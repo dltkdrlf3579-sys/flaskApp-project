@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}{{ partner.company_name }} 상세정보{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2 class="page-title">협력사 상세정보</h2>
+    <div class="breadcrumb">
+        <a href="{{ url_for('page_view', url='partner-standards') }}">협력사 기준정보</a>
+        <span class="separator">></span>
+        <span class="current">{{ partner.company_name }}</span>
+    </div>
+</div>
+
+<div class="detail-container">
+    <div class="detail-card">
+        <div class="card-header">
+            <h3 class="company-name">{{ partner.company_name }}</h3>
+        </div>
+        <div class="card-body">
+            <div class="info-grid">
+                <div class="info-item">
+                    <label>협력사명</label>
+                    <div class="value">{{ partner.company_name }}</div>
+                </div>
+                <div class="info-item">
+                    <label>사업자번호</label>
+                    <div class="value">{{ partner.business_number or '-' }}</div>
+                </div>
+                <div class="info-item">
+                    <label>대표자</label>
+                    <div class="value">{{ partner.representative or '-' }}</div>
+                </div>
+                <div class="info-item">
+                    <label>상시근로자</label>
+                    <div class="value">{{ partner.regular_workers }}명</div>
+                </div>
+                <div class="info-item">
+                    <label>등록일</label>
+                    <div class="value">{{ partner.created_at[:10] if partner.created_at else '-' }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="action-buttons">
+        <a href="{{ url_for('page_view', url='partner-standards') }}" class="btn-back">목록으로</a>
+        {% if session.get('edit_mode') %}
+        <button class="btn-edit" onclick="alert('편집 기능은 추후 구현 예정입니다.')">편집</button>
+        {% endif %}
+    </div>
+</div>
+
+<style>
+/* 페이지 헤더 */
+.page-header {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #2f5fd3;
+}
+.page-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #333;
+    margin: 0 0 8px 0;
+}
+.breadcrumb {
+    font-size: 14px;
+    color: #6b7280;
+}
+.breadcrumb a {
+    color: #2f5fd3;
+    text-decoration: none;
+}
+.breadcrumb a:hover {
+    text-decoration: underline;
+}
+.breadcrumb .separator {
+    margin: 0 8px;
+}
+.breadcrumb .current {
+    color: #374151;
+    font-weight: 600;
+}
+
+/* 상세 카드 */
+.detail-container {
+    max-width: 800px;
+}
+.detail-card {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    overflow: hidden;
+    margin-bottom: 20px;
+}
+.card-header {
+    background: #f8f9fa;
+    padding: 20px;
+    border-bottom: 1px solid #e5e7eb;
+}
+.company-name {
+    font-size: 22px;
+    font-weight: 700;
+    color: #1f2937;
+    margin: 0;
+}
+.card-body {
+    padding: 20px;
+}
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+}
+.info-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.info-item label {
+    font-weight: 600;
+    color: #374151;
+    font-size: 14px;
+}
+.info-item .value {
+    font-size: 16px;
+    color: #1f2937;
+    padding: 10px 12px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+}
+
+/* 액션 버튼 */
+.action-buttons {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-start;
+}
+.btn-back, .btn-edit {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+}
+.btn-back {
+    background: #6b7280;
+    color: white;
+}
+.btn-back:hover {
+    background: #4b5563;
+    color: white;
+    text-decoration: none;
+}
+.btn-edit {
+    background: #2f5fd3;
+    color: white;
+}
+.btn-edit:hover {
+    background: #1d4ed8;
+}
+
+/* 반응형 */
+@media (max-width: 768px) {
+    .info-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+    .card-header, .card-body {
+        padding: 16px;
+    }
+    .company-name {
+        font-size: 18px;
+    }
+    .action-buttons {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .btn-back, .btn-edit {
+        text-align: center;
+    }
+}
+</style>
+{% endblock %}

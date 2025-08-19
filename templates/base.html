@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}PORTAL{% endblock %}</title>
+    <style>
+        {% block style %}{% endblock %}
+    </style>
+</head>
+<body>
+    <!-- 상단 네비게이션 (DCInside 유사 스타일) -->
+    <nav class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="{{ url_for('index') }}">상생EHS 업무 포탈</a>
+        <ul class="nav-main" role="menubar" aria-label="메인 메뉴">
+          {# 현재 활성 슬러그 파악 #}
+          {% set active_slug = (request.view_args.get('url') if request.view_args else '') %}
+          {% for m in menu %}
+          {% set is_active = false %}
+          {% for sm in m.submenu %}
+            {% if active_slug == sm.url %}
+              {% set is_active = true %}
+            {% endif %}
+          {% endfor %}
+          <li class="nav-item has-sub{% if is_active %} is-active{% endif %}">
+            <a class="nav-link"
+               href="#"
+               role="menuitem"
+               aria-haspopup="true"
+               aria-expanded="false">{{ m.title }}</a>
+            <ul class="submenu" role="menu">
+              {% for sm in m.submenu %}
+              <li role="none">
+                <a role="menuitem"
+                   class="submenu-link {% if active_slug == sm.url %} active{% endif %}"
+                   href="{{ url_for('page_view', url=sm.url) }}">{{ sm.title }}</a>
+              </li>
+              {% endfor %}
+            </ul>
+          </li>
+          {% if not loop.last %}
+          <li class="sep" aria-hidden="true">|</li>
+          {% endif %}
+          {% endfor %}
+        </ul>
+        <div class="right-tools">
+          {% if session.get('edit_mode') %}
+            <a class="btn-small" href="{{ url_for('lock') }}">편집 잠금</a>
+          {% else %}
+            <a class="btn-small" href="{{ url_for('unlock') }}">편집 해제</a>
+          {% endif %}
+        </div>
+      </div>
+    </nav>
+
+    <style>
+    /* ===== 상단 바(파란색) ===== */
+    .topbar { background: #2f5fd3; position: sticky; top: 0; z-index: 1030; }
+    .topbar-inner {
+      max-width: 1200px; margin: 0 auto; height: 48px;
+      display: flex; align-items: center; gap: 16px; padding: 0 12px;
+    }
+    .brand { color: #fff; font-weight: 700; text-decoration: none; letter-spacing: .3px; margin-right: 8px; }
+
+    /* ===== 1차 메뉴 ===== */
+    .nav-main { list-style: none; display: flex; align-items: stretch; gap: 4px; margin: 0; padding: 0; }
+    .nav-item { position: relative; }
+    .nav-link {
+      color: #fff; text-decoration: none; font-weight: 600;
+      padding: 10px 14px; border-radius: 2px; display: block; line-height: 28px;
+    }
+    .nav-link:hover, .nav-item.is-active > .nav-link { background: rgba(255,255,255,.15); }
+    .sep { color: rgba(255,255,255,.65); align-self: center; padding: 0 6px; user-select: none; }
+
+    /* ===== 2차 드롭다운 ===== */
+    .submenu {
+      position: absolute; left: 0; top: 100%;
+      min-width: 180px; background: #fff; border: 1px solid #e5e7eb;
+      border-radius: 4px; box-shadow: 0 8px 18px rgba(0,0,0,.08);
+      padding: 6px 0; display: none; list-style: none; margin: 0;
+    }
+    .submenu-link {
+      display: block; padding: 9px 12px; color: #222; text-decoration: none; white-space: nowrap; font-size: 14px;
+    }
+    .submenu-link:hover { background: #f3f5f7; }
+    .submenu-link.active { color: #1b60d1; font-weight: 700; }
+
+    /* ===== 우측 툴바 ===== */
+    .right-tools { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    .btn-small {
+      color: #fff; text-decoration: none; font-size: 13px; padding: 6px 10px;
+      border: 1px solid rgba(255,255,255,.3); border-radius: 3px;
+    }
+    .btn-small:hover { background: rgba(255,255,255,.1); color: #fff; }
+
+    /* 데스크톱: 호버/포커스 시 표시 */
+    @media (min-width: 992px) {
+      .nav-item:hover > .submenu,
+      .nav-item:focus-within > .submenu { display: block; }
+    }
+
+    /* 모바일: 가로 스크롤 + 탭으로 토글 */
+    @media (max-width: 991.98px) {
+      .topbar-inner { height: auto; flex-wrap: wrap; padding: 8px 10px; gap: 8px; }
+      .brand { padding: 6px 0; }
+      .nav-main { width: 100%; overflow-x: auto; white-space: nowrap; gap: 0; }
+      .nav-link { padding: 8px 12px; }
+      .sep { display: none; }
+      .submenu {
+        position: static; display: none; border: 1px solid #e5e7eb; border-top: none; box-shadow: none; border-radius: 0 0 4px 4px;
+      }
+      .nav-item.open > .submenu { display: block; }
+      .right-tools { width: 100%; justify-content: flex-end; }
+    }
+
+    /* 컨텐츠 영역 */
+    .container { max-width: 1200px; margin: 20px auto; padding: 0 12px; }
+    
+    /* 플래시 메시지 */
+    .flash-messages { margin: 20px auto; max-width: 1200px; padding: 0 12px; }
+    .alert { padding: 12px 16px; margin-bottom: 16px; border-radius: 4px; font-size: 14px; }
+    .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .alert-danger { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .alert-info { background: #cce7f0; color: #0c5460; border: 1px solid #b8daff; }
+    </style>
+
+    <!-- 플래시 메시지 -->
+    <div class="flash-messages">
+        {% for message in get_flashed_messages(with_categories=true) %}
+            {% set category, message = message %}
+            <div class="alert alert-{{ 'danger' if category == 'error' else 'success' if category == 'success' else 'info' }}" role="alert">
+                {{ message }}
+            </div>
+        {% endfor %}
+    </div>
+
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+
+    <!-- 모바일 토글용 짧은 스크립트 (데스크톱에서는 무시) -->
+    <script>
+    (() => {
+      const isDesktop = () => window.matchMedia('(min-width: 992px)').matches;
+      document.querySelectorAll('.nav-item.has-sub > .nav-link').forEach(a => {
+        a.addEventListener('click', (e) => {
+          if (isDesktop()) return; // 데스크톱은 호버로 처리
+          e.preventDefault();
+          const li = e.currentTarget.closest('.nav-item');
+          // 현재 항목만 열고 나머지는 닫기
+          document.querySelectorAll('.nav-item.has-sub.open').forEach(x => { if (x !== li) x.classList.remove('open'); });
+          li.classList.toggle('open');
+          // aria-expanded 업데이트
+          a.setAttribute('aria-expanded', li.classList.contains('open') ? 'true' : 'false');
+        });
+      });
+    })();
+    </script>
+</body>
+</html>

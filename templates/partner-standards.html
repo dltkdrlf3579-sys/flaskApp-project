@@ -1,0 +1,686 @@
+{% extends "base.html" %}
+{% block title %}협력사 기준정보{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2 class="page-title">협력사 기준정보</h2>
+</div>
+
+<!-- 검색 영역 -->
+<div class="search-section">
+    <form method="GET" class="search-form">
+        <div class="search-fields">
+            <div class="search-group">
+                <label>협력사명</label>
+                <input type="text" name="company_name" value="{{ request.args.get('company_name', '') }}" placeholder="협력사명을 입력하세요">
+            </div>
+            <div class="search-group">
+                <label>사업자번호</label>
+                <input type="text" name="business_number" value="{{ request.args.get('business_number', '') }}" placeholder="사업자번호를 입력하세요">
+            </div>
+            <div class="search-group filter-group">
+                <label>업종(대분류)</label>
+                <div class="filter-select">
+                    <input type="text" id="major-filter-input" placeholder="업종을 검색하세요" autocomplete="off">
+                    <input type="hidden" name="business_type_major" value="{{ request.args.get('business_type_major', '') }}">
+                    <button type="button" class="filter-dropdown-btn">▼</button>
+                    <div class="filter-dropdown" id="major-dropdown">
+                        <div class="filter-options"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="search-group filter-group">
+                <label>업종(소분류)</label>
+                <div class="filter-select">
+                    <input type="text" id="minor-filter-input" placeholder="소분류를 검색하세요" autocomplete="off">
+                    <input type="hidden" name="business_type_minor" value="{{ request.args.get('business_type_minor', '') }}">
+                    <button type="button" class="filter-dropdown-btn">▼</button>
+                    <div class="filter-dropdown" id="minor-dropdown">
+                        <div class="filter-options"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="search-group range-group">
+                <label>상시근로자</label>
+                <div class="range-inputs">
+                    <input type="number" name="workers_min" value="{{ request.args.get('workers_min', '') }}" placeholder="최소" min="0">
+                    <span class="range-separator">~</span>
+                    <input type="number" name="workers_max" value="{{ request.args.get('workers_max', '') }}" placeholder="최대" min="0">
+                    <span class="range-unit">명</span>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- 검색 버튼 영역 -->
+<div class="search-buttons-section">
+    <div class="search-buttons">
+        <button type="button" onclick="resetForm()" class="btn-reset">초기화</button>
+        <button type="button" onclick="document.querySelector('.search-form').submit()" class="btn-search">검색</button>
+    </div>
+</div>
+
+<!-- 목록 테이블 -->
+<div class="table-section">
+    <div class="table-header">
+        <span class="total-count">총 {{ total_count }}건</span>
+        <div class="per-page-selector">
+            <select onchange="changePerPage(this.value)">
+                <option value="10" {% if request.args.get('per_page', '10') == '10' %}selected{% endif %}>10개씩</option>
+                <option value="25" {% if request.args.get('per_page', '10') == '25' %}selected{% endif %}>25개씩</option>
+                <option value="50" {% if request.args.get('per_page', '10') == '50' %}selected{% endif %}>50개씩</option>
+            </select>
+        </div>
+    </div>
+    <div class="table-wrapper">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th class="fixed-col">협력사명</th>
+                    <th>사업자번호</th>
+                    <th>대표자</th>
+                    <th>상시근로자</th>
+                    <th>업종(대분류)</th>
+                    <th>업종(소분류)</th>
+                    <th>설립일</th>
+                    <th>자본금</th>
+                    <th>연매출</th>
+                    <th>주요제품</th>
+                    <th>인증현황</th>
+                    <th>안전등급</th>
+                    <th>담당자</th>
+                    <th>연락처</th>
+                    <th>이메일</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for partner in partners %}
+                <tr>
+                    <td class="fixed-col">
+                        <a href="{{ url_for('partner_detail', partner_id=partner.id) }}" class="company-link">{{ partner.company_name }}</a>
+                    </td>
+                    <td>{{ partner.business_number }}</td>
+                    <td>{{ partner.representative }}</td>
+                    <td>{{ partner.regular_workers }}명</td>
+                    <td>{{ partner.business_type_major or '-' }}</td>
+                    <td>{{ partner.business_type_minor or '-' }}</td>
+                    <td>{{ partner.establishment_date or '-' }}</td>
+                    <td>{{ "{:,}".format(partner.capital_amount // 100000000) if partner.capital_amount else '-' }}억원</td>
+                    <td>{{ "{:,}".format(partner.annual_revenue // 100000000) if partner.annual_revenue else '-' }}억원</td>
+                    <td>{{ partner.main_products or '-' }}</td>
+                    <td>{{ partner.certification or '-' }}</td>
+                    <td>{{ partner.safety_rating or '-' }}</td>
+                    <td>{{ partner.contact_person or '-' }}</td>
+                    <td>{{ partner.phone_number or '-' }}</td>
+                    <td>{{ partner.email or '-' }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="15" class="no-data">검색 결과가 없습니다.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 페이지네이션 -->
+{% if pagination.pages > 1 %}
+<div class="pagination-section">
+    <div class="pagination">
+        {% set search_params = {} %}
+        {% for key, value in request.args.items() %}
+            {% if key != 'page' %}
+                {% set _ = search_params.update({key: value}) %}
+            {% endif %}
+        {% endfor %}
+        {% set window_info = pagination.get_window_info() %}
+        
+        <!-- 이전 10페이지 -->
+        {% if window_info.has_prev_window %}
+            <a href="{{ url_for('page_view', url='partner-standards', page=window_info.prev_window_start, **search_params) }}" class="page-btn">&laquo; 이전</a>
+        {% endif %}
+        
+        <!-- 현재 윈도우의 페이지들 (최대 10개) -->
+        {% for page in pagination.iter_pages() %}
+            {% if page != pagination.page %}
+                <a href="{{ url_for('page_view', url='partner-standards', page=page, **search_params) }}" class="page-btn">{{ page }}</a>
+            {% else %}
+                <span class="page-btn active">{{ page }}</span>
+            {% endif %}
+        {% endfor %}
+        
+        <!-- 다음 10페이지 -->
+        {% if window_info.has_next_window %}
+            <a href="{{ url_for('page_view', url='partner-standards', page=window_info.next_window_start, **search_params) }}" class="page-btn">다음 &raquo;</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<style>
+/* 페이지 헤더 */
+.page-header {
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #2f5fd3;
+}
+.page-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #333;
+    margin: 0;
+}
+
+/* 검색 영역 */
+.search-section {
+    background: #f8f9fa;
+    padding: 20px;
+    margin-bottom: 20px;
+    border-radius: 4px;
+    border: 1px solid #e5e7eb;
+}
+.search-form {
+    width: 100%;
+}
+.search-fields {
+    display: flex;
+    gap: 32px;
+    flex-wrap: wrap;
+}
+.search-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 0 0 auto;
+}
+.search-group label {
+    font-weight: 600;
+    color: #333;
+    font-size: 14px;
+    white-space: nowrap;
+    width: 80px;
+    flex-shrink: 0;
+    text-align: left;
+}
+
+/* 모든 입력 요소의 공통 스타일 */
+.search-group input[type="text"],
+.search-group input[type="number"],
+.filter-select input[type="text"] {
+    height: 40px; /* 고정 높이 */
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+.search-group input:focus,
+.filter-select input:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+/* 일반 텍스트 입력 */
+.search-group input[type="text"]:not(.filter-select input) {
+    width: 200px;
+    padding: 0 12px; /* 높이 고정으로 인해 상하 패딩 제거 */
+}
+
+/* 필터 검색 그룹 */
+.filter-group .filter-select {
+    position: relative;
+    width: 200px;
+    flex-shrink: 0;
+    height: 40px; /* 컨테이너 높이도 고정 */
+}
+.filter-select input[type="text"] {
+    width: 100%;
+    height: 100%;
+    padding: 0 32px 0 12px; /* 높이 고정으로 인해 상하 패딩 제거 */
+}
+.filter-dropdown-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 10px;
+    color: #666;
+}
+.filter-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid #d1d5db;
+    border-top: none;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 100;
+    display: none;
+}
+.filter-dropdown.show {
+    display: block;
+}
+.filter-options {
+    padding: 0;
+}
+.filter-option {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #f1f1f1;
+}
+.filter-option:hover {
+    background: #f3f4f6;
+}
+.filter-option:last-child {
+    border-bottom: none;
+}
+
+/* 범위 검색 그룹 */
+.range-group .range-inputs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 200px;
+    flex-shrink: 0;
+    height: 40px; /* 다른 입력 요소와 높이 맞춤 */
+}
+.range-inputs input[type="number"] {
+    width: 60px;
+    height: 40px; /* 높이 통일 */
+    padding: 0 6px; /* 높이 고정으로 인해 상하 패딩 제거 */
+    flex-shrink: 0;
+}
+.range-separator {
+    font-weight: 600;
+    color: #666;
+    flex-shrink: 0;
+    font-size: 14px;
+}
+.range-unit {
+    font-size: 14px;
+    color: #666;
+    flex-shrink: 0;
+}
+
+/* 검색 버튼 영역 (독립적) */
+.search-buttons-section {
+    margin-bottom: 20px;
+}
+.search-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+.btn-reset, .btn-search {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.btn-reset {
+    background: #6b7280;
+    color: white;
+}
+.btn-reset:hover {
+    background: #4b5563;
+}
+.btn-search {
+    background: #2f5fd3;
+    color: white;
+}
+.btn-search:hover {
+    background: #1d4ed8;
+}
+
+/* 테이블 영역 */
+.table-section {
+    background: white;
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.table-header {
+    padding: 12px 16px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.total-count {
+    font-weight: 600;
+    color: #374151;
+}
+.per-page-selector select {
+    padding: 4px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 14px;
+    background: white;
+}
+
+/* 가로 스크롤 래퍼 */
+.table-wrapper {
+    overflow-x: auto;
+    position: relative;
+}
+.table-wrapper::-webkit-scrollbar {
+    height: 8px;
+}
+.table-wrapper::-webkit-scrollbar-track {
+    background: #f1f5f9;
+}
+.table-wrapper::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+.table-wrapper::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+.data-table {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: collapse;
+}
+.data-table th {
+    background: #f1f5f9;
+    padding: 12px 16px;
+    text-align: left;
+    font-weight: 600;
+    color: #374151;
+    border-bottom: 2px solid #e5e7eb;
+    white-space: nowrap;
+    min-width: 120px;
+}
+.data-table th.fixed-col {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: #f1f5f9;
+    box-shadow: 2px 0 4px rgba(0,0,0,0.05);
+    min-width: 200px;
+}
+.data-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #f1f5f9;
+    color: #4b5563;
+    white-space: nowrap;
+    min-width: 120px;
+}
+.data-table td.fixed-col {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: white;
+    box-shadow: 2px 0 4px rgba(0,0,0,0.05);
+    min-width: 200px;
+}
+.data-table tbody tr:hover {
+    background: #f9fafb;
+}
+.data-table tbody tr:hover td.fixed-col {
+    background: #f9fafb;
+}
+.company-link {
+    color: #2f5fd3;
+    text-decoration: none;
+    font-weight: 600;
+}
+.company-link:hover {
+    text-decoration: underline;
+}
+.no-data {
+    text-align: center;
+    padding: 40px;
+    color: #9ca3af;
+    font-style: italic;
+}
+
+/* 페이지네이션 */
+.pagination-section {
+    margin-top: 20px;
+    display: flex;
+    justify-content: center;
+}
+.pagination {
+    display: flex;
+    gap: 4px;
+}
+.page-btn {
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    background: white;
+    color: #374151;
+    text-decoration: none;
+    border-radius: 4px;
+    font-size: 14px;
+}
+.page-btn:hover:not(.active):not(.dots) {
+    background: #f3f4f6;
+}
+.page-btn.active {
+    background: #2f5fd3;
+    color: white;
+    border-color: #2f5fd3;
+}
+.page-btn.dots {
+    border: none;
+    background: none;
+    cursor: default;
+}
+
+/* 반응형 */
+@media (max-width: 768px) {
+    .search-fields {
+        flex-direction: column;
+        gap: 16px;
+    }
+    .search-group {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+    .search-group label {
+        min-width: unset;
+    }
+    .search-group input {
+        width: 100%;
+    }
+    .search-buttons {
+        justify-content: stretch;
+    }
+    .btn-reset, .btn-search {
+        flex: 1;
+    }
+    .data-table {
+        font-size: 13px;
+    }
+    .data-table th,
+    .data-table td {
+        padding: 8px 12px;
+    }
+}
+</style>
+
+<script>
+// 업종 데이터
+const businessTypesData = {
+    '제조업': ['전자제품', '자동차', '기계', '화학', '섬유', '식품', '의약품', '철강', '플라스틱', '기타제조'],
+    '건설업': ['건축공사', '토목공사', '전기공사', '통신공사', '설비공사', '조경공사', '인테리어', '기타건설'],
+    'IT업': ['소프트웨어개발', '시스템통합', '데이터베이스', '네트워크', '보안', '게임개발', '웹개발', '모바일앱'],
+    '서비스업': ['컨설팅', '교육', '의료', '법률', '회계', '인사', '마케팅', '디자인', '청소', '보안서비스'],
+    '운수업': ['육상운송', '해상운송', '항공운송', '물류', '창고', '택배', '렌터카', '기타운송'],
+    '유통업': ['도매', '소매', '전자상거래', '백화점', '마트', '편의점', '온라인쇼핑몰', '기타유통'],
+    '금융업': ['은행', '증권', '보험', '카드', '리스', '투자', '자산관리', '핀테크'],
+    '에너지업': ['전력', '가스', '석유', '신재생에너지', '원자력', '석탄', '기타에너지']
+};
+
+const majorTypes = Object.keys(businessTypesData);
+
+// 페이지 로드 시 초기화
+document.addEventListener('DOMContentLoaded', function() {
+    initializeFilters();
+});
+
+function initializeFilters() {
+    // 대분류 필터 초기화
+    initMajorFilter();
+    
+    // 소분류 필터 초기화 (독립적)
+    initMinorFilter();
+    
+    // 기존 값 복원
+    const majorValue = document.querySelector('input[name="business_type_major"]').value;
+    const minorValue = document.querySelector('input[name="business_type_minor"]').value;
+    
+    if (majorValue) {
+        document.getElementById('major-filter-input').value = majorValue;
+    }
+    
+    if (minorValue) {
+        document.getElementById('minor-filter-input').value = minorValue;
+    }
+}
+
+function initMajorFilter() {
+    const input = document.getElementById('major-filter-input');
+    const dropdown = document.getElementById('major-dropdown');
+    const options = dropdown.querySelector('.filter-options');
+    
+    // 드롭다운 버튼 클릭
+    input.parentElement.querySelector('.filter-dropdown-btn').addEventListener('click', function() {
+        dropdown.classList.toggle('show');
+        populateMajorOptions('');
+    });
+    
+    // 입력 시 필터링
+    input.addEventListener('input', function() {
+        dropdown.classList.add('show');
+        populateMajorOptions(this.value);
+    });
+    
+    // 외부 클릭 시 닫기
+    document.addEventListener('click', function(e) {
+        if (!input.parentElement.contains(e.target)) {
+            dropdown.classList.remove('show');
+        }
+    });
+}
+
+function populateMajorOptions(filter) {
+    const dropdown = document.getElementById('major-dropdown');
+    const options = dropdown.querySelector('.filter-options');
+    
+    options.innerHTML = '';
+    
+    const filtered = majorTypes.filter(type => 
+        type.toLowerCase().includes(filter.toLowerCase())
+    );
+    
+    filtered.forEach(type => {
+        const option = document.createElement('div');
+        option.className = 'filter-option';
+        option.textContent = type;
+        option.addEventListener('click', function() {
+            selectMajorType(type);
+        });
+        options.appendChild(option);
+    });
+}
+
+function selectMajorType(type) {
+    document.getElementById('major-filter-input').value = type;
+    document.querySelector('input[name="business_type_major"]').value = type;
+    document.getElementById('major-dropdown').classList.remove('show');
+}
+
+function initMinorFilter() {
+    const input = document.getElementById('minor-filter-input');
+    const dropdown = document.getElementById('minor-dropdown');
+    
+    // 드롭다운 버튼 클릭
+    input.parentElement.querySelector('.filter-dropdown-btn').addEventListener('click', function() {
+        dropdown.classList.toggle('show');
+        populateMinorOptions('');
+    });
+    
+    // 입력 시 필터링
+    input.addEventListener('input', function() {
+        dropdown.classList.add('show');
+        populateMinorOptions(this.value);
+    });
+    
+    // 외부 클릭 시 닫기
+    document.addEventListener('click', function(e) {
+        if (!input.parentElement.contains(e.target)) {
+            dropdown.classList.remove('show');
+        }
+    });
+}
+
+function populateMinorOptions(filter) {
+    const dropdown = document.getElementById('minor-dropdown');
+    const options = dropdown.querySelector('.filter-options');
+    
+    options.innerHTML = '';
+    
+    // 모든 소분류 옵션을 하나의 배열로 합치기
+    const allMinorTypes = [];
+    Object.values(businessTypesData).forEach(minorArray => {
+        allMinorTypes.push(...minorArray);
+    });
+    
+    // 중복 제거 및 정렬
+    const uniqueMinorTypes = [...new Set(allMinorTypes)].sort();
+    
+    const filtered = uniqueMinorTypes.filter(type => 
+        type.toLowerCase().includes(filter.toLowerCase())
+    );
+    
+    filtered.forEach(type => {
+        const option = document.createElement('div');
+        option.className = 'filter-option';
+        option.textContent = type;
+        option.addEventListener('click', function() {
+            selectMinorType(type);
+        });
+        options.appendChild(option);
+    });
+}
+
+function selectMinorType(type) {
+    document.getElementById('minor-filter-input').value = type;
+    document.querySelector('input[name="business_type_minor"]').value = type;
+    document.getElementById('minor-dropdown').classList.remove('show');
+}
+
+function resetForm() {
+    const form = document.querySelector('.search-form');
+    const inputs = form.querySelectorAll('input');
+    inputs.forEach(input => input.value = '');
+    
+    // URL에서 검색 파라미터 제거하고 리다이렉트
+    const url = new URL(window.location);
+    url.search = '';
+    window.location.href = url.toString();
+}
+
+function changePerPage(perPage) {
+    const url = new URL(window.location);
+    url.searchParams.set('per_page', perPage);
+    url.searchParams.delete('page'); // 페이지를 1페이지로 리셋
+    window.location.href = url.toString();
+}
+</script>
+{% endblock %}
