@@ -1,6 +1,6 @@
 import os
 import logging
-from flask import Flask, render_template, request, session, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, request, jsonify
 from werkzeug.serving import run_simple
 from config.menu import MENU_CONFIG
 from database_config import db_config, partner_manager
@@ -410,57 +410,7 @@ def partner_accident():
                          pagination=pagination,
                          menu=MENU_CONFIG)
 
-@app.route("/<path:url>/edit", methods=["GET", "POST"])
-def page_edit(url):
-    if not session.get('edit_mode'):
-        flash("편집 권한이 없습니다.", "error")
-        return redirect(url_for('page_view', url=url))
-    
-    conn = sqlite3.connect(DB_PATH)
-    page = conn.execute("SELECT * FROM pages WHERE url = ?", (url,)).fetchone()
-    conn.close()
-    
-    if not page:
-        return "Page not found", 404
-    
-    if request.method == "POST":
-        title = request.form.get("title", "").strip()
-        content = request.form.get("content", "").strip()
-        
-        if not title:
-            title = "제목을 입력하세요."
-        
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("UPDATE pages SET title = ?, content = ? WHERE url = ?", 
-                    (title, content, url))
-        conn.commit()
-        conn.close()
-        
-        flash("저장되었습니다.", "success")
-        return redirect(url_for('page_view', url=url))
-    
-    return render_template("edit.html", 
-                         page={'url': page[1], 'title': page[2], 'content': page[3]},
-                         menu=MENU_CONFIG)
-
-@app.route("/unlock", methods=["GET", "POST"])
-def unlock():
-    if request.method == "POST":
-        password = request.form.get("password", "")
-        if password == PASSWORD:
-            session['edit_mode'] = True
-            flash("편집모드가 활성화되었습니다.", "success")
-            return redirect(url_for('index'))
-        else:
-            flash("비밀번호가 올바르지 않습니다.", "error")
-    
-    return render_template("unlock.html", menu=MENU_CONFIG)
-
-@app.route("/lock")
-def lock():
-    session.pop('edit_mode', None)
-    flash("편집모드를 종료했습니다.", "info")
-    return redirect(url_for('index'))
+# 편집 기능 완전 제거 - 심플함을 위해
 
 @app.route("/partner/<business_number>")
 @app.route("/partner-detail/<business_number>")

@@ -44,13 +44,7 @@
           {% endif %}
           {% endfor %}
         </ul>
-        <div class="right-tools">
-          {% if session.get('edit_mode') %}
-            <a class="btn-small" href="{{ url_for('lock') }}">편집 잠금</a>
-          {% else %}
-            <a class="btn-small" href="{{ url_for('unlock') }}">편집 해제</a>
-          {% endif %}
-        </div>
+        <!-- 편집 기능 제거 - 심플함을 위해 -->
       </div>
     </nav>
 
@@ -86,13 +80,7 @@
     .submenu-link:hover { background: #f3f5f7; }
     .submenu-link.active { color: #1b60d1; font-weight: 700; }
 
-    /* ===== 우측 툴바 ===== */
-    .right-tools { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-    .btn-small {
-      color: #fff; text-decoration: none; font-size: 13px; padding: 6px 10px;
-      border: 1px solid rgba(255,255,255,.3); border-radius: 3px;
-    }
-    .btn-small:hover { background: rgba(255,255,255,.1); color: #fff; }
+    /* 편집 기능 CSS 제거됨 */
 
     /* 데스크톱: 호버/포커스 시 표시 */
     @media (min-width: 992px) {
