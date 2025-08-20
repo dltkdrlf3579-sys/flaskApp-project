@@ -2,7 +2,50 @@ import configparser
 import os
 import sqlite3
 import logging
+import sys
+import traceback
+import pandas as pd
 from datetime import datetime, timedelta
+
+# IQADB_CONNECT310 모듈 로드
+try:
+    module_folder = 'C:/Users/user/AppData/Local/aipforge/pkgs/dist/obf/PY310'
+    if os.path.exists(module_folder):
+        sys.path.insert(0, os.path.abspath(module_folder))
+        from IQADB_CONNECT310 import *
+        IQADB_AVAILABLE = True
+        print(f"[SUCCESS] IQADB_CONNECT310 모듈 로드 성공: {module_folder}")
+    else:
+        IQADB_AVAILABLE = False
+        print(f"[WARNING] IQADB 모듈 경로를 찾을 수 없습니다: {module_folder}")
+except ImportError as e:
+    IQADB_AVAILABLE = False
+    print(f"[WARNING] IQADB_CONNECT310 모듈을 가져올 수 없습니다: {e}")
+except Exception as e:
+    IQADB_AVAILABLE = False
+    print(f"[ERROR] IQADB 모듈 로드 중 오류 발생: {e}")
+
+def execute_SQL(query):
+    """
+    기존 성공 방식: IQADB_CONNECT310을 사용한 데이터베이스 조회
+    """
+    if not IQADB_AVAILABLE:
+        raise Exception("IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
+    
+    conn = iqadb1()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query)
+            data = cur.fetchall()
+            col_names = [desc[0] for desc in cur.description]  # col_name → col_names 수정
+            df = pd.DataFrame(data, columns=col_names)  # dataframe → DataFrame 수정
+            return df
+    except Exception as e:
+        print(f"[ERROR] execute_SQL 실행 중 오류: {e}")
+        traceback.print_exc()
+        raise e
+    finally:
+        conn.close()
 
 # 설정 파일 로드 (절대 경로 사용)
 config = configparser.ConfigParser()
@@ -239,19 +282,16 @@ class PartnerDataManager:
         conn.close()
     
     def sync_partners_from_postgresql(self):
-        """PostgreSQL에서 협력사 마스터 데이터 동기화"""
+        """PostgreSQL에서 협력사 마스터 데이터 동기화 (판다스 방식)"""
         if not self.db_config.external_db_enabled:
             logging.info("외부 DB가 비활성화되어 있어 동기화를 건너뜁니다.")
             return False
-            
-        pg_conn = self.db_config.get_postgresql_connection()
-        if not pg_conn:
-            logging.error("PostgreSQL 연결 실패")
-            return False
+        
+        if not IQADB_AVAILABLE:
+            logging.error("IQADB_CONNECT310 모듈을 사용할 수 없습니다. 기존 psycopg2 방식을 시도합니다.")
+            return self._sync_with_psycopg2()  # 대안 방식
         
         try:
-            # PostgreSQL에서 데이터 조회
-            pg_cursor = pg_conn.cursor()
             # 🔧 두 가지 방법 지원: 1) 자동 생성 2) 수동 쿼리
             try:
                 # 방법 1: 컬럼 매핑을 통한 자동 쿼리 생성
@@ -265,14 +305,78 @@ class PartnerDataManager:
                     schema=self.db_config.pg_schema,
                     table=self.db_config.pg_table
                 )
-            pg_cursor.execute(query)
-            partners_data = pg_cursor.fetchall()
             
-            # SQLite에 데이터 동기화
+            # ✨ 기존 성공 방식으로 데이터 조회
+            logging.info("IQADB_CONNECT310을 사용하여 데이터 조회 시작...")
+            df = execute_SQL(query)
+            logging.info(f"데이터 조회 완료: {len(df)} 건")
+            
+            if df.empty:
+                logging.warning("조회된 데이터가 없습니다.")
+                return False
+            
+            # DataFrame을 SQLite에 저장
             sqlite_conn = self.db_config.get_sqlite_connection()
             sqlite_cursor = sqlite_conn.cursor()
             
-            # 기존 캐시 데이터 삭제 후 새로 삽입
+            # 기존 캐시 데이터 삭제
+            sqlite_cursor.execute("DELETE FROM partners_cache")
+            
+            # DataFrame을 레코드 배열로 변환하여 SQLite에 삽입
+            for _, row in df.iterrows():
+                sqlite_cursor.execute('''
+                    INSERT INTO partners_cache (
+                        business_number, company_name, partner_class, business_type_major,
+                        business_type_minor, hazard_work_flag, representative, address,
+                        average_age, annual_revenue, transaction_count
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    row.get('business_number', ''),
+                    row.get('company_name', ''),
+                    row.get('partner_class', ''),
+                    row.get('business_type_major', ''),
+                    row.get('business_type_minor', ''),
+                    row.get('hazard_work_flag', ''),
+                    row.get('representative', ''),
+                    row.get('address', ''),
+                    row.get('average_age', None),
+                    row.get('annual_revenue', None),
+                    row.get('transaction_count', None)
+                ))
+            
+            sqlite_conn.commit()
+            sqlite_conn.close()
+            
+            self.db_config.update_last_sync()
+            logging.info(f"✅ 협력사 데이터 {len(df)}건 동기화 완료 (판다스 방식)")
+            return True
+            
+        except Exception as e:
+            logging.error(f"❌ 데이터 동기화 실패: {e}")
+            traceback.print_exc()
+            return False
+    
+    def _sync_with_psycopg2(self):
+        """기존 psycopg2 방식 (IQADB 사용 불가능할 때 대안)"""
+        logging.info("psycopg2 대안 방식으로 동기화 시도...")
+        # 기존 psycopg2 코드 유지
+        pg_conn = self.db_config.get_postgresql_connection()
+        if not pg_conn:
+            logging.error("PostgreSQL 연결 실패")
+            return False
+        
+        try:
+            pg_cursor = pg_conn.cursor()
+            query_template = self.db_config.config.get('SQL_QUERIES', 'PARTNERS_QUERY')
+            query = query_template.format(
+                schema=self.db_config.pg_schema,
+                table=self.db_config.pg_table
+            )
+            pg_cursor.execute(query)
+            partners_data = pg_cursor.fetchall()
+            
+            sqlite_conn = self.db_config.get_sqlite_connection()
+            sqlite_cursor = sqlite_conn.cursor()
             sqlite_cursor.execute("DELETE FROM partners_cache")
             
             for partner in partners_data:
@@ -289,11 +393,11 @@ class PartnerDataManager:
             pg_conn.close()
             
             self.db_config.update_last_sync()
-            logging.info(f"협력사 데이터 {len(partners_data)}건 동기화 완료")
+            logging.info(f"협력사 데이터 {len(partners_data)}건 동기화 완료 (psycopg2 방식)")
             return True
             
         except Exception as e:
-            logging.error(f"데이터 동기화 실패: {e}")
+            logging.error(f"psycopg2 동기화 실패: {e}")
             return False
     
     def sync_accidents_from_postgresql(self):
