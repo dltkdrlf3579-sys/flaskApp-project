@@ -17,8 +17,8 @@ def test_simple_sync():
     print("=" * 50)
     
     try:
-        # 동기화 실행
-        print("📥 데이터 동기화 실행 중...")
+        # 협력사 동기화 실행
+        print("📥 협력사 데이터 동기화 실행 중...")
         success = partner_manager.sync_partners_from_external_db()
         
         if success:
@@ -41,7 +41,16 @@ def test_simple_sync():
                 print("⚠️ 동기화된 데이터가 없습니다.")
                 
         else:
-            print("❌ 동기화 실패!")
+            print("❌ 협력사 동기화 실패!")
+        
+        # 사고 데이터 동기화 실행
+        print("\n📥 사고 데이터 동기화 실행 중...")
+        accidents_success = partner_manager.sync_accidents_from_external_db()
+        
+        if accidents_success:
+            print("✅ 사고 동기화 성공!")
+        else:
+            print("❌ 사고 동기화 실패!")
             
     except Exception as e:
         print(f"🚨 테스트 중 오류 발생: {e}")

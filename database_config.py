@@ -137,6 +137,25 @@ class PartnerDataManager:
             )
         ''')
         
+        # 협력사 사고 정보 캐시 테이블
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS accidents_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                business_number TEXT NOT NULL,
+                accident_date TEXT,
+                accident_type TEXT,
+                accident_location TEXT,
+                accident_description TEXT,
+                injury_level TEXT,
+                injured_count INTEGER,
+                cause_analysis TEXT,
+                preventive_measures TEXT,
+                report_date TEXT,
+                reporter_name TEXT,
+                synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
         conn.commit()
         conn.close()
     
@@ -197,6 +216,66 @@ class PartnerDataManager:
             
         except Exception as e:
             print(f"[ERROR] ❌ 데이터 동기화 실패: {e}")
+            traceback.print_exc()
+            return False
+    
+    def sync_accidents_from_external_db(self):
+        """외부 DB에서 사고 데이터 동기화 (기존 성공 방식)"""
+        if not IQADB_AVAILABLE:
+            print("[ERROR] IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
+            return False
+        
+        try:
+            # config.ini에서 ACCIDENTS_QUERY 가져오기 (간단!)
+            query = self.config.get('SQL_QUERIES', 'ACCIDENTS_QUERY')
+            print(f"[INFO] 실행할 사고 쿼리: {query[:100]}...")
+            
+            # ✨ 기존 성공 방식으로 데이터 조회
+            print("[INFO] IQADB_CONNECT310을 사용하여 사고 데이터 조회 시작...")
+            df = execute_SQL(query)
+            print(f"[INFO] 사고 데이터 조회 완료: {len(df)} 건")
+            
+            if df.empty:
+                print("[WARNING] 조회된 사고 데이터가 없습니다.")
+                return False
+            
+            # DataFrame을 SQLite에 저장
+            conn = sqlite3.connect(self.local_db_path)
+            cursor = conn.cursor()
+            
+            # 기존 사고 캐시 데이터 삭제
+            cursor.execute("DELETE FROM accidents_cache")
+            
+            # DataFrame을 레코드 배열로 변환하여 SQLite에 삽입
+            for _, row in df.iterrows():
+                cursor.execute('''
+                    INSERT INTO accidents_cache (
+                        business_number, accident_date, accident_type, accident_location,
+                        accident_description, injury_level, injured_count, cause_analysis,
+                        preventive_measures, report_date, reporter_name
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    row.get('business_number', ''),
+                    row.get('accident_date', ''),
+                    row.get('accident_type', ''),
+                    row.get('accident_location', ''),
+                    row.get('accident_description', ''),
+                    row.get('injury_level', ''),
+                    row.get('injured_count', None),
+                    row.get('cause_analysis', ''),
+                    row.get('preventive_measures', ''),
+                    row.get('report_date', ''),
+                    row.get('reporter_name', '')
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            print(f"[SUCCESS] ✅ 사고 데이터 {len(df)}건 동기화 완료")
+            return True
+            
+        except Exception as e:
+            print(f"[ERROR] ❌ 사고 데이터 동기화 실패: {e}")
             traceback.print_exc()
             return False
     
