@@ -39,47 +39,50 @@
                         <div class="value">{{ partner.business_number or '-' }}</div>
                     </div>
                     <div class="info-cell">
-                        <label>업체명</label>
+                        <label>협력사명</label>
                         <div class="value">{{ partner.company_name }}</div>
                     </div>
                     <div class="info-cell">
-                        <label>대표자명</label>
+                        <label>Class</label>
+                        <div class="value">{{ partner.partner_class or '-' }}</div>
+                    </div>
+                    <div class="info-cell">
+                        <label>업종(대분류)</label>
+                        <div class="value">{{ partner.business_type_major or '-' }}</div>
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-cell">
+                        <label>업종(소분류)</label>
+                        <div class="value">{{ partner.business_type_minor or '-' }}</div>
+                    </div>
+                    <div class="info-cell">
+                        <label>위험작업여부</label>
+                        <div class="value">{{ '예' if partner.hazard_work_flag == 'O' else '아니오' if partner.hazard_work_flag == 'X' else '-' }}</div>
+                    </div>
+                    <div class="info-cell">
+                        <label>대표자성명</label>
                         <div class="value">{{ partner.representative or '-' }}</div>
                     </div>
                     <div class="info-cell">
-                        <label>연락처</label>
-                        <div class="value">{{ partner.phone_number or '-' }}</div>
-                    </div>
-                </div>
-                <div class="info-row">
-                    <div class="info-cell">
-                        <label>외사업자번호</label>
-                        <div class="value">{{ partner.business_number or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>선정자명</label>
-                        <div class="value">{{ partner.contact_person or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>대표이메일</label>
-                        <div class="value">{{ partner.email or '-' }}</div>
-                    </div>
-                </div>
-                <div class="info-row">
-                    <div class="info-cell">
                         <label>주소</label>
-                        <div class="value">{{ partner.main_products or '경기도 수원시 영통구 삼성로 129(매탄동)' }}</div>
+                        <div class="value">{{ partner.address or '-' }}</div>
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-cell">
+                        <label>평균연령</label>
+                        <div class="value">{{ partner.average_age if partner.average_age else '-' }}</div>
                     </div>
                     <div class="info-cell">
-                        <label>승인일</label>
-                        <div class="value">{{ partner.establishment_date or '2025-01-08' }}</div>
+                        <label>매출액</label>
+                        <div class="value">{{ "{:,}".format(partner.annual_revenue // 100000000) if partner.annual_revenue else '-' }}억원</div>
                     </div>
                     <div class="info-cell">
-                        <label>우편번호</label>
-                        <div class="value">{{ partner.regular_workers or '16677' }}</div>
+                        <!-- 빈 셀 -->
                     </div>
                     <div class="info-cell">
-                        <!-- 빈 셀로 4개 맞춤 -->
+                        <!-- 빈 셀 -->
                     </div>
                 </div>
             </div>

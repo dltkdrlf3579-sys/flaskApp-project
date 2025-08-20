@@ -26,9 +26,16 @@ wheels/
 .installed.cfg
 *.egg
 
-# 업로드 파일
+# 업로드 파일 및 사용자 데이터
 uploads/
 temp/
+static/uploads/
+static/images/uploaded/
+
+# 데이터베이스 및 사용자 데이터
+*.db
+*.sqlite
+*.sqlite3
 
 # 환경 변수
 .env

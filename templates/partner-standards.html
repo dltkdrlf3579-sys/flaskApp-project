@@ -78,19 +78,14 @@
                 <tr>
                     <th class="fixed-col">협력사명</th>
                     <th>사업자번호</th>
-                    <th>대표자</th>
-                    <th>상시근로자</th>
+                    <th>Class</th>
                     <th>업종(대분류)</th>
                     <th>업종(소분류)</th>
-                    <th>설립일</th>
-                    <th>자본금</th>
-                    <th>연매출</th>
-                    <th>주요제품</th>
-                    <th>인증현황</th>
-                    <th>안전등급</th>
-                    <th>담당자</th>
-                    <th>연락처</th>
-                    <th>이메일</th>
+                    <th>위험작업여부</th>
+                    <th>대표자성명</th>
+                    <th>주소</th>
+                    <th>평균연령</th>
+                    <th>매출액</th>
                 </tr>
             </thead>
             <tbody>
@@ -100,23 +95,18 @@
                         <a href="javascript:void(0)" class="company-link" onclick="openPartnerModal('{{ partner.business_number }}')">{{ partner.company_name }}</a>
                     </td>
                     <td>{{ partner.business_number }}</td>
-                    <td>{{ partner.representative }}</td>
-                    <td>{{ partner.regular_workers }}명</td>
+                    <td>{{ partner.partner_class or '-' }}</td>
                     <td>{{ partner.business_type_major or '-' }}</td>
                     <td>{{ partner.business_type_minor or '-' }}</td>
-                    <td>{{ partner.establishment_date or '-' }}</td>
-                    <td>{{ "{:,}".format(partner.capital_amount // 100000000) if partner.capital_amount else '-' }}억원</td>
+                    <td>{{ '예' if partner.hazard_work_flag == 'O' else '아니오' if partner.hazard_work_flag == 'X' else '-' }}</td>
+                    <td>{{ partner.representative or '-' }}</td>
+                    <td>{{ partner.address or '-' }}</td>
+                    <td>{{ partner.average_age if partner.average_age else '-' }}</td>
                     <td>{{ "{:,}".format(partner.annual_revenue // 100000000) if partner.annual_revenue else '-' }}억원</td>
-                    <td>{{ partner.main_products or '-' }}</td>
-                    <td>{{ partner.certification or '-' }}</td>
-                    <td>{{ partner.safety_rating or '-' }}</td>
-                    <td>{{ partner.contact_person or '-' }}</td>
-                    <td>{{ partner.phone_number or '-' }}</td>
-                    <td>{{ partner.email or '-' }}</td>
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="15" class="no-data">검색 결과가 없습니다.</td>
+                    <td colspan="10" class="no-data">검색 결과가 없습니다.</td>
                 </tr>
                 {% endfor %}
             </tbody>

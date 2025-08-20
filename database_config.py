@@ -119,10 +119,9 @@ class PartnerDataManager:
         mapping = dict(self.db_config.config.items('COLUMN_MAPPING'))
         
         # 협력사 정보만 필터링 (사고 정보 제외)
-        partner_columns = ['business_number', 'company_name', 'representative', 'regular_workers',
-                          'business_type', 'business_type_major', 'business_type_minor', 
-                          'establishment_date', 'capital_amount', 'annual_revenue', 'main_products',
-                          'certification', 'safety_rating', 'contact_person', 'phone_number', 'email']
+        partner_columns = ['business_number', 'company_name', 'partner_class', 'business_type_major', 
+                          'business_type_minor', 'hazard_work_flag', 'representative', 'address', 
+                          'average_age', 'annual_revenue']
         
         # AS 절이 있는 SELECT 문 생성
         select_columns = []
@@ -179,20 +178,14 @@ class PartnerDataManager:
             CREATE TABLE IF NOT EXISTS partners_cache (
                 business_number TEXT PRIMARY KEY,
                 company_name TEXT NOT NULL,
-                representative TEXT,
-                regular_workers INTEGER,
-                business_type TEXT,
+                partner_class TEXT,
                 business_type_major TEXT,
                 business_type_minor TEXT,
-                establishment_date TEXT,
-                capital_amount BIGINT,
+                hazard_work_flag TEXT,
+                representative TEXT,
+                address TEXT,
+                average_age INTEGER,
                 annual_revenue BIGINT,
-                main_products TEXT,
-                certification TEXT,
-                safety_rating TEXT,
-                contact_person TEXT,
-                phone_number TEXT,
-                email TEXT,
                 synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -284,12 +277,10 @@ class PartnerDataManager:
             for partner in partners_data:
                 sqlite_cursor.execute('''
                     INSERT INTO partners_cache (
-                        business_number, company_name, representative, regular_workers,
-                        business_type, business_type_major, business_type_minor,
-                        establishment_date, capital_amount, annual_revenue,
-                        main_products, certification, safety_rating,
-                        contact_person, phone_number, email
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        business_number, company_name, partner_class, business_type_major,
+                        business_type_minor, hazard_work_flag, representative, address,
+                        average_age, annual_revenue
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', partner)
             
             sqlite_conn.commit()
