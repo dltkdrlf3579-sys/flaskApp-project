@@ -4,7 +4,7 @@ import sqlite3
 import logging
 from datetime import datetime, timedelta
 
-# 설정 파일 로드 (절대 경로 사용 - 보안사업장 환경 대응)
+# 설정 파일 로드 (절대 경로 사용)
 config = configparser.ConfigParser()
 config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.ini')
 
