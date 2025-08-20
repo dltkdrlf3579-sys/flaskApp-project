@@ -55,81 +55,20 @@ if not os.path.exists(config_path):
 
 try:
     config.read(config_path, encoding='utf-8')
-    if not config.has_section('DATABASE'):
-        print(f"[ERROR] config.ini에 [DATABASE] 섹션이 없습니다.")
-        print("config_template.ini를 참고하여 설정을 확인하세요.")
-        exit(1)
     print(f"[SUCCESS] 설정 파일 로드 성공: {config_path}")
 except Exception as e:
     print(f"[ERROR] 설정 파일 로드 실패: {e}")
     exit(1)
 
-class DatabaseConfig:
-    def __init__(self):
-        self.config = config
-        self.local_db_path = config.get('DATABASE', 'LOCAL_DB_PATH')
-        self.external_db_enabled = config.getboolean('DATABASE', 'EXTERNAL_DB_ENABLED')
-        
-        # PostgreSQL 설정 (외부 DB)
-        if self.external_db_enabled:
-            self.pg_host = config.get('DATABASE', 'EXTERNAL_DB_HOST')
-            self.pg_port = config.getint('DATABASE', 'EXTERNAL_DB_PORT')
-            self.pg_database = config.get('DATABASE', 'EXTERNAL_DB_NAME')
-            self.pg_user = config.get('DATABASE', 'EXTERNAL_DB_USER')
-            self.pg_password = config.get('DATABASE', 'EXTERNAL_DB_PASSWORD')
-            self.pg_schema = config.get('DATABASE', 'EXTERNAL_DB_SCHEMA')
-            self.pg_table = config.get('DATABASE', 'EXTERNAL_DB_TABLE')
-    
-    def get_sqlite_connection(self):
-        """SQLite 연결 (로컬 업무 데이터용)"""
-        return sqlite3.connect(self.local_db_path)
-    
-    def should_sync(self):
-        """동기화가 필요한지 확인"""
-        if not self.external_db_enabled:
-            return False
-            
-        if not config.getboolean('SYNC', 'AUTO_SYNC_ENABLED'):
-            return False
-            
-        last_sync_file = config.get('SYNC', 'LAST_SYNC_FILE')
-        if not os.path.exists(last_sync_file):
-            return True
-            
-        try:
-            with open(last_sync_file, 'r') as f:
-                last_sync_str = f.read().strip()
-                last_sync = datetime.fromisoformat(last_sync_str)
-                
-            sync_interval = config.getint('SYNC', 'SYNC_INTERVAL_MINUTES')
-            next_sync = last_sync + timedelta(minutes=sync_interval)
-            
-            return datetime.now() >= next_sync
-        except:
-            return True
-    
-    def update_last_sync(self):
-        """마지막 동기화 시간 업데이트"""
-        last_sync_file = config.get('SYNC', 'LAST_SYNC_FILE')
-        with open(last_sync_file, 'w') as f:
-            f.write(datetime.now().isoformat())
-
 class PartnerDataManager:
     def __init__(self):
-        self.db_config = DatabaseConfig()
+        self.config = config
+        self.local_db_path = config.get('DATABASE', 'LOCAL_DB_PATH', fallback='portal.db')
         self.init_local_tables()
-    
-    def should_sync(self):
-        """동기화가 필요한지 확인 - DatabaseConfig의 메서드 호출"""
-        return self.db_config.should_sync()
-    
-    def update_last_sync(self):
-        """마지막 동기화 시간 업데이트 - DatabaseConfig의 메서드 호출"""
-        return self.db_config.update_last_sync()
     
     def init_local_tables(self):
         """로컬 SQLite 테이블 초기화"""
-        conn = self.db_config.get_sqlite_connection()
+        conn = sqlite3.connect(self.local_db_path)
         cursor = conn.cursor()
         
         # 협력사 마스터 데이터 캐시 테이블 (11개 컬럼)
@@ -203,41 +142,34 @@ class PartnerDataManager:
     
     def sync_partners_from_external_db(self):
         """외부 DB에서 협력사 마스터 데이터 동기화 (기존 성공 방식)"""
-        if not self.db_config.external_db_enabled:
-            logging.info("외부 DB가 비활성화되어 있어 동기화를 건너뜁니다.")
-            return False
-        
         if not IQADB_AVAILABLE:
             logging.error("IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
             return False
         
         try:
-            # config.ini에서 PARTNERS_QUERY 가져오기
-            query_template = self.db_config.config.get('SQL_QUERIES', 'PARTNERS_QUERY')
-            query = query_template.format(
-                schema=self.db_config.pg_schema,
-                table=self.db_config.pg_table
-            )
+            # config.ini에서 PARTNERS_QUERY 가져오기 (간단!)
+            query = self.config.get('SQL_QUERIES', 'PARTNERS_QUERY')
+            print(f"[INFO] 실행할 쿼리: {query[:100]}...")
             
             # ✨ 기존 성공 방식으로 데이터 조회
-            logging.info("IQADB_CONNECT310을 사용하여 데이터 조회 시작...")
+            print("[INFO] IQADB_CONNECT310을 사용하여 데이터 조회 시작...")
             df = execute_SQL(query)
-            logging.info(f"데이터 조회 완료: {len(df)} 건")
+            print(f"[INFO] 데이터 조회 완료: {len(df)} 건")
             
             if df.empty:
-                logging.warning("조회된 데이터가 없습니다.")
+                print("[WARNING] 조회된 데이터가 없습니다.")
                 return False
             
             # DataFrame을 SQLite에 저장
-            sqlite_conn = self.db_config.get_sqlite_connection()
-            sqlite_cursor = sqlite_conn.cursor()
+            conn = sqlite3.connect(self.local_db_path)
+            cursor = conn.cursor()
             
             # 기존 캐시 데이터 삭제
-            sqlite_cursor.execute("DELETE FROM partners_cache")
+            cursor.execute("DELETE FROM partners_cache")
             
             # DataFrame을 레코드 배열로 변환하여 SQLite에 삽입
             for _, row in df.iterrows():
-                sqlite_cursor.execute('''
+                cursor.execute('''
                     INSERT INTO partners_cache (
                         business_number, company_name, partner_class, business_type_major,
                         business_type_minor, hazard_work_flag, representative, address,
@@ -257,21 +189,20 @@ class PartnerDataManager:
                     row.get('transaction_count', None)
                 ))
             
-            sqlite_conn.commit()
-            sqlite_conn.close()
+            conn.commit()
+            conn.close()
             
-            self.db_config.update_last_sync()
-            logging.info(f"✅ 협력사 데이터 {len(df)}건 동기화 완료")
+            print(f"[SUCCESS] ✅ 협력사 데이터 {len(df)}건 동기화 완료")
             return True
             
         except Exception as e:
-            logging.error(f"❌ 데이터 동기화 실패: {e}")
+            print(f"[ERROR] ❌ 데이터 동기화 실패: {e}")
             traceback.print_exc()
             return False
     
     def get_partner_by_business_number(self, business_number):
         """사업자번호로 협력사 정보 조회 (캐시 + 상세정보 조인)"""
-        conn = self.db_config.get_sqlite_connection()
+        conn = sqlite3.connect(self.local_db_path)
         conn.row_factory = sqlite3.Row
         
         query = '''
@@ -290,7 +221,7 @@ class PartnerDataManager:
     
     def get_all_partners(self, page=1, per_page=10, filters=None):
         """협력사 목록 조회 (필터링 포함)"""
-        conn = self.db_config.get_sqlite_connection()
+        conn = sqlite3.connect(self.local_db_path)
         conn.row_factory = sqlite3.Row
         
         # 기본 쿼리
@@ -325,5 +256,4 @@ class PartnerDataManager:
         return partners, total_count
 
 # 전역 인스턴스
-db_config = DatabaseConfig()
 partner_manager = PartnerDataManager()
