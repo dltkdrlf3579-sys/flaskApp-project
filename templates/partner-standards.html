@@ -97,7 +97,7 @@
                 {% for partner in partners %}
                 <tr>
                     <td class="fixed-col">
-                        <a href="{{ url_for('partner_detail', business_number=partner.business_number) }}" class="company-link">{{ partner.company_name }}</a>
+                        <a href="javascript:void(0)" class="company-link" onclick="openPartnerModal('{{ partner.business_number }}')">{{ partner.company_name }}</a>
                     </td>
                     <td>{{ partner.business_number }}</td>
                     <td>{{ partner.representative }}</td>
@@ -681,6 +681,41 @@ function changePerPage(perPage) {
     url.searchParams.set('per_page', perPage);
     url.searchParams.delete('page'); // 페이지를 1페이지로 리셋
     window.location.href = url.toString();
+}
+
+// 파트너 상세정보 팝업 윈도우 함수
+function openPartnerModal(businessNumber) {
+    // 팝업 윈도우 옵션 설정
+    const width = 1400;
+    const height = 900;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes',
+        'toolbar=no',
+        'menubar=no',
+        'location=no',
+        'status=no'
+    ].join(',');
+    
+    // 새 팝업 윈도우 열기
+    const popupUrl = '/partner-detail/' + businessNumber + '?popup=1';
+    const popup = window.open(popupUrl, 'partnerDetail', popupOptions);
+    
+    // 팝업이 차단되었는지 확인
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    // 팝업 포커스
+    popup.focus();
 }
 </script>
 {% endblock %}

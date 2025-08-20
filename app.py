@@ -322,6 +322,7 @@ def lock():
     return redirect(url_for('index'))
 
 @app.route("/partner/<business_number>")
+@app.route("/partner-detail/<business_number>")
 def partner_detail(business_number):
     """협력사 상세정보 페이지"""
     logging.info(f"협력사 상세 정보 조회: {business_number}")
@@ -346,7 +347,7 @@ def partner_detail(business_number):
     logging.info(f"협력사 {business_number} ({partner['company_name']}) 상세 페이지 로드 - 첨부파일 {len(attachments)}개")
     
     # 팝업 모드인지 확인
-    is_popup = request.args.get('popup') == 'true'
+    is_popup = request.args.get('popup') == '1'
     
     return render_template('partner-detail.html', 
                          partner=partner, 

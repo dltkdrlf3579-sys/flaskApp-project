@@ -8,6 +8,7 @@
 {% endblock %}
 
 {% block title %}{{ partner.company_name.replace('-학교', '') }}{% endblock %}
+{% block popup_title %}{{ partner.company_name.replace('-학교', '') }} - 상세정보{% endblock %}
 {% block content %}
 
 {% if not is_popup %}
@@ -98,7 +99,14 @@
         </div>
         <div class="section-content">
             <div class="content-editor">
-                <textarea id="detailed-content" class="content-textarea" placeholder="업체에 대한 상세 내용을 입력하세요...">{{ partner.detailed_content or '' }}</textarea>
+                <!-- 간단한 편집 가능한 영역 -->
+                <div id="detailed-content" 
+                     class="editable-content" 
+                     contenteditable="true" 
+                     placeholder="업체에 대한 상세 내용을 입력하세요...&#10;&#10;💡 팁: 이미지나 엑셀표를 복사해서 붙여넣기 하세요!">{{ partner.detailed_content | safe if partner.detailed_content else '' }}</div>
+                
+                <!-- 숨겨진 textarea (저장용) -->
+                <textarea id="detailed-content-hidden" style="display: none;">{{ partner.detailed_content or '' }}</textarea>
             </div>
         </div>
     </div>
@@ -211,6 +219,13 @@
     font-weight: 600;
 }
 
+/* 팝업 모드일 때 헤더와 액션 버튼 숨김 */
+{% if is_popup %}
+.page-header, .action-buttons {
+    display: none !important;
+}
+{% endif %}
+
 /* 메인 컨테이너 */
 .partner-detail-container {
     max-width: 100%;
@@ -218,6 +233,24 @@
     flex-direction: column;
     gap: 1px;
 }
+
+{% if is_popup %}
+.partner-detail-container {
+    padding: 0;
+    gap: 0;
+}
+
+.section {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+}
+
+.section:last-child {
+    border-bottom: none;
+}
+{% endif %}
 
 /* 섹션 공통 스타일 */
 .section {
@@ -333,6 +366,76 @@
     outline: none;
     border-color: #2f5fd3;
     box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+/* 간단한 편집 가능한 영역 스타일 */
+.editable-content {
+    width: 100%;
+    min-height: 400px;
+    padding: 20px;
+    border: 1px solid #e1e5e9;
+    border-radius: 4px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #333;
+    font-family: inherit;
+    box-sizing: border-box;
+    background: white;
+    outline: none;
+    overflow-y: auto;
+}
+
+.editable-content:focus {
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+.editable-content:empty:before {
+    content: attr(placeholder);
+    color: #999;
+    font-style: italic;
+    white-space: pre-line;
+}
+
+.editable-content img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+    margin: 10px 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    display: block;
+}
+
+.editable-content table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 15px 0;
+    border: 1px solid #e1e5e9;
+}
+
+.editable-content table td,
+.editable-content table th {
+    border: 1px solid #e1e5e9;
+    padding: 8px 12px;
+    text-align: left;
+    min-width: 50px;
+}
+
+.editable-content table th {
+    background: #f8f9fa;
+    font-weight: 600;
+}
+
+.editable-content table tr:nth-child(even) {
+    background: #f8f9fa;
+}
+
+.editable-content p {
+    margin: 10px 0;
+}
+
+.editable-content br {
+    line-height: 1.6;
 }
 
 
@@ -866,6 +969,175 @@ function saveChanges() {
         if (data.success) {
             alert('수정이 완료되었습니다.');
             // 팝업이므로 단순히 새로고침 - 부모 창은 영향받지 않음
+            location.reload();
+        } else {
+            alert('수정 중 오류가 발생했습니다: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('수정 중 오류가 발생했습니다.');
+    });
+}
+
+// ==================== 간단한 contentEditable 에디터 ====================
+
+// 이미지 클립보드 붙여넣기 및 엑셀 표 처리
+document.getElementById('detailed-content').addEventListener('paste', function(e) {
+    e.preventDefault();
+    
+    const clipboardData = e.clipboardData || window.clipboardData;
+    
+    // 🎯 엑셀 표 처리를 이미지보다 먼저 확인!
+    const text = clipboardData.getData('text/plain');
+    if (text && text.includes('\t') && text.includes('\n')) {
+        console.log('엑셀 표 데이터 감지:', text.substring(0, 100));
+        const rows = text.trim().split('\n');
+        if (rows.length > 1) {
+            const table = document.createElement('table');
+            table.style.cssText = 'border-collapse: collapse; width: 100%; margin: 15px 0; border: 1px solid #e1e5e9;';
+            
+            rows.forEach((row, index) => {
+                const cells = row.split('\t');
+                const tr = document.createElement('tr');
+                
+                if (index === 0) {
+                    tr.style.background = '#f8f9fa';
+                    tr.style.fontWeight = 'bold';
+                }
+                
+                cells.forEach(cellData => {
+                    const cell = document.createElement(index === 0 ? 'th' : 'td');
+                    cell.textContent = cellData.trim();
+                    cell.style.cssText = 'border: 1px solid #e1e5e9; padding: 8px 12px; text-align: left; min-width: 50px;';
+                    
+                    // 표 셀 편집 가능하게 만들기
+                    cell.contentEditable = true;
+                    cell.addEventListener('blur', function() {
+                        // 편집 완료 시 처리할 내용 (필요시)
+                    });
+                    
+                    tr.appendChild(cell);
+                });
+                
+                table.appendChild(tr);
+            });
+            
+            console.log('HTML 표 생성 완료');
+            insertAtCursor(table);
+            return; // 표 처리했으므로 여기서 종료
+        }
+    }
+    
+    // 이미지 붙여넣기 처리 (표가 아닐 때만)
+    const items = clipboardData.items;
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        
+        // 이미지 아이템인 경우
+        if (item.type.indexOf('image') !== -1) {
+            console.log('이미지 데이터 감지');
+            const blob = item.getAsFile();
+            
+            if (blob.size > 5 * 1024 * 1024) {
+                alert('이미지 크기는 5MB 이하로 제한됩니다.');
+                return;
+            }
+            
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = document.createElement('img');
+                img.src = event.target.result;
+                img.style.maxWidth = '100%';
+                img.style.height = 'auto';
+                img.style.margin = '10px 0';
+                img.style.borderRadius = '4px';
+                img.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+                
+                // 현재 커서 위치에 이미지 삽입
+                insertAtCursor(img);
+            };
+            reader.readAsDataURL(blob);
+            return;
+        }
+    }
+    
+    // 일반 텍스트 붙여넣기
+    const textData = clipboardData.getData('text/plain');
+    if (textData) {
+        console.log('일반 텍스트 데이터:', textData.substring(0, 50));
+        document.execCommand('insertText', false, textData);
+    }
+});
+
+// 커서 위치에 요소 삽입
+function insertAtCursor(element) {
+    const selection = window.getSelection();
+    if (selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        range.deleteContents();
+        range.insertNode(element);
+        
+        // 커서를 삽입된 요소 뒤로 이동
+        range.setStartAfter(element);
+        range.setEndAfter(element);
+        selection.removeAllRanges();
+        selection.addRange(range);
+    } else {
+        // 커서가 없으면 끝에 추가
+        document.getElementById('detailed-content').appendChild(element);
+    }
+}
+
+// 저장 함수 수정
+function saveChanges() {
+    // contentEditable div에서 HTML 내용 가져오기
+    const editableDiv = document.getElementById('detailed-content');
+    const detailedContent = editableDiv.innerHTML;
+    
+    console.log('Saving content from contentEditable:', detailedContent);
+    
+    const businessNumber = '{{ partner.business_number }}';
+    
+    // 첨부파일 데이터 수집 (기존 로직 유지)
+    const attachments = [];
+    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
+    
+    rows.forEach(row => {
+        const desc = row.querySelector('.attachment-desc').value;
+        const id = row.dataset.id;
+        
+        attachments.push({
+            id: id || null,
+            description: desc,
+            isNew: row.dataset.isNew === 'true'
+        });
+    });
+    
+    // FormData 생성
+    const formData = new FormData();
+    formData.append('business_number', businessNumber);
+    formData.append('detailed_content', detailedContent);
+    formData.append('deleted_attachments', JSON.stringify(deletedAttachments));
+    formData.append('attachment_data', JSON.stringify(attachments));
+    
+    // 새 파일들 추가
+    pendingFiles.forEach((file, index) => {
+        console.log(`Adding file ${index}: ${file.name}`);
+        formData.append('files', file);
+    });
+    
+    console.log('Sending data to server...');
+    
+    // 서버로 전송
+    fetch('/update-partner', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('수정이 완료되었습니다.');
             location.reload();
         } else {
             alert('수정 중 오류가 발생했습니다: ' + data.message);
