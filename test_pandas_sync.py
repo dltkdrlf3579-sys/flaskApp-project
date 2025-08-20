@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-판다스 방식 데이터 동기화 테스트 스크립트
+사용자 정의 DB 연결 동기화 테스트 스크립트
 """
 
 import sys
@@ -18,9 +18,9 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-def test_pandas_sync():
-    """판다스 방식 동기화 테스트"""
-    print("🧪 판다스 방식 데이터 동기화 테스트 시작")
+def test_custom_sync():
+    """사용자 정의 DB 동기화 테스트"""
+    print("🧪 사용자 정의 DB 데이터 동기화 테스트 시작")
     print("=" * 50)
     
     try:
@@ -61,4 +61,4 @@ def test_pandas_sync():
     print("🏁 테스트 완료")
 
 if __name__ == "__main__":
-    test_pandas_sync()
+    test_custom_sync()

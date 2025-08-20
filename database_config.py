@@ -7,45 +7,37 @@ import traceback
 import pandas as pd
 from datetime import datetime, timedelta
 
-# IQADB_CONNECT310 모듈 로드
+# 사용자 정의 DB 연결 모듈 로드 (보안상 이유로 실제 경로는 로컬에서만 설정)
+CUSTOM_DB_AVAILABLE = False
 try:
-    module_folder = 'C:/Users/user/AppData/Local/aipforge/pkgs/dist/obf/PY310'
-    if os.path.exists(module_folder):
-        sys.path.insert(0, os.path.abspath(module_folder))
-        from IQADB_CONNECT310 import *
-        IQADB_AVAILABLE = True
-        print(f"[SUCCESS] IQADB_CONNECT310 모듈 로드 성공: {module_folder}")
-    else:
-        IQADB_AVAILABLE = False
-        print(f"[WARNING] IQADB 모듈 경로를 찾을 수 없습니다: {module_folder}")
-except ImportError as e:
-    IQADB_AVAILABLE = False
-    print(f"[WARNING] IQADB_CONNECT310 모듈을 가져올 수 없습니다: {e}")
+    # 로컬에서만 사용할 커스텀 DB 모듈이 있다면 여기에 추가
+    # 실제 구현은 config.ini나 별도 파일에서 처리
+    pass
 except Exception as e:
-    IQADB_AVAILABLE = False
-    print(f"[ERROR] IQADB 모듈 로드 중 오류 발생: {e}")
+    print(f"[INFO] 커스텀 DB 모듈 사용 안 함: {e}")
 
-def execute_SQL(query):
+def execute_custom_SQL(query):
     """
-    기존 성공 방식: IQADB_CONNECT310을 사용한 데이터베이스 조회
+    사용자 정의 DB 연결 방식 (로컬에서만 구현)
+    실제 구현은 로컬 환경에서 별도로 추가하세요.
     """
-    if not IQADB_AVAILABLE:
-        raise Exception("IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
+    if not CUSTOM_DB_AVAILABLE:
+        raise Exception("사용자 정의 DB 모듈이 설정되지 않았습니다.")
     
-    conn = iqadb1()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(query)
-            data = cur.fetchall()
-            col_names = [desc[0] for desc in cur.description]  # col_name → col_names 수정
-            df = pd.DataFrame(data, columns=col_names)  # dataframe → DataFrame 수정
-            return df
-    except Exception as e:
-        print(f"[ERROR] execute_SQL 실행 중 오류: {e}")
-        traceback.print_exc()
-        raise e
-    finally:
-        conn.close()
+    # 실제 구현은 로컬에서 추가
+    # 예시:
+    # conn = your_custom_connection_function()
+    # try:
+    #     with conn.cursor() as cur:
+    #         cur.execute(query)
+    #         data = cur.fetchall()
+    #         col_names = [desc[0] for desc in cur.description]
+    #         df = pd.DataFrame(data, columns=col_names)
+    #         return df
+    # finally:
+    #     conn.close()
+    
+    raise NotImplementedError("로컬에서 구현 필요")
 
 # 설정 파일 로드 (절대 경로 사용)
 config = configparser.ConfigParser()
@@ -287,8 +279,8 @@ class PartnerDataManager:
             logging.info("외부 DB가 비활성화되어 있어 동기화를 건너뜁니다.")
             return False
         
-        if not IQADB_AVAILABLE:
-            logging.error("IQADB_CONNECT310 모듈을 사용할 수 없습니다. 기존 psycopg2 방식을 시도합니다.")
+        if not CUSTOM_DB_AVAILABLE:
+            logging.info("사용자 정의 DB 모듈이 설정되지 않았습니다. 기존 psycopg2 방식을 사용합니다.")
             return self._sync_with_psycopg2()  # 대안 방식
         
         try:
@@ -306,9 +298,9 @@ class PartnerDataManager:
                     table=self.db_config.pg_table
                 )
             
-            # ✨ 기존 성공 방식으로 데이터 조회
-            logging.info("IQADB_CONNECT310을 사용하여 데이터 조회 시작...")
-            df = execute_SQL(query)
+            # ✨ 사용자 정의 방식으로 데이터 조회
+            logging.info("사용자 정의 DB 연결을 사용하여 데이터 조회 시작...")
+            df = execute_custom_SQL(query)
             logging.info(f"데이터 조회 완료: {len(df)} 건")
             
             if df.empty:
@@ -348,7 +340,7 @@ class PartnerDataManager:
             sqlite_conn.close()
             
             self.db_config.update_last_sync()
-            logging.info(f"✅ 협력사 데이터 {len(df)}건 동기화 완료 (판다스 방식)")
+            logging.info(f"✅ 협력사 데이터 {len(df)}건 동기화 완료 (사용자 정의 방식)")
             return True
             
         except Exception as e:
