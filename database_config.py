@@ -4,9 +4,26 @@ import sqlite3
 import logging
 from datetime import datetime, timedelta
 
-# 설정 파일 로드
+# 설정 파일 로드 (절대 경로 사용 - 보안사업장 환경 대응)
 config = configparser.ConfigParser()
-config.read('config.ini', encoding='utf-8')
+config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.ini')
+
+# 설정 파일 존재 확인 및 로드
+if not os.path.exists(config_path):
+    print(f"[ERROR] 설정 파일을 찾을 수 없습니다: {config_path}")
+    print("config_template.ini를 config.ini로 복사하세요.")
+    exit(1)
+
+try:
+    config.read(config_path, encoding='utf-8')
+    if not config.has_section('DATABASE'):
+        print(f"[ERROR] config.ini에 [DATABASE] 섹션이 없습니다.")
+        print("config_template.ini를 참고하여 설정을 확인하세요.")
+        exit(1)
+    print(f"[SUCCESS] 설정 파일 로드 성공: {config_path}")
+except Exception as e:
+    print(f"[ERROR] 설정 파일 로드 실패: {e}")
+    exit(1)
 
 class DatabaseConfig:
     def __init__(self):
