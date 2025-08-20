@@ -79,7 +79,8 @@
                         <div class="value">{{ "{:,}".format(partner.annual_revenue // 100000000) if partner.annual_revenue else '-' }}억원</div>
                     </div>
                     <div class="info-cell">
-                        <!-- 빈 셀 -->
+                        <label>거래차수</label>
+                        <div class="value">{{ partner.transaction_count or '-' }}</div>
                     </div>
                     <div class="info-cell">
                         <!-- 빈 셀 -->

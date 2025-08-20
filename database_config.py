@@ -121,7 +121,7 @@ class PartnerDataManager:
         # 협력사 정보만 필터링 (사고 정보 제외)
         partner_columns = ['business_number', 'company_name', 'partner_class', 'business_type_major', 
                           'business_type_minor', 'hazard_work_flag', 'representative', 'address', 
-                          'average_age', 'annual_revenue']
+                          'average_age', 'annual_revenue', 'transaction_count']
         
         # AS 절이 있는 SELECT 문 생성
         select_columns = []
@@ -186,6 +186,7 @@ class PartnerDataManager:
                 address TEXT,
                 average_age INTEGER,
                 annual_revenue BIGINT,
+                transaction_count INTEGER,
                 synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -279,8 +280,8 @@ class PartnerDataManager:
                     INSERT INTO partners_cache (
                         business_number, company_name, partner_class, business_type_major,
                         business_type_minor, hazard_work_flag, representative, address,
-                        average_age, annual_revenue
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        average_age, annual_revenue, transaction_count
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', partner)
             
             sqlite_conn.commit()

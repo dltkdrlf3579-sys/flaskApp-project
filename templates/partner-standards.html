@@ -86,6 +86,7 @@
                     <th>주소</th>
                     <th>평균연령</th>
                     <th>매출액</th>
+                    <th>거래차수</th>
                 </tr>
             </thead>
             <tbody>
@@ -103,10 +104,11 @@
                     <td>{{ partner.address or '-' }}</td>
                     <td>{{ partner.average_age if partner.average_age else '-' }}</td>
                     <td>{{ "{:,}".format(partner.annual_revenue // 100000000) if partner.annual_revenue else '-' }}억원</td>
+                    <td>{{ partner.transaction_count or '-' }}</td>
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="10" class="no-data">검색 결과가 없습니다.</td>
+                    <td colspan="11" class="no-data">검색 결과가 없습니다.</td>
                 </tr>
                 {% endfor %}
             </tbody>
