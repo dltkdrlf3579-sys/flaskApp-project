@@ -64,6 +64,7 @@ class PartnerDataManager:
     def __init__(self):
         self.config = config
         self.local_db_path = config.get('DATABASE', 'LOCAL_DB_PATH', fallback='portal.db')
+        self.db_config = None  # 나중에 설정됨
         self.init_local_tables()
     
     def init_local_tables(self):
@@ -334,5 +335,18 @@ class PartnerDataManager:
         
         return partners, total_count
 
+class DatabaseConfig:
+    """데이터베이스 설정 관리 클래스"""
+    def __init__(self):
+        self.config = config
+        self.local_db_path = config.get('DATABASE', 'LOCAL_DB_PATH', fallback='portal.db')
+        self.external_db_enabled = config.getboolean('DATABASE', 'EXTERNAL_DB_ENABLED', fallback=False)
+    
+    def get_sqlite_connection(self):
+        """SQLite 연결 반환"""
+        return sqlite3.connect(self.local_db_path)
+
 # 전역 인스턴스
+db_config = DatabaseConfig()
 partner_manager = PartnerDataManager()
+partner_manager.db_config = db_config  # 순환 참조 해결

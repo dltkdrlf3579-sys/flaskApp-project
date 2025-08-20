@@ -59,12 +59,16 @@ def init_db():
     
     # 외부 DB 연동이 활성화된 경우 동기화 시도
     if db_config.external_db_enabled:
-        if partner_manager.should_sync():
+        try:
             logging.info("협력사 데이터 동기화 시작...")
-            if partner_manager.sync_partners_from_postgresql():
+            if partner_manager.sync_partners_from_external_db():
                 logging.info("협력사 데이터 동기화 완료")
             else:
-                logging.warning("협력사 데이터 동기화 실패")
+                logging.warning("협력사 데이터 동기화 실패 - 샘플 데이터 사용")
+                init_sample_data()
+        except Exception as e:
+            logging.warning(f"동기화 중 오류 발생: {e} - 샘플 데이터 사용")
+            init_sample_data()
     else:
         # 외부 DB가 비활성화된 경우 샘플 데이터 생성
         init_sample_data()
