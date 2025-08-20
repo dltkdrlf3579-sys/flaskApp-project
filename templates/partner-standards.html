@@ -97,7 +97,7 @@
                 {% for partner in partners %}
                 <tr>
                     <td class="fixed-col">
-                        <a href="{{ url_for('partner_detail', partner_id=partner.id) }}" class="company-link">{{ partner.company_name }}</a>
+                        <a href="{{ url_for('partner_detail', business_number=partner.business_number) }}" class="company-link">{{ partner.company_name }}</a>
                     </td>
                     <td>{{ partner.business_number }}</td>
                     <td>{{ partner.representative }}</td>

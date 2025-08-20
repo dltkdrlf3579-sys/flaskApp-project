@@ -1,6 +1,6 @@
 import os
 import logging
-from flask import Flask, render_template, request, session, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, request, session, redirect, url_for, flash
 from werkzeug.serving import run_simple
 from config.menu import MENU_CONFIG
 from database_config import db_config, partner_manager
@@ -359,15 +359,10 @@ def verify_password():
     """비밀번호 검증"""
     try:
         data = request.get_json()
-        if not data:
-            return jsonify({"success": False, "message": "No data received"}), 400
-            
         password = data.get('password')
-        if not password:
-            return jsonify({"success": False, "message": "Password not provided"}), 400
         
         # config.ini에서 비밀번호 읽기
-        admin_password = db_config.config.get('DEFAULT', 'EDIT_PASSWORD')
+        admin_password = SETTINGS.get('SECURITY', 'admin_password', fallback='admin123')
         
         if password == admin_password:
             return jsonify({"success": True})

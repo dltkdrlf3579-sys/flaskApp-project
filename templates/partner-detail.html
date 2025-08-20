@@ -1,6 +1,16 @@
+{% if is_popup %}
+{% extends "popup-base.html" %}
+{% else %}
 {% extends "base.html" %}
-{% block title %}{{ partner.company_name }} 상세정보{% endblock %}
+{% endif %}
+
+{% block head %}
+{% endblock %}
+
+{% block title %}{{ partner.company_name.replace('-학교', '') }}{% endblock %}
 {% block content %}
+
+{% if not is_popup %}
 <div class="page-header">
     <h2 class="page-title">협력사 상세정보</h2>
     <div class="breadcrumb">
@@ -9,44 +19,164 @@
         <span class="current">{{ partner.company_name }}</span>
     </div>
 </div>
+{% endif %}
 
-<div class="detail-container">
-    <div class="detail-card">
-        <div class="card-header">
-            <h3 class="company-name">{{ partner.company_name }}</h3>
+<div class="partner-detail-container">
+    <!-- 1. 기본정보 영역 -->
+    <div class="section basic-info-section">
+        <div class="section-header">
+            <h3 class="section-title">기본정보</h3>
+            <button class="collapse-btn" onclick="toggleSection('basic-info')">
+                <span class="collapse-icon">▲</span>
+            </button>
         </div>
-        <div class="card-body">
-            <div class="info-grid">
-                <div class="info-item">
-                    <label>협력사명</label>
-                    <div class="value">{{ partner.company_name }}</div>
+        <div class="section-content" id="basic-info-content">
+            <div class="info-table">
+                <div class="info-row">
+                    <div class="info-cell">
+                        <label>사업자번호</label>
+                        <div class="value">{{ partner.business_number or '-' }}</div>
+                    </div>
+                    <div class="info-cell">
+                        <label>업체명</label>
+                        <div class="value">{{ partner.company_name }}</div>
+                    </div>
+                    <div class="info-cell">
+                        <label>대표자명</label>
+                        <div class="value">{{ partner.representative or '-' }}</div>
+                    </div>
+                    <div class="info-cell">
+                        <label>연락처</label>
+                        <div class="value">{{ partner.phone_number or '-' }}</div>
+                    </div>
                 </div>
-                <div class="info-item">
-                    <label>사업자번호</label>
-                    <div class="value">{{ partner.business_number or '-' }}</div>
+                <div class="info-row">
+                    <div class="info-cell">
+                        <label>외사업자번호</label>
+                        <div class="value">{{ partner.business_number or '-' }}</div>
+                    </div>
+                    <div class="info-cell">
+                        <label>선정자명</label>
+                        <div class="value">{{ partner.contact_person or '-' }}</div>
+                    </div>
+                    <div class="info-cell">
+                        <label>대표이메일</label>
+                        <div class="value">{{ partner.email or '-' }}</div>
+                    </div>
                 </div>
-                <div class="info-item">
-                    <label>대표자</label>
-                    <div class="value">{{ partner.representative or '-' }}</div>
-                </div>
-                <div class="info-item">
-                    <label>상시근로자</label>
-                    <div class="value">{{ partner.regular_workers }}명</div>
-                </div>
-                <div class="info-item">
-                    <label>등록일</label>
-                    <div class="value">{{ partner.created_at[:10] if partner.created_at else '-' }}</div>
+                <div class="info-row">
+                    <div class="info-cell">
+                        <label>주소</label>
+                        <div class="value">{{ partner.main_products or '경기도 수원시 영통구 삼성로 129(매탄동)' }}</div>
+                    </div>
+                    <div class="info-cell">
+                        <label>승인일</label>
+                        <div class="value">{{ partner.establishment_date or '2025-01-08' }}</div>
+                    </div>
+                    <div class="info-cell">
+                        <label>우편번호</label>
+                        <div class="value">{{ partner.regular_workers or '16677' }}</div>
+                    </div>
+                    <div class="info-cell">
+                        <label>현재 사용여부</label>
+                        <div class="value">
+                            <input type="radio" id="status-yes" name="status" checked>
+                            <label for="status-yes">Yes</label>
+                            <input type="radio" id="status-no" name="status">
+                            <label for="status-no">No</label>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
-    
+
+    <!-- 2. 업체 상세내용 영역 -->
+    <div class="section detail-content-section">
+        <div class="section-header">
+            <h3 class="section-title">업체 상세내용</h3>
+        </div>
+        <div class="section-content">
+            <div class="content-editor">
+                <textarea id="detailed-content" class="content-textarea" placeholder="업체에 대한 상세 내용을 입력하세요...">{{ partner.detailed_content or '' }}</textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. 첨부파일 영역 -->
+    <div class="section attachments-section">
+        <div class="section-header">
+            <h3 class="section-title">첨부파일</h3>
+            <button class="btn-add-file" onclick="document.getElementById('file-input').click();">추가</button>
+            <span class="file-count">총 <span id="file-count">{{ attachments|length }}</span>개</span>
+            <span class="file-size"><span id="file-size">{{ (attachments | sum(attribute='file_size') / 1024 / 1024) | round(2) }}</span> MB / 50 MB</span>
+        </div>
+        <div class="section-content">
+            <input type="file" id="file-input" multiple style="display: none;" onchange="handleFileUpload(this.files)">
+            <div class="attachments-table">
+                <div class="table-header">
+                    <div class="col-no">No.</div>
+                    <div class="col-file">파일명</div>
+                    <div class="col-desc">설명</div>
+                    <div class="col-action">상태</div>
+                </div>
+                <div class="table-body" id="attachments-tbody">
+                    {% for attachment in attachments %}
+                    <div class="table-row" data-id="{{ attachment.id }}">
+                        <div class="col-no">{{ loop.index }}</div>
+                        <div class="col-file">
+                            <span class="file-icon">📄</span>
+                            <a href="/download/{{ attachment.id }}" class="file-link" download>{{ attachment.file_name }}</a>
+                            <span class="file-size">({{ (attachment.file_size / 1024) | round(2) }} KB)</span>
+                        </div>
+                        <div class="col-desc">
+                            <input type="text" value="{{ attachment.description or '' }}" placeholder="설명을 입력하세요" class="attachment-desc">
+                        </div>
+                        <div class="col-action">
+                            <button class="btn-delete" onclick="deleteAttachment(this)">삭제</button>
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="table-row no-data" id="no-data-row">
+                        <div class="col-full">등록된 첨부파일이 없습니다.</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 저장 버튼 영역 -->
+    <div class="save-section">
+        <button class="btn-save" onclick="showPasswordModal()">수정완료</button>
+    </div>
+
+    <!-- 비밀번호 입력 모달 -->
+    <div id="password-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>편집 권한 확인</h3>
+                <span class="close" onclick="closePasswordModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>편집을 위해 비밀번호를 입력해주세요.</p>
+                <input type="password" id="password-input" placeholder="비밀번호" class="password-field">
+                <div class="modal-buttons">
+                    <button class="btn-confirm" onclick="verifyPasswordAndSave()">확인</button>
+                    <button class="btn-cancel" onclick="closePasswordModal()">취소</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% if not is_popup %}
     <div class="action-buttons">
         <a href="{{ url_for('page_view', url='partner-standards') }}" class="btn-back">목록으로</a>
         {% if session.get('edit_mode') %}
         <button class="btn-edit" onclick="alert('편집 기능은 추후 구현 예정입니다.')">편집</button>
         {% endif %}
     </div>
+    {% endif %}
 </div>
 
 <style>
@@ -81,53 +211,399 @@
     font-weight: 600;
 }
 
-/* 상세 카드 */
-.detail-container {
-    max-width: 800px;
+/* 메인 컨테이너 */
+.partner-detail-container {
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
 }
-.detail-card {
+
+/* 섹션 공통 스타일 */
+.section {
     background: white;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    overflow: hidden;
-    margin-bottom: 20px;
+    border: 1px solid #e1e5e9;
 }
-.card-header {
+
+.section-header {
     background: #f8f9fa;
-    padding: 20px;
-    border-bottom: 1px solid #e5e7eb;
+    padding: 12px 20px;
+    border-bottom: 1px solid #e1e5e9;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
 }
-.company-name {
-    font-size: 22px;
-    font-weight: 700;
-    color: #1f2937;
+
+.section-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
     margin: 0;
 }
-.card-body {
+
+.collapse-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+}
+
+.collapse-icon {
+    font-size: 12px;
+    color: #666;
+    transition: transform 0.2s;
+}
+
+.section-content {
     padding: 20px;
 }
-.info-grid {
+
+/* 1. 기본정보 섹션 */
+.info-table {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.info-row {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    grid-template-columns: repeat(4, 1fr);
     gap: 20px;
 }
-.info-item {
+
+.info-cell {
     display: flex;
     flex-direction: column;
     gap: 6px;
 }
-.info-item label {
+
+.info-cell label {
     font-weight: 600;
-    color: #374151;
+    color: #333;
+    font-size: 14px;
+    min-height: 20px;
+}
+
+.info-cell .value {
+    padding: 8px 12px;
+    background: #f8f9fa;
+    border: 1px solid #e1e5e9;
+    border-radius: 4px;
+    font-size: 14px;
+    color: #333;
+    min-height: 20px;
+    display: flex;
+    align-items: center;
+}
+
+.info-cell .value input[type="radio"] {
+    margin-right: 5px;
+}
+
+.info-cell .value label {
+    margin-right: 15px;
+    font-weight: normal;
+    min-height: auto;
+}
+
+/* 2. 업체 상세내용 섹션 */
+.detail-content-section .section-content {
+    padding: 20px;
+}
+
+.content-editor {
+    position: relative;
+}
+
+.content-textarea {
+    width: 100%;
+    min-height: 500px;
+    padding: 15px;
+    border: 1px solid #e1e5e9;
+    border-radius: 4px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #333;
+    font-family: inherit;
+    resize: vertical;
+    box-sizing: border-box;
+}
+
+.content-textarea:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+
+/* 3. 첨부파일 섹션 */
+.attachments-section .section-header {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.btn-add-file {
+    padding: 6px 12px;
+    background: #28a745;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-left: auto;
+    margin-right: 10px;
+}
+
+.btn-add-file:hover {
+    background: #218838;
+}
+
+.file-count, .file-size {
+    font-size: 14px;
+    color: #666;
+}
+
+.attachments-table {
+    border: 1px solid #e1e5e9;
+}
+
+.table-header {
+    display: grid;
+    grid-template-columns: 60px 30% 1fr 100px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e1e5e9;
+    font-weight: 600;
     font-size: 14px;
 }
-.info-item .value {
-    font-size: 16px;
-    color: #1f2937;
-    padding: 10px 12px;
-    background: #f9fafb;
-    border: 1px solid #e5e7eb;
+
+.table-header > div {
+    padding: 12px 10px;
+    border-right: 1px solid #e1e5e9;
+    display: flex;
+    align-items: center;
+}
+
+.table-header > div:last-child {
+    border-right: none;
+}
+
+.table-body {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.table-row {
+    display: grid;
+    grid-template-columns: 60px 30% 1fr 100px;
+    border-bottom: 1px solid #f1f1f1;
+    font-size: 14px;
+}
+
+.table-row > div {
+    padding: 12px 10px;
+    border-right: 1px solid #f1f1f1;
+    display: flex;
+    align-items: center;
+    word-break: break-word;
+}
+
+.table-row > div:last-child {
+    border-right: none;
+}
+
+.table-row:hover {
+    background: #f8f9fa;
+}
+
+.file-icon {
+    margin-right: 8px;
+}
+
+.file-link {
+    color: #2f5fd3;
+    text-decoration: none;
+    margin-right: 8px;
+}
+
+.file-link:hover {
+    text-decoration: underline;
+}
+
+.file-size {
+    color: #666;
+    font-size: 12px;
+}
+
+.col-desc input, .col-name input {
+    border: 1px solid #e1e5e9;
+    background: white;
+    width: 100%;
+    font-size: 14px;
+    color: #333;
+    padding: 4px 8px;
+    border-radius: 3px;
+}
+
+.col-desc input:focus {
+    outline: none;
+    border-color: #2f5fd3;
+}
+
+.btn-delete {
+    padding: 4px 12px;
+    background: #dc3545;
+    color: white;
+    border: none;
     border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.btn-delete:hover {
+    background: #c82333;
+}
+
+.no-data .col-full {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: #999;
+    padding: 40px;
+}
+
+/* 저장 섹션 */
+.save-section {
+    margin-top: 20px;
+    text-align: center;
+    padding: 20px;
+    border-top: 1px solid #e1e5e9;
+    background: #f8f9fa;
+}
+
+.btn-save {
+    padding: 12px 30px;
+    background: #2f5fd3;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn-save:hover {
+    background: #1d4ed8;
+}
+
+/* 비밀번호 모달 */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.4);
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: 15% auto;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    width: 400px;
+    max-width: 90%;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+
+.modal-header {
+    padding: 20px 25px 15px;
+    border-bottom: 1px solid #e1e5e9;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: #333;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.close {
+    color: #999;
+    font-size: 24px;
+    font-weight: bold;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.close:hover {
+    color: #333;
+}
+
+.modal-body {
+    padding: 25px;
+}
+
+.modal-body p {
+    margin: 0 0 20px 0;
+    color: #555;
+    font-size: 14px;
+}
+
+.password-field {
+    width: 100%;
+    padding: 12px 15px;
+    border: 1px solid #e1e5e9;
+    border-radius: 4px;
+    font-size: 14px;
+    margin-bottom: 20px;
+    box-sizing: border-box;
+}
+
+.password-field:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+.modal-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.btn-confirm, .btn-cancel {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    min-width: 80px;
+}
+
+.btn-confirm {
+    background: #2f5fd3;
+    color: white;
+}
+
+.btn-confirm:hover {
+    background: #1d4ed8;
+}
+
+.btn-cancel {
+    background: #6b7280;
+    color: white;
+}
+
+.btn-cancel:hover {
+    background: #4b5563;
 }
 
 /* 액션 버튼 */
@@ -135,7 +611,9 @@
     display: flex;
     gap: 12px;
     justify-content: flex-start;
+    margin-top: 20px;
 }
+
 .btn-back, .btn-edit {
     padding: 10px 20px;
     border: none;
@@ -146,42 +624,257 @@
     text-decoration: none;
     display: inline-block;
 }
+
 .btn-back {
     background: #6b7280;
     color: white;
 }
+
 .btn-back:hover {
     background: #4b5563;
     color: white;
     text-decoration: none;
 }
+
 .btn-edit {
     background: #2f5fd3;
     color: white;
 }
+
 .btn-edit:hover {
     background: #1d4ed8;
 }
 
 /* 반응형 */
 @media (max-width: 768px) {
-    .info-grid {
+    .info-row {
         grid-template-columns: 1fr;
-        gap: 16px;
+        gap: 12px;
     }
-    .card-header, .card-body {
-        padding: 16px;
+    
+    .table-header,
+    .table-row {
+        grid-template-columns: 1fr;
+        gap: 0;
     }
-    .company-name {
-        font-size: 18px;
+    
+    .table-header > div,
+    .table-row > div {
+        border-right: none;
+        border-bottom: 1px solid #e1e5e9;
     }
+    
+    .table-header > div:last-child,
+    .table-row > div:last-child {
+        border-bottom: none;
+    }
+    
     .action-buttons {
         flex-direction: column;
         align-items: stretch;
     }
+    
     .btn-back, .btn-edit {
         text-align: center;
     }
 }
 </style>
+
+<script>
+let pendingFiles = [];
+let deletedAttachments = [];
+
+// 페이지 로드 시 초기화
+
+function toggleSection(sectionId) {
+    const content = document.getElementById(sectionId + '-content');
+    const icon = document.querySelector(`[onclick="toggleSection('${sectionId}')"] .collapse-icon`);
+    
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        icon.textContent = '▲';
+    } else {
+        content.style.display = 'none';
+        icon.textContent = '▼';
+    }
+}
+
+function handleFileUpload(files) {
+    const tbody = document.getElementById('attachments-tbody');
+    const noDataRow = document.getElementById('no-data-row');
+    
+    if (noDataRow) {
+        noDataRow.remove();
+    }
+    
+    Array.from(files).forEach((file, index) => {
+        const fileSize = (file.size / 1024).toFixed(2);
+        const newRow = document.createElement('div');
+        newRow.className = 'table-row';
+        newRow.dataset.isNew = 'true';
+        
+        const rowCount = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)').length + 1;
+        
+        newRow.innerHTML = `
+            <div class="col-no">${rowCount}</div>
+            <div class="col-file">
+                <span class="file-icon">📄</span>
+                <span class="file-link">${file.name}</span>
+                <span class="file-size">(${fileSize} KB)</span>
+            </div>
+            <div class="col-desc">
+                <input type="text" placeholder="설명을 입력하세요" class="attachment-desc">
+            </div>
+            <div class="col-action">
+                <button class="btn-delete" onclick="deleteAttachment(this)">삭제</button>
+            </div>
+        `;
+        
+        tbody.appendChild(newRow);
+        pendingFiles.push(file);
+    });
+    
+    updateFileCount();
+}
+
+function deleteAttachment(btn) {
+    const row = btn.closest('.table-row');
+    const attachmentId = row.dataset.id;
+    
+    if (attachmentId) {
+        deletedAttachments.push(attachmentId);
+    }
+    
+    row.remove();
+    updateFileCount();
+    updateRowNumbers();
+    
+    // 파일이 모두 삭제된 경우 "등록된 첨부파일이 없습니다" 표시
+    const tbody = document.getElementById('attachments-tbody');
+    if (tbody.children.length === 0) {
+        tbody.innerHTML = '<div class="table-row no-data" id="no-data-row"><div class="col-full">등록된 첨부파일이 없습니다.</div></div>';
+    }
+}
+
+function updateFileCount() {
+    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
+    document.getElementById('file-count').textContent = rows.length;
+}
+
+function updateRowNumbers() {
+    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
+    rows.forEach((row, index) => {
+        const noCell = row.querySelector('.col-no');
+        noCell.textContent = index + 1;
+    });
+}
+
+function showPasswordModal() {
+    document.getElementById('password-modal').style.display = 'block';
+    document.getElementById('password-input').focus();
+    
+    // Enter 키 이벤트 추가
+    document.getElementById('password-input').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            verifyPasswordAndSave();
+        }
+    });
+}
+
+function closePasswordModal() {
+    document.getElementById('password-modal').style.display = 'none';
+    document.getElementById('password-input').value = '';
+}
+
+function verifyPasswordAndSave() {
+    const password = document.getElementById('password-input').value;
+    
+    if (!password) {
+        alert('비밀번호를 입력해주세요.');
+        return;
+    }
+    
+    // 서버에서 비밀번호 검증
+    fetch('/verify-password', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ password: password })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            closePasswordModal();
+            saveChanges();
+        } else {
+            alert(data.message || '비밀번호가 올바르지 않습니다.');
+            document.getElementById('password-input').value = '';
+            document.getElementById('password-input').focus();
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('비밀번호 검증 중 오류가 발생했습니다.');
+    });
+}
+
+function saveChanges() {
+    // textarea에서 데이터 수집
+    const detailedContent = document.getElementById('detailed-content').value;
+    const businessNumber = '{{ partner.business_number }}';
+    console.log('Saving for business number:', businessNumber);
+    console.log('Content length:', detailedContent.length);
+    
+    // 첨부파일 데이터 수집
+    const attachments = [];
+    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
+    
+    rows.forEach(row => {
+        const desc = row.querySelector('.attachment-desc').value;
+        const id = row.dataset.id;
+        
+        attachments.push({
+            id: id || null,
+            description: desc,
+            isNew: row.dataset.isNew === 'true'
+        });
+    });
+    
+    // FormData 생성
+    const formData = new FormData();
+    formData.append('business_number', businessNumber);
+    formData.append('detailed_content', detailedContent);
+    formData.append('deleted_attachments', JSON.stringify(deletedAttachments));
+    formData.append('attachment_data', JSON.stringify(attachments));
+    
+    // 새 파일들 추가
+    pendingFiles.forEach((file, index) => {
+        console.log(`Adding file ${index}: ${file.name}`);
+        formData.append('files', file);
+    });
+    
+    console.log('Sending data to server...');
+    
+    // 서버로 전송
+    fetch('/update-partner', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('수정이 완료되었습니다.');
+            // 팝업이므로 단순히 새로고침 - 부모 창은 영향받지 않음
+            location.reload();
+        } else {
+            alert('수정 중 오류가 발생했습니다: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('수정 중 오류가 발생했습니다.');
+    });
+}
+</script>
 {% endblock %}
