@@ -192,6 +192,10 @@ def page_view(url):
     if url == 'partner-standards':
         return partner_standards()
     
+    # 협력사 사고 페이지 특별 처리
+    if url == 'partner-accident':
+        return partner_accident()
+    
     conn = sqlite3.connect(DB_PATH)
     page = conn.execute("SELECT * FROM pages WHERE url = ?", (url,)).fetchone()
     conn.close()
@@ -265,6 +269,143 @@ def partner_standards():
     
     return render_template('partner-standards.html',
                          partners=partners,
+                         total_count=total_count,
+                         pagination=pagination,
+                         menu=MENU_CONFIG)
+
+def partner_accident():
+    """협력사 사고 페이지"""
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    
+    # 검색 조건
+    filters = {
+        'company_name': request.args.get('company_name', '').strip(),
+        'business_number': request.args.get('business_number', '').strip(),
+        'accident_date_start': request.args.get('accident_date_start', '').strip(),
+        'accident_date_end': request.args.get('accident_date_end', '').strip()
+    }
+    
+    # 더미 데이터 생성
+    import random
+    import datetime
+    
+    # 더미 사고 데이터
+    dummy_accidents = []
+    for i in range(50):  # 50개 더미 데이터
+        # 사고번호 생성: K + 연월일 + 순서(3자리) - 고정된 값
+        months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        days = [1, 5, 10, 15, 20, 25]
+        accident_date_fixed = f'2024-{months[i % 12]:02d}-{days[i % 6]:02d}'
+        accident_number = f'K{accident_date_fixed.replace("-", "")}{i+1:03d}'
+        
+        # 고정된 값들로 변경
+        grades = ['경미', '중대', '치명']
+        types = ['추락', '협착', '절단', '화재']
+        disaster_types = ['안전사고', '보건사고']
+        disaster_forms = ['낙하', '충돌', '전도']
+        days_of_week = ['월', '화', '수', '목', '금', '토', '일']
+        
+        dummy_accidents.append({
+            'id': i + 1,
+            'accident_number': accident_number,
+            'accident_name': f'사고사례{i+1:03d}',
+            'accident_date': accident_date_fixed,
+            'accident_grade': grades[i % 3],
+            'accident_type': types[i % 4],
+            'disaster_type': disaster_types[i % 2],
+            'disaster_form': disaster_forms[i % 3],
+            'workplace': f'사업장{(i % 5) + 1}',
+            'building': f'건물{(i % 10) + 1}',
+            'floor': f'{(i % 20) + 1}층',
+            'detail_location': f'상세위치{i+1:03d}',
+            'time': f'{9 + (i % 10):02d}:{(i * 5) % 60:02d}',
+            'day_of_week': days_of_week[i % 7],
+            'accident_content': f'사고내용{i+1}',
+            'responsible_company_1': f'협력사{(i % 20) + 1}',
+            'responsible_company_1_business_number': f'{1000000000 + i * 11111}',
+            'responsible_company_2': f'협력사{(i % 15) + 1}' if i % 3 == 0 else None,
+            'responsible_company_2_business_number': f'{2000000000 + i * 22222}' if i % 3 == 0 else None,
+            'column1': f'컬럼1-{i+1}',
+            'column2': f'컬럼2-{i+1}',
+            'column3': f'컬럼3-{i+1}',
+            'column4': f'컬럼4-{i+1}',
+            'column5': f'컬럼5-{i+1}',
+            'column6': f'컬럼6-{i+1}',
+            'column7': f'컬럼7-{i+1}',
+            'column8': f'컬럼8-{i+1}',
+            'column9': f'컬럼9-{i+1}',
+            'column10': f'컬럼10-{i+1}',
+        })
+    
+    # 검색 필터링 적용
+    filtered_accidents = dummy_accidents
+    
+    if filters['company_name']:
+        filtered_accidents = [a for a in filtered_accidents if filters['company_name'].lower() in a['responsible_company_1'].lower()]
+    
+    if filters['business_number']:
+        filtered_accidents = [a for a in filtered_accidents if filters['business_number'] in str(a['responsible_company_1_business_number'])]
+    
+    if filters['accident_date_start']:
+        filtered_accidents = [a for a in filtered_accidents if a['accident_date'] >= filters['accident_date_start']]
+    
+    if filters['accident_date_end']:
+        filtered_accidents = [a for a in filtered_accidents if a['accident_date'] <= filters['accident_date_end']]
+    
+    total_count = len(filtered_accidents)
+    
+    # 페이지네이션
+    start = (page - 1) * per_page
+    end = start + per_page
+    accidents = filtered_accidents[start:end]
+    
+    # 딕셔너리를 객체처럼 사용할 수 있도록 변환
+    class DictAsAttr:
+        def __init__(self, d):
+            for k, v in d.items():
+                setattr(self, k, v)
+    
+    accidents = [DictAsAttr(a) for a in accidents]
+    
+    # 페이지네이션 정보 (partner_standards와 동일한 클래스 사용)
+    class Pagination:
+        def __init__(self, page, per_page, total_count):
+            self.page = page
+            self.per_page = per_page
+            self.total_count = total_count
+            self.pages = math.ceil(total_count / per_page)
+            self.has_prev = page > 1
+            self.prev_num = page - 1 if self.has_prev else None
+            self.has_next = page < self.pages
+            self.next_num = page + 1 if self.has_next else None
+        
+        def iter_pages(self, window_size=10):
+            start = ((self.page - 1) // window_size) * window_size + 1
+            end = min(start + window_size - 1, self.pages)
+            for num in range(start, end + 1):
+                yield num
+        
+        def get_window_info(self, window_size=10):
+            start = ((self.page - 1) // window_size) * window_size + 1
+            end = min(start + window_size - 1, self.pages)
+            has_prev_window = start > 1
+            has_next_window = end < self.pages
+            prev_window_start = max(1, start - window_size)
+            next_window_start = min(end + 1, self.pages)
+            return {
+                'start': start,
+                'end': end,
+                'has_prev_window': has_prev_window,
+                'has_next_window': has_next_window,
+                'prev_window_start': prev_window_start,
+                'next_window_start': next_window_start
+            }
+    
+    pagination = Pagination(page, per_page, total_count)
+    
+    return render_template('partner-accident.html',
+                         accidents=accidents,
                          total_count=total_count,
                          pagination=pagination,
                          menu=MENU_CONFIG)
@@ -355,6 +496,126 @@ def partner_detail(business_number):
                          menu=MENU_CONFIG, 
                          is_popup=is_popup)
 
+@app.route("/accident-detail/<int:accident_id>")
+def accident_detail(accident_id):
+    """사고 상세정보 페이지"""
+    logging.info(f"사고 상세 정보 조회: {accident_id}")
+    
+    # 더미 데이터에서 해당 사고 찾기 (실제로는 DB에서 조회)
+    import random
+    
+    # 더미 사고 데이터 (partner_accident 함수와 동일한 데이터 생성)
+    dummy_accidents = []
+    for i in range(50):
+        # 사고번호 생성: K + 연월일 + 순서(3자리) - 고정된 값
+        months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        days = [1, 5, 10, 15, 20, 25]
+        accident_date_fixed = f'2024-{months[i % 12]:02d}-{days[i % 6]:02d}'
+        accident_number = f'K{accident_date_fixed.replace("-", "")}{i+1:03d}'
+        
+        # 고정된 값들로 변경
+        grades = ['경미', '중대', '치명']
+        types = ['추락', '협착', '절단', '화재']
+        disaster_types = ['안전사고', '보건사고']
+        disaster_forms = ['낙하', '충돌', '전도']
+        days_of_week = ['월', '화', '수', '목', '금', '토', '일']
+        
+        dummy_accidents.append({
+            'id': i + 1,
+            'accident_number': accident_number,
+            'accident_name': f'사고사례{i+1:03d}',
+            'accident_date': accident_date_fixed,
+            'accident_grade': grades[i % 3],
+            'accident_type': types[i % 4],
+            'disaster_type': disaster_types[i % 2],
+            'disaster_form': disaster_forms[i % 3],
+            'workplace': f'사업장{(i % 5) + 1}',
+            'building': f'건물{(i % 10) + 1}',
+            'floor': f'{(i % 20) + 1}층',
+            'detail_location': f'상세위치{i+1:03d}',
+            'time': f'{9 + (i % 10):02d}:{(i * 5) % 60:02d}',
+            'day_of_week': days_of_week[i % 7],
+            'accident_content': f'사고내용{i+1}에 대한 상세 설명입니다.',
+            'responsible_company_1': f'협력사{(i % 20) + 1}',
+            'responsible_company_1_business_number': f'{1000000000 + i * 11111}',
+            'responsible_company_2': f'협력사{(i % 15) + 1}' if i % 3 == 0 else None,
+            'responsible_company_2_business_number': f'{2000000000 + i * 22222}' if i % 3 == 0 else None,
+        })
+    
+    # 해당 ID의 사고 찾기
+    accident = None
+    for acc in dummy_accidents:
+        if acc['id'] == accident_id:
+            accident = acc
+            break
+    
+    if not accident:
+        logging.warning(f"사고를 찾을 수 없습니다: {accident_id}")
+        return "사고 정보를 찾을 수 없습니다.", 404
+    
+    # 저장된 상세내용이 있는지 확인
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # accident_details 테이블이 존재하는지 먼저 확인
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS accident_details (
+            accident_number TEXT PRIMARY KEY,
+            detailed_content TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    # accident_details 테이블에서 상세내용 조회
+    cursor.execute("SELECT detailed_content FROM accident_details WHERE accident_number = ?", (accident['accident_number'],))
+    detail_row = cursor.fetchone()
+    if detail_row:
+        accident['detailed_content'] = detail_row['detailed_content']
+    else:
+        accident['detailed_content'] = ''
+    
+    # accident_attachments 테이블도 생성
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS accident_attachments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            accident_number TEXT,
+            file_name TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            file_size INTEGER,
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    # 첨부파일 정보 가져오기
+    attachments = cursor.execute("""
+        SELECT * FROM accident_attachments 
+        WHERE accident_number = ? 
+        ORDER BY created_at DESC
+    """, (accident['accident_number'],)).fetchall()
+    
+    conn.close()
+    
+    # 딕셔너리를 객체처럼 사용할 수 있도록 변환
+    class DictAsAttr:
+        def __init__(self, d):
+            for k, v in d.items():
+                setattr(self, k, v)
+    
+    accident = DictAsAttr(accident)
+    
+    logging.info(f"사고 {accident_id} ({accident.accident_name}) 상세 페이지 로드")
+    
+    # 팝업 모드인지 확인
+    is_popup = request.args.get('popup') == '1'
+    
+    return render_template('accident-detail.html', 
+                         accident=accident,
+                         attachments=attachments,
+                         menu=MENU_CONFIG, 
+                         is_popup=is_popup)
+
 @app.route("/verify-password", methods=["POST"])
 def verify_password():
     """비밀번호 검증"""
@@ -380,6 +641,7 @@ def verify_password():
 @app.route("/update-partner", methods=["POST"])
 def update_partner():
     """협력사 정보 업데이트"""
+    conn = None
     try:
         import json
         
@@ -393,15 +655,16 @@ def update_partner():
         print(f"Files count: {len(files)}")
         print(f"Attachment data: {attachment_data}")
         
-        print(f"Connecting to database: {DB_PATH}")
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # 협력사 존재 여부 확인
+        # 협력사 존재 여부 확인 (먼저 확인)
         partner = partner_manager.get_partner_by_business_number(business_number)
         if not partner:
             from flask import jsonify
             return jsonify({"success": False, "message": "협력사를 찾을 수 없습니다."})
+        
+        print(f"Connecting to database: {DB_PATH}")
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)  # timeout 추가
+        conn.execute("PRAGMA journal_mode=WAL")  # WAL 모드로 변경 (동시성 개선)
+        cursor = conn.cursor()
         
         logging.info(f"업데이트 대상 협력사: {business_number}")
         
@@ -494,7 +757,162 @@ def update_partner():
             return jsonify({"success": False, "message": f"Commit failed: {str(commit_error)}"})
         
     except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+                conn.close()
+            except:
+                pass
         from flask import jsonify
+        logging.error(f"업데이트 중 오류 발생: {str(e)}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/update-accident", methods=["POST"])
+def update_accident():
+    """사고 정보 업데이트"""
+    conn = None
+    try:
+        import json
+        
+        accident_number = request.form.get('accident_number')
+        detailed_content = request.form.get('detailed_content')
+        deleted_attachments = json.loads(request.form.get('deleted_attachments', '[]'))
+        attachment_data = json.loads(request.form.get('attachment_data', '[]'))
+        files = request.files.getlist('files')
+        
+        print(f"Accident Number: {accident_number}")
+        print(f"Files count: {len(files)}")
+        print(f"Attachment data: {attachment_data}")
+        
+        # 사고 존재 여부 확인 (사고번호 형식 검증)
+        if not accident_number or not accident_number.startswith('K'):
+            from flask import jsonify
+            return jsonify({"success": False, "message": "사고를 찾을 수 없습니다."})
+        
+        print(f"Connecting to database: {DB_PATH}")
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)  # timeout 추가
+        conn.execute("PRAGMA journal_mode=WAL")  # WAL 모드로 변경 (동시성 개선)
+        cursor = conn.cursor()
+        
+        logging.info(f"업데이트 대상 사고: {accident_number}")
+        
+        # 1. 사고 상세내용 업데이트 (테이블이 없으면 생성)
+        logging.info(f"상세내용 업데이트: {detailed_content[:50]}...")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS accident_details (
+                accident_number TEXT PRIMARY KEY,
+                detailed_content TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            INSERT OR REPLACE INTO accident_details (accident_number, detailed_content, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+        """, (accident_number, detailed_content))
+        logging.info("상세내용 업데이트 완료")
+        
+        # 2. 사고 첨부파일 테이블 생성 (없으면 생성)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS accident_attachments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                accident_number TEXT,
+                file_name TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                file_size INTEGER,
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # 3. 삭제된 첨부파일 처리
+        for attachment_id in deleted_attachments:
+            cursor.execute("DELETE FROM accident_attachments WHERE id = ?", (attachment_id,))
+        
+        # 4. 기존 첨부파일 정보 업데이트
+        for attachment in attachment_data:
+            if attachment['id'] and not attachment.get('isNew'):
+                cursor.execute("""
+                    UPDATE accident_attachments 
+                    SET description = ? 
+                    WHERE id = ?
+                """, (attachment['description'], attachment['id']))
+        
+        # 5. 새 파일 업로드 처리
+        import os
+        upload_folder = os.path.join(os.getcwd(), 'uploads')
+        if not os.path.exists(upload_folder):
+            os.makedirs(upload_folder)
+            
+        # 새 파일들과 새 첨부파일 데이터 매칭
+        new_attachments = [a for a in attachment_data if a.get('isNew')]
+        print(f"New attachments: {new_attachments}")
+        
+        for i, file in enumerate(files):
+            if file.filename and i < len(new_attachments):
+                filename = file.filename
+                # 파일명에 타임스탬프 추가하여 중복 방지
+                import time
+                timestamp = str(int(time.time()))
+                name, ext = os.path.splitext(filename)
+                unique_filename = f"{name}_{timestamp}{ext}"
+                file_path = os.path.join(upload_folder, unique_filename)
+                
+                print(f"Saving file: {filename} as {unique_filename}")
+                file.save(file_path)
+                
+                attachment_info = new_attachments[i]
+                cursor.execute("""
+                    INSERT INTO accident_attachments 
+                    (accident_number, file_name, file_path, file_size, description)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    accident_number,
+                    filename,  # 원본 파일명으로 저장
+                    file_path,
+                    os.path.getsize(file_path),
+                    attachment_info['description']
+                ))
+                logging.info(f"첨부파일 추가: {filename} - {attachment_info['description']}")
+        
+        # 커밋 전 확인
+        check_result = cursor.execute("SELECT COUNT(*) FROM accident_attachments WHERE accident_number = ?", (accident_number,)).fetchone()
+        logging.info(f"커밋 전 {accident_number} 사고 첨부파일 개수: {check_result[0]}개")
+        
+        try:
+            conn.commit()
+            logging.info("데이터베이스 커밋 성공")
+            
+            # 커밋 후 다시 확인
+            check_result2 = cursor.execute("SELECT COUNT(*) FROM accident_attachments WHERE accident_number = ?", (accident_number,)).fetchone()
+            logging.info(f"커밋 후 {accident_number} 사고 첨부파일 개수: {check_result2[0]}개")
+            
+            conn.close()
+            
+            # 새로운 연결로 다시 확인
+            logging.info("새 연결로 데이터 지속성 확인...")
+            verify_conn = sqlite3.connect(DB_PATH)
+            verify_result = verify_conn.execute("SELECT COUNT(*) FROM accident_attachments WHERE accident_number = ?", (accident_number,)).fetchone()
+            logging.info(f"새 연결 확인: {accident_number} 사고 첨부파일 개수: {verify_result[0]}개")
+            verify_conn.close()
+            
+            from flask import jsonify
+            return jsonify({"success": True})
+        except Exception as commit_error:
+            print(f"Commit failed: {commit_error}")
+            conn.rollback()
+            conn.close()
+            from flask import jsonify
+            return jsonify({"success": False, "message": f"Commit failed: {str(commit_error)}"})
+        
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+                conn.close()
+            except:
+                pass
+        from flask import jsonify
+        logging.error(f"사고 업데이트 중 오류 발생: {str(e)}")
         return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route("/download/<int:attachment_id>")
@@ -512,9 +930,14 @@ def download_attachment(attachment_id):
         return "File not found", 404
     
     from flask import send_file
+    import os
+    
+    # 실제 파일 경로 구성 (uploads 폴더 기준)
+    actual_file_path = os.path.join(os.getcwd(), 'uploads', attachment['file_name'])
+    
     try:
         return send_file(
-            attachment['file_path'],
+            actual_file_path,
             as_attachment=True,
             download_name=attachment['file_name']
         )

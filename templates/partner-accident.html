@@ -1,0 +1,508 @@
+{% extends "base.html" %}
+{% block title %}협력사 사고{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2 class="page-title">협력사 사고</h2>
+</div>
+
+<!-- 검색 영역 -->
+<div class="search-section">
+    <form method="GET" class="search-form">
+        <div class="search-fields">
+            <div class="search-group">
+                <label>협력사명</label>
+                <input type="text" name="company_name" value="{{ request.args.get('company_name', '') }}" placeholder="협력사명을 입력하세요">
+            </div>
+            <div class="search-group">
+                <label>사업자번호</label>
+                <input type="text" name="business_number" value="{{ request.args.get('business_number', '') }}" placeholder="사업자번호를 입력하세요">
+            </div>
+            <div class="search-group range-group">
+                <label>재해날짜</label>
+                <div class="range-inputs">
+                    <input type="date" name="accident_date_start" value="{{ request.args.get('accident_date_start', '') }}" placeholder="시작일">
+                    <span class="range-separator">~</span>
+                    <input type="date" name="accident_date_end" value="{{ request.args.get('accident_date_end', '') }}" placeholder="종료일">
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- 검색 버튼 영역 -->
+<div class="search-buttons-section">
+    <div class="search-buttons">
+        <button type="button" onclick="resetForm()" class="btn-reset">초기화</button>
+        <button type="button" onclick="document.querySelector('.search-form').submit()" class="btn-search">검색</button>
+    </div>
+</div>
+
+<!-- 목록 테이블 -->
+<div class="table-section">
+    <div class="table-header">
+        <span class="total-count">총 {{ total_count }}건</span>
+        <div class="per-page-selector">
+            <select onchange="changePerPage(this.value)">
+                <option value="10" {% if request.args.get('per_page', '10') == '10' %}selected{% endif %}>10개씩</option>
+                <option value="25" {% if request.args.get('per_page', '10') == '25' %}selected{% endif %}>25개씩</option>
+                <option value="50" {% if request.args.get('per_page', '10') == '50' %}selected{% endif %}>50개씩</option>
+            </select>
+        </div>
+    </div>
+    <div class="table-wrapper">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th class="fixed-col">사고번호</th>
+                    <th>사고명</th>
+                    <th>재해날짜</th>
+                    <th>사고등급</th>
+                    <th>사고분류</th>
+                    <th>재해유형</th>
+                    <th>재해형태</th>
+                    <th>사업장</th>
+                    <th>건물</th>
+                    <th>층</th>
+                    <th>세부위치</th>
+                    <th>시간</th>
+                    <th>요일</th>
+                    <th>사고내용</th>
+                    <th>귀책협력사(1차)</th>
+                    <th>귀책협력사(1차)사업자번호</th>
+                    <th>귀책협력사(2차)</th>
+                    <th>귀책협력사(2차)사업자번호</th>
+                    <th>컬럼1</th>
+                    <th>컬럼2</th>
+                    <th>컬럼3</th>
+                    <th>컬럼4</th>
+                    <th>컬럼5</th>
+                    <th>컬럼6</th>
+                    <th>컬럼7</th>
+                    <th>컬럼8</th>
+                    <th>컬럼9</th>
+                    <th>컬럼10</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for accident in accidents %}
+                <tr>
+                    <td class="fixed-col">{{ accident.accident_number }}</td>
+                    <td>
+                        <a href="javascript:void(0)" class="company-link" onclick="openAccidentModal('{{ accident.id }}')">{{ accident.accident_name }}</a>
+                    </td>
+                    <td>{{ accident.accident_date }}</td>
+                    <td>{{ accident.accident_grade or '-' }}</td>
+                    <td>{{ accident.accident_type or '-' }}</td>
+                    <td>{{ accident.disaster_type or '-' }}</td>
+                    <td>{{ accident.disaster_form or '-' }}</td>
+                    <td>{{ accident.workplace or '-' }}</td>
+                    <td>{{ accident.building or '-' }}</td>
+                    <td>{{ accident.floor or '-' }}</td>
+                    <td>{{ accident.detail_location or '-' }}</td>
+                    <td>{{ accident.time or '-' }}</td>
+                    <td>{{ accident.day_of_week or '-' }}</td>
+                    <td>{{ accident.accident_content or '-' }}</td>
+                    <td>{{ accident.responsible_company_1 or '-' }}</td>
+                    <td>{{ accident.responsible_company_1_business_number or '-' }}</td>
+                    <td>{{ accident.responsible_company_2 or '-' }}</td>
+                    <td>{{ accident.responsible_company_2_business_number or '-' }}</td>
+                    <td>{{ accident.column1 or '-' }}</td>
+                    <td>{{ accident.column2 or '-' }}</td>
+                    <td>{{ accident.column3 or '-' }}</td>
+                    <td>{{ accident.column4 or '-' }}</td>
+                    <td>{{ accident.column5 or '-' }}</td>
+                    <td>{{ accident.column6 or '-' }}</td>
+                    <td>{{ accident.column7 or '-' }}</td>
+                    <td>{{ accident.column8 or '-' }}</td>
+                    <td>{{ accident.column9 or '-' }}</td>
+                    <td>{{ accident.column10 or '-' }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="27" class="no-data">검색 결과가 없습니다.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 페이지네이션 -->
+{% if pagination.pages > 1 %}
+<div class="pagination-section">
+    <div class="pagination">
+        {% set search_params = {} %}
+        {% for key, value in request.args.items() %}
+            {% if key != 'page' %}
+                {% set _ = search_params.update({key: value}) %}
+            {% endif %}
+        {% endfor %}
+        {% set window_info = pagination.get_window_info() %}
+        
+        <!-- 이전 10페이지 -->
+        {% if window_info.has_prev_window %}
+            <a href="{{ url_for('page_view', url='partner-accident', page=window_info.prev_window_start, **search_params) }}" class="page-btn">&laquo; 이전</a>
+        {% endif %}
+        
+        <!-- 현재 윈도우의 페이지들 (최대 10개) -->
+        {% for page in pagination.iter_pages() %}
+            {% if page != pagination.page %}
+                <a href="{{ url_for('page_view', url='partner-accident', page=page, **search_params) }}" class="page-btn">{{ page }}</a>
+            {% else %}
+                <span class="page-btn active">{{ page }}</span>
+            {% endif %}
+        {% endfor %}
+        
+        <!-- 다음 10페이지 -->
+        {% if window_info.has_next_window %}
+            <a href="{{ url_for('page_view', url='partner-accident', page=window_info.next_window_start, **search_params) }}" class="page-btn">다음 &raquo;</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<style>
+/* 페이지 헤더 */
+.page-header {
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #2f5fd3;
+}
+.page-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #333;
+    margin: 0;
+}
+
+/* 검색 영역 */
+.search-section {
+    background: #f8f9fa;
+    padding: 20px;
+    margin-bottom: 20px;
+    border-radius: 4px;
+    border: 1px solid #e5e7eb;
+}
+.search-form {
+    width: 100%;
+}
+.search-fields {
+    display: flex;
+    gap: 32px;
+    flex-wrap: wrap;
+}
+.search-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 0 0 auto;
+}
+.search-group label {
+    font-weight: 600;
+    color: #333;
+    font-size: 14px;
+    white-space: nowrap;
+    width: 80px;
+    flex-shrink: 0;
+    text-align: left;
+}
+
+/* 모든 입력 요소의 공통 스타일 */
+.search-group input[type="text"],
+.search-group input[type="date"] {
+    height: 40px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 14px;
+    box-sizing: border-box;
+    width: 200px;
+    padding: 0 12px;
+}
+
+.search-group input:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+/* 범위 검색 그룹 */
+.range-group .range-inputs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 200px;
+    flex-shrink: 0;
+    height: 40px;
+}
+.range-inputs input[type="date"] {
+    width: 120px;
+    height: 40px;
+    padding: 0 6px;
+    flex-shrink: 0;
+}
+.range-separator {
+    font-weight: 600;
+    color: #666;
+    flex-shrink: 0;
+    font-size: 14px;
+}
+
+/* 검색 버튼 영역 */
+.search-buttons-section {
+    margin-bottom: 20px;
+}
+.search-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+.btn-reset, .btn-search {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.btn-reset {
+    background: #6b7280;
+    color: white;
+}
+.btn-reset:hover {
+    background: #4b5563;
+}
+.btn-search {
+    background: #2f5fd3;
+    color: white;
+}
+.btn-search:hover {
+    background: #1d4ed8;
+}
+
+/* 테이블 영역 */
+.table-section {
+    background: white;
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.table-header {
+    padding: 12px 16px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.total-count {
+    font-weight: 600;
+    color: #374151;
+}
+.per-page-selector select {
+    padding: 4px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 14px;
+    background: white;
+}
+
+/* 가로 스크롤 래퍼 */
+.table-wrapper {
+    overflow-x: auto;
+    position: relative;
+}
+.table-wrapper::-webkit-scrollbar {
+    height: 8px;
+}
+.table-wrapper::-webkit-scrollbar-track {
+    background: #f1f5f9;
+}
+.table-wrapper::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+.table-wrapper::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+.data-table {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: collapse;
+}
+.data-table th {
+    background: #f1f5f9;
+    padding: 12px 16px;
+    text-align: left;
+    font-weight: 600;
+    color: #374151;
+    border-bottom: 2px solid #e5e7eb;
+    white-space: nowrap;
+    min-width: 120px;
+}
+.data-table th.fixed-col {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: #f1f5f9;
+    box-shadow: 2px 0 4px rgba(0,0,0,0.05);
+    min-width: 200px;
+}
+.data-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #f1f5f9;
+    color: #4b5563;
+    white-space: nowrap;
+    min-width: 120px;
+}
+.data-table td.fixed-col {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: white;
+    box-shadow: 2px 0 4px rgba(0,0,0,0.05);
+    min-width: 200px;
+}
+.data-table tbody tr:hover {
+    background: #f9fafb;
+}
+.data-table tbody tr:hover td.fixed-col {
+    background: #f9fafb;
+}
+.company-link {
+    color: #2f5fd3;
+    text-decoration: none;
+    font-weight: 600;
+}
+.company-link:hover {
+    text-decoration: underline;
+}
+.no-data {
+    text-align: center;
+    padding: 40px;
+    color: #9ca3af;
+    font-style: italic;
+}
+
+/* 페이지네이션 */
+.pagination-section {
+    margin-top: 20px;
+    display: flex;
+    justify-content: center;
+}
+.pagination {
+    display: flex;
+    gap: 4px;
+}
+.page-btn {
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    background: white;
+    color: #374151;
+    text-decoration: none;
+    border-radius: 4px;
+    font-size: 14px;
+}
+.page-btn:hover:not(.active):not(.dots) {
+    background: #f3f4f6;
+}
+.page-btn.active {
+    background: #2f5fd3;
+    color: white;
+    border-color: #2f5fd3;
+}
+.page-btn.dots {
+    border: none;
+    background: none;
+    cursor: default;
+}
+
+/* 반응형 */
+@media (max-width: 768px) {
+    .search-fields {
+        flex-direction: column;
+        gap: 16px;
+    }
+    .search-group {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+    .search-group label {
+        min-width: unset;
+    }
+    .search-group input {
+        width: 100%;
+    }
+    .search-buttons {
+        justify-content: stretch;
+    }
+    .btn-reset, .btn-search {
+        flex: 1;
+    }
+    .data-table {
+        font-size: 13px;
+    }
+    .data-table th,
+    .data-table td {
+        padding: 8px 12px;
+    }
+}
+</style>
+
+<script>
+function resetForm() {
+    const form = document.querySelector('.search-form');
+    const inputs = form.querySelectorAll('input');
+    inputs.forEach(input => input.value = '');
+    
+    // URL에서 검색 파라미터 제거하고 리다이렉트
+    const url = new URL(window.location);
+    url.search = '';
+    window.location.href = url.toString();
+}
+
+function changePerPage(perPage) {
+    const url = new URL(window.location);
+    url.searchParams.set('per_page', perPage);
+    url.searchParams.delete('page'); // 페이지를 1페이지로 리셋
+    window.location.href = url.toString();
+}
+
+// 사고 상세정보 팝업 윈도우 함수
+function openAccidentModal(accidentId) {
+    // 팝업 윈도우 옵션 설정
+    const width = 1400;
+    const height = 900;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes',
+        'toolbar=no',
+        'menubar=no',
+        'location=no',
+        'status=no'
+    ].join(',');
+    
+    // 새 팝업 윈도우 열기
+    const popupUrl = '/accident-detail/' + accidentId + '?popup=1';
+    const popup = window.open(popupUrl, 'accidentDetail', popupOptions);
+    
+    // 팝업이 차단되었는지 확인
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    // 팝업 포커스
+    popup.focus();
+}
+</script>
+{% endblock %}
