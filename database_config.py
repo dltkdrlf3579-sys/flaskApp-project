@@ -7,37 +7,41 @@ import traceback
 import pandas as pd
 from datetime import datetime, timedelta
 
-# 사용자 정의 DB 연결 모듈 로드 (보안상 이유로 실제 경로는 로컬에서만 설정)
-CUSTOM_DB_AVAILABLE = False
+# 기존 성공 방식: IQADB_CONNECT310 모듈 로드
 try:
-    # 로컬에서만 사용할 커스텀 DB 모듈이 있다면 여기에 추가
-    # 실제 구현은 config.ini나 별도 파일에서 처리
-    pass
+    module_folder = 'C:/Users/user/AppData/Local/aipforge/pkgs/dist/obf/PY310'
+    sys.path.insert(0, os.path.abspath(module_folder))
+    from IQADB_CONNECT310 import *
+    IQADB_AVAILABLE = True
+    print(f"[SUCCESS] IQADB_CONNECT310 모듈 로드 성공: {module_folder}")
+except ImportError as e:
+    IQADB_AVAILABLE = False
+    print(f"[WARNING] IQADB_CONNECT310 모듈을 가져올 수 없습니다: {e}")
 except Exception as e:
-    print(f"[INFO] 커스텀 DB 모듈 사용 안 함: {e}")
+    IQADB_AVAILABLE = False
+    print(f"[ERROR] IQADB 모듈 로드 중 오류 발생: {e}")
 
-def execute_custom_SQL(query):
+def execute_SQL(query):
     """
-    사용자 정의 DB 연결 방식 (로컬에서만 구현)
-    실제 구현은 로컬 환경에서 별도로 추가하세요.
+    기존 성공 방식: IQADB_CONNECT310을 사용한 데이터베이스 조회
     """
-    if not CUSTOM_DB_AVAILABLE:
-        raise Exception("사용자 정의 DB 모듈이 설정되지 않았습니다.")
+    if not IQADB_AVAILABLE:
+        raise Exception("IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
     
-    # 실제 구현은 로컬에서 추가
-    # 예시:
-    # conn = your_custom_connection_function()
-    # try:
-    #     with conn.cursor() as cur:
-    #         cur.execute(query)
-    #         data = cur.fetchall()
-    #         col_names = [desc[0] for desc in cur.description]
-    #         df = pd.DataFrame(data, columns=col_names)
-    #         return df
-    # finally:
-    #     conn.close()
-    
-    raise NotImplementedError("로컬에서 구현 필요")
+    conn = iqadb1()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(query)
+            data = cur.fetchall()
+            col_names = [desc[0] for desc in cur.description]
+            df = pd.DataFrame(data, columns=col_names)
+            return df
+    except Exception as e:
+        print(f"[ERROR] execute_SQL 실행 중 오류: {e}")
+        traceback.print_exc()
+        raise e
+    finally:
+        conn.close()
 
 # 설정 파일 로드 (절대 경로 사용)
 config = configparser.ConfigParser()
@@ -75,28 +79,6 @@ class DatabaseConfig:
             self.pg_password = config.get('DATABASE', 'EXTERNAL_DB_PASSWORD')
             self.pg_schema = config.get('DATABASE', 'EXTERNAL_DB_SCHEMA')
             self.pg_table = config.get('DATABASE', 'EXTERNAL_DB_TABLE')
-    
-    def get_postgresql_connection(self):
-        """PostgreSQL 연결 (협력사 마스터 데이터용)"""
-        if not self.external_db_enabled:
-            return None
-            
-        try:
-            import psycopg2
-            conn = psycopg2.connect(
-                host=self.pg_host,
-                port=self.pg_port,
-                database=self.pg_database,
-                user=self.pg_user,
-                password=self.pg_password
-            )
-            return conn
-        except ImportError:
-            logging.error("psycopg2 패키지가 설치되지 않았습니다. pip install psycopg2-binary")
-            return None
-        except Exception as e:
-            logging.error(f"PostgreSQL 연결 실패: {e}")
-            return None
     
     def get_sqlite_connection(self):
         """SQLite 연결 (로컬 업무 데이터용)"""
@@ -145,70 +127,12 @@ class PartnerDataManager:
         """마지막 동기화 시간 업데이트 - DatabaseConfig의 메서드 호출"""
         return self.db_config.update_last_sync()
     
-    def generate_partners_query(self):
-        """컬럼 매핑을 기반으로 자동으로 협력사 쿼리 생성"""
-        # COLUMN_MAPPING 섹션에서 매핑 정보 읽기
-        if not self.db_config.config.has_section('COLUMN_MAPPING'):
-            raise Exception("COLUMN_MAPPING 섹션이 없습니다")
-            
-        mapping = dict(self.db_config.config.items('COLUMN_MAPPING'))
-        
-        # 협력사 정보만 필터링 (사고 정보 제외)
-        partner_columns = ['business_number', 'company_name', 'partner_class', 'business_type_major', 
-                          'business_type_minor', 'hazard_work_flag', 'representative', 'address', 
-                          'average_age', 'annual_revenue', 'transaction_count']
-        
-        # AS 절이 있는 SELECT 문 생성
-        select_columns = []
-        for portal_column in partner_columns:
-            if portal_column in mapping:
-                real_column = mapping[portal_column]
-                select_columns.append(f"{real_column} AS {portal_column}")
-        
-        if not select_columns:
-            raise Exception("매핑된 컬럼이 없습니다")
-        
-        query = f"""
-            SELECT {', '.join(select_columns)}
-            FROM {self.db_config.pg_schema}.{self.db_config.pg_table}
-            WHERE {mapping.get('business_number', 'business_number')} IS NOT NULL
-            ORDER BY {mapping.get('company_name', 'company_name')}
-        """
-        
-        return query
-    
-    def generate_accidents_query(self):
-        """컬럼 매핑을 기반으로 자동으로 사고 쿼리 생성"""
-        # COLUMN_MAPPING 섹션에서 매핑 정보 읽기  
-        mapping = dict(self.db_config.config.items('COLUMN_MAPPING'))
-        
-        # 사고 관련 컬럼만 선택
-        accident_columns = ['business_number', 'accident_date', 'accident_type', 'accident_location', 
-                          'accident_description', 'injury_level', 'injured_count', 'cause_analysis',
-                          'preventive_measures', 'report_date', 'reporter_name']
-        
-        select_columns = []
-        for portal_column in accident_columns:
-            real_column = mapping.get(portal_column, portal_column)
-            select_columns.append(f"{real_column} AS {portal_column}")
-        
-        accidents_table = self.db_config.config.get('DATABASE', 'ACCIDENTS_DB_TABLE')
-        query = f"""
-            SELECT {', '.join(select_columns)}
-            FROM {self.db_config.pg_schema}.{accidents_table}
-            WHERE {mapping.get('business_number', 'business_number')} IS NOT NULL
-              AND {mapping.get('accident_date', 'accident_date')} >= '2020-01-01'
-            ORDER BY {mapping.get('accident_date', 'accident_date')} DESC
-        """
-        
-        return query
-    
     def init_local_tables(self):
         """로컬 SQLite 테이블 초기화"""
         conn = self.db_config.get_sqlite_connection()
         cursor = conn.cursor()
         
-        # 협력사 마스터 데이터 캐시 테이블
+        # 협력사 마스터 데이터 캐시 테이블 (11개 컬럼)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS partners_cache (
                 business_number TEXT PRIMARY KEY,
@@ -226,27 +150,7 @@ class PartnerDataManager:
             )
         ''')
         
-        # 협력사 사고 정보 캐시 테이블 (추가)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS accidents_cache (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                business_number TEXT NOT NULL,
-                accident_date TEXT,
-                accident_type TEXT,
-                accident_location TEXT,
-                accident_description TEXT,
-                injury_level TEXT,
-                injured_count INTEGER,
-                cause_analysis TEXT,
-                preventive_measures TEXT,
-                report_date TEXT,
-                reporter_name TEXT,
-                synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (business_number) REFERENCES partners_cache (business_number)
-            )
-        ''')
-        
-        # 업무 상세내용 테이블 (로컬 전용)
+        # 협력사 상세내용 테이블 (로컬 전용)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS partner_details (
                 business_number TEXT PRIMARY KEY,
@@ -270,37 +174,54 @@ class PartnerDataManager:
             )
         ''')
         
+        # 사고 상세내용 테이블
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS accident_details (
+                accident_number TEXT PRIMARY KEY,
+                detailed_content TEXT DEFAULT '',
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_by TEXT
+            )
+        ''')
+        
+        # 사고 첨부파일 테이블
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS accident_attachments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                accident_number TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                file_size INTEGER,
+                upload_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                description TEXT,
+                uploaded_by TEXT
+            )
+        ''')
+        
         conn.commit()
         conn.close()
     
-    def sync_partners_from_postgresql(self):
-        """PostgreSQL에서 협력사 마스터 데이터 동기화 (판다스 방식)"""
+    def sync_partners_from_external_db(self):
+        """외부 DB에서 협력사 마스터 데이터 동기화 (기존 성공 방식)"""
         if not self.db_config.external_db_enabled:
             logging.info("외부 DB가 비활성화되어 있어 동기화를 건너뜁니다.")
             return False
         
-        if not CUSTOM_DB_AVAILABLE:
-            logging.info("사용자 정의 DB 모듈이 설정되지 않았습니다. 기존 psycopg2 방식을 사용합니다.")
-            return self._sync_with_psycopg2()  # 대안 방식
+        if not IQADB_AVAILABLE:
+            logging.error("IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
+            return False
         
         try:
-            # 🔧 두 가지 방법 지원: 1) 자동 생성 2) 수동 쿼리
-            try:
-                # 방법 1: 컬럼 매핑을 통한 자동 쿼리 생성
-                query = self.generate_partners_query()
-                logging.info("컬럼 매핑으로 자동 생성된 쿼리 사용")
-            except Exception as mapping_error:
-                logging.warning(f"컬럼 매핑 실패, 수동 쿼리 사용: {mapping_error}")
-                # 방법 2: 수동 작성된 쿼리 사용 (기존 방식)
-                query_template = self.db_config.config.get('SQL_QUERIES', 'PARTNERS_QUERY')
-                query = query_template.format(
-                    schema=self.db_config.pg_schema,
-                    table=self.db_config.pg_table
-                )
+            # config.ini에서 PARTNERS_QUERY 가져오기
+            query_template = self.db_config.config.get('SQL_QUERIES', 'PARTNERS_QUERY')
+            query = query_template.format(
+                schema=self.db_config.pg_schema,
+                table=self.db_config.pg_table
+            )
             
-            # ✨ 사용자 정의 방식으로 데이터 조회
-            logging.info("사용자 정의 DB 연결을 사용하여 데이터 조회 시작...")
-            df = execute_custom_SQL(query)
+            # ✨ 기존 성공 방식으로 데이터 조회
+            logging.info("IQADB_CONNECT310을 사용하여 데이터 조회 시작...")
+            df = execute_SQL(query)
             logging.info(f"데이터 조회 완료: {len(df)} 건")
             
             if df.empty:
@@ -340,118 +261,12 @@ class PartnerDataManager:
             sqlite_conn.close()
             
             self.db_config.update_last_sync()
-            logging.info(f"✅ 협력사 데이터 {len(df)}건 동기화 완료 (사용자 정의 방식)")
+            logging.info(f"✅ 협력사 데이터 {len(df)}건 동기화 완료")
             return True
             
         except Exception as e:
             logging.error(f"❌ 데이터 동기화 실패: {e}")
             traceback.print_exc()
-            return False
-    
-    def _sync_with_psycopg2(self):
-        """기존 psycopg2 방식 (IQADB 사용 불가능할 때 대안)"""
-        logging.info("psycopg2 대안 방식으로 동기화 시도...")
-        # 기존 psycopg2 코드 유지
-        pg_conn = self.db_config.get_postgresql_connection()
-        if not pg_conn:
-            logging.error("PostgreSQL 연결 실패")
-            return False
-        
-        try:
-            pg_cursor = pg_conn.cursor()
-            query_template = self.db_config.config.get('SQL_QUERIES', 'PARTNERS_QUERY')
-            query = query_template.format(
-                schema=self.db_config.pg_schema,
-                table=self.db_config.pg_table
-            )
-            pg_cursor.execute(query)
-            partners_data = pg_cursor.fetchall()
-            
-            sqlite_conn = self.db_config.get_sqlite_connection()
-            sqlite_cursor = sqlite_conn.cursor()
-            sqlite_cursor.execute("DELETE FROM partners_cache")
-            
-            for partner in partners_data:
-                sqlite_cursor.execute('''
-                    INSERT INTO partners_cache (
-                        business_number, company_name, partner_class, business_type_major,
-                        business_type_minor, hazard_work_flag, representative, address,
-                        average_age, annual_revenue, transaction_count
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', partner)
-            
-            sqlite_conn.commit()
-            sqlite_conn.close()
-            pg_conn.close()
-            
-            self.db_config.update_last_sync()
-            logging.info(f"협력사 데이터 {len(partners_data)}건 동기화 완료 (psycopg2 방식)")
-            return True
-            
-        except Exception as e:
-            logging.error(f"psycopg2 동기화 실패: {e}")
-            return False
-    
-    def sync_accidents_from_postgresql(self):
-        """PostgreSQL에서 협력사 사고 데이터 동기화"""
-        if not self.db_config.external_db_enabled:
-            return False
-            
-        if not self.db_config.config.getboolean('DATABASE', 'ACCIDENTS_DB_ENABLED'):
-            logging.info("사고 데이터 동기화가 비활성화되어 있습니다.")
-            return False
-            
-        pg_conn = self.db_config.get_postgresql_connection()
-        if not pg_conn:
-            logging.error("PostgreSQL 연결 실패 (사고 데이터)")
-            return False
-        
-        try:
-            # PostgreSQL에서 사고 데이터 조회
-            pg_cursor = pg_conn.cursor()
-            accidents_table = self.db_config.config.get('DATABASE', 'ACCIDENTS_DB_TABLE')
-            
-            # 🔧 두 가지 방법 지원: 1) 자동 생성 2) 수동 쿼리
-            try:
-                # 방법 1: 컬럼 매핑을 통한 자동 쿼리 생성
-                query = self.generate_accidents_query()
-                logging.info("컬럼 매핑으로 자동 생성된 사고 쿼리 사용")
-            except Exception as mapping_error:
-                logging.warning(f"사고 컬럼 매핑 실패, 수동 쿼리 사용: {mapping_error}")
-                # 방법 2: 수동 작성된 쿼리 사용 (기존 방식)
-                query_template = self.db_config.config.get('SQL_QUERIES', 'ACCIDENTS_QUERY')
-                query = query_template.format(
-                    schema=self.db_config.pg_schema,
-                    table=accidents_table
-                )
-            pg_cursor.execute(query)
-            accidents_data = pg_cursor.fetchall()
-            
-            # SQLite에 데이터 동기화
-            sqlite_conn = self.db_config.get_sqlite_connection()
-            sqlite_cursor = sqlite_conn.cursor()
-            
-            # 기존 사고 데이터 삭제 후 새로 삽입
-            sqlite_cursor.execute("DELETE FROM accidents_cache")
-            
-            for accident in accidents_data:
-                sqlite_cursor.execute('''
-                    INSERT INTO accidents_cache (
-                        business_number, accident_date, accident_type, accident_location,
-                        accident_description, injury_level, injured_count, cause_analysis,
-                        preventive_measures, report_date, reporter_name
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', accident)
-            
-            sqlite_conn.commit()
-            sqlite_conn.close()
-            pg_conn.close()
-            
-            logging.info(f"사고 데이터 {len(accidents_data)}건 동기화 완료")
-            return True
-            
-        except Exception as e:
-            logging.error(f"사고 데이터 동기화 실패: {e}")
             return False
     
     def get_partner_by_business_number(self, business_number):
