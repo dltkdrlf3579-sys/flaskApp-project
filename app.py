@@ -78,11 +78,10 @@ def init_sample_data():
     conn = partner_manager.db_config.get_sqlite_connection()
     cursor = conn.cursor()
     
-    # 이미 데이터가 있는지 확인
-    cursor.execute("SELECT COUNT(*) FROM partners_cache")
-    if cursor.fetchone()[0] > 0:
-        conn.close()
-        return
+    # 기존 데이터 삭제 (스키마 변경으로 인한 재생성)
+    cursor.execute("DELETE FROM partners_cache")
+    cursor.execute("DELETE FROM partner_attachments")
+    logging.info("기존 샘플 데이터 삭제 완료")
     
     logging.info("샘플 데이터 생성 중...")
     
@@ -123,36 +122,30 @@ def init_sample_data():
             business_number = f"{random.randint(100, 999)}81{random.randint(10000, 99999):05d}"
         
         representative = f"대표자{i+1:03d}"
-        regular_workers = random.randint(50, 50000)
-        business_type_major = random.choice(business_types)
+        permanent_workers = random.randint(5, 500)  # 상시근로자 수 (5명~500명)
+        partner_class = random.choice(['-', 'A', 'B', 'C'])
         
-        selected_major = random.choice(business_types)
-        minor_count = random.randint(1, 3)
-        selected_minors = random.sample(business_types_data[selected_major], min(minor_count, len(business_types_data[selected_major])))
+        business_type_major = random.choice(business_types)
+        minor_count = random.randint(1, 2)
+        selected_minors = random.sample(business_types_data[business_type_major], min(minor_count, len(business_types_data[business_type_major])))
         business_type_minor = ', '.join(selected_minors)
-        business_type = f"{business_type_major} > {business_type_minor}"
-        establishment_date = f"{random.randint(1980, 2020)}-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}"
-        capital_amount = random.randint(1, 1000) * 100000000
-        annual_revenue = random.randint(10, 10000) * 100000000
-        main_products = random.choice(products)
-        certification = random.choice(certifications)
-        safety_rating = random.choice(safety_ratings)
-        contact_person = f"담당자{i+1:03d}"
-        phone_number = f"02-{random.randint(1000, 9999)}-{random.randint(1000, 9999)}"
-        email = f"contact{i+1:03d}@company{i+1:03d}.co.kr"
+        
+        hazard_work_flag = random.choice(['O', 'X', ''])  # O: 위험작업, X: 비위험작업, '': 미분류
+        address = f"서울특별시 {random.choice(['강남구', '서초구', '송파구', '영등포구', '마포구', '종로구', '중구', '용산구'])} 샘플로{random.randint(1, 999)}"
+        average_age = random.randint(25, 55)  # 평균 연령
+        annual_revenue = random.randint(1, 1000) * 100000000  # 연매출 (억원 단위)
+        transaction_count = random.randint(1, 50)  # 거래 차수
         
         cursor.execute('''
             INSERT INTO partners_cache (
-                business_number, company_name, representative, regular_workers,
-                business_type, business_type_major, business_type_minor, establishment_date, 
-                capital_amount, annual_revenue, main_products, certification, 
-                safety_rating, contact_person, phone_number, email
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                business_number, company_name, partner_class, business_type_major, 
+                business_type_minor, hazard_work_flag, representative, address,
+                average_age, annual_revenue, transaction_count, permanent_workers
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            business_number, company_name, representative, regular_workers,
-            business_type, business_type_major, business_type_minor, establishment_date,
-            capital_amount, annual_revenue, main_products, certification,
-            safety_rating, contact_person, phone_number, email
+            business_number, company_name, partner_class, business_type_major,
+            business_type_minor, hazard_work_flag, representative, address,
+            average_age, annual_revenue, transaction_count, permanent_workers
         ))
         
         # 일부 협력사에 실제 존재하는 샘플 첨부파일 추가

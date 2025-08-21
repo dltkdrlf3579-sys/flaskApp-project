@@ -86,6 +86,7 @@ class PartnerDataManager:
                 average_age INTEGER,
                 annual_revenue BIGINT,
                 transaction_count INTEGER,
+                permanent_workers INTEGER,
                 synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -156,6 +157,16 @@ class PartnerDataManager:
                 synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        
+        # 기존 테이블에 permanent_workers 컬럼이 없으면 추가
+        try:
+            cursor.execute("ALTER TABLE partners_cache ADD COLUMN permanent_workers INTEGER")
+            logging.info("partners_cache 테이블에 permanent_workers 컬럼 추가 완료")
+        except Exception as e:
+            if "duplicate column name" in str(e).lower() or "already exists" in str(e).lower():
+                logging.info("permanent_workers 컬럼이 이미 존재합니다")
+            else:
+                logging.warning(f"permanent_workers 컬럼 추가 중 오류: {e}")
         
         conn.commit()
         conn.close()

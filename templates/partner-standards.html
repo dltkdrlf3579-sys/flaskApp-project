@@ -87,6 +87,7 @@
                     <th>평균연령</th>
                     <th>매출액</th>
                     <th>거래차수</th>
+                    <th>상시근로자</th>
                 </tr>
             </thead>
             <tbody>
@@ -105,10 +106,11 @@
                     <td>{{ partner.average_age if partner.average_age else '-' }}</td>
                     <td>{{ "{:,}".format(partner.annual_revenue // 100000000) if partner.annual_revenue else '-' }}억원</td>
                     <td>{{ partner.transaction_count or '-' }}</td>
+                    <td>{{ partner.permanent_workers if partner.permanent_workers else '-' }}명</td>
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="11" class="no-data">검색 결과가 없습니다.</td>
+                    <td colspan="12" class="no-data">검색 결과가 없습니다.</td>
                 </tr>
                 {% endfor %}
             </tbody>

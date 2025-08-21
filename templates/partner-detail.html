@@ -83,7 +83,8 @@
                         <div class="value">{{ partner.transaction_count or '-' }}</div>
                     </div>
                     <div class="info-cell">
-                        <!-- 빈 셀 -->
+                        <label>상시근로자</label>
+                        <div class="value">{{ partner.permanent_workers if partner.permanent_workers else '-' }}명</div>
                     </div>
                 </div>
             </div>
