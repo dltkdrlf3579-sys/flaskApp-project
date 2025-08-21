@@ -895,13 +895,16 @@ function verifyPasswordAndSave() {
         return;
     }
     
-    // 서버에서 비밀번호 검증
+    // 서버에서 비밀번호 검증 (협력사 게시판)
     fetch('/verify-password', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ password: password })
+        body: JSON.stringify({ 
+            password: password,
+            board_type: '{{ board_type }}' 
+        })
     })
     .then(response => response.json())
     .then(data => {

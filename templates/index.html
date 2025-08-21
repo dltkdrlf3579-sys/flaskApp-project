@@ -14,16 +14,14 @@
                      class="main-image"
                      onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIwMCIgaGVpZ2h0PSIzMDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0iIzRBOTBFMiIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMzZweCIgZmlsbD0id2hpdGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj7smYjsoITqtIDrpqwg6rOA66as7IKs7IaQ7IusPC90ZXh0Pjwvc3ZnPg==';">
                 <div class="image-overlay">
-                    <h3>스마트 안전관리</h3>
-                    <p>협력사와 함께하는 안전한 작업환경 구축</p>
                 </div>
             </div>
         </div>
 
-        <!-- 관련 사이트 바로가기 섹션 -->
+        <!-- 바로가기 섹션 -->
         <div class="link-buttons-section">
             <h3 class="section-title mb-4 text-center">
-                관련 사이트 바로가기
+                바로가기
             </h3>
             
             <!-- 4개 버튼을 1x4 배치 (가로로 4개) -->
@@ -86,22 +84,31 @@
     min-height: 80vh;
 }
 
+.container-fluid {
+    padding: 0 20px;  /* 좌우 여백 추가 */
+    max-width: 1240px;  /* 최대 너비 제한 */
+    margin: 0 auto;  /* 중앙 정렬 */
+}
+
 /* ======================
    상단 이미지 섹션 스타일
    ====================== */
 .top-image-section {
-    margin-bottom: 40px;
+    margin-top: 50px;  /* 상단 네비게이션과 이미지 사이 여백 추가 */
+    margin-bottom: 0px;  /* 이미지와 바로가기 섹션 간격 증가 */
 }
 
 .main-image-container {
     position: relative;
     width: 100%;
     overflow: hidden;
+    border-radius: 12px;  /* 모서리 둥글게 */
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);  /* 그림자 효과 */
 }
 
 .main-image {
     width: 100%;
-    height: 300px;
+    height: 450px;  /* 300px → 450px로 증가 */
     object-fit: cover;
     display: block;
 }

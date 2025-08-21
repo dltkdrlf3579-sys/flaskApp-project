@@ -155,17 +155,22 @@ def init_sample_data():
             safety_rating, contact_person, phone_number, email
         ))
         
-        # 일부 협력사에 샘플 첨부파일 추가
-        if i < 10:
-            sample_files = [
-                ('사업자등록증.pdf', 2.07 * 1024 * 1024, '사업자등록증'),
-                ('회사소개서.docx', 192.39 * 1024, '회사소개서'),
-                ('인증서.png', 201.46 * 1024, '인증기관')
+        # 일부 협력사에 실제 존재하는 샘플 첨부파일 추가
+        if i < 5:  # 처음 5개 협력사에만 추가
+            # uploads 폴더에 실제 존재하는 파일들 사용
+            real_files = [
+                ('sample_for_you_1755663410.xlsx', 'uploads/sample_for_you_1755663410.xlsx', '샘플 엑셀 파일'),
+                ('[Quick Guide] DS사업장 내방신청 v.03_1755666638.pdf', 'uploads/[Quick Guide] DS사업장 내방신청 v.03_1755666638.pdf', 'DS사업장 가이드'),
+                ('[Quick Guide] 상생협력포털(PCMS) 회원가입 v.02_1755674307.pdf', 'uploads/[Quick Guide] 상생협력포털(PCMS) 회원가입 v.02_1755674307.pdf', 'PCMS 가입 가이드')
             ]
             
-            num_files = random.randint(1, 3)
-            for j in range(num_files):
-                file_info = random.choice(sample_files)
+            # 하나의 실제 파일만 추가 (확실히 다운로드되도록)
+            file_info = real_files[i % len(real_files)]
+            file_path = os.path.join(os.getcwd(), file_info[1])
+            
+            # 파일이 실제로 존재하는지 확인
+            if os.path.exists(file_path):
+                file_size = os.path.getsize(file_path)
                 cursor.execute('''
                     INSERT INTO partner_attachments (
                         business_number, file_name, file_path, file_size, description
@@ -173,8 +178,8 @@ def init_sample_data():
                 ''', (
                     business_number,
                     file_info[0],
-                    f'/uploads/{file_info[0]}',
-                    int(file_info[1]),
+                    file_path,  # 전체 경로로 저장
+                    file_size,
                     file_info[2]
                 ))
     
@@ -448,7 +453,8 @@ def partner_detail(business_number):
                          partner=partner, 
                          attachments=attachments,
                          menu=MENU_CONFIG, 
-                         is_popup=is_popup)
+                         is_popup=is_popup,
+                         board_type='partner')  # 게시판 타입 전달
 
 @app.route("/accident-detail/<int:accident_id>")
 def accident_detail(accident_id):
@@ -568,28 +574,48 @@ def accident_detail(accident_id):
                          accident=accident,
                          attachments=attachments,
                          menu=MENU_CONFIG, 
-                         is_popup=is_popup)
+                         is_popup=is_popup,
+                         board_type='accident')  # 게시판 타입 전달
 
 @app.route("/verify-password", methods=["POST"])
 def verify_password():
-    """비밀번호 검증"""
+    """게시판별 비밀번호 검증"""
     try:
         data = request.get_json()
         if not data:
             return jsonify({"success": False, "message": "No data received"}), 400
             
         password = data.get('password')
+        board_type = data.get('board_type', 'default')  # partner, accident, 또는 default
+        
         if not password:
             return jsonify({"success": False, "message": "Password not provided"}), 400
         
-        # config.ini에서 비밀번호 읽기
-        admin_password = db_config.config.get('DEFAULT', 'EDIT_PASSWORD')
+        # 게시판 타입별 비밀번호 확인
+        correct_password = None
         
-        if password == admin_password:
+        if board_type == 'partner':
+            # 협력사 게시판 비밀번호
+            correct_password = db_config.config.get('PASSWORDS', 'PARTNER_EDIT_PASSWORD', fallback=None)
+        elif board_type == 'accident':
+            # 사고 게시판 비밀번호
+            correct_password = db_config.config.get('PASSWORDS', 'ACCIDENT_EDIT_PASSWORD', fallback=None)
+        else:
+            # 기본 비밀번호 (기존 호환성)
+            correct_password = db_config.config.get('DEFAULT', 'EDIT_PASSWORD')
+        
+        # 비밀번호가 설정되지 않은 경우 기본 비밀번호 사용
+        if not correct_password:
+            correct_password = db_config.config.get('DEFAULT', 'EDIT_PASSWORD')
+        
+        logging.info(f"비밀번호 검증 요청: board_type={board_type}")
+        
+        if password == correct_password:
             return jsonify({"success": True})
         else:
             return jsonify({"success": False, "message": "비밀번호가 올바르지 않습니다."})
     except Exception as e:
+        logging.error(f"비밀번호 검증 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route("/update-partner", methods=["POST"])
@@ -886,17 +912,31 @@ def download_attachment(attachment_id):
     from flask import send_file
     import os
     
-    # 실제 파일 경로 구성 (uploads 폴더 기준)
-    actual_file_path = os.path.join(os.getcwd(), 'uploads', attachment['file_name'])
+    # DB에 저장된 file_path 사용 (실제 저장된 경로)
+    stored_file_path = attachment['file_path']
+    
+    # 절대 경로인지 상대 경로인지 확인
+    if os.path.isabs(stored_file_path):
+        actual_file_path = stored_file_path
+    else:
+        # 상대 경로면 현재 디렉토리 기준으로 구성
+        actual_file_path = os.path.join(os.getcwd(), stored_file_path.lstrip('/\\'))
+    
+    logging.info(f"다운로드 요청: ID={attachment_id}, 파일={attachment['file_name']}, 경로={actual_file_path}")
     
     try:
-        return send_file(
-            actual_file_path,
-            as_attachment=True,
-            download_name=attachment['file_name']
-        )
-    except FileNotFoundError:
-        return "File not found on disk", 404
+        if os.path.exists(actual_file_path):
+            return send_file(
+                actual_file_path,
+                as_attachment=True,
+                download_name=attachment['file_name']
+            )
+        else:
+            logging.error(f"파일을 찾을 수 없습니다: {actual_file_path}")
+            return "File not found on disk", 404
+    except Exception as e:
+        logging.error(f"파일 다운로드 중 오류: {e}")
+        return f"Download error: {str(e)}", 500
 
 @app.route("/partner-attachments/<business_number>")
 def get_partner_attachments(business_number):
