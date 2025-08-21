@@ -332,6 +332,19 @@ class PartnerDataManager:
             if filters.get('business_type_major'):
                 query += " AND business_type_major = ?"
                 params.append(filters['business_type_major'])
+            
+            if filters.get('business_type_minor'):
+                query += " AND business_type_minor LIKE ?"
+                params.append(f"%{filters['business_type_minor']}%")
+            
+            # 상시근로자 수 범위 필터
+            if filters.get('workers_min'):
+                query += " AND permanent_workers >= ?"
+                params.append(filters['workers_min'])
+            
+            if filters.get('workers_max'):
+                query += " AND permanent_workers <= ?"
+                params.append(filters['workers_max'])
         
         # 전체 개수 조회
         count_query = query.replace("SELECT *", "SELECT COUNT(*)")
