@@ -78,10 +78,34 @@ def init_sample_data():
     conn = partner_manager.db_config.get_sqlite_connection()
     cursor = conn.cursor()
     
-    # 기존 데이터 삭제 (스키마 변경으로 인한 재생성)
-    cursor.execute("DELETE FROM partners_cache")
-    cursor.execute("DELETE FROM partner_attachments")
-    logging.info("기존 샘플 데이터 삭제 완료")
+    # 이미 데이터가 있는지 확인
+    try:
+        cursor.execute("SELECT COUNT(*) FROM partners_cache")
+        count = cursor.fetchone()[0]
+        
+        # permanent_workers 컬럼이 있는지 확인
+        cursor.execute("PRAGMA table_info(partners_cache)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        # permanent_workers 컬럼이 없으면 기존 데이터에 랜덤값 추가
+        if 'permanent_workers' not in columns:
+            logging.info("permanent_workers 컬럼이 없어서 기존 데이터에 값을 추가합니다")
+            import random
+            cursor.execute("SELECT business_number FROM partners_cache")
+            existing_partners = cursor.fetchall()
+            for partner in existing_partners:
+                permanent_workers = random.randint(5, 500)
+                cursor.execute("UPDATE partners_cache SET permanent_workers = ? WHERE business_number = ?", 
+                             (permanent_workers, partner[0]))
+            conn.commit()
+            logging.info(f"기존 {len(existing_partners)}개 협력사에 상시근로자 데이터 추가 완료")
+        
+        # 데이터가 충분히 있으면 종료
+        if count > 0:
+            conn.close()
+            return
+    except Exception as e:
+        logging.warning(f"데이터 확인 중 오류: {e}")
     
     logging.info("샘플 데이터 생성 중...")
     
