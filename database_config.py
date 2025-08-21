@@ -7,9 +7,23 @@ import traceback
 import pandas as pd
 from datetime import datetime, timedelta
 
-# 기존 성공 방식: IQADB_CONNECT310 모듈 로드
-try:
+# 설정 파일 로드
+config = configparser.ConfigParser()
+config_path = os.path.join(os.path.dirname(__file__), 'config.ini')
+
+# config.ini 파일을 먼저 읽어서 경로 가져오기
+if os.path.exists(config_path):
+    try:
+        config.read(config_path, encoding='utf-8')
+        module_folder = config.get('DATABASE', 'IQADB_MODULE_PATH', 
+                                  fallback='C:/Users/user/AppData/Local/aipforge/pkgs/dist/obf/PY310')
+    except:
+        module_folder = 'C:/Users/user/AppData/Local/aipforge/pkgs/dist/obf/PY310'
+else:
     module_folder = 'C:/Users/user/AppData/Local/aipforge/pkgs/dist/obf/PY310'
+
+# IQADB_CONNECT310 모듈 로드
+try:
     sys.path.insert(0, os.path.abspath(module_folder))
     from IQADB_CONNECT310 import *
     IQADB_AVAILABLE = True
@@ -43,22 +57,8 @@ def execute_SQL(query):
     finally:
         conn.close()
 
-# 설정 파일 로드 (절대 경로 사용)
-config = configparser.ConfigParser()
-config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.ini')
-
-# 설정 파일 존재 확인 및 로드
-if not os.path.exists(config_path):
-    print(f"[ERROR] 설정 파일을 찾을 수 없습니다: {config_path}")
-    print("config_template.ini를 config.ini로 복사하세요.")
-    exit(1)
-
-try:
-    config.read(config_path, encoding='utf-8')
-    print(f"[SUCCESS] 설정 파일 로드 성공: {config_path}")
-except Exception as e:
-    print(f"[ERROR] 설정 파일 로드 실패: {e}")
-    exit(1)
+# config는 이미 위에서 로드되었음 - 중복 제거
+# 설정 파일 로드 성공 메시지는 이미 위에서 출력됨
 
 class PartnerDataManager:
     def __init__(self):
@@ -72,24 +72,51 @@ class PartnerDataManager:
         conn = sqlite3.connect(self.local_db_path)
         cursor = conn.cursor()
         
-        # 협력사 마스터 데이터 캐시 테이블 (11개 컬럼)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS partners_cache (
-                business_number TEXT PRIMARY KEY,
-                company_name TEXT NOT NULL,
-                partner_class TEXT,
-                business_type_major TEXT,
-                business_type_minor TEXT,
-                hazard_work_flag TEXT,
-                representative TEXT,
-                address TEXT,
-                average_age INTEGER,
-                annual_revenue BIGINT,
-                transaction_count INTEGER,
-                permanent_workers INTEGER,
-                synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+        # 기존 partners_cache 테이블의 구조 확인
+        cursor.execute("PRAGMA table_info(partners_cache)")
+        existing_columns = {col[1]: col[2] for col in cursor.fetchall()}
+        
+        # 필요한 컬럼 정의
+        required_columns = {
+            'business_number': 'TEXT PRIMARY KEY',
+            'company_name': 'TEXT NOT NULL',
+            'partner_class': 'TEXT',
+            'business_type_major': 'TEXT',
+            'business_type_minor': 'TEXT',
+            'hazard_work_flag': 'TEXT',
+            'representative': 'TEXT',
+            'address': 'TEXT',
+            'average_age': 'INTEGER',
+            'annual_revenue': 'BIGINT',
+            'transaction_count': 'TEXT',
+            'permanent_workers': 'INTEGER',
+            'synced_at': 'DATETIME DEFAULT CURRENT_TIMESTAMP'
+        }
+        
+        # 테이블이 없거나 구조가 다르면 재생성
+        if not existing_columns or set(existing_columns.keys()) != set(required_columns.keys()):
+            print("[INFO] partners_cache 테이블 구조가 변경되어 재생성합니다.")
+            cursor.execute("DROP TABLE IF EXISTS partners_cache")
+            cursor.execute('''
+                CREATE TABLE partners_cache (
+                    business_number TEXT PRIMARY KEY,
+                    company_name TEXT NOT NULL,
+                    partner_class TEXT,
+                    business_type_major TEXT,
+                    business_type_minor TEXT,
+                    hazard_work_flag TEXT,
+                    representative TEXT,
+                    address TEXT,
+                    average_age INTEGER,
+                    annual_revenue BIGINT,
+                    transaction_count TEXT,
+                    permanent_workers INTEGER,
+                    synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            print("[SUCCESS] partners_cache 테이블 재생성 완료")
+        else:
+            print("[INFO] partners_cache 테이블 구조가 정상입니다.")
         
         # 협력사 상세내용 테이블 (로컬 전용)
         cursor.execute('''
@@ -204,8 +231,8 @@ class PartnerDataManager:
                     INSERT INTO partners_cache (
                         business_number, company_name, partner_class, business_type_major,
                         business_type_minor, hazard_work_flag, representative, address,
-                        average_age, annual_revenue, transaction_count
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        average_age, annual_revenue, transaction_count, permanent_workers
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     row.get('business_number', ''),
                     row.get('company_name', ''),
@@ -217,7 +244,8 @@ class PartnerDataManager:
                     row.get('address', ''),
                     row.get('average_age', None),
                     row.get('annual_revenue', None),
-                    row.get('transaction_count', None)
+                    row.get('transaction_count', ''),  # TEXT로 변경
+                    row.get('permanent_workers', None)  # 추가
                 ))
             
             conn.commit()
