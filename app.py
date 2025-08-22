@@ -358,9 +358,6 @@ def partner_standards():
 
 def partner_accident():
     """협력사 사고 페이지"""
-    # 확실히 이 함수가 호출되는지 확인
-    with open('PARTNER_ACCIDENT_CALLED.txt', 'w') as f:
-        f.write('YES! Called at ' + str(datetime.now()))
     
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
@@ -399,6 +396,7 @@ def partner_accident():
             ORDER BY accident_date DESC, accident_number DESC
         """).fetchall()
         
+        logging.info(f"로컬 DB에서 {len(local_accidents_rows)}개 사고 조회됨")
         
         for row in local_accidents_rows:
             accident = dict(row)
@@ -427,8 +425,12 @@ def partner_accident():
             accident['responsible_company_2_business_number'] = accident.get('responsible_company_2_business_number')
             
             all_accidents.append(accident)
+        
+        logging.info(f"로컬 사고 추가 완료: {len(all_accidents)}개")
     except Exception as e:
         logging.error(f"로컬 사고 데이터 조회 실패: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
     
     
     # 2. 개발 환경에서는 더미 데이터 추가 (로컬 사고 뒤에)
@@ -499,6 +501,7 @@ def partner_accident():
         
         logging.info(f"더미 데이터 50개 추가됨")
     
+    print(f"[DEBUG] 전체 사고 개수: {len(all_accidents)}", flush=True)
     logging.info(f"전체 사고 개수: {len(all_accidents)}")
     
     filtered_accidents = all_accidents
