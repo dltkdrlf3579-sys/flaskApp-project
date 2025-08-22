@@ -102,7 +102,7 @@
                 <div id="detailed-content" 
                      class="editable-content" 
                      contenteditable="true" 
-                     placeholder="업체에 대한 상세 내용을 입력하세요...&#10;&#10;💡 팁: 이미지나 엑셀표를 복사해서 붙여넣기 하세요!">{{ partner.detailed_content | safe if partner.detailed_content else '' }}</div>
+                     placeholder="사고에 대한 상세 내용을 입력하세요.">{{ partner.detailed_content | safe if partner.detailed_content else '' }}</div>
                 
                 <!-- 숨겨진 textarea (저장용) -->
                 <textarea id="detailed-content-hidden" style="display: none;">{{ partner.detailed_content or '' }}</textarea>

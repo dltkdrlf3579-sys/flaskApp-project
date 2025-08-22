@@ -30,7 +30,10 @@ EXTERNAL_DB_ENABLED = False
 
 #### EXTERNAL_DB_ENABLED
 - **True**: IQADB_CONNECT310을 통해 실제 데이터베이스에서 데이터 조회
-- **False**: 샘플 데이터 사용 (개발/테스트용)
+  - PARTNERS_QUERY가 있으면 협력사 데이터 동기화
+  - ACCIDENTS_QUERY가 있으면 사고 데이터 동기화
+  - 각 쿼리는 선택적 (없으면 해당 데이터는 샘플/더미 사용)
+- **False**: 모든 데이터를 샘플/더미로 사용 (개발/테스트용)
 
 #### IQADB_MODULE_PATH
 - IQADB_CONNECT310 모듈이 설치된 경로

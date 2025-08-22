@@ -1,0 +1,1497 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>협력사 사고</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        
+    </style>
+    <style>
+        /* 전체 페이지 가로 스크롤 방지 */
+        html, body {
+            overflow-x: hidden;
+            width: 100%;
+            max-width: 100vw;
+        }
+        
+        /* 컨텐츠 영역 기본 설정 */
+        .content-wrapper {
+            width: 100%;
+            max-width: 100%;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+    <!-- 상단 네비게이션 (DCInside 유사 스타일) -->
+    <nav class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="/">
+          <img src="/static/logo-sample.png" alt="Logo" class="logo-img">
+          상생EHS Portal
+        </a>
+        <ul class="nav-main" role="menubar" aria-label="메인 메뉴">
+          
+          
+          
+          
+          
+            
+          
+          <li class="nav-item has-sub">
+            <a class="nav-link"
+               href="#"
+               role="menuitem"
+               aria-haspopup="true"
+               aria-expanded="false">협력사 정보</a>
+            <ul class="submenu" role="menu">
+              
+              <li role="none">
+                <a role="menuitem"
+                   class="submenu-link "
+                   href="/partner-standards">협력사 기준정보</a>
+              </li>
+              
+            </ul>
+          </li>
+          
+          <li class="sep" aria-hidden="true">|</li>
+          
+          
+          
+          
+            
+              
+            
+          
+          <li class="nav-item has-sub">
+            <a class="nav-link"
+               href="#"
+               role="menuitem"
+               aria-haspopup="true"
+               aria-expanded="false">사고예방</a>
+            <ul class="submenu" role="menu">
+              
+              <li role="none">
+                <a role="menuitem"
+                   class="submenu-link  active"
+                   href="/partner-accident">협력사 사고</a>
+              </li>
+              
+            </ul>
+          </li>
+          
+          
+        </ul>
+        <!-- 관리자 메뉴 (우측 상단) -->
+        <div class="admin-tools">
+          <div class="dropdown">
+            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" id="adminMenu" data-bs-toggle="dropdown" aria-expanded="false">
+              <i class="bi bi-gear"></i> 관리자
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="adminMenu">
+              <li><a class="dropdown-item" href="/admin/menu-settings"><i class="bi bi-sliders"></i> 메뉴 설정</a></li>
+              <li><a class="dropdown-item" href="/admin/permission-settings"><i class="bi bi-shield-lock"></i> 권한 설정</a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <style>
+    /* ===== 상단 바(흰색 배경) ===== */
+    .topbar { 
+      background: #ffffff; 
+      border-bottom: 1px solid #e5e7eb;  /* 하단 구분선 추가 */
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);  /* 가벼운 그림자 */
+      z-index: 9999;  /* 최상위로 설정 */
+      position: relative;  /* position 명시 */
+    }
+    .topbar-inner {
+      max-width: none; margin: 0; height: 56px;
+      display: flex; align-items: center; gap: 16px; padding: 0 24px;
+      justify-content: space-between;
+    }
+    
+    /* 관리자 도구 (우측 상단) */
+    .admin-tools {
+      margin-left: auto;
+    }
+    .logo-img {
+      height: 40px;
+      width: auto;
+      margin-right: 12px;
+    }
+    .brand { 
+      color: #2f5fd3; 
+      font-weight: 600; 
+      text-decoration: none; 
+      font-size: 18px;
+      margin-right: 24px;
+      display: flex;
+      align-items: center;
+    }
+
+    /* ===== 1차 메뉴 ===== */
+    .nav-main { list-style: none; display: flex; align-items: stretch; gap: 0; margin: 0; padding: 0; flex: 1; }
+    .nav-item { position: relative; }
+    
+    
+    .nav-link {
+      color: #333; text-decoration: none; font-weight: 700;
+      padding: 10px 16px; display: block; line-height: 28px;
+      transition: color 0.2s ease;
+      cursor: pointer;
+    }
+    .nav-link:hover, .nav-item.is-active > .nav-link, .nav-item.open > .nav-link { 
+      color: #2f5fd3;
+    }
+    .sep { color: #ddd; align-self: center; padding: 0 8px; user-select: none; }
+
+    /* ===== 2차 드롭다운 ===== */
+    .submenu {
+      position: absolute; left: 0; top: calc(100% - 1px); /* 간격 제거 */
+      min-width: 180px; background: #fff; border: 1px solid #e5e7eb;
+      border-radius: 0 0 4px 4px; /* 상단 모서리는 직각으로 */
+      box-shadow: 0 8px 18px rgba(0,0,0,.08);
+      padding: 6px 0; display: none; list-style: none; margin: 0;
+      z-index: 10000;  /* 최상위로 설정 */
+      border-top: 2px solid #2f5fd3; /* 상단에 강조선 추가 */
+    }
+    .submenu-link {
+      display: block; padding: 9px 12px; color: #222; text-decoration: none; white-space: nowrap; font-size: 14px;
+    }
+    .submenu-link:hover { background: #f3f5f7; }
+    .submenu-link.active { color: #1b60d1; font-weight: 700; }
+
+    /* 편집 기능 CSS 제거됨 */
+
+    /* 호버 기반 드롭다운 */
+    .nav-item:hover > .submenu,
+    .nav-item.keep-open > .submenu { 
+      display: block; 
+    }
+    
+    /* 화살표 제거 - 깔끔한 디자인 유지 */
+
+    /* 모바일 반응형 조정 */
+    @media (max-width: 991.98px) {
+      .topbar-inner { height: auto; flex-wrap: wrap; padding: 8px 10px; gap: 8px; }
+      .brand { padding: 6px 0; }
+      .nav-main { width: 100%; overflow-x: auto; white-space: nowrap; gap: 0; }
+      .nav-link { padding: 8px 12px; }
+      .sep { display: none; }
+      .submenu {
+        position: static; border: 1px solid #e5e7eb; border-top: none; box-shadow: none; border-radius: 0 0 4px 4px;
+      }
+      .right-tools { width: 100%; justify-content: flex-end; }
+    }
+
+    /* 컨텐츠 영역 */
+    .container { 
+        max-width: none; 
+        margin: 20px 24px; 
+        padding: 0; 
+        width: calc(100% - 48px);
+        box-sizing: border-box;
+    }
+    
+    /* 플래시 메시지 */
+    .flash-messages { margin: 20px 24px; padding: 0; }
+    .alert { padding: 12px 16px; margin-bottom: 16px; border-radius: 4px; font-size: 14px; }
+    .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .alert-danger { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .alert-info { background: #cce7f0; color: #0c5460; border: 1px solid #b8daff; }
+    </style>
+
+    <!-- 플래시 메시지 -->
+    <div class="flash-messages">
+        
+    </div>
+
+    
+    <div class="container">
+    
+    
+    
+<div class="page-header">
+    <h2 class="page-title">협력사 사고</h2>
+</div>
+
+<!-- 검색 영역 -->
+<div class="search-section">
+    <form method="GET" class="search-form">
+        <div class="search-fields">
+            <div class="search-group">
+                <label>협력사명</label>
+                <input type="text" name="company_name" value="" placeholder="협력사명을 입력하세요">
+            </div>
+            <div class="search-group">
+                <label>사업자번호</label>
+                <input type="text" name="business_number" value="" placeholder="사업자번호를 입력하세요">
+            </div>
+            <div class="search-group range-group">
+                <label>재해날짜</label>
+                <div class="range-inputs">
+                    <input type="date" name="accident_date_start" value="" placeholder="시작일">
+                    <span class="range-separator">~</span>
+                    <input type="date" name="accident_date_end" value="" placeholder="종료일">
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- 검색 버튼 영역 -->
+<div class="search-buttons-section">
+    <div class="search-buttons">
+        <button type="button" onclick="resetForm()" class="btn-reset">초기화</button>
+        <button type="button" onclick="document.querySelector('.search-form').submit()" class="btn-search">검색</button>
+    </div>
+</div>
+
+<!-- 목록 테이블 -->
+<div class="table-section">
+    <div class="table-header">
+        <div class="left-controls">
+            <span class="total-count">총 50건</span>
+            <div class="per-page-selector">
+                <select onchange="changePerPage(this.value)">
+                    <option value="10" selected>10개씩</option>
+                    <option value="25" >25개씩</option>
+                    <option value="50" >50개씩</option>
+                </select>
+            </div>
+        </div>
+        <div class="action-buttons">
+            <button class="btn btn-sm btn-excel-upload" onclick="showImportModal()">
+                <img src="/static/icons/excel-icon.svg" style="vertical-align: middle; margin-right: 4px;" width="16" height="16">
+                엑셀 업로드
+            </button>
+            <button class="btn btn-sm btn-excel-download" onclick="exportToExcel()">
+                <img src="/static/icons/excel-icon.svg" style="vertical-align: middle; margin-right: 4px;" width="16" height="16">
+                엑셀 다운로드
+            </button>
+            <button class="btn btn-sm btn-register" onclick="showRegisterModal()">
+                등록
+            </button>
+        </div>
+    </div>
+    <div class="table-wrapper">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th class="fixed-col">사고명</th>
+                    <th>사고번호</th>
+                    <th>재해날짜</th>
+                    <th>사고등급</th>
+                    <th>사고분류</th>
+                    <th>재해유형</th>
+                    <th>재해형태</th>
+                    <th>사업장</th>
+                    <th>건물</th>
+                    <th>층</th>
+                    <th>세부위치</th>
+                    <th>시간</th>
+                    <th>요일</th>
+                    <th>사고내용</th>
+                    <th>귀책협력사(1차)</th>
+                    <th>귀책협력사(1차)사업자번호</th>
+                    <th>귀책협력사(2차)</th>
+                    <th>귀책협력사(2차)사업자번호</th>
+                    
+                    <th>처리상태</th>
+                    
+                    <th>조치사항</th>
+                    
+                    <th>재발방지대책</th>
+                    
+                    <th>담당부서</th>
+                    
+                    <th>담당자</th>
+                    
+                    <th>완료예정일</th>
+                    
+                    <th>원인분석</th>
+                    
+                    <th>첨부문서</th>
+                    
+                    <th>발생위치</th>
+                    
+                </tr>
+            </thead>
+            <tbody>
+                
+                <tr>
+                    <td class="fixed-col">
+                        <a href="javascript:void(0)" class="company-link" onclick="openAccidentModal('1')">사고사례001</a>
+                    </td>
+                    <td>K20240101001</td>
+                    <td>2024-01-01</td>
+                    <td>경미</td>
+                    <td>추락</td>
+                    <td>안전사고</td>
+                    <td>낙하</td>
+                    <td>사업장1</td>
+                    <td>건물1</td>
+                    <td>1층</td>
+                    <td>상세위치001</td>
+                    <td>09:00</td>
+                    <td>월</td>
+                    <td>사고내용1</td>
+                    <td>협력사1</td>
+                    <td>1000000000</td>
+                    <td>협력사1</td>
+                    <td>2000000000</td>
+                    
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                    
+                </tr>
+                
+                <tr>
+                    <td class="fixed-col">
+                        <a href="javascript:void(0)" class="company-link" onclick="openAccidentModal('2')">사고사례002</a>
+                    </td>
+                    <td>K20240205002</td>
+                    <td>2024-02-05</td>
+                    <td>중대</td>
+                    <td>협착</td>
+                    <td>보건사고</td>
+                    <td>충돌</td>
+                    <td>사업장2</td>
+                    <td>건물2</td>
+                    <td>2층</td>
+                    <td>상세위치002</td>
+                    <td>10:05</td>
+                    <td>화</td>
+                    <td>사고내용2</td>
+                    <td>협력사2</td>
+                    <td>1000011111</td>
+                    <td>-</td>
+                    <td>-</td>
+                    
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                    
+                </tr>
+                
+                <tr>
+                    <td class="fixed-col">
+                        <a href="javascript:void(0)" class="company-link" onclick="openAccidentModal('3')">사고사례003</a>
+                    </td>
+                    <td>K20240310003</td>
+                    <td>2024-03-10</td>
+                    <td>치명</td>
+                    <td>절단</td>
+                    <td>안전사고</td>
+                    <td>전도</td>
+                    <td>사업장3</td>
+                    <td>건물3</td>
+                    <td>3층</td>
+                    <td>상세위치003</td>
+                    <td>11:10</td>
+                    <td>수</td>
+                    <td>사고내용3</td>
+                    <td>협력사3</td>
+                    <td>1000022222</td>
+                    <td>-</td>
+                    <td>-</td>
+                    
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                    
+                </tr>
+                
+                <tr>
+                    <td class="fixed-col">
+                        <a href="javascript:void(0)" class="company-link" onclick="openAccidentModal('4')">사고사례004</a>
+                    </td>
+                    <td>K20240415004</td>
+                    <td>2024-04-15</td>
+                    <td>경미</td>
+                    <td>화재</td>
+                    <td>보건사고</td>
+                    <td>낙하</td>
+                    <td>사업장4</td>
+                    <td>건물4</td>
+                    <td>4층</td>
+                    <td>상세위치004</td>
+                    <td>12:15</td>
+                    <td>목</td>
+                    <td>사고내용4</td>
+                    <td>협력사4</td>
+                    <td>1000033333</td>
+                    <td>협력사4</td>
+                    <td>2000066666</td>
+                    
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                    
+                </tr>
+                
+                <tr>
+                    <td class="fixed-col">
+                        <a href="javascript:void(0)" class="company-link" onclick="openAccidentModal('5')">사고사례005</a>
+                    </td>
+                    <td>K20240520005</td>
+                    <td>2024-05-20</td>
+                    <td>중대</td>
+                    <td>추락</td>
+                    <td>안전사고</td>
+                    <td>충돌</td>
+                    <td>사업장5</td>
+                    <td>건물5</td>
+                    <td>5층</td>
+                    <td>상세위치005</td>
+                    <td>13:20</td>
+                    <td>금</td>
+                    <td>사고내용5</td>
+                    <td>협력사5</td>
+                    <td>1000044444</td>
+                    <td>-</td>
+                    <td>-</td>
+                    
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                    
+                </tr>
+                
+                <tr>
+                    <td class="fixed-col">
+                        <a href="javascript:void(0)" class="company-link" onclick="openAccidentModal('6')">사고사례006</a>
+                    </td>
+                    <td>K20240625006</td>
+                    <td>2024-06-25</td>
+                    <td>치명</td>
+                    <td>협착</td>
+                    <td>보건사고</td>
+                    <td>전도</td>
+                    <td>사업장1</td>
+                    <td>건물6</td>
+                    <td>6층</td>
+                    <td>상세위치006</td>
+                    <td>14:25</td>
+                    <td>토</td>
+                    <td>사고내용6</td>
+                    <td>협력사6</td>
+                    <td>1000055555</td>
+                    <td>-</td>
+                    <td>-</td>
+                    
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                    
+                </tr>
+                
+                <tr>
+                    <td class="fixed-col">
+                        <a href="javascript:void(0)" class="company-link" onclick="openAccidentModal('7')">사고사례007</a>
+                    </td>
+                    <td>K20240701007</td>
+                    <td>2024-07-01</td>
+                    <td>경미</td>
+                    <td>절단</td>
+                    <td>안전사고</td>
+                    <td>낙하</td>
+                    <td>사업장2</td>
+                    <td>건물7</td>
+                    <td>7층</td>
+                    <td>상세위치007</td>
+                    <td>15:30</td>
+                    <td>일</td>
+                    <td>사고내용7</td>
+                    <td>협력사7</td>
+                    <td>1000066666</td>
+                    <td>협력사7</td>
+                    <td>2000133332</td>
+                    
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                    
+                </tr>
+                
+                <tr>
+                    <td class="fixed-col">
+                        <a href="javascript:void(0)" class="company-link" onclick="openAccidentModal('8')">사고사례008</a>
+                    </td>
+                    <td>K20240805008</td>
+                    <td>2024-08-05</td>
+                    <td>중대</td>
+                    <td>화재</td>
+                    <td>보건사고</td>
+                    <td>충돌</td>
+                    <td>사업장3</td>
+                    <td>건물8</td>
+                    <td>8층</td>
+                    <td>상세위치008</td>
+                    <td>16:35</td>
+                    <td>월</td>
+                    <td>사고내용8</td>
+                    <td>협력사8</td>
+                    <td>1000077777</td>
+                    <td>-</td>
+                    <td>-</td>
+                    
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                    
+                </tr>
+                
+                <tr>
+                    <td class="fixed-col">
+                        <a href="javascript:void(0)" class="company-link" onclick="openAccidentModal('9')">사고사례009</a>
+                    </td>
+                    <td>K20240910009</td>
+                    <td>2024-09-10</td>
+                    <td>치명</td>
+                    <td>추락</td>
+                    <td>안전사고</td>
+                    <td>전도</td>
+                    <td>사업장4</td>
+                    <td>건물9</td>
+                    <td>9층</td>
+                    <td>상세위치009</td>
+                    <td>17:40</td>
+                    <td>화</td>
+                    <td>사고내용9</td>
+                    <td>협력사9</td>
+                    <td>1000088888</td>
+                    <td>-</td>
+                    <td>-</td>
+                    
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                    
+                </tr>
+                
+                <tr>
+                    <td class="fixed-col">
+                        <a href="javascript:void(0)" class="company-link" onclick="openAccidentModal('10')">사고사례010</a>
+                    </td>
+                    <td>K20241015010</td>
+                    <td>2024-10-15</td>
+                    <td>경미</td>
+                    <td>협착</td>
+                    <td>보건사고</td>
+                    <td>낙하</td>
+                    <td>사업장5</td>
+                    <td>건물10</td>
+                    <td>10층</td>
+                    <td>상세위치010</td>
+                    <td>18:45</td>
+                    <td>수</td>
+                    <td>사고내용10</td>
+                    <td>협력사10</td>
+                    <td>1000099999</td>
+                    <td>협력사10</td>
+                    <td>2000199998</td>
+                    
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                        <td>-</td>
+                        
+                    
+                </tr>
+                
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 페이지네이션 -->
+
+<div class="pagination-section">
+    <div class="pagination">
+        
+        
+        
+        
+        <!-- 이전 10페이지 -->
+        
+        
+        <!-- 현재 윈도우의 페이지들 (최대 10개) -->
+        
+            
+                <span class="page-btn active">1</span>
+            
+        
+            
+                <a href="/partner-accident?page=2" class="page-btn">2</a>
+            
+        
+            
+                <a href="/partner-accident?page=3" class="page-btn">3</a>
+            
+        
+            
+                <a href="/partner-accident?page=4" class="page-btn">4</a>
+            
+        
+            
+                <a href="/partner-accident?page=5" class="page-btn">5</a>
+            
+        
+        
+        <!-- 다음 10페이지 -->
+        
+    </div>
+</div>
+
+
+<style>
+/* 페이지 헤더 */
+.page-header {
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #2f5fd3;
+}
+.page-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #333;
+    margin: 0;
+}
+
+/* 검색 영역 */
+.search-section {
+    background: #f8f9fa;
+    padding: 20px;
+    margin-bottom: 20px;
+    border-radius: 4px;
+    border: 1px solid #e5e7eb;
+}
+.search-form {
+    width: 100%;
+}
+.search-fields {
+    display: flex;
+    gap: 32px;
+    flex-wrap: wrap;
+}
+.search-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 0 0 auto;
+}
+.search-group label {
+    font-weight: 600;
+    color: #333;
+    font-size: 14px;
+    white-space: nowrap;
+    width: 80px;
+    flex-shrink: 0;
+    text-align: left;
+}
+
+/* 모든 입력 요소의 공통 스타일 */
+.search-group input[type="text"],
+.search-group input[type="date"] {
+    height: 40px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 14px;
+    box-sizing: border-box;
+    width: 200px;
+    padding: 0 12px;
+}
+
+.search-group input:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+/* 범위 검색 그룹 */
+.range-group .range-inputs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 200px;
+    flex-shrink: 0;
+    height: 40px;
+}
+.range-inputs input[type="date"] {
+    width: 120px;
+    height: 40px;
+    padding: 0 6px;
+    flex-shrink: 0;
+}
+.range-separator {
+    font-weight: 600;
+    color: #666;
+    flex-shrink: 0;
+    font-size: 14px;
+}
+
+/* 검색 버튼 영역 */
+.search-buttons-section {
+    margin-bottom: 20px;
+}
+.search-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+.btn-reset, .btn-search {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.btn-reset {
+    background: #6b7280;
+    color: white;
+}
+.btn-reset:hover {
+    background: #4b5563;
+}
+.btn-search {
+    background: #2f5fd3;
+    color: white;
+}
+.btn-search:hover {
+    background: #1d4ed8;
+}
+
+/* 테이블 영역 */
+.table-section {
+    background: white;
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.table-header {
+    padding: 12px 16px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* 왼쪽 컨트롤 영역 */
+.left-controls {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+/* 액션 버튼 그룹 */
+.action-buttons {
+    display: flex;
+    align-items: center;
+    gap: 0;
+}
+
+.action-buttons .btn {
+    padding: 6px 12px;
+    font-size: 13px;
+    border: 1px solid #ddd;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.2s;
+    background: white;
+    color: #333;
+}
+
+/* 엑셀 업로드 버튼 (첫번째) */
+.btn-excel-upload {
+    border-radius: 4px 0 0 4px;
+    border-right: none;
+}
+
+.btn-excel-upload:hover {
+    background-color: #f0f0f0;
+}
+
+/* 엑셀 다운로드 버튼 (두번째) */
+.btn-excel-download {
+    border-radius: 0 4px 4px 0;
+    margin-right: 10px;
+}
+
+.btn-excel-download:hover {
+    background-color: #f0f0f0;
+}
+
+/* 등록 버튼 (마지막) */
+.btn-register {
+    background-color: #198754 !important;
+    color: white !important;
+    border-color: #198754 !important;
+    border-radius: 4px;
+}
+
+.btn-register:hover {
+    background-color: #157347 !important;
+}
+.total-count {
+    font-weight: 600;
+    color: #374151;
+}
+.per-page-selector {
+    display: inline-flex;
+    align-items: center;
+}
+.per-page-selector select {
+    padding: 4px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 13px;
+    background: white;
+    margin-left: 5px;
+}
+
+/* 가로 스크롤 래퍼 */
+.table-wrapper {
+    overflow-x: auto;
+    position: relative;
+}
+.table-wrapper::-webkit-scrollbar {
+    height: 8px;
+}
+.table-wrapper::-webkit-scrollbar-track {
+    background: #f1f5f9;
+}
+.table-wrapper::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+.table-wrapper::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+.data-table {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: collapse;
+}
+.data-table th {
+    background: #f1f5f9;
+    padding: 12px 16px;
+    text-align: left;
+    font-weight: 600;
+    color: #374151;
+    border-bottom: 2px solid #e5e7eb;
+    white-space: nowrap;
+    min-width: 120px;
+}
+.data-table th.fixed-col {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: #f1f5f9;
+    box-shadow: 2px 0 4px rgba(0,0,0,0.05);
+    min-width: 200px;
+}
+.data-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #f1f5f9;
+    color: #4b5563;
+    white-space: nowrap;
+    min-width: 120px;
+}
+.data-table td.fixed-col {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: white;
+    box-shadow: 2px 0 4px rgba(0,0,0,0.05);
+    min-width: 200px;
+}
+.data-table tbody tr:hover {
+    background: #f9fafb;
+}
+.data-table tbody tr:hover td.fixed-col {
+    background: #f9fafb;
+}
+.company-link {
+    color: #2f5fd3;
+    text-decoration: none;
+    font-weight: 600;
+}
+.company-link:hover {
+    text-decoration: underline;
+}
+.no-data {
+    text-align: center;
+    padding: 40px;
+    color: #9ca3af;
+    font-style: italic;
+}
+
+/* 페이지네이션 */
+.pagination-section {
+    margin-top: 20px;
+    display: flex;
+    justify-content: center;
+}
+.pagination {
+    display: flex;
+    gap: 4px;
+}
+.page-btn {
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    background: white;
+    color: #374151;
+    text-decoration: none;
+    border-radius: 4px;
+    font-size: 14px;
+}
+.page-btn:hover:not(.active):not(.dots) {
+    background: #f3f4f6;
+}
+.page-btn.active {
+    background: #2f5fd3;
+    color: white;
+    border-color: #2f5fd3;
+}
+.page-btn.dots {
+    border: none;
+    background: none;
+    cursor: default;
+}
+
+/* 반응형 */
+@media (max-width: 768px) {
+    .search-fields {
+        flex-direction: column;
+        gap: 16px;
+    }
+    .search-group {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+    .search-group label {
+        min-width: unset;
+    }
+    .search-group input {
+        width: 100%;
+    }
+    .search-buttons {
+        justify-content: stretch;
+    }
+    .btn-reset, .btn-search {
+        flex: 1;
+    }
+    .data-table {
+        font-size: 13px;
+    }
+    .data-table th,
+    .data-table td {
+        padding: 8px 12px;
+    }
+}
+</style>
+
+<script>
+function resetForm() {
+    const form = document.querySelector('.search-form');
+    const inputs = form.querySelectorAll('input');
+    inputs.forEach(input => input.value = '');
+    
+    // URL에서 검색 파라미터 제거하고 리다이렉트
+    const url = new URL(window.location);
+    url.search = '';
+    window.location.href = url.toString();
+}
+
+function changePerPage(perPage) {
+    const url = new URL(window.location);
+    url.searchParams.set('per_page', perPage);
+    url.searchParams.delete('page'); // 페이지를 1페이지로 리셋
+    window.location.href = url.toString();
+}
+
+// Phase 1: 동적 컬럼 데이터 렌더링
+document.addEventListener('DOMContentLoaded', function() {
+    // 각 행의 custom_data 파싱하고 표시
+    document.querySelectorAll('tr').forEach(function(row) {
+        var customDataScript = row.querySelector('script');
+        if (customDataScript && typeof temp_custom !== 'undefined') {
+            var customData = temp_custom;
+            temp_custom = undefined; // 재사용 방지
+            
+            row.querySelectorAll('.dynamic-col').forEach(function(cell) {
+                var columnKey = cell.dataset.columnKey;
+                var columnType = cell.dataset.columnType;
+                var value = customData[columnKey];
+                var displayText = '-';
+                
+                if (value) {
+                    if (columnType === 'popup_person' && typeof value === 'object') {
+                        displayText = value.name + ' (' + value.department + ')';
+                    } else if (columnType === 'popup_company' && typeof value === 'object') {
+                        displayText = value.name;
+                    } else {
+                        displayText = value;
+                    }
+                }
+                
+                cell.querySelector('.dynamic-value').textContent = displayText;
+            });
+        }
+    });
+});
+
+// 사고 상세정보 팝업 윈도우 함수
+function openAccidentModal(accidentId) {
+    // 팝업 윈도우 옵션 설정
+    const width = 1400;
+    const height = 900;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes',
+        'toolbar=no',
+        'menubar=no',
+        'location=no',
+        'status=no'
+    ].join(',');
+    
+    // 새 팝업 윈도우 열기
+    const popupUrl = '/accident-detail/' + accidentId + '?popup=1';
+    const popup = window.open(popupUrl, 'accidentDetail', popupOptions);
+    
+    // 팝업이 차단되었는지 확인
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    // 팝업 포커스
+    popup.focus();
+}
+
+// 사고 등록 모달 열기
+function showRegisterModal() {
+    // 사고 등록 페이지로 이동 또는 모달 표시
+    const width = 1400;
+    const height = 900;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    // 새 사고 등록 페이지 열기
+    const popup = window.open('/accident-register?popup=1', 'accidentRegister', popupOptions);
+    if (!popup) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+    }
+}
+
+// Excel Import 모달
+function showImportModal() {
+    // Import 모달 HTML 생성
+    const modalHtml = `
+        <div class="modal fade" id="importModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Excel Import</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="importForm" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label class="form-label">Excel 파일 선택</label>
+                                <input type="file" class="form-control" id="importFile" accept=".xlsx,.xls" required>
+                                <small class="text-muted">※ Excel 파일(.xlsx, .xls)만 가능합니다.</small>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Import 옵션</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="skipDuplicate" checked>
+                                    <label class="form-check-label" for="skipDuplicate">
+                                        중복 데이터 건너뛰기
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="validateData" checked>
+                                    <label class="form-check-label" for="validateData">
+                                        데이터 유효성 검사
+                                    </label>
+                                </div>
+                            </div>
+                        </form>
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle"></i> Import 전 샘플 파일을 다운로드하여 형식을 확인하세요.
+                            <br>
+                            <a href="/api/accident-export?template=true" class="btn btn-sm btn-outline-primary mt-2">
+                                <i class="bi bi-download"></i> 샘플 파일 다운로드
+                            </a>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                        <button type="button" class="btn btn-primary" onclick="importExcel()">Import 시작</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // 모달이 이미 있으면 제거
+    const existingModal = document.getElementById('importModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    // 모달 추가 및 표시
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    const modal = new bootstrap.Modal(document.getElementById('importModal'));
+    modal.show();
+}
+
+// Excel Import 실행
+function importExcel() {
+    const fileInput = document.getElementById('importFile');
+    const file = fileInput.files[0];
+    
+    if (!file) {
+        alert('파일을 선택해주세요.');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('skip_duplicate', document.getElementById('skipDuplicate').checked);
+    formData.append('validate_data', document.getElementById('validateData').checked);
+    
+    // Loading 표시
+    const btn = event.target;
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 처리중...';
+    btn.disabled = true;
+    
+    fetch('/api/accident-import', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`Import 완료!\n성공: ${data.success_count}건\n실패: ${data.error_count}건`);
+            location.reload();
+        } else {
+            alert('Import 실패: ' + data.message);
+        }
+    })
+    .catch(error => {
+        alert('Import 중 오류가 발생했습니다.');
+        console.error(error);
+    })
+    .finally(() => {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    });
+}
+
+// Excel Export
+function exportToExcel() {
+    // 현재 검색 조건 포함하여 Export
+    const url = new URL(window.location);
+    const params = new URLSearchParams(url.search);
+    
+    // Export API 호출
+    window.location.href = '/api/accident-export?' + params.toString();
+}
+</script>
+
+    
+    
+    </div>
+    
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- 호버 기반 드롭다운 메뉴 스크립트 (지속성 추가) -->
+    <script>
+    (() => {
+      let menuTimer = null;
+      let activeMenu = null;
+      
+      // 메뉴 항목 호버 시
+      document.querySelectorAll('.nav-item.has-sub').forEach(item => {
+        // 마우스 진입
+        item.addEventListener('mouseenter', (e) => {
+          // 타이머 취소
+          if (menuTimer) {
+            clearTimeout(menuTimer);
+            menuTimer = null;
+          }
+          
+          // 다른 메뉴 닫기
+          document.querySelectorAll('.nav-item.keep-open').forEach(x => {
+            if (x !== item) x.classList.remove('keep-open');
+          });
+          
+          // 현재 메뉴 열기
+          item.classList.add('keep-open');
+          activeMenu = item;
+          item.querySelector('.nav-link').setAttribute('aria-expanded', 'true');
+        });
+        
+        // 마우스 이탈
+        item.addEventListener('mouseleave', (e) => {
+          // 0.75초 후에 닫기 (사용자가 다시 돌아올 시간 제공)
+          menuTimer = setTimeout(() => {
+            item.classList.remove('keep-open');
+            item.querySelector('.nav-link').setAttribute('aria-expanded', 'false');
+            if (activeMenu === item) activeMenu = null;
+          }, 750);
+        });
+        
+        // 서브메뉴 클릭 시 메뉴 유지
+        item.querySelectorAll('.submenu-link').forEach(link => {
+          link.addEventListener('click', (e) => {
+            // 링크는 정상 작동하도록 두고, 메뉴만 유지
+            item.classList.add('keep-open');
+          });
+        });
+      });
+      
+      // 메인 링크 클릭 시 토글 기능 추가 (호버와 별개로)
+      document.querySelectorAll('.nav-item.has-sub > .nav-link').forEach(a => {
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          const li = e.currentTarget.closest('.nav-item');
+          
+          // 타이머 취소
+          if (menuTimer) {
+            clearTimeout(menuTimer);
+            menuTimer = null;
+          }
+          
+          // 토글
+          if (li.classList.contains('keep-open')) {
+            li.classList.remove('keep-open');
+            a.setAttribute('aria-expanded', 'false');
+          } else {
+            // 다른 메뉴 닫기
+            document.querySelectorAll('.nav-item.keep-open').forEach(x => {
+              if (x !== li) {
+                x.classList.remove('keep-open');
+                x.querySelector('.nav-link').setAttribute('aria-expanded', 'false');
+              }
+            });
+            li.classList.add('keep-open');
+            a.setAttribute('aria-expanded', 'true');
+            activeMenu = li;
+          }
+        });
+      });
+      
+      // 페이지 다른 곳 클릭 시 메뉴 닫기
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('.nav-item.has-sub')) {
+          if (menuTimer) {
+            clearTimeout(menuTimer);
+            menuTimer = null;
+          }
+          document.querySelectorAll('.nav-item.keep-open').forEach(x => {
+            x.classList.remove('keep-open');
+            x.querySelector('.nav-link').setAttribute('aria-expanded', 'false');
+          });
+          activeMenu = null;
+        }
+      });
+    })();
+    </script>
+</body>
+</html>

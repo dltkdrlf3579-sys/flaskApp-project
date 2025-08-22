@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>메뉴 설정 - 관리자</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f5f5f5;
+        }
+        
+        .admin-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px 0;
+            margin-bottom: 30px;
+        }
+        
+        .admin-header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 600;
+        }
+        
+        .admin-header p {
+            margin: 5px 0 0 0;
+            opacity: 0.9;
+        }
+        
+        .menu-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .menu-card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: 2px solid transparent;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        
+        .menu-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+            border-color: #667eea;
+        }
+        
+        .menu-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .menu-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 8px;
+        }
+        
+        .menu-desc {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 15px;
+        }
+        
+        .menu-status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .status-active {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-dev {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .status-planned {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .back-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: white;
+            text-decoration: none;
+            background: rgba(255,255,255,0.2);
+            padding: 8px 16px;
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+        
+        .back-btn:hover {
+            background: rgba(255,255,255,0.3);
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-header">
+        <div class="container">
+            <a href="/" class="back-btn">
+                <i class="bi bi-arrow-left"></i> 메인으로
+            </a>
+            <h1 class="mt-3"><i class="bi bi-sliders"></i> 메뉴 설정</h1>
+            <p>각 메뉴별 컬럼 및 설정을 관리합니다</p>
+        </div>
+    </div>
+    
+    <div class="container">
+        <h5 class="mb-4">컬럼 설정</h5>
+        <div class="menu-grid">
+            <!-- 협력사 기준정보 -->
+            <div class="menu-card" onclick="alert('준비중입니다')">
+                <div class="menu-icon">
+                    <i class="bi bi-building"></i>
+                </div>
+                <div class="menu-title">협력사 기준정보 컬럼 설정</div>
+                <div class="menu-desc">협력사 마스터 정보 필드 관리</div>
+                <span class="menu-status status-planned">준비중</span>
+            </div>
+            
+            <!-- 협력사 사고 -->
+            <div class="menu-card" onclick="location.href='/admin/accident-columns'">
+                <div class="menu-icon">
+                    <i class="bi bi-exclamation-triangle"></i>
+                </div>
+                <div class="menu-title">협력사 사고 컬럼 설정</div>
+                <div class="menu-desc">사고 상세정보 추가 필드 관리</div>
+                <span class="menu-status status-active">운영중</span>
+            </div>
+            
+            <!-- 대시보드 설정 -->
+            <div class="menu-card" onclick="alert('준비중입니다')">
+                <div class="menu-icon">
+                    <i class="bi bi-graph-up"></i>
+                </div>
+                <div class="menu-title">대시보드 설정</div>
+                <div class="menu-desc">대시보드 위젯 및 레이아웃 관리</div>
+                <span class="menu-status status-planned">준비중</span>
+            </div>
+            
+            <!-- 게시판 설정 -->
+            <div class="menu-card" onclick="alert('준비중입니다')">
+                <div class="menu-icon">
+                    <i class="bi bi-clipboard-data"></i>
+                </div>
+                <div class="menu-title">게시판 설정</div>
+                <div class="menu-desc">게시판별 필드 및 권한 설정</div>
+                <span class="menu-status status-planned">준비중</span>
+            </div>
+        </div>
+        
+        <h5 class="mb-4 mt-5">데이터 관리</h5>
+        <div class="menu-grid">
+            <!-- 담당자 관리 -->
+            <div class="menu-card" onclick="alert('준비중입니다')">
+                <div class="menu-icon">
+                    <i class="bi bi-people"></i>
+                </div>
+                <div class="menu-title">담당자 관리</div>
+                <div class="menu-desc">직원 정보 및 권한 관리</div>
+                <span class="menu-status status-dev">개발중</span>
+            </div>
+            
+            <!-- 업체 관리 -->
+            <div class="menu-card" onclick="alert('준비중입니다')">
+                <div class="menu-icon">
+                    <i class="bi bi-buildings"></i>
+                </div>
+                <div class="menu-title">업체 관리</div>
+                <div class="menu-desc">협력업체 마스터 데이터 관리</div>
+                <span class="menu-status status-dev">개발중</span>
+            </div>
+            
+            <!-- 코드 관리 -->
+            <div class="menu-card" onclick="alert('준비중입니다')">
+                <div class="menu-icon">
+                    <i class="bi bi-list-ul"></i>
+                </div>
+                <div class="menu-title">공통 코드 관리</div>
+                <div class="menu-desc">드롭다운 옵션 및 코드 관리</div>
+                <span class="menu-status status-planned">준비중</span>
+            </div>
+        </div>
+        
+        <h5 class="mb-4 mt-5">시스템 설정</h5>
+        <div class="menu-grid">
+            <!-- 메뉴 순서 관리 -->
+            <div class="menu-card" onclick="alert('준비중입니다')">
+                <div class="menu-icon">
+                    <i class="bi bi-menu-button-wide"></i>
+                </div>
+                <div class="menu-title">메뉴 순서 관리</div>
+                <div class="menu-desc">상단 메뉴 구조 및 순서 설정</div>
+                <span class="menu-status status-planned">준비중</span>
+            </div>
+            
+            <!-- 백업/복원 -->
+            <div class="menu-card" onclick="alert('준비중입니다')">
+                <div class="menu-icon">
+                    <i class="bi bi-arrow-repeat"></i>
+                </div>
+                <div class="menu-title">백업/복원</div>
+                <div class="menu-desc">데이터 백업 및 복원 관리</div>
+                <span class="menu-status status-planned">준비중</span>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

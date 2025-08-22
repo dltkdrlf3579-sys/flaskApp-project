@@ -7,23 +7,23 @@
 {% block head %}
 {% endblock %}
 
-{% block title %}사고 상세정보{% endblock %}
-{% block popup_title %}{{ accident.accident_number }} - 사고 상세정보{% endblock %}
+{% block title %}사고 등록{% endblock %}
+{% block popup_title %}사고 등록{% endblock %}
 {% block content %}
 
 {% if not is_popup %}
 <div class="page-header">
-    <h2 class="page-title">사고 상세정보</h2>
+    <h2 class="page-title">사고 등록</h2>
     <div class="breadcrumb">
         <a href="{{ url_for('page_view', url='partner-accident') }}">협력사 사고</a>
         <span class="separator">></span>
-        <span class="current">{{ accident.accident_number }}</span>
+        <span class="current">신규 등록</span>
     </div>
 </div>
 {% endif %}
 
 <div class="accident-detail-container">
-    <!-- 1. 기본정보 영역 -->
+    <!-- 1. 기본정보 영역 (시스템 데이터 - 읽기전용) -->
     <div class="section basic-info-section">
         <div class="section-header">
             <h3 class="section-title">기본정보</h3>
@@ -36,84 +36,84 @@
                 <div class="info-row">
                     <div class="info-cell">
                         <label>사고번호</label>
-                        <div class="value">{{ accident.accident_number }}</div>
+                        <div class="value">자동 생성됩니다</div>
                     </div>
                     <div class="info-cell">
                         <label>사고명</label>
-                        <div class="value">{{ accident.accident_name }}</div>
+                        <div class="value">-</div>
                     </div>
                     <div class="info-cell">
                         <label>재해날짜</label>
-                        <div class="value">{{ accident.accident_date }}</div>
+                        <div class="value">-</div>
                     </div>
                     <div class="info-cell">
                         <label>사고등급</label>
-                        <div class="value">{{ accident.accident_grade or '-' }}</div>
+                        <div class="value">-</div>
                     </div>
                     <div class="info-cell">
                         <label>사고분류</label>
-                        <div class="value">{{ accident.accident_type or '-' }}</div>
+                        <div class="value">-</div>
                     </div>
                 </div>
                 <div class="info-row">
                     <div class="info-cell">
                         <label>재해유형</label>
-                        <div class="value">{{ accident.disaster_type or '-' }}</div>
+                        <div class="value">-</div>
                     </div>
                     <div class="info-cell">
                         <label>재해형태</label>
-                        <div class="value">{{ accident.disaster_form or '-' }}</div>
+                        <div class="value">-</div>
                     </div>
                     <div class="info-cell">
                         <label>사업장</label>
-                        <div class="value">{{ accident.workplace or '-' }}</div>
+                        <div class="value">-</div>
                     </div>
                     <div class="info-cell">
                         <label>건물</label>
-                        <div class="value">{{ accident.building or '-' }}</div>
+                        <div class="value">-</div>
                     </div>
                 </div>
                 <div class="info-row">
                     <div class="info-cell">
                         <label>층</label>
-                        <div class="value">{{ accident.floor or '-' }}</div>
+                        <div class="value">-</div>
                     </div>
                     <div class="info-cell">
                         <label>세부위치</label>
-                        <div class="value">{{ accident.detail_location or '-' }}</div>
+                        <div class="value">-</div>
                     </div>
                     <div class="info-cell">
                         <label>시간</label>
-                        <div class="value">{{ accident.time or '-' }}</div>
+                        <div class="value">-</div>
                     </div>
                     <div class="info-cell">
                         <label>요일</label>
-                        <div class="value">{{ accident.day_of_week or '-' }}</div>
+                        <div class="value">-</div>
                     </div>
                 </div>
                 <div class="info-row">
                     <div class="info-cell">
                         <label>귀책협력사(1차)</label>
-                        <div class="value">{{ accident.responsible_company_1 or '-' }}</div>
+                        <div class="value">-</div>
                     </div>
                     <div class="info-cell">
                         <label>귀책협력사(1차)사업자번호</label>
-                        <div class="value">{{ accident.responsible_company_1_business_number or '-' }}</div>
+                        <div class="value">-</div>
                     </div>
                     <div class="info-cell">
                         <label>귀책협력사(2차)</label>
-                        <div class="value">{{ accident.responsible_company_2 or '-' }}</div>
+                        <div class="value">-</div>
                     </div>
                     <div class="info-cell">
                         <label>귀책협력사(2차)사업자번호</label>
-                        <div class="value">{{ accident.responsible_company_2_business_number or '-' }}</div>
+                        <div class="value">-</div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- 2. 추가 기입정보 영역 (Phase 2: 동적 컬럼 입력 폼) -->
+    <!-- 2. 추가 기입정보 영역 (동적 컬럼 입력 폼) -->
     <div class="section additional-info-section">
         <div class="section-header">
             <h3 class="section-title">추가 기입정보</h3>
@@ -122,6 +122,7 @@
             </button>
         </div>
         <div class="section-content" id="additional-info-content">
+            
             <div class="info-table">
                 {% set columns_per_row = 4 %}
                 {% for chunk in dynamic_columns | batch(columns_per_row) %}
@@ -129,13 +130,12 @@
                     {% for col in chunk %}
                     <div class="info-cell">
                         <label>{{ col.column_name }}</label>
-                        {% set col_value = custom_data.get(col.column_key, '') %}
                         
                         {% if col.column_type == 'text' %}
                             <input type="text" 
                                    class="dynamic-input" 
                                    data-column-key="{{ col.column_key }}"
-                                   value="{{ col_value }}"
+                                   value=""
                                    placeholder="{{ col.column_name }} 입력">
                         
                         {% elif col.column_type == 'dropdown' %}
@@ -144,7 +144,7 @@
                                 {% if col.dropdown_options %}
                                     {% set options = col.dropdown_options | from_json %}
                                     {% for option in options %}
-                                        <option value="{{ option }}" {% if col_value == option %}selected{% endif %}>{{ option }}</option>
+                                        <option value="{{ option }}">{{ option }}</option>
                                     {% endfor %}
                                 {% endif %}
                             </select>
@@ -153,14 +153,14 @@
                             <input type="date" 
                                    class="dynamic-input" 
                                    data-column-key="{{ col.column_key }}"
-                                   value="{{ col_value }}">
+                                   value="">
                         
                         {% elif col.column_type == 'popup_person' %}
                             <div class="popup-input-wrapper">
                                 <input type="text" 
                                        class="dynamic-input popup-person" 
                                        data-column-key="{{ col.column_key }}"
-                                       value="{{ col_value.name if col_value is mapping else col_value }}"
+                                       value=""
                                        placeholder="담당자 선택"
                                        readonly>
                                 <button class="btn-popup" onclick="openPersonPopup('{{ col.column_key }}')">선택</button>
@@ -171,7 +171,7 @@
                                 <input type="text" 
                                        class="dynamic-input popup-company" 
                                        data-column-key="{{ col.column_key }}"
-                                       value="{{ col_value.name if col_value is mapping else col_value }}"
+                                       value=""
                                        placeholder="업체 선택"
                                        readonly>
                                 <button class="btn-popup" onclick="openCompanyPopup('{{ col.column_key }}')">선택</button>
@@ -181,7 +181,7 @@
                             <input type="text" 
                                    class="dynamic-input" 
                                    data-column-key="{{ col.column_key }}"
-                                   value="{{ col_value }}"
+                                   value=""
                                    placeholder="{{ col.column_name }} 입력">
                         {% endif %}
                     </div>
@@ -208,10 +208,10 @@
                 <div id="detailed-content" 
                      class="editable-content" 
                      contenteditable="true" 
-                     placeholder="사고에 대한 상세 내용을 입력하세요.">{{ accident.detailed_content | safe if accident.detailed_content else '' }}</div>
+                     placeholder="사고에 대한 상세 내용을 입력하세요."></div>
                 
                 <!-- 숨겨진 textarea (저장용) -->
-                <textarea id="detailed-content-hidden" style="display: none;">{{ accident.detailed_content or '' }}</textarea>
+                <textarea id="detailed-content-hidden" style="display: none;"></textarea>
             </div>
         </div>
     </div>
@@ -221,7 +221,7 @@
         <div class="section-header">
             <h3 class="section-title">첨부파일</h3>
             <button class="btn-add-file" onclick="document.getElementById('file-input').click();">추가</button>
-            <span class="file-count">총 <span id="file-count">{{ attachments|length }}</span>개</span>
+            <span class="file-count">총 <span id="file-count">0</span>개</span>
             <span class="file-size"><span id="file-size">0</span> MB / 50 MB</span>
         </div>
         <div class="section-content">
@@ -234,26 +234,9 @@
                     <div class="col-action">상태</div>
                 </div>
                 <div class="table-body" id="attachments-tbody">
-                    {% for attachment in attachments %}
-                    <div class="table-row" data-id="{{ attachment.id }}">
-                        <div class="col-no">{{ loop.index }}</div>
-                        <div class="col-file">
-                            <span class="file-icon">📄</span>
-                            <a href="/download/{{ attachment.id }}" class="file-link" download>{{ attachment.file_name }}</a>
-                            <span class="file-size">({{ (attachment.file_size / 1024) | round(2) }} KB)</span>
-                        </div>
-                        <div class="col-desc">
-                            <input type="text" value="{{ attachment.description or '' }}" placeholder="설명을 입력하세요" class="attachment-desc">
-                        </div>
-                        <div class="col-action">
-                            <button class="btn-delete" onclick="deleteAttachment(this)">삭제</button>
-                        </div>
-                    </div>
-                    {% else %}
                     <div class="table-row no-data" id="no-data-row">
                         <div class="col-full">등록된 첨부파일이 없습니다.</div>
                     </div>
-                    {% endfor %}
                 </div>
             </div>
         </div>
@@ -261,32 +244,8 @@
 
     <!-- 저장 버튼 영역 -->
     <div class="save-section">
-        <button class="btn-save" onclick="showPasswordModal()">수정완료</button>
+        <button class="btn-save" onclick="registerAccident()">등록완료</button>
     </div>
-
-    <!-- 비밀번호 입력 모달 -->
-    <div id="password-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>편집 권한 확인</h3>
-                <span class="close" onclick="closePasswordModal()">&times;</span>
-            </div>
-            <div class="modal-body">
-                <p>편집을 위해 비밀번호를 입력해주세요.</p>
-                <input type="password" id="password-input" placeholder="비밀번호" class="password-field">
-                <div class="modal-buttons">
-                    <button class="btn-confirm" onclick="verifyPasswordAndSave()">확인</button>
-                    <button class="btn-cancel" onclick="closePasswordModal()">취소</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    {% if not is_popup %}
-    <div class="action-buttons">
-        <a href="{{ url_for('page_view', url='partner-accident') }}" class="btn-back">목록으로</a>
-    </div>
-    {% endif %}
 </div>
 
 <style>
@@ -323,20 +282,10 @@
 
 /* 팝업 모드일 때 헤더와 액션 버튼 숨김 */
 {% if is_popup %}
-.page-header, .action-buttons {
+.page-header {
     display: none !important;
 }
-{% endif %}
 
-/* 메인 컨테이너 */
-.accident-detail-container {
-    max-width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-}
-
-{% if is_popup %}
 .accident-detail-container {
     padding: 0;
     gap: 0;
@@ -353,6 +302,14 @@
     border-bottom: none;
 }
 {% endif %}
+
+/* 메인 컨테이너 */
+.accident-detail-container {
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
 
 /* 섹션 공통 스타일 */
 .section {
@@ -425,10 +382,42 @@
     border: 1px solid #e1e5e9;
     border-radius: 4px;
     font-size: 14px;
-    color: #333;
+    color: #999;
     min-height: 20px;
     display: flex;
     align-items: center;
+}
+
+/* 1-1. 기본정보 입력 필드 스타일 */
+.basic-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 14px;
+    background: white;
+    transition: border-color 0.2s;
+}
+
+.basic-input:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+.basic-input:read-only {
+    background: #f9fafb;
+    color: #666;
+    cursor: not-allowed;
+}
+
+.basic-input::placeholder {
+    color: #9ca3af;
+    font-style: italic;
+}
+
+select.basic-input {
+    cursor: pointer;
 }
 
 /* 2. 추가 기입정보 섹션 (동적 컬럼 입력) */
@@ -717,142 +706,6 @@
     background: #1d4ed8;
 }
 
-/* 비밀번호 모달 */
-.modal {
-    display: none;
-    position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0,0,0,0.4);
-}
-
-.modal-content {
-    background-color: #fefefe;
-    margin: 15% auto;
-    padding: 0;
-    border: none;
-    border-radius: 8px;
-    width: 400px;
-    max-width: 90%;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-}
-
-.modal-header {
-    padding: 20px 25px 15px;
-    border-bottom: 1px solid #e1e5e9;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.modal-header h3 {
-    margin: 0;
-    color: #333;
-    font-size: 18px;
-    font-weight: 600;
-}
-
-.close {
-    color: #999;
-    font-size: 24px;
-    font-weight: bold;
-    cursor: pointer;
-    line-height: 1;
-}
-
-.close:hover {
-    color: #333;
-}
-
-.modal-body {
-    padding: 25px;
-}
-
-.modal-body p {
-    margin: 0 0 20px 0;
-    color: #555;
-    font-size: 14px;
-}
-
-.password-field {
-    width: 100%;
-    padding: 12px 15px;
-    border: 1px solid #e1e5e9;
-    border-radius: 4px;
-    font-size: 14px;
-    margin-bottom: 20px;
-    box-sizing: border-box;
-}
-
-.password-field:focus {
-    outline: none;
-    border-color: #2f5fd3;
-    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
-}
-
-.modal-buttons {
-    display: flex;
-    gap: 10px;
-    justify-content: flex-end;
-}
-
-.btn-confirm, .btn-cancel {
-    padding: 10px 20px;
-    border: none;
-    border-radius: 4px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    min-width: 80px;
-}
-
-.btn-confirm {
-    background: #2f5fd3;
-    color: white;
-}
-
-.btn-confirm:hover {
-    background: #1d4ed8;
-}
-
-.btn-cancel {
-    background: #6b7280;
-    color: white;
-}
-
-.btn-cancel:hover {
-    background: #4b5563;
-}
-
-/* 액션 버튼 */
-.action-buttons {
-    display: flex;
-    gap: 12px;
-    justify-content: flex-start;
-    margin-top: 20px;
-}
-
-.btn-back {
-    padding: 10px 20px;
-    border: none;
-    border-radius: 4px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    text-decoration: none;
-    display: inline-block;
-    background: #6b7280;
-    color: white;
-}
-
-.btn-back:hover {
-    background: #4b5563;
-    color: white;
-    text-decoration: none;
-}
 
 /* 반응형 */
 @media (max-width: 768px) {
@@ -877,21 +730,11 @@
     .table-row > div:last-child {
         border-bottom: none;
     }
-    
-    .action-buttons {
-        flex-direction: column;
-        align-items: stretch;
-    }
-    
-    .btn-back {
-        text-align: center;
-    }
 }
 </style>
 
 <script>
 let pendingFiles = [];
-let deletedAttachments = [];
 
 function toggleSection(sectionId) {
     const content = document.getElementById(sectionId + '-content');
@@ -946,10 +789,11 @@ function handleFileUpload(files) {
 
 function deleteAttachment(btn) {
     const row = btn.closest('.table-row');
-    const attachmentId = row.dataset.id;
+    const index = Array.from(row.parentNode.children).indexOf(row);
     
-    if (attachmentId) {
-        deletedAttachments.push(attachmentId);
+    // pendingFiles에서 해당 파일 제거
+    if (row.dataset.isNew === 'true') {
+        pendingFiles.splice(index, 1);
     }
     
     row.remove();
@@ -966,6 +810,13 @@ function deleteAttachment(btn) {
 function updateFileCount() {
     const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
     document.getElementById('file-count').textContent = rows.length;
+    
+    // 파일 크기 계산
+    let totalSize = 0;
+    pendingFiles.forEach(file => {
+        totalSize += file.size / (1024 * 1024); // MB로 변환
+    });
+    document.getElementById('file-size').textContent = totalSize.toFixed(2);
 }
 
 function updateRowNumbers() {
@@ -976,63 +827,17 @@ function updateRowNumbers() {
     });
 }
 
-function showPasswordModal() {
-    document.getElementById('password-modal').style.display = 'block';
-    document.getElementById('password-input').focus();
-}
-
-function closePasswordModal() {
-    document.getElementById('password-modal').style.display = 'none';
-    document.getElementById('password-input').value = '';
-}
-
-function verifyPasswordAndSave() {
-    const password = document.getElementById('password-input').value;
+function registerAccident() {
+    console.log('등록 함수 시작');
     
-    if (!password) {
-        alert('비밀번호를 입력해주세요.');
-        return;
-    }
-    
-    // 서버에서 비밀번호 검증
-    fetch('/verify-password', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-            password: password,
-            board_type: '{{ board_type }}' 
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            closePasswordModal();
-            saveChanges();
-        } else {
-            alert(data.message || '비밀번호가 올바르지 않습니다.');
-            document.getElementById('password-input').value = '';
-            document.getElementById('password-input').focus();
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('비밀번호 검증 중 오류가 발생했습니다.');
-    });
-}
-
-function saveChanges() {
     // contentEditable div에서 HTML 내용 가져오기
     const editableDiv = document.getElementById('detailed-content');
     const detailedContent = editableDiv.innerHTML;
+    console.log('상세내용:', detailedContent.substring(0, 100));
     
-    console.log('Saving content from contentEditable:', detailedContent);
-    
-    const accidentNumber = '{{ accident.accident_number }}';
-    
-    // Phase 2: 동적 컬럼 데이터 수집
+    // 동적 컬럼 데이터 수집 (추가 기입정보만)
     const customData = {};
+    console.log('동적 입력 필드 개수:', document.querySelectorAll('.dynamic-input').length);
     document.querySelectorAll('.dynamic-input').forEach(element => {
         const columnKey = element.dataset.columnKey;
         let value = '';
@@ -1043,8 +848,6 @@ function saveChanges() {
         } else {
             value = element.value || element.textContent || '';
         }
-        
-        console.log(`Collecting: ${columnKey} = ${value} (type: ${element.tagName})`);  // 디버깅용
         
         // popup 타입인 경우 객체로 저장
         if (element.classList.contains('popup-person')) {
@@ -1060,58 +863,64 @@ function saveChanges() {
         }
         
         customData[columnKey] = value;
+        console.log(`컬럼 ${columnKey}: ${JSON.stringify(value)}`);
     });
     
-    console.log('Collected customData:', customData);  // 디버깅용
+    console.log('수집된 동적 데이터:', customData);
     
-    // 첨부파일 데이터 수집 (기존 로직 유지)
+    // 첨부파일 설명 수집
     const attachments = [];
     const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
     
     rows.forEach(row => {
         const desc = row.querySelector('.attachment-desc')?.value || '';
-        const id = row.dataset.id;
-        
         attachments.push({
-            id: id || null,
-            description: desc,
-            isNew: row.dataset.isNew === 'true'
+            description: desc
         });
     });
     
     // FormData 생성
     const formData = new FormData();
-    formData.append('accident_number', accidentNumber);
     formData.append('detailed_content', detailedContent);
-    formData.append('custom_data', JSON.stringify(customData));  // 동적 컬럼 데이터 추가
-    formData.append('deleted_attachments', JSON.stringify(deletedAttachments));
+    formData.append('custom_data', JSON.stringify(customData));  // 동적 컬럼만
     formData.append('attachment_data', JSON.stringify(attachments));
     
     // 새 파일들 추가
     pendingFiles.forEach((file, index) => {
-        console.log(`Adding file ${index}: ${file.name}`);
         formData.append('files', file);
     });
     
-    console.log('Sending data to server...');
-    
     // 서버로 전송
-    fetch('/update-accident', {
+    console.log('서버로 데이터 전송 시작...');
+    fetch('/register-accident', {
         method: 'POST',
         body: formData
     })
-    .then(response => response.json())
+    .then(response => {
+        console.log('서버 응답 상태:', response.status);
+        return response.json();
+    })
     .then(data => {
+        console.log('서버 응답 데이터:', data);
         if (data.success) {
-            alert('수정이 완료되었습니다.');
-            location.reload();
+            alert('사고가 성공적으로 등록되었습니다.');
+            {% if is_popup %}
+            if (window.opener) {
+                window.opener.location.reload();
+                window.close();
+            } else {
+                window.location.href = '/partner-accident';
+            }
+            {% else %}
+            window.location.href = '/partner-accident';
+            {% endif %}
         } else {
-            alert('수정 중 오류가 발생했습니다: ' + data.message);
+            alert('등록 중 오류가 발생했습니다: ' + (data.message || '알 수 없는 오류'));
         }
     })
     .catch(error => {
         console.error('Error:', error);
-        alert('수정 중 오류가 발생했습니다.');
+        alert('등록 중 오류가 발생했습니다.');
     });
 }
 
@@ -1123,7 +932,7 @@ document.getElementById('detailed-content').addEventListener('paste', function(e
     
     const clipboardData = e.clipboardData || window.clipboardData;
     
-    // 🎯 엑셀 표 처리를 이미지보다 먼저 확인!
+    // 엑셀 표 처리를 이미지보다 먼저 확인
     const text = clipboardData.getData('text/plain');
     if (text && text.includes('\t') && text.includes('\n')) {
         console.log('엑셀 표 데이터 감지:', text.substring(0, 100));
@@ -1224,29 +1033,9 @@ function insertAtCursor(element) {
     }
 }
 
-// 페이지 로드시 첨부파일 정보 초기화
+// 페이지 로드시 초기화
 document.addEventListener('DOMContentLoaded', function() {
-    updateFileInfo();
+    updateFileCount();
 });
-
-function updateFileInfo() {
-    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
-    const fileCount = rows.length;
-    
-    // 기존 파일 크기 계산
-    let totalSize = 0;
-    rows.forEach(row => {
-        const sizeText = row.querySelector('.file-size');
-        if (sizeText) {
-            const sizeMatch = sizeText.textContent.match(/\(([\d.]+)\s*KB\)/);
-            if (sizeMatch) {
-                totalSize += parseFloat(sizeMatch[1]) / 1024; // KB를 MB로 변환
-            }
-        }
-    });
-    
-    document.getElementById('file-count').textContent = fileCount;
-    document.getElementById('file-size').textContent = totalSize.toFixed(2);
-}
 </script>
 {% endblock %}

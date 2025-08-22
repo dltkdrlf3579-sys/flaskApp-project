@@ -4,8 +4,26 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}PORTAL{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css" rel="stylesheet">
     <style>
         {% block style %}{% endblock %}
+    </style>
+    <style>
+        /* 전체 페이지 가로 스크롤 방지 */
+        html, body {
+            overflow-x: hidden;
+            width: 100%;
+            max-width: 100vw;
+        }
+        
+        /* 컨텐츠 영역 기본 설정 */
+        .content-wrapper {
+            width: 100%;
+            max-width: 100%;
+            padding: 20px;
+            box-sizing: border-box;
+        }
     </style>
 </head>
 <body>
@@ -47,7 +65,18 @@
           {% endif %}
           {% endfor %}
         </ul>
-        <!-- 편집 기능 제거 - 심플함을 위해 -->
+        <!-- 관리자 메뉴 (우측 상단) -->
+        <div class="admin-tools">
+          <div class="dropdown">
+            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" id="adminMenu" data-bs-toggle="dropdown" aria-expanded="false">
+              <i class="bi bi-gear"></i> 관리자
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="adminMenu">
+              <li><a class="dropdown-item" href="/admin/menu-settings"><i class="bi bi-sliders"></i> 메뉴 설정</a></li>
+              <li><a class="dropdown-item" href="/admin/permission-settings"><i class="bi bi-shield-lock"></i> 권한 설정</a></li>
+            </ul>
+          </div>
+        </div>
       </div>
     </nav>
 
@@ -57,11 +86,18 @@
       background: #ffffff; 
       border-bottom: 1px solid #e5e7eb;  /* 하단 구분선 추가 */
       box-shadow: 0 2px 4px rgba(0,0,0,0.05);  /* 가벼운 그림자 */
-      z-index: 9999; 
+      z-index: 9999;  /* 최상위로 설정 */
+      position: relative;  /* position 명시 */
     }
     .topbar-inner {
       max-width: none; margin: 0; height: 56px;
       display: flex; align-items: center; gap: 16px; padding: 0 24px;
+      justify-content: space-between;
+    }
+    
+    /* 관리자 도구 (우측 상단) */
+    .admin-tools {
+      margin-left: auto;
     }
     .logo-img {
       height: 40px;
@@ -79,25 +115,30 @@
     }
 
     /* ===== 1차 메뉴 ===== */
-    .nav-main { list-style: none; display: flex; align-items: stretch; gap: 0; margin: 0; padding: 0; }
+    .nav-main { list-style: none; display: flex; align-items: stretch; gap: 0; margin: 0; padding: 0; flex: 1; }
     .nav-item { position: relative; }
+    
+    
     .nav-link {
-      color: #333; text-decoration: none; font-weight: 500;
+      color: #333; text-decoration: none; font-weight: 700;
       padding: 10px 16px; display: block; line-height: 28px;
       transition: color 0.2s ease;
+      cursor: pointer;
     }
-    .nav-link:hover, .nav-item.is-active > .nav-link { 
+    .nav-link:hover, .nav-item.is-active > .nav-link, .nav-item.open > .nav-link { 
       color: #2f5fd3;
     }
     .sep { color: #ddd; align-self: center; padding: 0 8px; user-select: none; }
 
     /* ===== 2차 드롭다운 ===== */
     .submenu {
-      position: absolute; left: 0; top: 100%;
+      position: absolute; left: 0; top: calc(100% - 1px); /* 간격 제거 */
       min-width: 180px; background: #fff; border: 1px solid #e5e7eb;
-      border-radius: 4px; box-shadow: 0 8px 18px rgba(0,0,0,.08);
+      border-radius: 0 0 4px 4px; /* 상단 모서리는 직각으로 */
+      box-shadow: 0 8px 18px rgba(0,0,0,.08);
       padding: 6px 0; display: none; list-style: none; margin: 0;
-      z-index: 10000;  /* 이미지보다 위에 표시 */
+      z-index: 10000;  /* 최상위로 설정 */
+      border-top: 2px solid #2f5fd3; /* 상단에 강조선 추가 */
     }
     .submenu-link {
       display: block; padding: 9px 12px; color: #222; text-decoration: none; white-space: nowrap; font-size: 14px;
@@ -107,13 +148,15 @@
 
     /* 편집 기능 CSS 제거됨 */
 
-    /* 데스크톱: 호버/포커스 시 표시 */
-    @media (min-width: 992px) {
-      .nav-item:hover > .submenu,
-      .nav-item:focus-within > .submenu { display: block; }
+    /* 호버 기반 드롭다운 */
+    .nav-item:hover > .submenu,
+    .nav-item.keep-open > .submenu { 
+      display: block; 
     }
+    
+    /* 화살표 제거 - 깔끔한 디자인 유지 */
 
-    /* 모바일: 가로 스크롤 + 탭으로 토글 */
+    /* 모바일 반응형 조정 */
     @media (max-width: 991.98px) {
       .topbar-inner { height: auto; flex-wrap: wrap; padding: 8px 10px; gap: 8px; }
       .brand { padding: 6px 0; }
@@ -121,14 +164,19 @@
       .nav-link { padding: 8px 12px; }
       .sep { display: none; }
       .submenu {
-        position: static; display: none; border: 1px solid #e5e7eb; border-top: none; box-shadow: none; border-radius: 0 0 4px 4px;
+        position: static; border: 1px solid #e5e7eb; border-top: none; box-shadow: none; border-radius: 0 0 4px 4px;
       }
-      .nav-item.open > .submenu { display: block; }
       .right-tools { width: 100%; justify-content: flex-end; }
     }
 
     /* 컨텐츠 영역 */
-    .container { max-width: none; margin: 20px 24px; padding: 0; }
+    .container { 
+        max-width: none; 
+        margin: 20px 24px; 
+        padding: 0; 
+        width: calc(100% - 48px);
+        box-sizing: border-box;
+    }
     
     /* 플래시 메시지 */
     .flash-messages { margin: 20px 24px; padding: 0; }
@@ -148,25 +196,109 @@
         {% endfor %}
     </div>
 
+    {% if request.endpoint != 'index' %}
     <div class="container">
-        {% block content %}{% endblock %}
+    {% endif %}
+    
+    {% block content %}{% endblock %}
+    
+    {% if request.endpoint != 'index' %}
     </div>
+    {% endif %}
 
-    <!-- 모바일 토글용 짧은 스크립트 (데스크톱에서는 무시) -->
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- 호버 기반 드롭다운 메뉴 스크립트 (지속성 추가) -->
     <script>
     (() => {
-      const isDesktop = () => window.matchMedia('(min-width: 992px)').matches;
+      let menuTimer = null;
+      let activeMenu = null;
+      
+      // 메뉴 항목 호버 시
+      document.querySelectorAll('.nav-item.has-sub').forEach(item => {
+        // 마우스 진입
+        item.addEventListener('mouseenter', (e) => {
+          // 타이머 취소
+          if (menuTimer) {
+            clearTimeout(menuTimer);
+            menuTimer = null;
+          }
+          
+          // 다른 메뉴 닫기
+          document.querySelectorAll('.nav-item.keep-open').forEach(x => {
+            if (x !== item) x.classList.remove('keep-open');
+          });
+          
+          // 현재 메뉴 열기
+          item.classList.add('keep-open');
+          activeMenu = item;
+          item.querySelector('.nav-link').setAttribute('aria-expanded', 'true');
+        });
+        
+        // 마우스 이탈
+        item.addEventListener('mouseleave', (e) => {
+          // 0.75초 후에 닫기 (사용자가 다시 돌아올 시간 제공)
+          menuTimer = setTimeout(() => {
+            item.classList.remove('keep-open');
+            item.querySelector('.nav-link').setAttribute('aria-expanded', 'false');
+            if (activeMenu === item) activeMenu = null;
+          }, 750);
+        });
+        
+        // 서브메뉴 클릭 시 메뉴 유지
+        item.querySelectorAll('.submenu-link').forEach(link => {
+          link.addEventListener('click', (e) => {
+            // 링크는 정상 작동하도록 두고, 메뉴만 유지
+            item.classList.add('keep-open');
+          });
+        });
+      });
+      
+      // 메인 링크 클릭 시 토글 기능 추가 (호버와 별개로)
       document.querySelectorAll('.nav-item.has-sub > .nav-link').forEach(a => {
         a.addEventListener('click', (e) => {
-          if (isDesktop()) return; // 데스크톱은 호버로 처리
           e.preventDefault();
           const li = e.currentTarget.closest('.nav-item');
-          // 현재 항목만 열고 나머지는 닫기
-          document.querySelectorAll('.nav-item.has-sub.open').forEach(x => { if (x !== li) x.classList.remove('open'); });
-          li.classList.toggle('open');
-          // aria-expanded 업데이트
-          a.setAttribute('aria-expanded', li.classList.contains('open') ? 'true' : 'false');
+          
+          // 타이머 취소
+          if (menuTimer) {
+            clearTimeout(menuTimer);
+            menuTimer = null;
+          }
+          
+          // 토글
+          if (li.classList.contains('keep-open')) {
+            li.classList.remove('keep-open');
+            a.setAttribute('aria-expanded', 'false');
+          } else {
+            // 다른 메뉴 닫기
+            document.querySelectorAll('.nav-item.keep-open').forEach(x => {
+              if (x !== li) {
+                x.classList.remove('keep-open');
+                x.querySelector('.nav-link').setAttribute('aria-expanded', 'false');
+              }
+            });
+            li.classList.add('keep-open');
+            a.setAttribute('aria-expanded', 'true');
+            activeMenu = li;
+          }
         });
+      });
+      
+      // 페이지 다른 곳 클릭 시 메뉴 닫기
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('.nav-item.has-sub')) {
+          if (menuTimer) {
+            clearTimeout(menuTimer);
+            menuTimer = null;
+          }
+          document.querySelectorAll('.nav-item.keep-open').forEach(x => {
+            x.classList.remove('keep-open');
+            x.querySelector('.nav-link').setAttribute('aria-expanded', 'false');
+          });
+          activeMenu = null;
+        }
       });
     })();
     </script>

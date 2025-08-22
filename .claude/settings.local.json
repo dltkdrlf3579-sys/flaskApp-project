@@ -2,7 +2,16 @@
   "permissions": {
     "allow": [
       "Bash(git add:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(cp:*)",
+      "Bash(python:*)",
+      "Bash(sqlite3:*)",
+      "Bash(curl:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(mkdir:*)",
+      "Bash(/dev/null)",
+      "Bash(where python)"
     ],
     "deny": [],
     "ask": []

@@ -166,6 +166,36 @@ class PartnerDataManager:
             )
         ''')
         
+        # Phase 1: 사고 컬럼 설정 테이블 (동적 컬럼 관리용)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS accident_column_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                column_key VARCHAR(50) UNIQUE NOT NULL,
+                column_name VARCHAR(100) NOT NULL,
+                column_type VARCHAR(20) DEFAULT 'text',
+                column_order INTEGER DEFAULT 0,
+                is_active BOOLEAN DEFAULT 1,
+                dropdown_options TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Phase 1: 표준 담당자 마스터 테이블 (팝업 선택용)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS person_master (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR(50) NOT NULL,
+                department VARCHAR(100),
+                position VARCHAR(50),
+                company_name VARCHAR(100),
+                phone VARCHAR(20),
+                email VARCHAR(100),
+                is_active BOOLEAN DEFAULT 1,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
         # 협력사 사고 정보 캐시 테이블
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS accidents_cache (

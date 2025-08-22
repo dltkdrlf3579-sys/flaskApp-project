@@ -1,0 +1,289 @@
+{% extends "base.html" %}
+{% block title %}메인{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="container-fluid">
+        
+        <!-- 상단 이미지 영역 (탑바 바로 밑) -->
+        <div class="top-image-section">
+            <!-- 메인 이미지 -->
+            <div class="main-image-container">
+                <!-- 실제 이미지 파일 경로로 변경하세요 -->
+                <img src="/static/images/main-safety.jpg" 
+                     alt="안전관리 시스템" 
+                     class="main-image"
+                     onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIwMCIgaGVpZ2h0PSIzMDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0iIzRBOTBFMiIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMzZweCIgZmlsbD0id2hpdGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj7smYjsoITqtIDrpqwg6rOA66as7IKs7IaQ7IusPC90ZXh0Pjwvc3ZnPg==';">
+                <div class="image-overlay">
+                </div>
+            </div>
+        </div>
+
+        <!-- 바로가기 섹션 -->
+        <div class="link-buttons-section">
+            <h3 class="section-title mb-4 text-center">
+                바로가기
+            </h3>
+            
+            <!-- 4개 버튼을 1x4 배치 (가로로 4개) -->
+            <div class="link-buttons-grid">
+                        
+                        <!-- 버튼 1: 고용노동부 -->
+                        <div class="link-button-item">
+                            <a href="https://www.moel.go.kr" target="_blank" class="link-button">
+                                <div class="button-content">
+                                    <h5>고용노동부</h5>
+                                    <p>산업안전보건 정책 및 제도</p>
+                                </div>
+                            </a>
+                        </div>
+
+                        <!-- 버튼 2: 안전보건공단 -->
+                        <div class="link-button-item">
+                            <a href="https://www.kosha.or.kr" target="_blank" class="link-button">
+                                <div class="button-content">
+                                    <h5>안전보건공단</h5>
+                                    <p>산업재해 예방 및 안전보건 지원</p>
+                                </div>
+                            </a>
+                        </div>
+
+                        <!-- 버튼 3: 중대재해처벌법 -->
+                        <div class="link-button-item">
+                            <a href="https://www.moel.go.kr/policy/policyinfo/safety/list4.do" target="_blank" class="link-button">
+                                <div class="button-content">
+                                    <h5>중대재해처벌법</h5>
+                                    <p>중대재해 처벌 관련 법령 안내</p>
+                                </div>
+                            </a>
+                        </div>
+
+                        <!-- 버튼 4: 안전신문고 -->
+                        <div class="link-button-item">
+                            <a href="https://www.safereport.go.kr" target="_blank" class="link-button">
+                                <div class="button-content">
+                                    <h5>안전신문고</h5>
+                                    <p>안전사고 신고 및 제보 시스템</p>
+                                </div>
+                            </a>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 커스텀 스타일 -->
+<style>
+/* ======================
+   메인 컨테이너 스타일
+   ====================== */
+.main-content {
+    padding: 0;
+    min-height: 80vh;
+}
+
+.container-fluid {
+    padding: 0 20px;  /* 좌우 여백 추가 */
+    max-width: 1240px;  /* 최대 너비 제한 */
+    margin: 0 auto;  /* 중앙 정렬 */
+}
+
+/* ======================
+   상단 이미지 섹션 스타일
+   ====================== */
+.top-image-section {
+    margin-top: 50px;  /* 상단 네비게이션과 이미지 사이 여백 추가 */
+    margin-bottom: 0px;  /* 이미지와 바로가기 섹션 간격 증가 */
+}
+
+.main-image-container {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+    border-radius: 12px;  /* 모서리 둥글게 */
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);  /* 그림자 효과 */
+}
+
+.main-image {
+    width: 100%;
+    height: 450px;  /* 300px → 450px로 증가 */
+    object-fit: cover;
+    display: block;
+}
+
+.image-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(transparent, rgba(0,0,0,0.7));
+    color: white;
+    padding: 30px 20px 20px;
+    text-align: center;
+}
+
+.image-overlay h3 {
+    margin: 0 0 10px 0;
+    font-size: 1.8rem;
+    font-weight: bold;
+}
+
+.image-overlay p {
+    margin: 0;
+    font-size: 1rem;
+    opacity: 0.9;
+}
+
+/* ======================
+   링크 버튼 섹션 스타일
+   ====================== */
+.link-buttons-section {
+    padding: 20px;
+    max-width: 1000px;
+    margin: 0 auto;
+}
+
+.section-title {
+    color: #2f5fd3;
+    font-weight: bold;
+    font-size: 1.5rem;
+}
+
+/* 버튼 그리드 - 1x4 가로 배치 (컴팩트, 4x2 확장 대비) */
+.link-buttons-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    /* 4x2 행렬로 확장하려면 아래 주석 해제:
+    grid-template-rows: repeat(2, 1fr);
+    */
+    gap: 15px;
+    margin-top: 25px;
+}
+
+.link-button-item {
+    width: 100%;
+}
+
+.link-button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 15px 10px;
+    background: white;
+    border: 2px solid #e1e5e9;
+    border-radius: 8px;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    height: 100%;
+    min-height: 80px;
+}
+
+.link-button:hover {
+    border-color: #2f5fd3;
+    background: #f8f9ff;
+    transform: translateY(-3px);
+    box-shadow: 0 8px 20px rgba(47, 95, 211, 0.1);
+    text-decoration: none;
+    color: inherit;
+}
+
+.button-content {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.button-content h5 {
+    margin: 0 0 5px 0;
+    font-weight: bold;
+    color: #333;
+    font-size: 0.95rem;
+}
+
+.button-content p {
+    margin: 0;
+    color: #666;
+    font-size: 0.75rem;
+    line-height: 1.3;
+    text-align: center;
+}
+
+/* ======================
+   반응형 스타일
+   ====================== */
+@media (max-width: 991px) {
+    .link-buttons-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+    }
+    
+    .link-button {
+        padding: 12px 8px;
+        min-height: 70px;
+    }
+    
+    .button-content h5 {
+        font-size: 0.85rem;
+    }
+    
+    .button-content p {
+        font-size: 0.7rem;
+    }
+    
+    .main-image {
+        height: 250px;
+    }
+    
+    .image-overlay h3 {
+        font-size: 1.5rem;
+    }
+    
+    .image-overlay p {
+        font-size: 0.9rem;
+    }
+}
+
+@media (max-width: 767px) {
+    .link-buttons-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+    }
+    
+    .link-button {
+        padding: 10px 6px;
+        min-height: 60px;
+    }
+    
+    .button-content h5 {
+        font-size: 0.8rem;
+        margin-bottom: 3px;
+    }
+    
+    .button-content p {
+        font-size: 0.65rem;
+    }
+    
+    .main-image {
+        height: 200px;
+    }
+    
+    .image-overlay h3 {
+        font-size: 1.3rem;
+    }
+    
+    .image-overlay p {
+        font-size: 0.8rem;
+    }
+    
+    .section-title {
+        font-size: 1.3rem;
+    }
+}
+</style>
+{% endblock %}
