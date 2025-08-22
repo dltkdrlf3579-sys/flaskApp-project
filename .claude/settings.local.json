@@ -11,7 +11,8 @@
       "Bash(grep:*)",
       "Bash(mkdir:*)",
       "Bash(/dev/null)",
-      "Bash(where python)"
+      "Bash(where python)",
+      "Bash(powershell:*)"
     ],
     "deny": [],
     "ask": []

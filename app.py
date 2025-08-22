@@ -278,26 +278,16 @@ def index():
     }
     return render_template("index.html", menu=MENU_CONFIG, dashboard_config=dashboard_config)
 
-@app.route("/<path:url>")
-def page_view(url):
-    # 협력사 기준정보 페이지 특별 처리
-    if url == 'partner-standards':
-        return partner_standards()
-    
-    # 협력사 사고 페이지 특별 처리
-    if url == 'partner-accident':
-        return partner_accident()
-    
-    conn = sqlite3.connect(DB_PATH)
-    page = conn.execute("SELECT * FROM pages WHERE url = ?", (url,)).fetchone()
-    conn.close()
-    
-    if not page:
-        return "Page not found", 404
-    
-    return render_template("page.html", 
-                         page={'url': page[1], 'title': page[2], 'content': page[3]},
-                         menu=MENU_CONFIG)
+# 개별 라우트들을 catch-all 라우트보다 먼저 정의
+@app.route("/partner-standards")
+def partner_standards_route():
+    """협력사 기준정보 페이지 라우트"""
+    return partner_standards()
+
+@app.route("/partner-accident")
+def partner_accident_route():
+    """협력사 사고 페이지 라우트"""
+    return partner_accident()
 
 def partner_standards():
     """협력사 기준정보 페이지"""
@@ -409,57 +399,37 @@ def partner_accident():
             ORDER BY accident_date DESC, accident_number DESC
         """).fetchall()
         
-        # 디버그용 - 첫 번째 사고로 테스트 항목 추가
-        if len(local_accidents_rows) > 0:
-            all_accidents.append({
-                'id': 99999,
-                'accident_number': f'DEBUG_{len(local_accidents_rows)}',
-                'accident_name': f'디버그: {len(local_accidents_rows)}개 로컬 사고',
-                'accident_date': '2025-12-31',
-                'accident_grade': '테스트',
-                'accident_type': '테스트',
-                'disaster_type': '테스트',
-                'disaster_form': '테스트',
-                'workplace': '테스트',
-                'building': '테스트',
-                'floor': '테스트',
-                'detail_location': '테스트',
-                'time': '00:00',
-                'day_of_week': '월',
-                'accident_content': '테스트',
-                'responsible_company_1': '테스트',
-                'responsible_company_1_business_number': '0000000000',
-                'responsible_company_2': None,
-                'responsible_company_2_business_number': None,
-                'custom_data': '{}'
-            })
         
         for row in local_accidents_rows:
             accident = dict(row)
             # ID 확인 및 설정
-            if 'id' not in accident:
+            if 'id' not in accident or not accident['id']:
                 accident['id'] = len(all_accidents) + 1000  # 충돌 방지를 위해 1000부터 시작
             # 필수 필드 채우기
             accident['accident_name'] = accident.get('accident_name') or f"사고_{accident['accident_number']}"
             accident['custom_data'] = accident.get('custom_data', '{}')
+            
+            # 웹 표시용 필수 필드들 채우기
+            accident['accident_grade'] = accident.get('accident_grade') or accident.get('injury_level', '일반')
+            accident['accident_type'] = accident.get('accident_type', '기타')
+            accident['disaster_type'] = accident.get('disaster_type', '일반사고')
+            accident['disaster_form'] = accident.get('disaster_form', '기타')
+            accident['workplace'] = accident.get('workplace', '미분류')
+            accident['building'] = accident.get('building', '미분류')
+            accident['floor'] = accident.get('floor', '미분류')
+            accident['detail_location'] = accident.get('detail_location', accident.get('accident_location', '미분류'))
+            accident['time'] = accident.get('time', '미분류')
+            accident['day_of_week'] = accident.get('day_of_week', '미분류')
+            accident['accident_content'] = accident.get('accident_content', accident.get('accident_description', '내용 없음'))
+            accident['responsible_company_1'] = accident.get('responsible_company_1', '직접등록')
+            accident['responsible_company_1_business_number'] = accident.get('responsible_company_1_business_number', accident.get('business_number', 'DIRECT-ENTRY'))
+            accident['responsible_company_2'] = accident.get('responsible_company_2')
+            accident['responsible_company_2_business_number'] = accident.get('responsible_company_2_business_number')
+            
             all_accidents.append(accident)
     except Exception as e:
-        # 오류 발생 시 더미 데이터에 오류 메시지 추가
-        all_accidents.append({
-            'id': 88888,
-            'accident_number': 'ERROR',
-            'accident_name': f'오류: {str(e)}',
-            'accident_date': '2025-12-31',
-            'accident_grade': 'ERROR',
-            'custom_data': '{}'
-        })
         logging.error(f"로컬 사고 데이터 조회 실패: {e}")
     
-    # 디버그: 로컬 사고 로드 후 상태 확인
-    with open('AFTER_LOCAL_LOAD.txt', 'w') as f:
-        f.write(f'Local accidents loaded: {len(all_accidents)} items\n')
-        if all_accidents:
-            f.write(f'First accident: {all_accidents[0]}\n')
     
     # 2. 개발 환경에서는 더미 데이터 추가 (로컬 사고 뒤에)
     if not db_config.external_db_enabled:
@@ -524,8 +494,8 @@ def partner_accident():
             dummy_accident['custom_data'] = json.dumps(custom_data, ensure_ascii=False)
             dummy_accidents.append(dummy_accident)
         
-        # 로컬 사고가 먼저 나오도록 순서 조정
-        all_accidents = all_accidents + dummy_accidents
+        # 로컬 사고 뒤에 더미 사고 추가
+        all_accidents.extend(dummy_accidents)
         
         logging.info(f"더미 데이터 50개 추가됨")
     
@@ -599,6 +569,9 @@ def partner_accident():
     
     # DB 연결 닫기
     conn.close()
+    
+    # 디버깅 로그
+    logging.info(f"partner_accident: 전체 {len(all_accidents)}개, 필터링 {total_count}개, 표시 {len(accidents)}개")
     
     return render_template('partner-accident.html',
                          accidents=accidents,
@@ -1594,6 +1567,21 @@ def get_person_master():
     except Exception as e:
         logging.error(f"담당자 조회 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
+
+# Catch-all 라우트는 맨 마지막에 위치 (다른 모든 라우트 다음)
+@app.route("/<path:url>")
+def page_view(url):
+    """일반 페이지 체크 (catch-all 라우트)"""
+    conn = sqlite3.connect(DB_PATH)
+    page = conn.execute("SELECT * FROM pages WHERE url = ?", (url,)).fetchone()
+    conn.close()
+    
+    if not page:
+        return "Page not found", 404
+    
+    return render_template("page.html", 
+                         page={'url': page[1], 'title': page[2], 'content': page[3]},
+                         menu=MENU_CONFIG)
 
 if __name__ == "__main__":
     print("Flask 앱 시작 중...", flush=True)
