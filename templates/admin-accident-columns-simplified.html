@@ -416,11 +416,47 @@
         <!-- 오른쪽: 코드 편집기 -->
         <div class="code-editor">
             <div id="editorContainer">
-                <div class="empty-state">
+                <!-- 편집기 헤더 -->
+                <div class="editor-header" style="display: none;">
+                    <div>
+                        <h3 id="currentColumnName">컬럼명</h3>
+                        <span class="text-muted" id="currentColumnKey">column_key</span>
+                    </div>
+                    <div class="editor-actions">
+                        <button class="btn btn-secondary" onclick="resetCodes()">
+                            <i class="bi bi-arrow-counterclockwise"></i> 초기화
+                        </button>
+                        <button class="btn btn-primary" onclick="saveCodes()" id="saveButton">
+                            <i class="bi bi-check-lg"></i> 저장
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 코드 테이블 -->
+                <table class="code-table" style="display: none;">
+                    <thead>
+                        <tr>
+                            <th width="50"></th>
+                            <th width="200">코드</th>
+                            <th>표시값</th>
+                            <th width="80">작업</th>
+                        </tr>
+                    </thead>
+                    <tbody id="codeTableBody">
+                    </tbody>
+                </table>
+                
+                <!-- 빈 상태 -->
+                <div class="empty-state" id="emptyState">
                     <i class="bi bi-list-ul"></i>
                     <h3>컬럼을 선택하세요</h3>
                     <p>왼쪽 목록에서 편집할 드롭다운 컬럼을 선택하세요</p>
                 </div>
+                
+                <!-- 행 추가 버튼 -->
+                <button class="btn-add" onclick="addCode()" style="display: none;" id="addButton">
+                    <i class="bi bi-plus-circle"></i> 행 추가
+                </button>
             </div>
         </div>
     </div>
@@ -435,10 +471,37 @@ let currentColumn = null;
 let allColumns = [];
 let currentCodes = [];
 let hasChanges = false;
+let isEmbedded = false;
+let embeddedColumnKey = null;
 
 // 초기화
 document.addEventListener('DOMContentLoaded', function() {
-    loadColumns();
+    // URL 파라미터 확인
+    const urlParams = new URLSearchParams(window.location.search);
+    isEmbedded = urlParams.get('embedded') === 'true';
+    embeddedColumnKey = urlParams.get('column_key');
+    
+    if (isEmbedded) {
+        // CSS 스타일 강제 적용
+        const style = document.createElement('style');
+        style.innerHTML = `
+            .navbar, .top-menu, nav, header { display: none !important; }
+            .container-fluid { padding: 0 !important; margin-top: 0 !important; }
+            body { padding-top: 0 !important; }
+            .admin-header { display: none !important; }
+            .column-list { display: none !important; }
+            .columns-grid { grid-template-columns: 1fr !important; }
+            .admin-container { padding: 20px !important; max-width: 100% !important; }
+        `;
+        document.head.appendChild(style);
+        
+        if (embeddedColumnKey) {
+            // 특정 컬럼 직접 로드
+            loadEmbeddedColumn(embeddedColumnKey);
+        }
+    } else {
+        loadColumns();
+    }
 });
 
 // 컬럼 목록 로드
@@ -452,6 +515,111 @@ async function loadColumns() {
     } catch (error) {
         console.error('컬럼 로드 실패:', error);
         showToast('error', '컬럼 목록을 불러올 수 없습니다');
+    }
+}
+
+// Embedded 모드에서 특정 컬럼 로드
+async function loadEmbeddedColumn(columnKey) {
+    currentColumn = {
+        key: columnKey,
+        name: columnKey,
+        is_new: true
+    };
+    
+    // 기존 코드가 있는지 확인
+    try {
+        const response = await fetch(`/api/dropdown-codes/${columnKey}`);
+        const data = await response.json();
+        
+        if (data.success && data.codes && data.codes.length > 0) {
+            currentColumn.is_new = false;
+            currentCodes = data.codes.map(code => ({
+                code: code.code,
+                value: code.value,
+                order: code.order
+            }));
+            console.log('Embedded 모드 코드 로드:', currentCodes);
+        } else {
+            currentCodes = [];
+            console.log('코드가 없습니다. 빈 상태로 시작합니다.');
+        }
+        
+        renderCodeEditor();
+    } catch (error) {
+        console.error('코드 로드 실패:', error);
+        currentCodes = [];
+        renderCodeEditor();
+    }
+}
+
+// 코드 편집기 렌더링
+function renderCodeEditor() {
+    const container = document.getElementById('codeTableBody');
+    const emptyState = document.getElementById('emptyState');
+    const codeTable = document.querySelector('.code-table');
+    const editorHeader = document.querySelector('.editor-header');
+    const addButton = document.getElementById('addButton');
+    
+    if (!currentColumn) {
+        container.innerHTML = '';
+        editorHeader.style.display = 'none';
+        codeTable.style.display = 'none';
+        emptyState.style.display = 'flex';
+        addButton.style.display = 'none';
+        return;
+    }
+    
+    // 편집기 활성화
+    editorHeader.style.display = 'flex';
+    emptyState.style.display = 'none';
+    addButton.style.display = 'block';
+    
+    // 제목 업데이트
+    document.getElementById('currentColumnName').textContent = currentColumn.name;
+    document.getElementById('currentColumnKey').textContent = currentColumn.key;
+    
+    if (currentCodes.length === 0) {
+        codeTable.style.display = 'none';
+        container.innerHTML = '';
+    } else {
+        codeTable.style.display = 'table';
+        
+        container.innerHTML = currentCodes.map((code, index) => `
+            <tr data-id="${index}">
+                <td class="drag-handle">
+                    <i class="bi bi-grip-vertical"></i>
+                </td>
+                <td class="code-cell">
+                    <input type="text" value="${code.code}" 
+                           readonly
+                           style="background-color: #f5f5f5; cursor: not-allowed;"
+                           placeholder="자동 생성">
+                </td>
+                <td class="value-cell">
+                    <input type="text" value="${code.value}" 
+                           onchange="updateCode(${index}, 'value', this.value)"
+                           placeholder="표시값 입력">
+                </td>
+                <td class="action-cell">
+                    <button class="btn-icon" onclick="deleteCode(${index})">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+        
+        // Sortable 초기화
+        if (window.Sortable) {
+            new Sortable(container, {
+                handle: '.drag-handle',
+                animation: 150,
+                onEnd: function(evt) {
+                    const movedItem = currentCodes.splice(evt.oldIndex, 1)[0];
+                    currentCodes.splice(evt.newIndex, 0, movedItem);
+                    setHasChanges(true);
+                }
+            });
+        }
     }
 }
 
@@ -510,7 +678,7 @@ async function selectColumn(columnKey, columnName) {
     
     currentColumn = { key: columnKey, name: columnName };
     await loadCodes(columnKey);
-    renderEditor();
+    renderCodeEditor();  // renderEditor 대신 renderCodeEditor 사용
     hasChanges = false;
     updateSaveStatus();
 }
@@ -519,9 +687,17 @@ async function selectColumn(columnKey, columnName) {
 async function loadCodes(columnKey) {
     try {
         const response = await fetch(`/api/dropdown-codes/${columnKey}`);
-        if (response.ok) {
-            currentCodes = await response.json();
+        const data = await response.json();
+        
+        if (data.success && data.codes && data.codes.length > 0) {
+            currentCodes = data.codes.map(code => ({
+                code: code.code,
+                value: code.value,
+                order: code.order
+            }));
+            console.log('코드 로드 성공:', currentCodes);
         } else {
+            // 기존 형식에서 마이그레이션 또는 빈 배열
             currentCodes = await migrateFromOldFormat(columnKey);
         }
     } catch (error) {
@@ -550,6 +726,42 @@ async function migrateFromOldFormat(columnKey) {
     } catch {
         return [];
     }
+}
+
+// 코드 업데이트
+function updateCode(index, field, value) {
+    if (currentCodes[index]) {
+        currentCodes[index][field] = value;
+        setHasChanges(true);
+    }
+}
+
+// 코드 삭제
+function deleteCode(index) {
+    currentCodes.splice(index, 1);
+    renderCodeEditor();
+    setHasChanges(true);
+    showToast('info', '옵션이 삭제되었습니다');
+}
+
+// 코드 추가
+function addCode() {
+    const newCode = {
+        code: generateNewCode(),
+        value: '',
+        order: currentCodes.length + 1
+    };
+    currentCodes.push(newCode);
+    renderCodeEditor();
+    setHasChanges(true);
+    
+    // 새로 추가된 입력란에 포커스
+    setTimeout(() => {
+        const inputs = document.querySelectorAll('.value-cell input');
+        if (inputs.length > 0) {
+            inputs[inputs.length - 1].focus();
+        }
+    }, 100);
 }
 
 // 편집기 렌더링
@@ -680,16 +892,22 @@ function generateNewCode() {
     if (!currentColumn) return '';
     
     const prefix = currentColumn.key.toUpperCase();
-    const existingCodes = Array.from(document.querySelectorAll('.code-readonly')).map(input => input.value);
     
-    let num = 1;
-    let newCode;
-    do {
-        newCode = `${prefix}_${String(num).padStart(3, '0')}`;
-        num++;
-    } while (existingCodes.includes(newCode));
+    // 현재 코드들에서 가장 큰 번호 찾기
+    let maxNum = 0;
+    currentCodes.forEach(code => {
+        if (code.code && code.code.startsWith(prefix + '_')) {
+            const numPart = code.code.split('_')[1];
+            const num = parseInt(numPart, 10);
+            if (!isNaN(num) && num > maxNum) {
+                maxNum = num;
+            }
+        }
+    });
     
-    return newCode;
+    // 다음 번호로 새 코드 생성
+    const newNum = maxNum + 1;
+    return `${prefix}_${String(newNum).padStart(3, '0')}`;
 }
 
 // 행 추가
@@ -790,38 +1008,20 @@ async function saveCodes() {
         return;
     }
     
-    // 유효성 검증
-    const inputs = document.querySelectorAll('.value-input');
-    let hasError = false;
+    // 빈 값 체크
+    const validCodes = currentCodes.filter(code => code.value && code.value.trim());
     
-    inputs.forEach(input => {
-        if (!validateValue(input)) {
-            hasError = true;
-        }
-    });
-    
-    if (hasError) {
-        showToast('error', '입력값을 확인해주세요');
-        return;
-    }
-    
-    // 데이터 수집
-    const codes = [];
-    const rows = document.querySelectorAll('#codeTableBody tr');
-    
-    rows.forEach(row => {
-        const code = row.querySelector('.code-readonly').value;
-        const value = row.querySelector('.value-input').value.trim();
-        
-        if (code && value) {
-            codes.push({ code, value });
-        }
-    });
-    
-    if (codes.length === 0) {
+    if (validCodes.length === 0) {
         showToast('error', '최소 하나 이상의 옵션을 입력해주세요');
         return;
     }
+    
+    // 데이터 준비
+    const codes = validCodes.map((code, index) => ({
+        code: code.code,
+        value: code.value.trim(),
+        order: index + 1
+    }));
     
     const saveButton = document.getElementById('saveButton');
     const originalText = saveButton.innerHTML;
@@ -843,7 +1043,25 @@ async function saveCodes() {
         if (result.success) {
             showToast('success', '저장되었습니다');
             setHasChanges(false);
-            await loadColumns();
+            
+            // Embedded 모드에서는 부모 창에 메시지 전송 후 창 닫기
+            if (isEmbedded && window.opener) {
+                window.opener.postMessage({
+                    type: 'DROPDOWN_CODES_SAVED',
+                    columnKey: currentColumn.key,
+                    codes: codes
+                }, '*');
+                
+                // 저장 성공 메시지 표시 후 창 닫기
+                showToast('success', '저장이 완료되었습니다. 2초 후 창이 닫힙니다.');
+                setTimeout(() => {
+                    window.close();
+                }, 2000);
+            }
+            
+            if (!isEmbedded) {
+                await loadColumns();
+            }
         } else {
             showToast('error', '저장 실패: ' + result.message);
         }
@@ -864,7 +1082,7 @@ function resetEdit() {
     
     setHasChanges(false);
     if (currentColumn) {
-        loadCodes(currentColumn.key).then(() => renderEditor());
+        loadCodes(currentColumn.key).then(() => renderCodeEditor());
     }
 }
 

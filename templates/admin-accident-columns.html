@@ -277,8 +277,13 @@
                         
                         <div class="mb-3" id="optionsField" style="display: none;">
                             <label class="form-label">드롭다운 옵션</label>
-                            <textarea class="form-control" id="dropdownOptions" rows="4" 
-                                placeholder="한 줄에 하나씩 입력&#10;예:&#10;진행중&#10;완료&#10;보류"></textarea>
+                            <div class="alert alert-info" style="font-size: 13px;">
+                                <i class="bi bi-info-circle"></i> 드롭다운 옵션은 코드 관리 페이지에서 설정합니다.
+                            </div>
+                            <button type="button" class="btn btn-primary w-100" onclick="openCodeEditor()">
+                                <i class="bi bi-code-square"></i> 코드 편집기 열기
+                            </button>
+                            <input type="hidden" id="dropdownOptions" />
                         </div>
                         
                         <div class="form-check mb-3">
@@ -1021,6 +1026,59 @@ let editingId = null;
             html += '</div>';
             
             preview.innerHTML = html;
+        }
+        
+        // 코드 편집기 관련 함수들
+        let currentEditingColumnKey = null;
+        
+        function openCodeEditor() {
+            const columnKey = document.getElementById('columnKey').value;
+            if (!columnKey) {
+                alert('컬럼 키를 먼저 입력해주세요.');
+                return;
+            }
+            
+            currentEditingColumnKey = columnKey;
+            
+            // 새 창에서 코드 편집기 열기
+            const width = 1200;
+            const height = 800;
+            const left = (window.screen.width - width) / 2;
+            const top = (window.screen.height - height) / 2;
+            
+            const codeEditorWindow = window.open(
+                `/admin/accident-columns-simplified?column_key=${columnKey}&embedded=true`,
+                'codeEditor',
+                `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+            );
+            
+            // 메시지 리스너 설정
+            window.addEventListener('message', function(event) {
+                if (event.data.type === 'DROPDOWN_CODES_SAVED') {
+                    handleCodesSaved(event.data.columnKey, event.data.codes);
+                }
+            });
+        }
+        
+        function handleCodesSaved(columnKey, codes) {
+            if (columnKey === currentEditingColumnKey) {
+                // 코드를 JSON 문자열로 변환하여 저장
+                const optionValues = codes.map(code => code.value);
+                document.getElementById('dropdownOptions').value = JSON.stringify(optionValues);
+                
+                // 사용자에게 알림
+                const alert = document.createElement('div');
+                alert.className = 'alert alert-success alert-dismissible fade show';
+                alert.innerHTML = `
+                    <i class="bi bi-check-circle"></i> 드롭다운 옵션이 설정되었습니다. (${codes.length}개)
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                `;
+                document.getElementById('optionsField').appendChild(alert);
+                
+                setTimeout(() => {
+                    alert.remove();
+                }, 3000);
+            }
         }
 </script>
 {% endblock %}

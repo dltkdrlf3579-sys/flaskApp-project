@@ -1805,6 +1805,22 @@ def add_accident_column():
             dropdown_options
         ))
         
+        # 드롭다운 타입일 경우 자동으로 코드 생성
+        if data.get('column_type') == 'dropdown' and dropdown_options:
+            try:
+                options_list = json.loads(dropdown_options) if isinstance(dropdown_options, str) else dropdown_options
+                if isinstance(options_list, list):
+                    for idx, value in enumerate(options_list, 1):
+                        code = f"{column_key.upper()}_{str(idx).zfill(3)}"
+                        cursor.execute("""
+                            INSERT OR IGNORE INTO dropdown_option_codes
+                            (column_key, option_code, option_value, display_order, is_active)
+                            VALUES (?, ?, ?, ?, 1)
+                        """, (column_key, code, value, idx))
+                    logging.info(f"드롭다운 컬럼 {column_key}에 대한 코드 {len(options_list)}개 자동 생성")
+            except Exception as e:
+                logging.error(f"드롭다운 코드 자동 생성 실패: {e}")
+        
         conn.commit()
         conn.close()
         
@@ -1827,10 +1843,12 @@ def update_accident_column(column_id):
         cursor = conn.cursor()
         
         # 현재 컬럼 정보 조회
-        cursor.execute("SELECT * FROM accident_column_config WHERE id = ?", (column_id,))
-        column = cursor.fetchone()
-        if not column:
+        cursor.execute("SELECT column_key, column_type FROM accident_column_config WHERE id = ?", (column_id,))
+        column_info = cursor.fetchone()
+        if not column_info:
             return jsonify({"success": False, "message": "컬럼을 찾을 수 없습니다."}), 404
+        
+        current_column_key, current_column_type = column_info
         
         # 업데이트할 필드 준비
         update_fields = []
@@ -1840,9 +1858,20 @@ def update_accident_column(column_id):
             update_fields.append("column_name = ?")
             params.append(data['column_name'])
         
+        # 타입 변경 처리
         if 'column_type' in data:
+            new_type = data['column_type']
             update_fields.append("column_type = ?")
-            params.append(data['column_type'])
+            params.append(new_type)
+            
+            # 드롭다운에서 다른 타입으로 변경 시 코드 비활성화
+            if current_column_type == 'dropdown' and new_type != 'dropdown':
+                cursor.execute("""
+                    UPDATE dropdown_option_codes 
+                    SET is_active = 0 
+                    WHERE column_key = ?
+                """, (current_column_key,))
+                logging.info(f"타입 변경으로 {current_column_key}의 드롭다운 코드 비활성화")
         
         if 'is_active' in data:
             update_fields.append("is_active = ?")
@@ -1853,6 +1882,30 @@ def update_accident_column(column_id):
             dropdown_options = json.dumps(data['dropdown_options'], ensure_ascii=False) if data['dropdown_options'] else None
             update_fields.append("dropdown_options = ?")
             params.append(dropdown_options)
+            
+            # 새로운 드롭다운 옵션에 대한 코드 생성
+            if data.get('column_type') == 'dropdown' and dropdown_options:
+                try:
+                    options_list = json.loads(dropdown_options) if isinstance(dropdown_options, str) else data['dropdown_options']
+                    if isinstance(options_list, list):
+                        # 기존 코드 비활성화
+                        cursor.execute("""
+                            UPDATE dropdown_option_codes 
+                            SET is_active = 0 
+                            WHERE column_key = ?
+                        """, (current_column_key,))
+                        
+                        # 새 코드 생성
+                        for idx, value in enumerate(options_list, 1):
+                            code = f"{current_column_key.upper()}_{str(idx).zfill(3)}"
+                            cursor.execute("""
+                                INSERT OR REPLACE INTO dropdown_option_codes
+                                (column_key, option_code, option_value, display_order, is_active)
+                                VALUES (?, ?, ?, ?, 1)
+                            """, (current_column_key, code, value, idx))
+                        logging.info(f"드롭다운 옵션 업데이트: {current_column_key}에 코드 {len(options_list)}개 재생성")
+                except Exception as e:
+                    logging.error(f"드롭다운 코드 업데이트 실패: {e}")
         
         if update_fields:
             update_fields.append("updated_at = CURRENT_TIMESTAMP")
@@ -1882,7 +1935,17 @@ def get_dropdown_codes(column_key):
         """, (column_key,)).fetchall()
         conn.close()
         
-        return jsonify([dict(code) for code in codes])
+        # 응답 형식 통일
+        return jsonify({
+            "success": True,
+            "codes": [
+                {
+                    "code": code['option_code'],
+                    "value": code['option_value'],
+                    "order": code['display_order']
+                } for code in codes
+            ]
+        })
     except Exception as e:
         logging.error(f"드롭다운 코드 조회 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
@@ -2070,6 +2133,22 @@ def delete_accident_column(column_id):
     try:
         conn = sqlite3.connect(DB_PATH, timeout=10.0)  # timeout 추가
         cursor = conn.cursor()
+        
+        # 먼저 컬럼 정보 조회
+        cursor.execute("SELECT column_key, column_type FROM accident_column_config WHERE id = ?", (column_id,))
+        column_info = cursor.fetchone()
+        
+        if column_info:
+            column_key, column_type = column_info
+            
+            # 드롭다운 타입이면 관련 코드도 비활성화
+            if column_type == 'dropdown':
+                cursor.execute("""
+                    UPDATE dropdown_option_codes 
+                    SET is_active = 0 
+                    WHERE column_key = ?
+                """, (column_key,))
+                logging.info(f"드롭다운 컬럼 {column_key}의 코드도 비활성화")
         
         # 컬럼을 실제로 삭제하지 않고 비활성화
         cursor.execute("""
