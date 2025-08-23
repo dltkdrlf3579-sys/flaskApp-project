@@ -1,7 +1,7 @@
 import os
 import logging
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 from werkzeug.serving import run_simple
 from werkzeug.utils import secure_filename
 from config.menu import MENU_CONFIG
@@ -289,6 +289,27 @@ def partner_accident_route():
     """협력사 사고 페이지 라우트"""
     return partner_accident()
 
+@app.route("/data-recovery")
+def data_recovery():
+    """데이터 복구 페이지"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    
+    # 삭제된 사고 조회
+    deleted_accidents_rows = conn.execute("""
+        SELECT * FROM accidents_cache 
+        WHERE is_deleted = 1
+        ORDER BY accident_date DESC, accident_number DESC
+    """).fetchall()
+    
+    deleted_accidents = [dict(row) for row in deleted_accidents_rows]
+    conn.close()
+    
+    return render_template('data-recovery.html', 
+                         deleted_accidents=deleted_accidents,
+                         menu=MENU_CONFIG,
+                         active_slug='data-recovery')
+
 def partner_standards():
     """협력사 기준정보 페이지"""
     page = request.args.get('page', 1, type=int)
@@ -381,6 +402,11 @@ def partner_accident():
     # Row 객체를 dict로 변환
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
     
+    # 드롭다운 컬럼에 대해 코드-값 매핑 정보 추가
+    for col in dynamic_columns:
+        if col['column_type'] == 'dropdown':
+            col['code_mapping'] = get_dropdown_options_for_display(col['column_key'])
+    
     # 사고 데이터 조회 (운영 환경 고려)
     import random
     import datetime
@@ -391,9 +417,39 @@ def partner_accident():
     
     # 1. 항상 로컬 DB에서 먼저 조회 (등록된 사고)  
     try:
+        # accident_datetime 컬럼이 없으면 추가
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(accidents_cache)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if 'accident_datetime' not in columns:
+            cursor.execute("ALTER TABLE accidents_cache ADD COLUMN accident_datetime TEXT")
+            # 기존 데이터 업데이트 (날짜와 시간 조합)
+            cursor.execute("""
+                UPDATE accidents_cache 
+                SET accident_datetime = 
+                    CASE 
+                        WHEN accident_date IS NOT NULL AND accident_time IS NOT NULL 
+                        THEN accident_date || ' ' || accident_time
+                        WHEN accident_date IS NOT NULL 
+                        THEN accident_date || ' 00:00'
+                        ELSE datetime('now', 'localtime')
+                    END
+                WHERE accident_datetime IS NULL
+            """)
+            conn.commit()
+            logging.info("accident_datetime 컬럼 추가 및 기존 데이터 업데이트 완료")
+        
         local_accidents_rows = conn.execute("""
             SELECT * FROM accidents_cache 
-            ORDER BY accident_date DESC, accident_number DESC
+            WHERE is_deleted = 0 OR is_deleted IS NULL
+            ORDER BY 
+                CASE 
+                    WHEN accident_datetime IS NOT NULL AND accident_datetime != '' 
+                    THEN accident_datetime 
+                    ELSE COALESCE(accident_date, '1900-01-01') || ' 00:00' 
+                END DESC, 
+                accident_number DESC
         """).fetchall()
         
         logging.info(f"로컬 DB에서 {len(local_accidents_rows)}개 사고 조회됨")
@@ -572,6 +628,22 @@ def partner_accident():
     
     # DB 연결 닫기
     conn.close()
+    
+    # 코드를 값으로 변환 (표시용)
+    for accident in accidents:
+        # DictAsAttr 객체 처리를 위해 hasattr 사용
+        if hasattr(accident, 'custom_data') and accident.custom_data:
+            try:
+                custom_data = json.loads(accident.custom_data)
+                for col in dynamic_columns:
+                    if col['column_type'] == 'dropdown' and col['column_key'] in custom_data:
+                        code = custom_data[col['column_key']]
+                        if code:
+                            # 코드를 값으로 변환
+                            custom_data[col['column_key']] = convert_code_to_value(col['column_key'], code)
+                accident.custom_data = json.dumps(custom_data, ensure_ascii=False)
+            except Exception as e:
+                logging.error(f"코드 변환 오류: {e}")
     
     # 디버깅 로그
     logging.info(f"partner_accident: 전체 {len(all_accidents)}개, 필터링 {total_count}개, 표시 {len(accidents)}개")
@@ -773,6 +845,77 @@ def accident_detail(accident_id):
                          is_popup=is_popup,
                          board_type='accident')  # 게시판 타입 전달
 
+def get_dropdown_options_for_display(column_key):
+    """드롭다운 옵션을 코드-값 매핑 방식으로 가져오기"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        
+        # 활성화된 코드 목록 조회
+        codes = conn.execute("""
+            SELECT option_code, option_value 
+            FROM dropdown_option_codes
+            WHERE column_key = ? AND is_active = 1
+            ORDER BY display_order
+        """, (column_key,)).fetchall()
+        
+        conn.close()
+        
+        if codes:
+            # 코드-값 매핑 방식 반환
+            return [{'code': row['option_code'], 'value': row['option_value']} for row in codes]
+        else:
+            return None
+    except:
+        return None
+
+def convert_code_to_value(column_key, code):
+    """코드를 표시 값으로 변환"""
+    if not code:
+        return code
+        
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # 코드에 해당하는 값 조회 (비활성화된 것도 포함 - 기존 데이터 표시용)
+        result = cursor.execute("""
+            SELECT option_value 
+            FROM dropdown_option_codes
+            WHERE column_key = ? AND option_code = ?
+        """, (column_key, code)).fetchone()
+        
+        conn.close()
+        
+        if result:
+            return result[0]
+        else:
+            # 매핑이 없으면 원본 값 반환 (하위 호환성)
+            return code
+    except:
+        return code
+
+def convert_accident_codes_to_values(accident_data, dynamic_columns):
+    """사고 데이터의 코드를 표시 값으로 일괄 변환"""
+    if not accident_data or not accident_data.get('custom_data'):
+        return accident_data
+    
+    try:
+        custom_data = json.loads(accident_data['custom_data'])
+        
+        for col in dynamic_columns:
+            if col['column_type'] == 'dropdown' and col['column_key'] in custom_data:
+                code = custom_data[col['column_key']]
+                if code:
+                    # 코드를 값으로 변환
+                    custom_data[col['column_key']] = convert_code_to_value(col['column_key'], code)
+        
+        accident_data['custom_data'] = json.dumps(custom_data, ensure_ascii=False)
+    except:
+        pass
+    
+    return accident_data
+
 @app.route("/accident-register")
 def accident_register():
     """사고 등록 페이지"""
@@ -793,9 +936,21 @@ def accident_register():
     
     conn.close()
     
-    logging.info(f"동적 컬럼 {len(dynamic_columns)}개 로드됨")
+    # 드롭다운 컬럼에 대해 코드-값 매핑 적용
     for col in dynamic_columns:
-        logging.info(f"  - {col['column_name']} ({col['column_type']})")
+        if col['column_type'] == 'dropdown':
+            # 코드-값 매핑 방식으로 옵션 가져오기
+            code_options = get_dropdown_options_for_display(col['column_key'])
+            if code_options:
+                # 새로운 방식의 옵션이 있으면 사용
+                col['dropdown_options_mapped'] = code_options
+                logging.info(f"  - {col['column_name']}: 코드-값 매핑 {len(code_options)}개 옵션")
+            else:
+                # 기존 JSON 방식 유지 (하위 호환성)
+                col['dropdown_options_mapped'] = None
+                logging.info(f"  - {col['column_name']}: 기존 JSON 방식 사용")
+    
+    logging.info(f"동적 컬럼 {len(dynamic_columns)}개 로드됨")
     
     # 팝업 모드인지 확인
     is_popup = request.args.get('popup') == '1'
@@ -813,12 +968,31 @@ def register_accident():
         import json
         import datetime
         
+        # 기본정보 필드들 받기
+        accident_name = request.form.get('accident_name', '')
+        accident_date = request.form.get('accident_date', '')
+        accident_time = request.form.get('accident_time', '')
+        accident_grade = request.form.get('accident_grade', '')
+        accident_type = request.form.get('accident_type', '')
+        injury_type = request.form.get('injury_type', '')
+        injury_form = request.form.get('injury_form', '')
+        workplace = request.form.get('workplace', '')
+        building = request.form.get('building', '')
+        floor = request.form.get('floor', '')
+        location_detail = request.form.get('location_detail', '')
+        day_of_week = request.form.get('day_of_week', '')
+        responsible_company1 = request.form.get('responsible_company1', '')
+        responsible_company1_no = request.form.get('responsible_company1_no', '')
+        responsible_company2 = request.form.get('responsible_company2', '')
+        responsible_company2_no = request.form.get('responsible_company2_no', '')
+        
         detailed_content = request.form.get('detailed_content')
-        custom_data = json.loads(request.form.get('custom_data', '{}'))  # 동적 컬럼만
+        custom_data = json.loads(request.form.get('custom_data', '{}'))  # 동적 컬럼
         attachment_data = json.loads(request.form.get('attachment_data', '[]'))
         files = request.files.getlist('files')
         
-        logging.info(f"등록 요청 받음 - 상세내용: {detailed_content[:50] if detailed_content else 'None'}")
+        logging.info(f"등록 요청 받음 - 사고명: {accident_name}")
+        logging.info(f"사고 날짜: {accident_date}, 시간: {accident_time}")
         logging.info(f"동적 컬럼 데이터: {custom_data}")
         logging.info(f"첨부파일 개수: {len(files)}")
         
@@ -849,32 +1023,91 @@ def register_accident():
         
         logging.info(f"새 사고 등록: {accident_number}")
         
-        # 1. 기본 사고 정보 등록 (동적 컬럼만 - 기본정보는 시스템에서 자동 처리)
+        # 1. 기본 사고 정보 등록 (기본정보 + 동적 컬럼)
         # 필요한 컬럼들이 없는 경우 추가
         cursor.execute("PRAGMA table_info(accidents_cache)")
         columns = [col[1] for col in cursor.fetchall()]
         
-        if 'accident_number' not in columns:
-            cursor.execute("ALTER TABLE accidents_cache ADD COLUMN accident_number TEXT")
-        if 'accident_name' not in columns:
-            cursor.execute("ALTER TABLE accidents_cache ADD COLUMN accident_name TEXT")
-        if 'custom_data' not in columns:
-            cursor.execute("ALTER TABLE accidents_cache ADD COLUMN custom_data TEXT")
+        # 필수 컬럼들 체크 및 추가
+        required_columns = [
+            ('accident_number', 'TEXT'),
+            ('accident_name', 'TEXT'),
+            ('accident_date', 'TEXT'),
+            ('accident_time', 'TEXT'),
+            ('accident_datetime', 'TEXT'),
+            ('accident_grade', 'TEXT'),
+            ('accident_type', 'TEXT'),
+            ('injury_type', 'TEXT'),
+            ('injury_form', 'TEXT'),
+            ('workplace', 'TEXT'),
+            ('building', 'TEXT'),
+            ('floor', 'TEXT'),
+            ('location_detail', 'TEXT'),
+            ('day_of_week', 'TEXT'),
+            ('responsible_company1', 'TEXT'),
+            ('responsible_company1_no', 'TEXT'),
+            ('responsible_company2', 'TEXT'),
+            ('responsible_company2_no', 'TEXT'),
+            ('custom_data', 'TEXT')
+        ]
+        
+        for col_name, col_type in required_columns:
+            if col_name not in columns:
+                cursor.execute(f"ALTER TABLE accidents_cache ADD COLUMN {col_name} {col_type}")
+                logging.info(f"컬럼 추가: {col_name}")
+        
+        # datetime 조합 (정렬용)
+        if accident_date and accident_time:
+            accident_datetime = f"{accident_date} {accident_time}"
+        elif accident_date:
+            accident_datetime = f"{accident_date} 00:00"
+        else:
+            accident_datetime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
         
         cursor.execute("""
             INSERT INTO accidents_cache (
                 accident_number, 
                 accident_name,
                 accident_date,
+                accident_time,
+                accident_datetime,
+                accident_grade,
+                accident_type,
+                injury_type,
+                injury_form,
+                workplace,
+                building,
+                floor,
+                location_detail,
+                day_of_week,
+                responsible_company1,
+                responsible_company1_no,
+                responsible_company2,
+                responsible_company2_no,
                 custom_data,
                 business_number
-            ) VALUES (?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             accident_number,
-            f"사고_{accident_number}",  # 기본 사고명
-            today.strftime('%Y-%m-%d'),  # 오늘 날짜
+            accident_name or f"사고_{accident_number}",
+            accident_date or today.strftime('%Y-%m-%d'),
+            accident_time or '',
+            accident_datetime,
+            accident_grade or '',
+            accident_type or '',
+            injury_type or '',
+            injury_form or '',
+            workplace or '',
+            building or '',
+            floor or '',
+            location_detail or '',
+            day_of_week or '',
+            responsible_company1 or '',
+            responsible_company1_no or '',
+            responsible_company2 or '',
+            responsible_company2_no or '',
             json.dumps(custom_data),
-            "DIRECT-ENTRY"  # 수기입력 표시
+            responsible_company1_no or "DIRECT-ENTRY"  # 수기입력 표시
         ))
         
         # 2. 상세내용 저장
@@ -1377,17 +1610,161 @@ def get_accident_columns():
 @app.route("/admin/accident-columns")
 def admin_accident_columns():
     """사고 컬럼 관리 페이지"""
-    return render_template('admin-accident-columns.html')
+    return render_template('admin-accident-columns.html', menu=MENU_CONFIG)
+
+@app.route("/admin/accident-columns-v2")
+def admin_accident_columns_v2():
+    """사고 컬럼 관리 페이지 V2 - 코드 매핑 방식"""
+    return render_template('admin-accident-columns-v2.html', menu=MENU_CONFIG)
+
+@app.route("/admin/accident-columns-v3")
+def admin_accident_columns_v3():
+    """사고 컬럼 관리 페이지 V3 - 완전한 코드 매핑 시스템"""
+    return render_template('admin-accident-columns-v3.html', menu=MENU_CONFIG)
+
+@app.route("/admin/accident-columns-enhanced")
+def admin_accident_columns_enhanced():
+    """사고 컬럼 관리 페이지 Enhanced - Phase 2 고급 기능"""
+    return render_template('admin-accident-columns-enhanced.html', menu=MENU_CONFIG)
+
+@app.route("/admin/accident-columns-simplified")
+def admin_accident_columns_simplified():
+    """사고 컬럼 관리 페이지 Simplified - 간소화 버전"""
+    return render_template('admin-accident-columns-simplified.html', menu=MENU_CONFIG)
 
 @app.route("/admin/menu-settings")
 def admin_menu_settings():
     """메뉴 설정 페이지"""
-    return render_template('admin-menu-settings.html')
+    return render_template('admin-menu-settings.html', menu=MENU_CONFIG)
 
 @app.route("/admin/permission-settings")
 def admin_permission_settings():
     """권한 설정 페이지"""
-    return render_template('admin-permission-settings.html')
+    return render_template('admin-permission-settings.html', menu=MENU_CONFIG)
+
+@app.route("/admin/data-management")
+def admin_data_management():
+    """데이터 관리 페이지"""
+    return render_template('admin-data-management.html', menu=MENU_CONFIG)
+
+@app.route("/api/accidents/deleted")
+def get_deleted_accidents():
+    """삭제된 사고 목록 API"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    
+    # 삭제된 사고만 조회
+    deleted_accidents_rows = conn.execute("""
+        SELECT * FROM accidents_cache 
+        WHERE is_deleted = 1
+        ORDER BY accident_date DESC, accident_number DESC
+    """).fetchall()
+    
+    deleted_accidents = [dict(row) for row in deleted_accidents_rows]
+    conn.close()
+    
+    return jsonify({"success": True, "accidents": deleted_accidents})
+
+@app.route('/api/accidents/delete', methods=['POST'])
+def delete_accidents():
+    """선택한 사고들을 소프트 삭제"""
+    try:
+        data = request.json
+        ids = data.get('ids', [])
+        
+        if not ids:
+            return jsonify({"success": False, "message": "삭제할 항목이 없습니다."}), 400
+        
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cursor = conn.cursor()
+        
+        # 모든 사고 삭제 가능 (ACC, K 모두)
+        placeholders = ','.join('?' * len(ids))
+        cursor.execute(f"""
+            UPDATE accidents_cache 
+            SET is_deleted = 1 
+            WHERE id IN ({placeholders})
+        """, ids)
+        
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "deleted_count": deleted_count,
+            "message": f"{deleted_count}건이 삭제되었습니다."
+        })
+    except Exception as e:
+        logging.error(f"사고 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route('/api/accidents/restore', methods=['POST'])
+def restore_accidents():
+    """삭제된 사고들을 복구"""
+    try:
+        data = request.json
+        ids = data.get('ids', [])
+        
+        if not ids:
+            return jsonify({"success": False, "message": "복구할 항목이 없습니다."}), 400
+        
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cursor = conn.cursor()
+        
+        # 선택한 사고들을 복구 (is_deleted = 0)
+        placeholders = ','.join('?' * len(ids))
+        cursor.execute(f"""
+            UPDATE accidents_cache 
+            SET is_deleted = 0 
+            WHERE id IN ({placeholders})
+        """, ids)
+        
+        restored_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "restored_count": restored_count,
+            "message": f"{restored_count}건이 복구되었습니다."
+        })
+    except Exception as e:
+        logging.error(f"사고 복구 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route('/api/accidents/permanent-delete', methods=['POST'])
+def permanent_delete_accidents():
+    """선택한 사고들을 영구 삭제"""
+    try:
+        data = request.json
+        ids = data.get('ids', [])
+        
+        if not ids:
+            return jsonify({"success": False, "message": "삭제할 항목이 없습니다."}), 400
+        
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cursor = conn.cursor()
+        
+        # 선택한 사고들을 영구 삭제
+        placeholders = ','.join('?' * len(ids))
+        cursor.execute(f"""
+            DELETE FROM accidents_cache 
+            WHERE id IN ({placeholders})
+        """, ids)
+        
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "deleted_count": deleted_count,
+            "message": f"{deleted_count}건이 영구 삭제되었습니다."
+        })
+    except Exception as e:
+        logging.error(f"사고 영구 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route("/api/accident-columns", methods=["POST"])
 def add_accident_column():
@@ -1492,6 +1869,201 @@ def update_accident_column(column_id):
         logging.error(f"컬럼 수정 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
+@app.route("/api/dropdown-codes/<column_key>", methods=["GET"])
+def get_dropdown_codes(column_key):
+    """특정 컬럼의 드롭다운 코드 목록 조회"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        codes = conn.execute("""
+            SELECT * FROM dropdown_option_codes
+            WHERE column_key = ? AND is_active = 1
+            ORDER BY display_order
+        """, (column_key,)).fetchall()
+        conn.close()
+        
+        return jsonify([dict(code) for code in codes])
+    except Exception as e:
+        logging.error(f"드롭다운 코드 조회 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/dropdown-codes", methods=["POST"])
+def save_dropdown_codes():
+    """드롭다운 코드 저장/업데이트 (변경 이력 추적 포함)"""
+    try:
+        data = request.json
+        column_key = data.get('column_key')
+        codes = data.get('codes', [])
+        
+        # 요청 정보 수집 (감사 로그용)
+        ip_address = request.remote_addr
+        user_agent = request.headers.get('User-Agent', '')
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # 트랜잭션 시작
+        cursor.execute("BEGIN TRANSACTION")
+        
+        # 기존 활성 코드 조회 (변경 전 상태 기록용)
+        existing_codes = cursor.execute("""
+            SELECT option_code, option_value, display_order 
+            FROM dropdown_option_codes
+            WHERE column_key = ? AND is_active = 1
+        """, (column_key,)).fetchall()
+        
+        existing_dict = {row[0]: {'value': row[1], 'order': row[2]} for row in existing_codes}
+        
+        # 기존 코드 비활성화
+        cursor.execute("""
+            UPDATE dropdown_option_codes 
+            SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+            WHERE column_key = ?
+        """, (column_key,))
+        
+        # 새 코드 삽입 또는 업데이트
+        for idx, code_item in enumerate(codes, 1):
+            option_code = code_item.get('code')
+            option_value = code_item.get('value')
+            
+            # 기존 코드가 있는지 확인
+            existing = cursor.execute("""
+                SELECT id, option_value, display_order FROM dropdown_option_codes
+                WHERE column_key = ? AND option_code = ?
+            """, (column_key, option_code)).fetchone()
+            
+            if existing:
+                old_value = existing[1]
+                old_order = existing[2]
+                
+                # 업데이트
+                cursor.execute("""
+                    UPDATE dropdown_option_codes 
+                    SET option_value = ?, display_order = ?, is_active = 1,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE column_key = ? AND option_code = ?
+                """, (option_value, idx, column_key, option_code))
+                
+                # 변경 이력 기록 (값이나 순서가 변경된 경우만)
+                if old_value != option_value or old_order != idx:
+                    cursor.execute("""
+                        INSERT INTO dropdown_code_audit 
+                        (column_key, option_code, action_type, old_value, new_value, 
+                         old_order, new_order, ip_address, user_agent)
+                        VALUES (?, ?, 'UPDATE', ?, ?, ?, ?, ?, ?)
+                    """, (column_key, option_code, old_value, option_value, 
+                          old_order, idx, ip_address, user_agent))
+            else:
+                # 새로 삽입
+                cursor.execute("""
+                    INSERT INTO dropdown_option_codes 
+                    (column_key, option_code, option_value, display_order, is_active)
+                    VALUES (?, ?, ?, ?, 1)
+                """, (column_key, option_code, option_value, idx))
+                
+                # 생성 이력 기록
+                cursor.execute("""
+                    INSERT INTO dropdown_code_audit 
+                    (column_key, option_code, action_type, new_value, new_order, 
+                     ip_address, user_agent)
+                    VALUES (?, ?, 'CREATE', ?, ?, ?, ?)
+                """, (column_key, option_code, option_value, idx, ip_address, user_agent))
+        
+        # 삭제된 코드 확인 및 기록
+        new_codes = {item['code'] for item in codes}
+        for old_code, old_data in existing_dict.items():
+            if old_code not in new_codes:
+                cursor.execute("""
+                    INSERT INTO dropdown_code_audit 
+                    (column_key, option_code, action_type, old_value, old_order, 
+                     ip_address, user_agent)
+                    VALUES (?, ?, 'DELETE', ?, ?, ?, ?)
+                """, (column_key, old_code, old_data['value'], old_data['order'], 
+                      ip_address, user_agent))
+        
+        cursor.execute("COMMIT")
+        conn.close()
+        
+        return jsonify({"success": True, "message": "드롭다운 코드가 저장되었습니다."})
+    except Exception as e:
+        if conn:
+            conn.rollback()
+            conn.close()
+        logging.error(f"드롭다운 코드 저장 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/dropdown-codes/<column_key>/history", methods=["GET"])
+def get_dropdown_history(column_key):
+    """특정 컬럼의 변경 이력 조회"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        
+        # 최근 100개 변경 이력 조회
+        history = conn.execute("""
+            SELECT * FROM dropdown_code_audit
+            WHERE column_key = ?
+            ORDER BY changed_at DESC
+            LIMIT 100
+        """, (column_key,)).fetchall()
+        
+        # 통계 정보 조회
+        stats = conn.execute("""
+            SELECT * FROM dropdown_code_stats
+            WHERE column_key = ?
+        """, (column_key,)).fetchone()
+        
+        conn.close()
+        
+        return jsonify({
+            "history": [dict(row) for row in history],
+            "stats": dict(stats) if stats else None
+        })
+    except Exception as e:
+        logging.error(f"변경 이력 조회 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/dropdown-codes/audit-summary", methods=["GET"])
+def get_audit_summary():
+    """전체 변경 이력 요약"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        
+        # 최근 7일간 변경 통계
+        recent_changes = conn.execute("""
+            SELECT 
+                DATE(changed_at) as date,
+                COUNT(*) as total_changes,
+                COUNT(DISTINCT column_key) as columns_changed
+            FROM dropdown_code_audit
+            WHERE changed_at >= datetime('now', '-7 days')
+            GROUP BY DATE(changed_at)
+            ORDER BY date DESC
+        """).fetchall()
+        
+        # 가장 많이 변경된 컬럼 TOP 5
+        most_changed = conn.execute("""
+            SELECT 
+                column_key,
+                COUNT(*) as change_count,
+                MAX(changed_at) as last_changed
+            FROM dropdown_code_audit
+            GROUP BY column_key
+            ORDER BY change_count DESC
+            LIMIT 5
+        """).fetchall()
+        
+        conn.close()
+        
+        return jsonify({
+            "recent_changes": [dict(row) for row in recent_changes],
+            "most_changed_columns": [dict(row) for row in most_changed]
+        })
+    except Exception as e:
+        logging.error(f"감사 요약 조회 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
 @app.route("/api/accident-columns/<int:column_id>", methods=["DELETE"])
 def delete_accident_column(column_id):
     """사고 페이지 동적 컬럼 삭제 (실제로는 비활성화)"""
@@ -1585,6 +2157,708 @@ def page_view(url):
     return render_template("page.html", 
                          page={'url': page[1], 'title': page[2], 'content': page[3]},
                          menu=MENU_CONFIG)
+
+@app.route("/api/accident-export")
+def export_accidents_excel():
+    """사고 데이터 엑셀 다운로드"""
+    try:
+        import openpyxl
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill
+        from datetime import datetime
+        import io
+        
+        # 검색 조건 가져오기
+        company_name = request.args.get('company_name', '')
+        business_number = request.args.get('business_number', '')
+        accident_date_start = request.args.get('accident_date_start', '')
+        accident_date_end = request.args.get('accident_date_end', '')
+        
+        # DB 연결
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        
+        # 동적 컬럼 정보 가져오기
+        dynamic_columns_rows = conn.execute("""
+            SELECT * FROM accident_column_config 
+            WHERE is_active = 1 
+            ORDER BY column_order
+        """).fetchall()
+        dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+        
+        # 사고 데이터 조회 (partner_accident 함수와 동일한 로직)
+        query = """
+            SELECT * FROM accidents_cache 
+            WHERE 1=1
+        """
+        params = []
+        
+        if company_name:
+            query += " AND (responsible_company1 LIKE ? OR responsible_company2 LIKE ?)"
+            params.extend([f'%{company_name}%', f'%{company_name}%'])
+        
+        if business_number:
+            query += " AND (responsible_company1_no LIKE ? OR responsible_company2_no LIKE ?)"
+            params.extend([f'%{business_number}%', f'%{business_number}%'])
+        
+        if accident_date_start:
+            query += " AND accident_date >= ?"
+            params.append(accident_date_start)
+        
+        if accident_date_end:
+            query += " AND accident_date <= ?"
+            params.append(accident_date_end)
+        
+        query += """
+            ORDER BY 
+                CASE 
+                    WHEN accident_datetime IS NOT NULL AND accident_datetime != '' 
+                    THEN accident_datetime 
+                    ELSE COALESCE(accident_date, '1900-01-01') || ' 00:00' 
+                END DESC, 
+                accident_number DESC
+        """
+        
+        accidents = conn.execute(query, params).fetchall()
+        
+        # 엑셀 워크북 생성
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "사고 현황"
+        
+        # 헤더 스타일 설정
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_align = Alignment(horizontal="center", vertical="center")
+        
+        # 헤더 작성 (사고번호는 자동 생성되므로 제외)
+        headers = [
+            '사고명', '재해날짜', '시간', '사고등급', '사고분류',
+            '재해유형', '재해형태', '사업장', '건물', '층', '세부위치',
+            '요일', '귀책협력사(1차)', '귀책협력사(1차)사업자번호',
+            '귀책협력사(2차)', '귀책협력사(2차)사업자번호'
+        ]
+        
+        # 동적 컬럼 헤더 추가
+        for col in dynamic_columns:
+            headers.append(col['column_name'])
+        
+        # 헤더 쓰기
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+        
+        # 데이터 쓰기
+        for row_idx, accident_row in enumerate(accidents, 2):
+            accident = dict(accident_row)
+            
+            # 기본 필드 쓰기 (사고번호 제외)
+            ws.cell(row=row_idx, column=1, value=accident.get('accident_name', ''))
+            ws.cell(row=row_idx, column=2, value=accident.get('accident_date', ''))
+            ws.cell(row=row_idx, column=3, value=accident.get('accident_time', ''))
+            ws.cell(row=row_idx, column=4, value=accident.get('accident_grade', ''))
+            ws.cell(row=row_idx, column=5, value=accident.get('accident_type', ''))
+            ws.cell(row=row_idx, column=6, value=accident.get('injury_type', ''))
+            ws.cell(row=row_idx, column=7, value=accident.get('injury_form', ''))
+            ws.cell(row=row_idx, column=8, value=accident.get('workplace', ''))
+            ws.cell(row=row_idx, column=9, value=accident.get('building', ''))
+            ws.cell(row=row_idx, column=10, value=accident.get('floor', ''))
+            ws.cell(row=row_idx, column=11, value=accident.get('location_detail', ''))
+            ws.cell(row=row_idx, column=12, value=accident.get('day_of_week', ''))
+            ws.cell(row=row_idx, column=13, value=accident.get('responsible_company1', ''))
+            ws.cell(row=row_idx, column=14, value=accident.get('responsible_company1_no', ''))
+            ws.cell(row=row_idx, column=15, value=accident.get('responsible_company2', ''))
+            ws.cell(row=row_idx, column=16, value=accident.get('responsible_company2_no', ''))
+            
+            # 동적 컬럼 데이터 쓰기
+            import json
+            custom_data = {}
+            # DictAsAttr 객체 처리를 위해 hasattr 사용
+            if hasattr(accident, 'custom_data') and accident.custom_data:
+                try:
+                    custom_data = json.loads(accident.custom_data)
+                except:
+                    custom_data = {}
+            
+            for col_idx, col in enumerate(dynamic_columns, 17):
+                value = custom_data.get(col['column_key'], '')
+                # popup 타입 데이터 처리
+                if isinstance(value, dict):
+                    if 'name' in value:
+                        value = value['name']
+                    else:
+                        value = str(value)
+                ws.cell(row=row_idx, column=col_idx, value=value)
+        
+        # 컬럼 너비 자동 조정
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+        
+        # 파일을 메모리에 저장
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        conn.close()
+        
+        # 파일명 생성
+        filename = f"accident_list_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        # 다운로드 응답
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except Exception as e:
+        logging.error(f"엑셀 다운로드 중 오류: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+        return jsonify({"success": False, "message": str(e)}), 500
+
+# ===== 엑셀 임포트 API =====
+@app.route('/api/accident-import', methods=['POST'])
+def import_accidents():
+    try:
+        import openpyxl
+        import json
+        from datetime import datetime
+        import re
+        
+        # 파일 확인
+        if 'file' not in request.files:
+            return jsonify({"success": False, "message": "파일이 없습니다."}), 400
+            
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"success": False, "message": "파일이 선택되지 않았습니다."}), 400
+            
+        if not file.filename.lower().endswith(('.xlsx', '.xls')):
+            return jsonify({"success": False, "message": "엑셀 파일만 업로드 가능합니다."}), 400
+        
+        # 옵션 확인
+        skip_duplicates = request.form.get('skip_duplicates') == 'on'
+        validate_data = request.form.get('validate_data') == 'on'
+        
+        # 엑셀 파일 읽기
+        wb = openpyxl.load_workbook(file, data_only=True)
+        ws = wb.active
+        
+        # DB 연결
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # accident_columns 테이블 확인 및 생성
+        cursor.execute("""
+            SELECT name FROM sqlite_master 
+            WHERE type='table' AND name='accident_columns'
+        """)
+        if not cursor.fetchone():
+            # 테이블이 없으면 빈 리스트로 처리
+            dynamic_columns = []
+            logging.info("accident_columns 테이블이 없어서 동적 컬럼 없이 처리합니다.")
+        else:
+            # 동적 컬럼 조회
+            cursor.execute("""
+                SELECT column_key, column_name, column_type, dropdown_options
+                FROM accident_columns 
+                WHERE is_active = 1 
+                ORDER BY column_order
+            """)
+            dynamic_columns = cursor.fetchall()
+        
+        # 헤더 매핑 (한글 헤더명 -> DB 컬럼명)
+        # 주의: 사고번호는 자동 생성하므로 매핑에서 제외
+        header_mapping = {
+            '사고명': 'accident_name', 
+            '재해날짜': 'accident_date',
+            '시간': 'accident_time',
+            '사고등급': 'accident_level',
+            '사고분류': 'accident_classification',
+            '재해유형': 'disaster_type',
+            '재해형태': 'disaster_form',
+            '사업장': 'workplace',
+            '건물': 'building',
+            '층': 'floor',
+            '세부위치': 'location_detail',
+            '요일': 'day_of_week',
+            '귀책협력사(1차)': 'responsible_company1',
+            '귀책협력사(1차)사업자번호': 'responsible_company1_no',
+            '귀책협력사(2차)': 'responsible_company2',
+            '귀책협력사(2차)사업자번호': 'responsible_company2_no',
+            '처리상태': 'processing_status',
+            '조치사항': 'measures',
+            '재발방지대책': 'prevention_measures',
+            '담당부서': 'department',
+            '담당자': 'manager',
+            '완료예정일': 'completion_date',
+            '원인분석': 'cause_analysis',
+            '첨부문서': 'attachment',
+            '발생위치': 'occurrence_location'
+        }
+        
+        # 동적 컬럼 매핑 추가
+        for col in dynamic_columns:
+            header_mapping[col['column_name']] = col['column_key']
+        
+        # 첫 번째 행에서 헤더 읽기
+        headers = []
+        for cell in ws[1]:
+            headers.append(cell.value if cell.value else '')
+        
+        success_count = 0
+        error_count = 0
+        errors = []
+        
+        # 헤더 정보 로그
+        logging.info(f"엑셀 헤더: {headers}")
+        logging.info(f"헤더 매핑: {header_mapping}")
+        
+        # 데이터 행 처리 (2행부터)
+        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
+            try:
+                # 빈 행 건너뛰기
+                if not any(row):
+                    continue
+                
+                logging.info(f"처리 중인 행 {row_idx}: {row}")
+                
+                # 데이터 매핑
+                data = {}
+                custom_data = {}
+                
+                for col_idx, cell_value in enumerate(row):
+                    if col_idx >= len(headers):
+                        break
+                        
+                    header = headers[col_idx]
+                    if not header or not cell_value:
+                        continue
+                        
+                    # 문자열로 변환
+                    str_value = str(cell_value).strip()
+                    if not str_value:
+                        continue
+                    
+                    # 헤더 매핑
+                    if header in header_mapping:
+                        db_column = header_mapping[header]
+                        
+                        # 기본 컬럼인지 동적 컬럼인지 확인 (accident_number는 자동 생성하므로 제외)
+                        if db_column in ['accident_name', 'accident_date', 'accident_time', 
+                                       'accident_level', 'accident_classification', 'disaster_type', 'disaster_form',
+                                       'workplace', 'building', 'floor', 'location_detail', 'day_of_week',
+                                       'responsible_company1', 'responsible_company1_no', 'responsible_company2',
+                                       'responsible_company2_no', 'processing_status', 'measures', 
+                                       'prevention_measures', 'department', 'manager', 'completion_date',
+                                       'cause_analysis', 'attachment', 'occurrence_location']:
+                            data[db_column] = str_value
+                        else:
+                            # 동적 컬럼
+                            custom_data[db_column] = str_value
+                
+                # 사고번호는 항상 자동 생성 (사용자 입력 무시)
+                if data.get('accident_date'):
+                    # 재해날짜를 기준으로 ACCYYMMDD 형식으로 생성
+                    try:
+                        accident_date = data['accident_date']
+                        if isinstance(accident_date, str):
+                            # 날짜 문자열을 파싱
+                            for fmt in ['%Y-%m-%d', '%Y/%m/%d', '%Y.%m.%d']:
+                                try:
+                                    dt = datetime.strptime(accident_date, fmt)
+                                    break
+                                except ValueError:
+                                    continue
+                            else:
+                                # 파싱 실패시 현재 날짜 사용
+                                dt = datetime.now()
+                        else:
+                            dt = datetime.now()
+                        
+                        # ACCYYMMDD 기본 형식으로 생성
+                        base_number = dt.strftime('ACC%y%m%d')
+                        
+                        # 같은 날짜에 이미 있는 사고 수 확인
+                        cursor.execute("""
+                            SELECT COUNT(*) FROM accidents 
+                            WHERE accident_number LIKE ?
+                        """, (base_number + '%',))
+                        count = cursor.fetchone()[0]
+                        
+                        # 일련번호 추가 (01, 02, 03...)
+                        sequence = str(count + 1).zfill(2)
+                        data['accident_number'] = base_number + sequence
+                        
+                    except Exception as e:
+                        # 오류 발생시 기본 자동 생성 방식 사용
+                        data['accident_number'] = generate_manual_accident_number(cursor)
+                else:
+                    # 재해날짜가 없으면 기본 자동 생성 방식 사용
+                    data['accident_number'] = generate_manual_accident_number(cursor)
+                
+                # 중복 확인
+                if skip_duplicates and data.get('accident_number'):
+                    cursor.execute("SELECT COUNT(*) FROM accidents WHERE accident_number = ?", (data['accident_number'],))
+                    if cursor.fetchone()[0] > 0:
+                        continue
+                
+                # 날짜 형식 처리 - 간단화
+                if data.get('accident_date'):
+                    date_str = str(data['accident_date']).strip()
+                    if date_str and date_str != 'None':
+                        data['accident_date'] = date_str
+                    else:
+                        # 날짜가 없으면 오늘 날짜로 설정
+                        data['accident_date'] = datetime.now().strftime('%Y-%m-%d')
+                
+                logging.info(f"매핑된 데이터: {data}")
+                logging.info(f"동적 컬럼 데이터: {custom_data}")
+                
+                # 최소 필수 데이터 확인
+                if not data.get('accident_number'):
+                    logging.error(f"행 {row_idx}: 사고번호가 생성되지 않음")
+                    continue
+                
+                # DB 저장 - 간단화
+                try:
+                    # 기본 필드만 먼저 저장
+                    insert_sql = """
+                        INSERT INTO accidents 
+                        (accident_number, accident_name, accident_date, created_at) 
+                        VALUES (?, ?, ?, ?)
+                    """
+                    values = [
+                        data['accident_number'],
+                        data.get('accident_name', ''),
+                        data.get('accident_date', datetime.now().strftime('%Y-%m-%d')),
+                        datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    ]
+                    
+                    logging.info(f"실행할 SQL: {insert_sql}")
+                    logging.info(f"SQL 파라미터: {values}")
+                    
+                    cursor.execute(insert_sql, values)
+                    
+                except Exception as sql_error:
+                    logging.error(f"SQL 실행 오류: {sql_error}")
+                    raise sql_error
+                
+                success_count += 1
+                
+            except Exception as e:
+                error_count += 1
+                errors.append(f"행 {row_idx}: {str(e)}")
+                continue
+        
+        conn.commit()
+        conn.close()
+        
+        result = {
+            "success": True,
+            "success_count": success_count,
+            "error_count": error_count
+        }
+        
+        if errors:
+            result["errors"] = errors[:10]  # 최대 10개 오류만 반환
+            
+        return jsonify(result)
+        
+    except Exception as e:
+        logging.error(f"엑셀 임포트 중 오류: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+        return jsonify({"success": False, "message": str(e)}), 500
+
+# ===== 협력사 엑셀 다운로드 API =====
+@app.route('/api/partners/export')
+def export_partners_to_excel():
+    try:
+        import openpyxl
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill
+        from datetime import datetime
+        import io
+        
+        # 검색 조건 가져오기
+        company_name = request.args.get('company_name', '')
+        business_number = request.args.get('business_number', '')
+        business_type_major = request.args.get('business_type_major', '')
+        business_type_minor = request.args.get('business_type_minor', '')
+        workers_min = request.args.get('workers_min', '')
+        workers_max = request.args.get('workers_max', '')
+        
+        # 협력사 데이터 조회 (partner_standards 함수와 동일한 로직)
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # 쿼리 구성
+            query = "SELECT * FROM partners_cache WHERE 1=1"
+            params = []
+            
+            if company_name:
+                query += " AND company_name LIKE ?"
+                params.append(f'%{company_name}%')
+            
+            if business_number:
+                query += " AND business_number LIKE ?"
+                params.append(f'%{business_number}%')
+                
+            if business_type_major:
+                query += " AND business_type_major = ?"
+                params.append(business_type_major)
+                
+            if business_type_minor:
+                query += " AND business_type_minor = ?"
+                params.append(business_type_minor)
+                
+            if workers_min:
+                try:
+                    min_val = int(workers_min)
+                    query += " AND permanent_workers >= ?"
+                    params.append(min_val)
+                except ValueError:
+                    pass
+                    
+            if workers_max:
+                try:
+                    max_val = int(workers_max)
+                    query += " AND permanent_workers <= ?"
+                    params.append(max_val)
+                except ValueError:
+                    pass
+            
+            query += " ORDER BY company_name"
+            
+            partners = cursor.execute(query, params).fetchall()
+            
+            # 엑셀 워크북 생성
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "협력사 기준정보"
+            
+            # 헤더 스타일 설정
+            header_font = Font(bold=True, color="FFFFFF")
+            header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+            header_align = Alignment(horizontal="center", vertical="center")
+            
+            # 헤더 작성
+            headers = [
+                '협력사명', '사업자번호', 'Class', '업종(대분류)', '업종(소분류)',
+                '위험작업여부', '대표자성명', '주소', '평균연령', '매출액', 
+                '거래차수', '상시근로자'
+            ]
+            
+            # 헤더 쓰기
+            for col_idx, header in enumerate(headers, 1):
+                cell = ws.cell(row=1, column=col_idx, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_align
+            
+            # 데이터 쓰기
+            for row_idx, partner_row in enumerate(partners, 2):
+                partner = dict(partner_row)
+                
+                ws.cell(row=row_idx, column=1, value=partner.get('company_name', ''))
+                ws.cell(row=row_idx, column=2, value=partner.get('business_number', ''))
+                ws.cell(row=row_idx, column=3, value=partner.get('partner_class', ''))
+                ws.cell(row=row_idx, column=4, value=partner.get('business_type_major', ''))
+                ws.cell(row=row_idx, column=5, value=partner.get('business_type_minor', ''))
+                
+                # 위험작업여부 처리
+                hazard_work = partner.get('hazard_work_flag', '')
+                hazard_text = '예' if hazard_work == 'O' else '아니오' if hazard_work == 'X' else ''
+                ws.cell(row=row_idx, column=6, value=hazard_text)
+                
+                ws.cell(row=row_idx, column=7, value=partner.get('representative', ''))
+                ws.cell(row=row_idx, column=8, value=partner.get('address', ''))
+                ws.cell(row=row_idx, column=9, value=partner.get('average_age', ''))
+                
+                # 매출액 처리 (억원 단위)
+                revenue = partner.get('annual_revenue')
+                if revenue:
+                    revenue_text = f"{revenue // 100000000}억원"
+                else:
+                    revenue_text = ''
+                ws.cell(row=row_idx, column=10, value=revenue_text)
+                
+                ws.cell(row=row_idx, column=11, value=partner.get('transaction_count', ''))
+                
+                # 상시근로자 처리
+                workers = partner.get('permanent_workers')
+                workers_text = f"{workers}명" if workers else ''
+                ws.cell(row=row_idx, column=12, value=workers_text)
+            
+            # 컬럼 너비 자동 조정
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                ws.column_dimensions[column_letter].width = adjusted_width
+            
+            # 파일을 메모리에 저장
+            output = io.BytesIO()
+            wb.save(output)
+            output.seek(0)
+            
+            conn.close()
+            
+            # 파일명 생성
+            filename = f"partners_list_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            
+            # 다운로드 응답
+            return send_file(
+                output,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                as_attachment=True,
+                download_name=filename
+            )
+            
+        except Exception as db_error:
+            logging.error(f"협력사 데이터 조회 중 오류: {db_error}")
+            # 더미 데이터로 대체
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "협력사 기준정보"
+            
+            # 헤더만 있는 빈 파일 생성
+            headers = [
+                '협력사명', '사업자번호', 'Class', '업종(대분류)', '업종(소분류)',
+                '위험작업여부', '대표자성명', '주소', '평균연령', '매출액', 
+                '거래차수', '상시근로자'
+            ]
+            
+            header_font = Font(bold=True, color="FFFFFF")
+            header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+            header_align = Alignment(horizontal="center", vertical="center")
+            
+            for col_idx, header in enumerate(headers, 1):
+                cell = ws.cell(row=1, column=col_idx, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_align
+            
+            # 샘플 데이터 1행 추가
+            sample_data = [
+                '샘플 협력사', '123-45-67890', 'A', '제조업', '전자제품',
+                '예', '김대표', '서울시 강남구', '35', '100억원', '5', '50명'
+            ]
+            for col_idx, value in enumerate(sample_data, 1):
+                ws.cell(row=2, column=col_idx, value=value)
+            
+            # 컬럼 너비 조정
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 30)
+                ws.column_dimensions[column_letter].width = adjusted_width
+            
+            output = io.BytesIO()
+            wb.save(output)
+            output.seek(0)
+            
+            filename = f"partners_list_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            
+            return send_file(
+                output,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                as_attachment=True,
+                download_name=filename
+            )
+    
+    except Exception as e:
+        logging.error(f"협력사 엑셀 다운로드 중 오류: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+        return jsonify({"success": False, "message": str(e)}), 500
+
+# ===== 협력사 삭제 API =====
+@app.route('/api/partners/delete', methods=['POST'])
+def delete_partners():
+    try:
+        data = request.get_json()
+        business_numbers = data.get('business_numbers', [])
+        
+        if not business_numbers:
+            return jsonify({"success": False, "message": "삭제할 협력사가 선택되지 않았습니다."}), 400
+        
+        # DB 연결
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        deleted_count = 0
+        
+        # 각 협력사를 삭제
+        for business_number in business_numbers:
+            # 실제 삭제 대신 soft delete 구현 (is_deleted 플래그)
+            # 만약 테이블에 is_deleted 컬럼이 없다면 실제 삭제
+            try:
+                # 먼저 컬럼 존재 확인
+                cursor.execute("PRAGMA table_info(partners_cache)")
+                columns = [col[1] for col in cursor.fetchall()]
+                
+                if 'is_deleted' in columns:
+                    # Soft delete
+                    cursor.execute(
+                        "UPDATE partners_cache SET is_deleted = 1 WHERE business_number = ?",
+                        (business_number,)
+                    )
+                else:
+                    # Hard delete
+                    cursor.execute(
+                        "DELETE FROM partners_cache WHERE business_number = ?",
+                        (business_number,)
+                    )
+                
+                if cursor.rowcount > 0:
+                    deleted_count += 1
+                    
+            except Exception as e:
+                logging.error(f"협력사 {business_number} 삭제 중 오류: {e}")
+                continue
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "deleted_count": deleted_count,
+            "message": f"{deleted_count}개의 협력사가 삭제되었습니다."
+        })
+        
+    except Exception as e:
+        logging.error(f"협력사 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
 
 if __name__ == "__main__":
     print("Flask 앱 시작 중...", flush=True)

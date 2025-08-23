@@ -1,0 +1,308 @@
+{% extends "base.html" %}
+{% block title %}데이터 관리{% endblock %}
+{% block content %}
+<style>
+.admin-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.admin-tabs {
+    border-bottom: 2px solid #e0e0e0;
+    margin-bottom: 30px;
+}
+
+.admin-tabs ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    gap: 5px;
+}
+
+.admin-tabs li {
+    flex: 0 0 auto;
+}
+
+.admin-tabs a {
+    display: block;
+    padding: 12px 20px;
+    text-decoration: none;
+    color: #666;
+    background: #f5f5f5;
+    border: 1px solid #e0e0e0;
+    border-bottom: none;
+    border-radius: 5px 5px 0 0;
+    transition: all 0.3s;
+}
+
+.admin-tabs a:hover {
+    background: #fff;
+    color: #333;
+}
+
+.admin-tabs a.active {
+    background: #fff;
+    color: #333;
+    font-weight: 500;
+    position: relative;
+    bottom: -2px;
+    border-bottom: 2px solid #fff;
+}
+
+.tab-content {
+    display: none;
+    padding: 20px 0;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+.recovery-section {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.recovery-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.recovery-title {
+    font-size: 18px;
+    font-weight: 500;
+    color: #333;
+}
+
+.data-table {
+    width: 100%;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.data-table th {
+    background: #6c757d;
+    color: white;
+    padding: 12px;
+    text-align: left;
+    font-weight: 500;
+}
+
+.data-table td {
+    padding: 12px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.data-table tr:hover {
+    background: #f8f9fa;
+}
+
+.btn-restore {
+    background: #28a745;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.btn-restore:hover {
+    background: #218838;
+}
+
+.no-data {
+    text-align: center;
+    padding: 40px;
+    color: #999;
+}
+
+.info-box {
+    background: #e3f2fd;
+    border-left: 4px solid #2196f3;
+    padding: 15px;
+    margin-bottom: 20px;
+    border-radius: 4px;
+}
+
+.info-box i {
+    color: #2196f3;
+    margin-right: 8px;
+}
+</style>
+
+<div class="admin-container">
+    <h2>데이터 관리</h2>
+    
+    <div class="admin-tabs">
+        <ul>
+            <li><a href="#partner" class="tab-link active" onclick="switchTab('partner')">협력사</a></li>
+            <li><a href="#accident" class="tab-link" onclick="switchTab('accident')">사고</a></li>
+        </ul>
+    </div>
+    
+    <!-- 협력사 탭 -->
+    <div id="partner-tab" class="tab-content active">
+        <div class="recovery-section">
+            <div class="recovery-header">
+                <h3 class="recovery-title">협력사 데이터 복구</h3>
+                <button class="btn btn-sm btn-secondary" onclick="refreshPartnerData()">
+                    <i class="bi bi-arrow-clockwise"></i> 새로고침
+                </button>
+            </div>
+            
+            <div class="info-box">
+                <i class="bi bi-info-circle"></i>
+                삭제된 협력사 데이터를 복구할 수 있습니다. 복구 후 협력사 목록에서 다시 확인 가능합니다.
+            </div>
+            
+            <div class="deleted-partners">
+                <p class="no-data">삭제된 협력사 데이터가 없습니다.</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 사고 탭 -->
+    <div id="accident-tab" class="tab-content">
+        <div class="recovery-section">
+            <div class="recovery-header">
+                <h3 class="recovery-title">사고 데이터 복구</h3>
+                <button class="btn btn-sm btn-secondary" onclick="loadDeletedAccidents()">
+                    <i class="bi bi-arrow-clockwise"></i> 새로고침
+                </button>
+            </div>
+            
+            <div class="info-box">
+                <i class="bi bi-info-circle"></i>
+                삭제된 사고 데이터를 복구할 수 있습니다. 복구 후 사고 목록에서 다시 확인 가능합니다.
+            </div>
+            
+            <div id="deleted-accidents-list">
+                <p class="no-data">로딩 중...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 탭 전환
+function switchTab(tabName) {
+    // 모든 탭 링크와 콘텐츠 비활성화
+    document.querySelectorAll('.tab-link').forEach(link => {
+        link.classList.remove('active');
+    });
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    
+    // 선택한 탭 활성화
+    document.querySelector(`a[href="#${tabName}"]`).classList.add('active');
+    document.getElementById(`${tabName}-tab`).classList.add('active');
+    
+    // 사고 탭이면 데이터 로드
+    if (tabName === 'accident') {
+        loadDeletedAccidents();
+    }
+}
+
+// 삭제된 사고 로드
+function loadDeletedAccidents() {
+    fetch('/api/accidents/deleted')
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('deleted-accidents-list');
+            
+            if (data.accidents && data.accidents.length > 0) {
+                let html = `
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>사고번호</th>
+                                <th>사고명</th>
+                                <th>재해날짜</th>
+                                <th>작업</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                
+                data.accidents.forEach(accident => {
+                    html += `
+                        <tr>
+                            <td>${accident.accident_number}</td>
+                            <td>${accident.accident_name || '-'}</td>
+                            <td>${accident.accident_date || '-'}</td>
+                            <td>
+                                <button class="btn-restore" onclick="restoreAccident('${accident.id}')">
+                                    <i class="bi bi-arrow-counterclockwise"></i> 복구
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                });
+                
+                html += `
+                        </tbody>
+                    </table>
+                `;
+                
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '<p class="no-data">삭제된 사고 데이터가 없습니다.</p>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading deleted accidents:', error);
+            document.getElementById('deleted-accidents-list').innerHTML = 
+                '<p class="no-data">데이터를 불러오는 중 오류가 발생했습니다.</p>';
+        });
+}
+
+// 사고 복구
+function restoreAccident(id) {
+    if (!confirm('이 사고를 복구하시겠습니까?')) {
+        return;
+    }
+    
+    fetch('/api/accidents/restore', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ids: [id] })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('사고가 복구되었습니다.');
+            loadDeletedAccidents();
+        } else {
+            alert('복구 실패: ' + data.message);
+        }
+    })
+    .catch(error => {
+        alert('복구 중 오류가 발생했습니다.');
+        console.error(error);
+    });
+}
+
+// 협력사 데이터 새로고침 (향후 구현)
+function refreshPartnerData() {
+    alert('협력사 데이터 복구 기능은 준비 중입니다.');
+}
+
+// 페이지 로드 시 사고 탭이 활성화되어 있으면 데이터 로드
+window.addEventListener('DOMContentLoaded', () => {
+    if (window.location.hash === '#accident') {
+        switchTab('accident');
+    }
+});
+</script>
+{% endblock %}

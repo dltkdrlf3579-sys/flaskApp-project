@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}삭제 데이터 복구{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h2 class="page-title">삭제 데이터 복구</h2>
+</div>
+
+<!-- 탭 메뉴 -->
+<div class="tab-menu">
+    <button class="tab-button active" onclick="switchTab('accident')">사고 데이터</button>
+    <button class="tab-button" onclick="switchTab('partner')">협력사 데이터</button>
+</div>
+
+<!-- 사고 데이터 탭 -->
+<div id="accident-tab" class="tab-content active">
+    <div class="info-message">
+        <i class="bi bi-info-circle"></i>
+        삭제된 사고 데이터를 복구할 수 있습니다. 복구 후 사고 목록에서 다시 확인 가능합니다.
+    </div>
+    
+    <div class="table-section">
+        <div class="table-header">
+            <div class="left-controls">
+                <span class="total-count">삭제된 사고: {{ deleted_accidents|length }}건</span>
+            </div>
+        </div>
+        <div class="table-wrapper">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>사고번호</th>
+                        <th>사고명</th>
+                        <th>재해날짜</th>
+                        <th>작업</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for accident in deleted_accidents %}
+                    <tr>
+                        <td>{{ accident.accident_number }}</td>
+                        <td>{{ accident.accident_name or '-' }}</td>
+                        <td>{{ accident.accident_date or '-' }}</td>
+                        <td>
+                            <button class="btn btn-sm btn-success" onclick="restoreAccident('{{ accident.id }}')">
+                                <i class="bi bi-arrow-counterclockwise"></i> 복구
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="no-data">삭제된 사고 데이터가 없습니다.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 협력사 데이터 탭 -->
+<div id="partner-tab" class="tab-content">
+    <div class="info-message">
+        <i class="bi bi-info-circle"></i>
+        삭제된 협력사 데이터를 복구할 수 있습니다. (준비 중)
+    </div>
+    
+    <div class="table-section">
+        <div class="no-data" style="padding: 40px; text-align: center;">
+            협력사 데이터 복구 기능은 준비 중입니다.
+        </div>
+    </div>
+</div>
+
+<style>
+.tab-menu {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #e0e0e0;
+}
+
+.tab-button {
+    padding: 10px 20px;
+    background: #f5f5f5;
+    border: 1px solid #e0e0e0;
+    border-bottom: none;
+    border-radius: 5px 5px 0 0;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.3s;
+}
+
+.tab-button:hover {
+    background: #fff;
+}
+
+.tab-button.active {
+    background: #fff;
+    font-weight: 500;
+    position: relative;
+    bottom: -2px;
+    border-bottom: 2px solid #fff;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+.info-message {
+    background: #e3f2fd;
+    border-left: 4px solid #2196f3;
+    padding: 15px;
+    margin-bottom: 20px;
+    border-radius: 4px;
+    color: #1976d2;
+}
+
+.info-message i {
+    margin-right: 8px;
+}
+
+.btn-success {
+    background: #28a745;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.btn-success:hover {
+    background: #218838;
+}
+</style>
+
+<script>
+// 탭 전환
+function switchTab(tabName) {
+    // 모든 탭 버튼과 콘텐츠 비활성화
+    document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    
+    // 선택한 탭 활성화
+    event.target.classList.add('active');
+    document.getElementById(`${tabName}-tab`).classList.add('active');
+}
+
+// 사고 복구
+function restoreAccident(id) {
+    if (!confirm('이 사고를 복구하시겠습니까?')) {
+        return;
+    }
+    
+    fetch('/api/accidents/restore', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ids: [id] })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('사고가 복구되었습니다.');
+            location.reload();
+        } else {
+            alert('복구 실패: ' + data.message);
+        }
+    })
+    .catch(error => {
+        alert('복구 중 오류가 발생했습니다.');
+        console.error(error);
+    });
+}
+</script>
+{% endblock %}

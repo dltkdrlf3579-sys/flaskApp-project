@@ -40,73 +40,89 @@
                     </div>
                     <div class="info-cell">
                         <label>사고명</label>
-                        <div class="value">-</div>
+                        <input type="text" id="accident_name" class="basic-input" placeholder="사고명 입력">
                     </div>
                     <div class="info-cell">
                         <label>재해날짜</label>
-                        <div class="value">-</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>사고등급</label>
-                        <div class="value">-</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>사고분류</label>
-                        <div class="value">-</div>
-                    </div>
-                </div>
-                <div class="info-row">
-                    <div class="info-cell">
-                        <label>재해유형</label>
-                        <div class="value">-</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>재해형태</label>
-                        <div class="value">-</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>사업장</label>
-                        <div class="value">-</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>건물</label>
-                        <div class="value">-</div>
-                    </div>
-                </div>
-                <div class="info-row">
-                    <div class="info-cell">
-                        <label>층</label>
-                        <div class="value">-</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>세부위치</label>
-                        <div class="value">-</div>
+                        <input type="date" id="accident_date" class="basic-input">
                     </div>
                     <div class="info-cell">
                         <label>시간</label>
-                        <div class="value">-</div>
+                        <input type="time" id="accident_time" class="basic-input">
+                    </div>
+                    <div class="info-cell">
+                        <label>사고등급</label>
+                        <select id="accident_grade" class="basic-input">
+                            <option value="">선택하세요</option>
+                            <option value="A급">A급</option>
+                            <option value="B급">B급</option>
+                            <option value="C급">C급</option>
+                            <option value="D급">D급</option>
+                            <option value="경미">경미</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-cell">
+                        <label>사고분류</label>
+                        <input type="text" id="accident_type" class="basic-input" placeholder="사고분류 입력">
+                    </div>
+                    <div class="info-cell">
+                        <label>재해유형</label>
+                        <input type="text" id="injury_type" class="basic-input" placeholder="재해유형 입력">
+                    </div>
+                    <div class="info-cell">
+                        <label>재해형태</label>
+                        <input type="text" id="injury_form" class="basic-input" placeholder="재해형태 입력">
+                    </div>
+                    <div class="info-cell">
+                        <label>사업장</label>
+                        <input type="text" id="workplace" class="basic-input" placeholder="사업장 입력">
+                    </div>
+                </div>
+                <div class="info-row">
+                    <div class="info-cell">
+                        <label>건물</label>
+                        <input type="text" id="building" class="basic-input" placeholder="건물 입력">
+                    </div>
+                    <div class="info-cell">
+                        <label>층</label>
+                        <input type="text" id="floor" class="basic-input" placeholder="층 입력">
+                    </div>
+                    <div class="info-cell">
+                        <label>세부위치</label>
+                        <input type="text" id="location_detail" class="basic-input" placeholder="세부위치 입력">
                     </div>
                     <div class="info-cell">
                         <label>요일</label>
-                        <div class="value">-</div>
+                        <select id="day_of_week" class="basic-input">
+                            <option value="">선택하세요</option>
+                            <option value="월요일">월요일</option>
+                            <option value="화요일">화요일</option>
+                            <option value="수요일">수요일</option>
+                            <option value="목요일">목요일</option>
+                            <option value="금요일">금요일</option>
+                            <option value="토요일">토요일</option>
+                            <option value="일요일">일요일</option>
+                        </select>
                     </div>
                 </div>
                 <div class="info-row">
                     <div class="info-cell">
                         <label>귀책협력사(1차)</label>
-                        <div class="value">-</div>
+                        <input type="text" id="responsible_company1" class="basic-input" placeholder="협력사명 입력">
                     </div>
                     <div class="info-cell">
                         <label>귀책협력사(1차)사업자번호</label>
-                        <div class="value">-</div>
+                        <input type="text" id="responsible_company1_no" class="basic-input" placeholder="사업자번호 입력">
                     </div>
                     <div class="info-cell">
                         <label>귀책협력사(2차)</label>
-                        <div class="value">-</div>
+                        <input type="text" id="responsible_company2" class="basic-input" placeholder="협력사명 입력">
                     </div>
                     <div class="info-cell">
                         <label>귀책협력사(2차)사업자번호</label>
-                        <div class="value">-</div>
+                        <input type="text" id="responsible_company2_no" class="basic-input" placeholder="사업자번호 입력">
                     </div>
                 </div>
             </div>
@@ -141,7 +157,13 @@
                         {% elif col.column_type == 'dropdown' %}
                             <select class="dynamic-input" data-column-key="{{ col.column_key }}">
                                 <option value="">선택하세요</option>
-                                {% if col.dropdown_options %}
+                                {% if col.dropdown_options_mapped %}
+                                    {# 새로운 코드-값 매핑 방식 #}
+                                    {% for option in col.dropdown_options_mapped %}
+                                        <option value="{{ option.code }}">{{ option.value }}</option>
+                                    {% endfor %}
+                                {% elif col.dropdown_options %}
+                                    {# 기존 JSON 방식 (하위 호환성) #}
                                     {% set options = col.dropdown_options | from_json %}
                                     {% for option in options %}
                                         <option value="{{ option }}">{{ option }}</option>
@@ -835,6 +857,27 @@ function registerAccident() {
     const detailedContent = editableDiv.innerHTML;
     console.log('상세내용:', detailedContent.substring(0, 100));
     
+    // 기본정보 필드들 수집
+    const basicInfo = {
+        accident_name: document.getElementById('accident_name')?.value || '',
+        accident_date: document.getElementById('accident_date')?.value || '',
+        accident_time: document.getElementById('accident_time')?.value || '',
+        accident_grade: document.getElementById('accident_grade')?.value || '',
+        accident_type: document.getElementById('accident_type')?.value || '',
+        injury_type: document.getElementById('injury_type')?.value || '',
+        injury_form: document.getElementById('injury_form')?.value || '',
+        workplace: document.getElementById('workplace')?.value || '',
+        building: document.getElementById('building')?.value || '',
+        floor: document.getElementById('floor')?.value || '',
+        location_detail: document.getElementById('location_detail')?.value || '',
+        day_of_week: document.getElementById('day_of_week')?.value || '',
+        responsible_company1: document.getElementById('responsible_company1')?.value || '',
+        responsible_company1_no: document.getElementById('responsible_company1_no')?.value || '',
+        responsible_company2: document.getElementById('responsible_company2')?.value || '',
+        responsible_company2_no: document.getElementById('responsible_company2_no')?.value || ''
+    };
+    console.log('기본정보:', basicInfo);
+    
     // 동적 컬럼 데이터 수집 (추가 기입정보만)
     const customData = {};
     console.log('동적 입력 필드 개수:', document.querySelectorAll('.dynamic-input').length);
@@ -881,6 +924,12 @@ function registerAccident() {
     
     // FormData 생성
     const formData = new FormData();
+    
+    // 기본정보 필드들 추가
+    Object.keys(basicInfo).forEach(key => {
+        formData.append(key, basicInfo[key]);
+    });
+    
     formData.append('detailed_content', detailedContent);
     formData.append('custom_data', JSON.stringify(customData));  // 동적 컬럼만
     formData.append('attachment_data', JSON.stringify(attachments));

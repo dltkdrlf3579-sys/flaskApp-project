@@ -1,0 +1,1465 @@
+{% extends "base.html" %}
+{% block title %}사고 컬럼 관리 - 고급 코드 매핑{% endblock %}
+{% block content %}
+<style>
+.admin-container {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.admin-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 30px;
+    margin: -20px -20px 30px -20px;
+    border-radius: 8px;
+}
+
+.admin-header h1 {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 600;
+}
+
+.admin-header p {
+    margin: 5px 0 0 0;
+    opacity: 0.9;
+}
+
+/* 상태 표시 배지 */
+.status-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-left: 10px;
+}
+
+.status-badge.saved {
+    background: #d4edda;
+    color: #155724;
+}
+
+.status-badge.unsaved {
+    background: #fff3cd;
+    color: #856404;
+}
+
+/* 컬럼 리스트 개선 */
+.columns-grid {
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.column-list {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    padding: 20px;
+    max-height: 700px;
+    overflow-y: auto;
+}
+
+.column-list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #e9ecef;
+}
+
+.search-box {
+    position: relative;
+    flex: 1;
+    margin-right: 10px;
+}
+
+.search-box input {
+    width: 100%;
+    padding: 8px 35px 8px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.search-box i {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #6c757d;
+}
+
+.column-item {
+    padding: 14px;
+    margin-bottom: 8px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 2px solid transparent;
+    position: relative;
+}
+
+.column-item:hover {
+    background: #e9ecef;
+    transform: translateX(4px);
+}
+
+.column-item.active {
+    background: #e7f3ff;
+    border-color: #2f5fd3;
+    box-shadow: 0 2px 8px rgba(47, 95, 211, 0.2);
+}
+
+.column-item .column-name {
+    font-weight: 600;
+    margin-bottom: 6px;
+    font-size: 15px;
+}
+
+.column-item .column-info {
+    font-size: 12px;
+    color: #6c757d;
+    display: flex;
+    gap: 12px;
+}
+
+.column-item .option-count {
+    background: #e9ecef;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+}
+
+/* 코드 편집기 개선 */
+.code-editor {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    padding: 20px;
+    min-height: 700px;
+}
+
+.editor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #e9ecef;
+}
+
+.editor-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: #333;
+}
+
+.editor-actions {
+    display: flex;
+    gap: 10px;
+}
+
+/* 툴바 추가 */
+.editor-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 6px;
+}
+
+.toolbar-left {
+    display: flex;
+    gap: 10px;
+}
+
+.toolbar-right {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.btn-toolbar {
+    padding: 6px 12px;
+    border: 1px solid #ced4da;
+    background: white;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-toolbar:hover {
+    background: #e9ecef;
+    border-color: #adb5bd;
+}
+
+.btn-toolbar.active {
+    background: #2f5fd3;
+    color: white;
+    border-color: #2f5fd3;
+}
+
+/* 엑셀형 테이블 개선 */
+.code-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.code-table thead {
+    background: linear-gradient(180deg, #f8f9fa 0%, #e9ecef 100%);
+}
+
+.code-table th {
+    padding: 12px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 13px;
+    border-bottom: 2px solid #dee2e6;
+    color: #495057;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.code-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #e9ecef;
+    background: white;
+}
+
+.code-table tbody tr:hover td {
+    background: #f8f9fa;
+}
+
+.code-table tbody tr.selected td {
+    background: #e7f3ff;
+}
+
+/* 입력 필드 개선 */
+.code-input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+.code-input:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 3px rgba(47, 95, 211, 0.1);
+    background: white;
+}
+
+.code-input.code-readonly {
+    background: #f8f9fa;
+    font-family: 'Monaco', 'Courier New', monospace;
+    font-weight: 600;
+    color: #495057;
+    cursor: not-allowed;
+}
+
+.code-input.error {
+    border-color: #dc3545;
+    background: #fff5f5;
+}
+
+.error-message {
+    color: #dc3545;
+    font-size: 12px;
+    margin-top: 4px;
+}
+
+/* 버튼 스타일 개선 */
+.btn-remove-row {
+    background: #fff;
+    color: #dc3545;
+    border: 1px solid #dc3545;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s;
+}
+
+.btn-remove-row:hover {
+    background: #dc3545;
+    color: white;
+}
+
+.btn-add-row {
+    background: #28a745;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-top: 15px;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.btn-add-row:hover {
+    background: #218838;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(40, 167, 69, 0.3);
+}
+
+.btn-save {
+    background: #2f5fd3;
+    color: white;
+    border: none;
+    padding: 10px 24px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.btn-save:hover {
+    background: #1d4ed8;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(47, 95, 211, 0.3);
+}
+
+.btn-save:disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-cancel {
+    background: white;
+    color: #6c757d;
+    border: 1px solid #6c757d;
+    padding: 10px 24px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-cancel:hover {
+    background: #6c757d;
+    color: white;
+}
+
+/* 드래그 앤 드롭 개선 */
+.drag-handle {
+    cursor: move;
+    color: #adb5bd;
+    padding: 0 8px;
+    transition: color 0.2s;
+}
+
+.drag-handle:hover {
+    color: #495057;
+}
+
+.dragging {
+    opacity: 0.5;
+}
+
+.drag-over {
+    border-top: 3px solid #2f5fd3;
+}
+
+/* 통계 정보 */
+.stats-panel {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.stat-card {
+    background: white;
+    padding: 15px;
+    border-radius: 6px;
+    border: 1px solid #e9ecef;
+}
+
+.stat-card .stat-label {
+    font-size: 12px;
+    color: #6c757d;
+    margin-bottom: 5px;
+}
+
+.stat-card .stat-value {
+    font-size: 24px;
+    font-weight: 600;
+    color: #333;
+}
+
+/* 로딩 상태 */
+.loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255, 255, 255, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+
+.spinner {
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #2f5fd3;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* 빈 상태 */
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: #6c757d;
+}
+
+.empty-state i {
+    font-size: 48px;
+    color: #dee2e6;
+    margin-bottom: 20px;
+}
+
+/* 알림 토스트 */
+.toast-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+}
+
+.toast {
+    background: white;
+    padding: 16px 20px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 300px;
+    animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.toast.success {
+    border-left: 4px solid #28a745;
+}
+
+.toast.error {
+    border-left: 4px solid #dc3545;
+}
+
+.toast.warning {
+    border-left: 4px solid #ffc107;
+}
+
+/* 일괄 작업 패널 */
+.bulk-actions {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    display: none;
+}
+
+.bulk-actions.show {
+    display: block;
+}
+
+.bulk-actions-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.selected-count {
+    font-weight: 600;
+    color: #495057;
+}
+
+.bulk-buttons {
+    display: flex;
+    gap: 10px;
+}
+</style>
+
+<div class="admin-container">
+    <div class="admin-header">
+        <h1>
+            사고 컬럼 관리 - 고급 코드 매핑
+            <span class="status-badge saved" id="saveStatus">저장됨</span>
+        </h1>
+        <p>드롭다운 옵션을 코드로 관리하여 데이터 일관성을 유지합니다</p>
+    </div>
+
+    <!-- 통계 패널 -->
+    <div class="stats-panel">
+        <div class="stat-card">
+            <div class="stat-label">총 드롭다운 컬럼</div>
+            <div class="stat-value" id="totalColumns">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">활성 컬럼</div>
+            <div class="stat-value" id="activeColumns">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">총 옵션 수</div>
+            <div class="stat-value" id="totalOptions">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">마지막 수정</div>
+            <div class="stat-value" id="lastModified" style="font-size: 14px;">-</div>
+        </div>
+    </div>
+
+    <div class="columns-grid">
+        <!-- 왼쪽: 컬럼 목록 -->
+        <div class="column-list">
+            <div class="column-list-header">
+                <div class="search-box">
+                    <input type="text" placeholder="컬럼 검색..." id="columnSearch" onkeyup="filterColumns()">
+                    <i class="bi bi-search"></i>
+                </div>
+                <button class="btn-toolbar" onclick="refreshColumnList()">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+            </div>
+            <div id="columnListContainer">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>컬럼 목록을 불러오는 중...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 오른쪽: 코드 편집기 -->
+        <div class="code-editor">
+            <div id="editorContainer">
+                <div class="empty-state">
+                    <i class="bi bi-list-ul"></i>
+                    <h3>컬럼을 선택하세요</h3>
+                    <p>왼쪽 목록에서 편집할 드롭다운 컬럼을 선택하세요</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 토스트 컨테이너 -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// 전역 변수
+let currentColumn = null;
+let allColumns = [];
+let currentCodes = [];
+let hasChanges = false;
+let selectedRows = new Set();
+
+// 페이지 로드 시 초기화
+document.addEventListener('DOMContentLoaded', function() {
+    loadColumns();
+    updateStats();
+    
+    // 자동 저장 (5분마다)
+    setInterval(() => {
+        if (hasChanges) {
+            autoSave();
+        }
+    }, 300000);
+    
+    // 키보드 단축키
+    document.addEventListener('keydown', function(e) {
+        // Ctrl+S: 저장
+        if (e.ctrlKey && e.key === 's') {
+            e.preventDefault();
+            if (hasChanges && currentColumn) {
+                saveCodes();
+            }
+        }
+        // Ctrl+A: 새 행 추가
+        if (e.ctrlKey && e.key === 'a') {
+            e.preventDefault();
+            if (currentColumn) {
+                addRow();
+            }
+        }
+    });
+});
+
+// 컬럼 목록 로드
+async function loadColumns() {
+    try {
+        const response = await fetch('/api/accident-columns');
+        const columns = await response.json();
+        
+        // 드롭다운 타입만 필터링
+        allColumns = columns.filter(col => col.column_type === 'dropdown');
+        
+        renderColumnList();
+        updateStats();
+    } catch (error) {
+        console.error('컬럼 로드 실패:', error);
+        showToast('error', '컬럼 목록을 불러올 수 없습니다');
+    }
+}
+
+// 컬럼 목록 렌더링
+function renderColumnList() {
+    const container = document.getElementById('columnListContainer');
+    const searchTerm = document.getElementById('columnSearch').value.toLowerCase();
+    
+    // 검색 필터링
+    const filteredColumns = allColumns.filter(col => 
+        col.column_name.toLowerCase().includes(searchTerm) ||
+        col.column_key.toLowerCase().includes(searchTerm)
+    );
+    
+    if (filteredColumns.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <p>검색 결과가 없습니다</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = '';
+    filteredColumns.forEach(column => {
+        const optionCount = getOptionCount(column);
+        const isActive = currentColumn && currentColumn.key === column.column_key;
+        
+        html += `
+            <div class="column-item ${isActive ? 'active' : ''}" 
+                 data-column-id="${column.id}" 
+                 data-column-key="${column.column_key}" 
+                 onclick="selectColumn('${column.column_key}', '${column.column_name}')">
+                <div class="column-name">
+                    ${column.column_name}
+                    ${column.is_active ? '' : '<span style="color: #dc3545; font-size: 12px;"> (비활성)</span>'}
+                </div>
+                <div class="column-info">
+                    <span><i class="bi bi-key"></i> ${column.column_key}</span>
+                    <span class="option-count">${optionCount}개 옵션</span>
+                    ${column.updated_at ? `<span><i class="bi bi-clock"></i> ${formatDate(column.updated_at)}</span>` : ''}
+                </div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+// 컬럼 검색
+function filterColumns() {
+    renderColumnList();
+}
+
+// 컬럼 목록 새로고침
+function refreshColumnList() {
+    loadColumns();
+    showToast('success', '목록을 새로고침했습니다');
+}
+
+// 옵션 개수 계산
+function getOptionCount(column) {
+    if (!column.dropdown_options) return 0;
+    try {
+        const options = typeof column.dropdown_options === 'string' 
+            ? JSON.parse(column.dropdown_options) 
+            : column.dropdown_options;
+        return Array.isArray(options) ? options.length : 0;
+    } catch {
+        return 0;
+    }
+}
+
+// 컬럼 선택
+async function selectColumn(columnKey, columnName) {
+    // 변경사항 확인
+    if (hasChanges && !confirm('저장하지 않은 변경사항이 있습니다. 계속하시겠습니까?')) {
+        return;
+    }
+    
+    // 활성 표시
+    document.querySelectorAll('.column-item').forEach(item => {
+        item.classList.remove('active');
+    });
+    event.currentTarget.classList.add('active');
+    
+    currentColumn = { key: columnKey, name: columnName };
+    
+    // 코드 목록 로드
+    await loadCodes(columnKey);
+    
+    // 편집기 렌더링
+    renderEditor();
+    
+    // 상태 초기화
+    hasChanges = false;
+    updateSaveStatus();
+}
+
+// 코드 목록 로드
+async function loadCodes(columnKey) {
+    try {
+        const response = await fetch(`/api/dropdown-codes/${columnKey}`);
+        if (response.ok) {
+            currentCodes = await response.json();
+        } else {
+            // 코드가 없으면 기존 dropdown_options에서 마이그레이션
+            currentCodes = await migrateFromOldFormat(columnKey);
+        }
+    } catch (error) {
+        console.error('코드 로드 실패:', error);
+        currentCodes = [];
+    }
+}
+
+// 기존 형식에서 마이그레이션
+async function migrateFromOldFormat(columnKey) {
+    const column = allColumns.find(col => col.column_key === columnKey);
+    if (!column || !column.dropdown_options) return [];
+    
+    try {
+        const options = typeof column.dropdown_options === 'string'
+            ? JSON.parse(column.dropdown_options)
+            : column.dropdown_options;
+        
+        if (!Array.isArray(options)) return [];
+        
+        // 코드 자동 생성
+        return options.map((value, index) => ({
+            code: `${columnKey.toUpperCase()}_${String(index + 1).padStart(3, '0')}`,
+            value: value,
+            order: index + 1
+        }));
+    } catch {
+        return [];
+    }
+}
+
+// 편집기 렌더링
+function renderEditor() {
+    const container = document.getElementById('editorContainer');
+    
+    if (!currentColumn) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="bi bi-list-ul"></i>
+                <h3>컬럼을 선택하세요</h3>
+                <p>왼쪽 목록에서 편집할 드롭다운 컬럼을 선택하세요</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let tableRows = '';
+    currentCodes.forEach((code, index) => {
+        tableRows += createTableRow(code.code || code.option_code, code.value || code.option_value, index);
+    });
+    
+    // 빈 테이블이면 기본 행 추가
+    if (!tableRows) {
+        tableRows = createTableRow(generateNewCode(), '', 0);
+    }
+    
+    container.innerHTML = `
+        <div class="editor-header">
+            <div class="editor-title">
+                ${currentColumn.name}
+                <span style="font-size: 14px; color: #6c757d; margin-left: 10px;">
+                    (${currentColumn.key})
+                </span>
+            </div>
+            <div class="editor-actions">
+                <button class="btn-cancel" onclick="cancelEdit()">
+                    <i class="bi bi-x-lg"></i> 취소
+                </button>
+                <button class="btn-save" onclick="saveCodes()" id="saveButton">
+                    <i class="bi bi-check-lg"></i> 저장
+                </button>
+            </div>
+        </div>
+        
+        <!-- 툴바 -->
+        <div class="editor-toolbar">
+            <div class="toolbar-left">
+                <button class="btn-toolbar" onclick="selectAllRows()">
+                    <i class="bi bi-check-square"></i> 전체 선택
+                </button>
+                <button class="btn-toolbar" onclick="deleteSelectedRows()">
+                    <i class="bi bi-trash"></i> 선택 삭제
+                </button>
+                <button class="btn-toolbar" onclick="sortByValue()">
+                    <i class="bi bi-sort-alpha-down"></i> 값 정렬
+                </button>
+            </div>
+            <div class="toolbar-right">
+                <span style="font-size: 13px; color: #6c757d;">
+                    총 <strong id="rowCount">${currentCodes.length}</strong>개 옵션
+                </span>
+                <button class="btn-toolbar" onclick="exportCodes()">
+                    <i class="bi bi-download"></i> 내보내기
+                </button>
+                <button class="btn-toolbar" onclick="importCodes()">
+                    <i class="bi bi-upload"></i> 가져오기
+                </button>
+            </div>
+        </div>
+        
+        <!-- 일괄 작업 패널 -->
+        <div class="bulk-actions" id="bulkActions">
+            <div class="bulk-actions-header">
+                <span class="selected-count">
+                    <span id="selectedCount">0</span>개 선택됨
+                </span>
+                <div class="bulk-buttons">
+                    <button class="btn-toolbar" onclick="bulkDelete()">삭제</button>
+                    <button class="btn-toolbar" onclick="bulkActivate()">활성화</button>
+                    <button class="btn-toolbar" onclick="bulkDeactivate()">비활성화</button>
+                </div>
+            </div>
+        </div>
+        
+        <table class="code-table">
+            <thead>
+                <tr>
+                    <th width="40">
+                        <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll()">
+                    </th>
+                    <th width="50">순서</th>
+                    <th width="180">코드</th>
+                    <th>표시 값</th>
+                    <th width="100">상태</th>
+                    <th width="100">작업</th>
+                </tr>
+            </thead>
+            <tbody id="codeTableBody">
+                ${tableRows}
+            </tbody>
+        </table>
+        
+        <button class="btn-add-row" onclick="addRow()">
+            <i class="bi bi-plus-circle"></i> 새 옵션 추가 (Ctrl+A)
+        </button>
+    `;
+    
+    // Sortable 초기화
+    initSortable();
+    
+    // 변경 감지 이벤트 추가
+    addChangeListeners();
+    
+    // 행 개수 업데이트
+    updateRowCount();
+}
+
+// 테이블 행 생성
+function createTableRow(code, value, index) {
+    const isActive = true; // 기본값
+    return `
+        <tr data-code="${code}" data-index="${index}">
+            <td>
+                <input type="checkbox" class="row-checkbox" onchange="updateSelectedRows()">
+            </td>
+            <td class="drag-handle">
+                <i class="bi bi-grip-vertical"></i>
+                <span class="row-number">${index + 1}</span>
+            </td>
+            <td>
+                <input type="text" class="code-input code-readonly" value="${code}" readonly>
+            </td>
+            <td>
+                <input type="text" class="code-input value-input" value="${value}" 
+                       placeholder="표시할 값을 입력하세요"
+                       onblur="validateValue(this)">
+                <div class="error-message" style="display: none;"></div>
+            </td>
+            <td>
+                <span class="status-badge ${isActive ? 'saved' : 'unsaved'}">
+                    ${isActive ? '활성' : '비활성'}
+                </span>
+            </td>
+            <td>
+                <button class="btn-remove-row" onclick="removeRow(this)">
+                    <i class="bi bi-trash"></i> 삭제
+                </button>
+            </td>
+        </tr>
+    `;
+}
+
+// 값 유효성 검증
+function validateValue(input) {
+    const value = input.value.trim();
+    const errorDiv = input.nextElementSibling;
+    
+    // 빈 값 체크
+    if (!value) {
+        input.classList.add('error');
+        errorDiv.textContent = '값을 입력해주세요';
+        errorDiv.style.display = 'block';
+        return false;
+    }
+    
+    // 중복 체크
+    const allValues = Array.from(document.querySelectorAll('.value-input'))
+        .map(el => el.value.trim())
+        .filter(v => v);
+    const duplicates = allValues.filter((v, i) => allValues.indexOf(v) !== i);
+    
+    if (duplicates.includes(value)) {
+        input.classList.add('error');
+        errorDiv.textContent = '중복된 값입니다';
+        errorDiv.style.display = 'block';
+        return false;
+    }
+    
+    // 에러 제거
+    input.classList.remove('error');
+    errorDiv.style.display = 'none';
+    return true;
+}
+
+// 새 코드 생성
+function generateNewCode() {
+    if (!currentColumn) return '';
+    
+    const prefix = currentColumn.key.toUpperCase();
+    const existingCodes = Array.from(document.querySelectorAll('.code-readonly')).map(input => input.value);
+    
+    let num = 1;
+    let newCode;
+    do {
+        newCode = `${prefix}_${String(num).padStart(3, '0')}`;
+        num++;
+    } while (existingCodes.includes(newCode));
+    
+    return newCode;
+}
+
+// 행 추가
+function addRow() {
+    const tbody = document.getElementById('codeTableBody');
+    const newCode = generateNewCode();
+    const rowCount = tbody.querySelectorAll('tr').length;
+    
+    const newRow = document.createElement('tr');
+    newRow.setAttribute('data-code', newCode);
+    newRow.setAttribute('data-index', rowCount);
+    newRow.innerHTML = createTableRow(newCode, '', rowCount).replace(`<tr data-code="${newCode}" data-index="${rowCount}">`, '').replace('</tr>', '');
+    
+    tbody.appendChild(newRow);
+    
+    // 행 번호 업데이트
+    updateRowNumbers();
+    updateRowCount();
+    
+    // 변경 감지
+    addChangeListeners();
+    setHasChanges(true);
+    
+    // 새 행의 값 입력 필드에 포커스
+    newRow.querySelector('.value-input').focus();
+    
+    showToast('success', '새 옵션이 추가되었습니다');
+}
+
+// 행 삭제
+function removeRow(button) {
+    if (!confirm('이 옵션을 삭제하시겠습니까?')) {
+        return;
+    }
+    
+    const row = button.closest('tr');
+    const value = row.querySelector('.value-input').value;
+    
+    row.remove();
+    
+    updateRowNumbers();
+    updateRowCount();
+    setHasChanges(true);
+    
+    showToast('warning', `"${value}" 옵션이 삭제되었습니다`);
+}
+
+// 선택된 행 삭제
+function deleteSelectedRows() {
+    const selected = document.querySelectorAll('.row-checkbox:checked');
+    if (selected.length === 0) {
+        showToast('warning', '삭제할 항목을 선택하세요');
+        return;
+    }
+    
+    if (!confirm(`${selected.length}개 옵션을 삭제하시겠습니까?`)) {
+        return;
+    }
+    
+    selected.forEach(checkbox => {
+        checkbox.closest('tr').remove();
+    });
+    
+    updateRowNumbers();
+    updateRowCount();
+    setHasChanges(true);
+    updateSelectedRows();
+    
+    showToast('warning', `${selected.length}개 옵션이 삭제되었습니다`);
+}
+
+// 값으로 정렬
+function sortByValue() {
+    const tbody = document.getElementById('codeTableBody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    
+    rows.sort((a, b) => {
+        const valueA = a.querySelector('.value-input').value.toLowerCase();
+        const valueB = b.querySelector('.value-input').value.toLowerCase();
+        return valueA.localeCompare(valueB, 'ko');
+    });
+    
+    tbody.innerHTML = '';
+    rows.forEach(row => tbody.appendChild(row));
+    
+    updateRowNumbers();
+    setHasChanges(true);
+    
+    showToast('success', '값 기준으로 정렬되었습니다');
+}
+
+// 행 번호 업데이트
+function updateRowNumbers() {
+    const rows = document.querySelectorAll('#codeTableBody tr');
+    rows.forEach((row, index) => {
+        const numberSpan = row.querySelector('.row-number');
+        if (numberSpan) {
+            numberSpan.textContent = index + 1;
+        }
+        row.setAttribute('data-index', index);
+    });
+}
+
+// 행 개수 업데이트
+function updateRowCount() {
+    const count = document.querySelectorAll('#codeTableBody tr').length;
+    const countEl = document.getElementById('rowCount');
+    if (countEl) {
+        countEl.textContent = count;
+    }
+}
+
+// 전체 선택
+function toggleSelectAll() {
+    const selectAll = document.getElementById('selectAllCheckbox');
+    const checkboxes = document.querySelectorAll('.row-checkbox');
+    
+    checkboxes.forEach(cb => {
+        cb.checked = selectAll.checked;
+    });
+    
+    updateSelectedRows();
+}
+
+// 선택된 행 업데이트
+function updateSelectedRows() {
+    const selected = document.querySelectorAll('.row-checkbox:checked');
+    const bulkPanel = document.getElementById('bulkActions');
+    const selectedCount = document.getElementById('selectedCount');
+    
+    if (selected.length > 0) {
+        bulkPanel.classList.add('show');
+        selectedCount.textContent = selected.length;
+    } else {
+        bulkPanel.classList.remove('show');
+    }
+    
+    // 전체 선택 체크박스 상태 업데이트
+    const selectAll = document.getElementById('selectAllCheckbox');
+    const allCheckboxes = document.querySelectorAll('.row-checkbox');
+    
+    if (selectAll) {
+        if (selected.length === 0) {
+            selectAll.checked = false;
+            selectAll.indeterminate = false;
+        } else if (selected.length === allCheckboxes.length) {
+            selectAll.checked = true;
+            selectAll.indeterminate = false;
+        } else {
+            selectAll.checked = false;
+            selectAll.indeterminate = true;
+        }
+    }
+}
+
+// Sortable 초기화
+function initSortable() {
+    const tbody = document.getElementById('codeTableBody');
+    if (tbody && typeof Sortable !== 'undefined') {
+        new Sortable(tbody, {
+            handle: '.drag-handle',
+            animation: 150,
+            ghostClass: 'dragging',
+            chosenClass: 'selected',
+            dragClass: 'drag-over',
+            onEnd: function() {
+                updateRowNumbers();
+                setHasChanges(true);
+            }
+        });
+    }
+}
+
+// 변경 감지 리스너 추가
+function addChangeListeners() {
+    document.querySelectorAll('.value-input').forEach(input => {
+        input.addEventListener('input', () => {
+            setHasChanges(true);
+        });
+    });
+}
+
+// 변경사항 설정
+function setHasChanges(value) {
+    hasChanges = value;
+    updateSaveStatus();
+    
+    const saveButton = document.getElementById('saveButton');
+    if (saveButton) {
+        saveButton.disabled = !value;
+    }
+}
+
+// 저장 상태 업데이트
+function updateSaveStatus() {
+    const status = document.getElementById('saveStatus');
+    if (status) {
+        if (hasChanges) {
+            status.textContent = '저장 필요';
+            status.className = 'status-badge unsaved';
+        } else {
+            status.textContent = '저장됨';
+            status.className = 'status-badge saved';
+        }
+    }
+}
+
+// 코드 저장
+async function saveCodes() {
+    if (!currentColumn) return;
+    
+    // 유효성 검증
+    const inputs = document.querySelectorAll('.value-input');
+    let hasError = false;
+    
+    inputs.forEach(input => {
+        if (!validateValue(input)) {
+            hasError = true;
+        }
+    });
+    
+    if (hasError) {
+        showToast('error', '입력값을 확인해주세요');
+        return;
+    }
+    
+    // 데이터 수집
+    const codes = [];
+    const rows = document.querySelectorAll('#codeTableBody tr');
+    
+    rows.forEach(row => {
+        const code = row.querySelector('.code-readonly').value;
+        const value = row.querySelector('.value-input').value.trim();
+        
+        if (code && value) {
+            codes.push({ code, value });
+        }
+    });
+    
+    if (codes.length === 0) {
+        showToast('warning', '최소 하나 이상의 옵션을 입력해주세요');
+        return;
+    }
+    
+    // 로딩 표시
+    const saveButton = document.getElementById('saveButton');
+    const originalText = saveButton.innerHTML;
+    saveButton.innerHTML = '<i class="bi bi-hourglass-split"></i> 저장 중...';
+    saveButton.disabled = true;
+    
+    try {
+        const response = await fetch('/api/dropdown-codes', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                column_key: currentColumn.key,
+                codes: codes
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showToast('success', '코드가 저장되었습니다');
+            setHasChanges(false);
+            
+            // 목록 새로고침
+            await loadColumns();
+            
+            // 마지막 수정 시간 업데이트
+            updateLastModified();
+        } else {
+            showToast('error', '저장 실패: ' + result.message);
+        }
+    } catch (error) {
+        console.error('저장 오류:', error);
+        showToast('error', '저장 중 오류가 발생했습니다');
+    } finally {
+        saveButton.innerHTML = originalText;
+        saveButton.disabled = false;
+    }
+}
+
+// 자동 저장
+async function autoSave() {
+    if (!hasChanges || !currentColumn) return;
+    
+    showToast('info', '자동 저장 중...');
+    await saveCodes();
+}
+
+// 편집 취소
+function cancelEdit() {
+    if (hasChanges && !confirm('저장하지 않은 변경사항이 있습니다. 취소하시겠습니까?')) {
+        return;
+    }
+    
+    setHasChanges(false);
+    if (currentColumn) {
+        loadCodes(currentColumn.key).then(() => renderEditor());
+    }
+}
+
+// 통계 업데이트
+function updateStats() {
+    const totalColumns = allColumns.length;
+    const activeColumns = allColumns.filter(col => col.is_active).length;
+    const totalOptions = allColumns.reduce((sum, col) => sum + getOptionCount(col), 0);
+    
+    document.getElementById('totalColumns').textContent = totalColumns;
+    document.getElementById('activeColumns').textContent = activeColumns;
+    document.getElementById('totalOptions').textContent = totalOptions;
+}
+
+// 마지막 수정 시간 업데이트
+function updateLastModified() {
+    const now = new Date();
+    const formatted = formatDate(now.toISOString());
+    document.getElementById('lastModified').textContent = formatted;
+}
+
+// 날짜 포맷
+function formatDate(dateString) {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    const now = new Date();
+    const diff = now - date;
+    
+    // 1분 이내
+    if (diff < 60000) {
+        return '방금 전';
+    }
+    // 1시간 이내
+    if (diff < 3600000) {
+        const minutes = Math.floor(diff / 60000);
+        return `${minutes}분 전`;
+    }
+    // 24시간 이내
+    if (diff < 86400000) {
+        const hours = Math.floor(diff / 3600000);
+        return `${hours}시간 전`;
+    }
+    
+    // 그 외
+    return date.toLocaleDateString('ko-KR');
+}
+
+// 토스트 메시지 표시
+function showToast(type, message) {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    
+    let icon = '';
+    switch(type) {
+        case 'success': icon = 'bi-check-circle-fill'; break;
+        case 'error': icon = 'bi-x-circle-fill'; break;
+        case 'warning': icon = 'bi-exclamation-triangle-fill'; break;
+        case 'info': icon = 'bi-info-circle-fill'; break;
+    }
+    
+    toast.innerHTML = `
+        <i class="bi ${icon}" style="font-size: 20px;"></i>
+        <div>${message}</div>
+    `;
+    
+    container.appendChild(toast);
+    
+    // 3초 후 제거
+    setTimeout(() => {
+        toast.style.animation = 'slideOut 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
+// 코드 내보내기
+function exportCodes() {
+    if (!currentColumn) return;
+    
+    const codes = [];
+    const rows = document.querySelectorAll('#codeTableBody tr');
+    
+    rows.forEach(row => {
+        const code = row.querySelector('.code-readonly').value;
+        const value = row.querySelector('.value-input').value.trim();
+        if (code && value) {
+            codes.push({ code, value });
+        }
+    });
+    
+    const data = {
+        column_key: currentColumn.key,
+        column_name: currentColumn.name,
+        codes: codes,
+        exported_at: new Date().toISOString()
+    };
+    
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${currentColumn.key}_codes_${Date.now()}.json`;
+    a.click();
+    
+    showToast('success', '코드를 내보냈습니다');
+}
+
+// 코드 가져오기
+function importCodes() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    
+    input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            
+            if (!data.codes || !Array.isArray(data.codes)) {
+                throw new Error('잘못된 파일 형식입니다');
+            }
+            
+            // 기존 데이터 덮어쓰기 확인
+            if (!confirm('기존 데이터를 덮어쓰시겠습니까?')) {
+                return;
+            }
+            
+            // 테이블 초기화
+            const tbody = document.getElementById('codeTableBody');
+            tbody.innerHTML = '';
+            
+            // 데이터 추가
+            data.codes.forEach((item, index) => {
+                const row = document.createElement('tr');
+                row.setAttribute('data-code', item.code);
+                row.setAttribute('data-index', index);
+                row.innerHTML = createTableRow(item.code, item.value, index)
+                    .replace(`<tr data-code="${item.code}" data-index="${index}">`, '')
+                    .replace('</tr>', '');
+                tbody.appendChild(row);
+            });
+            
+            updateRowNumbers();
+            updateRowCount();
+            addChangeListeners();
+            setHasChanges(true);
+            
+            showToast('success', '코드를 가져왔습니다');
+        } catch (error) {
+            console.error('가져오기 실패:', error);
+            showToast('error', '파일을 읽을 수 없습니다');
+        }
+    };
+    
+    input.click();
+}
+
+// 페이지 떠나기 전 확인
+window.addEventListener('beforeunload', function(e) {
+    if (hasChanges) {
+        e.preventDefault();
+        e.returnValue = '저장하지 않은 변경사항이 있습니다.';
+    }
+});
+
+// 스타일 추가 (slideOut 애니메이션)
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes slideOut {
+        from {
+            transform: translateX(0);
+            opacity: 1;
+        }
+        to {
+            transform: translateX(400px);
+            opacity: 0;
+        }
+    }
+`;
+document.head.appendChild(style);
+</script>
+
+<!-- Sortable.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+{% endblock %}

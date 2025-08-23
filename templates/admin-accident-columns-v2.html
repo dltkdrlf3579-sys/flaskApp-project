@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+{% block title %}사고 컬럼 관리 V2 - 코드매핑{% endblock %}
+{% block content %}
+<style>
+.admin-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.dropdown-editor {
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 15px;
+    margin-top: 20px;
+}
+
+.option-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+.option-table th {
+    background: #f8f9fa;
+    padding: 10px;
+    text-align: left;
+    border: 1px solid #dee2e6;
+    font-weight: 600;
+}
+
+.option-table td {
+    padding: 8px;
+    border: 1px solid #dee2e6;
+}
+
+.option-table input {
+    width: 100%;
+    padding: 5px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+}
+
+.option-code {
+    width: 100px;
+    background: #f8f9fa;
+    font-family: monospace;
+    font-weight: 600;
+}
+
+.btn-add-row {
+    background: #28a745;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-top: 10px;
+}
+
+.btn-remove {
+    background: #dc3545;
+    color: white;
+    border: none;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.handle {
+    cursor: move;
+    color: #6c757d;
+    padding: 0 8px;
+}
+
+.code-mapping-info {
+    background: #e7f3ff;
+    padding: 15px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+}
+
+.code-mapping-info h4 {
+    margin: 0 0 10px 0;
+    color: #0066cc;
+}
+
+.example-table {
+    background: white;
+    padding: 10px;
+    border-radius: 4px;
+    margin-top: 10px;
+}
+
+.example-table table {
+    width: 100%;
+    font-size: 13px;
+}
+
+.example-table th {
+    background: #f0f0f0;
+    padding: 5px;
+    text-align: left;
+}
+
+.example-table td {
+    padding: 5px;
+    border-bottom: 1px solid #eee;
+}
+</style>
+
+<div class="admin-container">
+    <h1>사고 컬럼 관리 - 코드 매핑 방식</h1>
+    
+    <div class="code-mapping-info">
+        <h4>💡 코드-값 매핑 방식이란?</h4>
+        <p>실제 데이터는 코드(A, B, C)로 저장하고, 화면에 표시할 때만 실제 값으로 보여줍니다.</p>
+        <div class="example-table">
+            <table>
+                <tr>
+                    <th>저장되는 값 (코드)</th>
+                    <th>화면 표시 값</th>
+                    <th>설명</th>
+                </tr>
+                <tr>
+                    <td><code>STS001</code></td>
+                    <td>진행중</td>
+                    <td>값이 "진행중"에서 "처리중"으로 바뀌어도 코드는 그대로</td>
+                </tr>
+                <tr>
+                    <td><code>STS002</code></td>
+                    <td>완료</td>
+                    <td>모든 기존 데이터가 자동으로 새 표시값 적용</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <div class="dropdown-editor">
+        <h3>드롭다운 옵션 편집기</h3>
+        
+        <table class="option-table" id="optionTable">
+            <thead>
+                <tr>
+                    <th width="40">순서</th>
+                    <th width="120">코드</th>
+                    <th>표시값</th>
+                    <th width="100">작업</th>
+                </tr>
+            </thead>
+            <tbody id="optionTableBody">
+                <!-- 동적으로 행 추가 -->
+            </tbody>
+        </table>
+        
+        <button class="btn-add-row" onclick="addOptionRow()">
+            <i class="bi bi-plus-circle"></i> 행 추가
+        </button>
+        
+        <div style="margin-top: 20px;">
+            <button class="btn btn-primary" onclick="saveOptions()">저장</button>
+            <button class="btn btn-secondary" onclick="cancelEdit()">취소</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let optionCounter = 1;
+let currentOptions = [];
+
+// 초기 데이터 로드 (예시)
+function loadInitialData() {
+    // 예시 데이터
+    const sampleData = [
+        {code: 'STS001', value: '진행중'},
+        {code: 'STS002', value: '완료'},
+        {code: 'STS003', value: '취소'}
+    ];
+    
+    sampleData.forEach(option => {
+        addOptionRow(option);
+    });
+}
+
+// 옵션 행 추가
+function addOptionRow(data = null) {
+    const tbody = document.getElementById('optionTableBody');
+    const row = document.createElement('tr');
+    
+    const code = data ? data.code : generateCode();
+    const value = data ? data.value : '';
+    
+    row.innerHTML = `
+        <td class="handle">
+            <i class="bi bi-grip-vertical"></i>
+            ${optionCounter}
+        </td>
+        <td>
+            <input type="text" class="option-code" value="${code}" readonly>
+        </td>
+        <td>
+            <input type="text" class="option-value" value="${value}" placeholder="표시할 값 입력">
+        </td>
+        <td>
+            <button class="btn-remove" onclick="removeRow(this)">
+                <i class="bi bi-trash"></i> 삭제
+            </button>
+        </td>
+    `;
+    
+    tbody.appendChild(row);
+    optionCounter++;
+    
+    // 드래그 앤 드롭 초기화
+    initializeDragAndDrop();
+}
+
+// 코드 자동 생성
+function generateCode() {
+    const prefix = 'OPT';
+    const number = String(optionCounter).padStart(3, '0');
+    return `${prefix}${number}`;
+}
+
+// 행 삭제
+function removeRow(button) {
+    if (confirm('이 옵션을 삭제하시겠습니까?')) {
+        button.closest('tr').remove();
+        updateRowNumbers();
+    }
+}
+
+// 행 번호 업데이트
+function updateRowNumbers() {
+    const rows = document.querySelectorAll('#optionTableBody tr');
+    rows.forEach((row, index) => {
+        const handle = row.querySelector('.handle');
+        handle.innerHTML = `
+            <i class="bi bi-grip-vertical"></i>
+            ${index + 1}
+        `;
+    });
+    optionCounter = rows.length + 1;
+}
+
+// 드래그 앤 드롭 초기화
+function initializeDragAndDrop() {
+    const tbody = document.getElementById('optionTableBody');
+    new Sortable(tbody, {
+        handle: '.handle',
+        animation: 150,
+        onEnd: function() {
+            updateRowNumbers();
+        }
+    });
+}
+
+// 옵션 저장
+function saveOptions() {
+    const rows = document.querySelectorAll('#optionTableBody tr');
+    const options = [];
+    
+    rows.forEach(row => {
+        const code = row.querySelector('.option-code').value;
+        const value = row.querySelector('.option-value').value;
+        
+        if (code && value) {
+            options.push({code, value});
+        }
+    });
+    
+    console.log('저장할 옵션:', options);
+    alert('옵션이 저장되었습니다.\n' + JSON.stringify(options, null, 2));
+}
+
+// 취소
+function cancelEdit() {
+    if (confirm('변경사항을 취소하시겠습니까?')) {
+        location.reload();
+    }
+}
+
+// 페이지 로드 시 초기화
+document.addEventListener('DOMContentLoaded', function() {
+    loadInitialData();
+});
+</script>
+
+<!-- Sortable.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+{% endblock %}

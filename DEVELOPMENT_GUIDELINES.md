@@ -213,4 +213,136 @@ git push
 
 ---
 
+## 🎨 CSS 레이아웃 통일 가이드라인
+
+### ⚠️ 페이지 간 스타일 불일치 문제와 해결법
+
+**문제 상황:**
+- 코드상으로는 동일한 CSS가 적용된 것처럼 보이지만, 실제 브라우저에서는 페이지마다 다른 스타일이 적용되는 경우
+- 특히 `.page-header` 같은 공통 요소에서 자주 발생
+
+**원인 분석:**
+1. **중복 CSS 정의**: 같은 파일 내에서 동일한 클래스가 여러 번 정의
+2. **CSS 적용 순서**: 나중에 정의된 스타일이 앞서 정의된 스타일을 덮어씀 (Cascade 규칙)
+3. **스타일 위치**: `<style>` 태그가 HTML 중간에 있으면 이미 렌더링된 요소에 적용되지 않음
+
+**실제 사례 (협력사 사고 vs 협력사 기준정보):**
+```css
+/* 문제: 같은 파일에 두 개의 .page-header 정의 */
+
+/* 첫 번째 정의 (상단) - 무시됨 */
+.page-header {
+    padding: 24px 0;
+    font-size: 28px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+/* ... 중간에 다른 CSS들 ... */
+
+/* 두 번째 정의 (하단) - 실제 적용됨 */
+.page-header {
+    padding-bottom: 10px;  /* 상단 패딩 없음 */
+    font-size: 20px;
+    border-bottom: 2px solid #2f5fd3;
+}
+```
+
+### 🔧 해결 방법
+
+#### 1. 빠른 해결 (현 상태 유지)
+문제가 되는 페이지의 스타일을 통일하려는 기준에 맞춤:
+
+```css
+/* 기준이 되는 최종 스타일로 통일 */
+.page-header {
+    background: #fff;
+    margin-bottom: 20px;
+    padding-bottom: 10px;           /* 상단 패딩 제거 */
+    border-bottom: 2px solid #2f5fd3; /* 파란색 보더 */
+}
+.page-title {
+    color: #333;
+    font-size: 20px;               /* 폰트 크기 통일 */
+    font-weight: 700;
+    margin: 0;
+}
+```
+
+#### 2. 근본 해결 (권장)
+공통 스타일을 `base.html`로 이동:
+
+**base.html에 추가:**
+```html
+<style>
+/* Global Page Header */
+.page-header {
+  background: #fff;
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #2f5fd3;
+}
+.page-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #333;
+  margin: 0;
+}
+</style>
+```
+
+**개별 페이지에서:**
+```html
+<!-- 중복 .page-header, .page-title 정의 제거 -->
+<!-- 페이지별 고유 스타일만 유지 -->
+```
+
+### 📋 CSS 통일 체크리스트
+
+**새 페이지 개발 시:**
+- [ ] 공통 요소(헤더, 버튼 등)는 base.html의 전역 스타일 사용
+- [ ] 페이지별 CSS는 해당 페이지만의 고유 요소에만 적용
+- [ ] `<style>` 태그는 HTML 상단에 배치
+
+**기존 페이지 수정 시:**
+- [ ] 동일한 클래스의 중복 정의 확인
+- [ ] DevTools로 실제 적용된 CSS 확인 (`Computed` 탭 활용)
+- [ ] 여러 페이지에 영향을 주는 변경사항은 base.html에서 처리
+
+**디버깅 방법:**
+1. **브라우저 개발자도구 (F12) 사용**
+   - `Elements` 탭에서 해당 요소 선택
+   - `Computed` 탭에서 최종 적용된 스타일 확인
+   - `Styles` 탭에서 어떤 CSS가 덮어써졌는지 확인
+
+2. **강력 새로고침**
+   - `Ctrl + F5` 또는 `Ctrl + Shift + R`
+   - 캐시된 CSS로 인한 문제 해결
+
+3. **CSS 우선순위 강제 적용 (임시방편)**
+   ```css
+   .page-header {
+       padding: 10px !important;  /* 다른 스타일보다 강제 우선 */
+   }
+   ```
+
+### ⚡ 성능 최적화 팁
+
+**CSS 구조화:**
+```
+base.html
+├── 전역 스타일 (모든 페이지 공통)
+├── 컴포넌트 스타일 (버튼, 폼 등)
+└── 페이지별 스타일 블록
+
+개별 페이지.html  
+└── 해당 페이지만의 고유 스타일
+```
+
+**권장 사항:**
+- 공통 스타일은 한 번만 정의
+- 페이지별 스타일은 최소한으로 유지  
+- 중복 코드 제거로 유지보수성 향상
+
+---
+
 **이 가이드라인은 지속적으로 업데이트되며, 모든 개발자가 숙지하고 따라야 합니다.**
