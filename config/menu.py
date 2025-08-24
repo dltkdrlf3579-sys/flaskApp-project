@@ -12,4 +12,28 @@ MENU_CONFIG = [
             {"title": "협력사 사고", "url": "partner-accident"},
         ],
     },
+    {
+        "title": "작업안전",
+        "submenu": [
+            {"title": "작업안전 현황", "url": "work-safety"},
+        ],
+    },
+    {
+        "title": "위험성평가",
+        "submenu": [
+            {"title": "위험성평가 현황", "url": "risk-assessment"},
+        ],
+    },
+    {
+        "title": "적격성평가",
+        "submenu": [
+            {"title": "적격성평가 현황", "url": "qualification-assessment"},
+        ],
+    },
+    {
+        "title": "안전문화",
+        "submenu": [
+            {"title": "안전문화 현황", "url": "safety-culture"},
+        ],
+    },
 ]

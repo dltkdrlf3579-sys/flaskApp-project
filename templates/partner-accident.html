@@ -140,15 +140,14 @@
                     <td>{{ accident.responsible_company_2 or '-' }}</td>
                     <td>{{ accident.responsible_company_2_business_number or '-' }}</td>
                     {% if accident.custom_data %}
-                        {% set custom = accident.custom_data | safe %}
-                        {% set custom = custom | replace("'", '"') %}
-                        {% set custom_dict = {} %}
-                        {% if custom %}
-                            <script>var temp_custom = {{ custom | safe }};</script>
-                        {% endif %}
+                        {% set custom = accident.custom_data | from_json %}
                         {% for col in dynamic_columns %}
-                        <td class="dynamic-col" data-column-key="{{ col.column_key }}" data-column-type="{{ col.column_type }}">
-                            <span class="dynamic-value">-</span>
+                        <td>
+                            {% if custom and col.column_key in custom %}
+                                {{ custom[col.column_key] or '-' }}
+                            {% else %}
+                                -
+                            {% endif %}
                         </td>
                         {% endfor %}
                     {% else %}

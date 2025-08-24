@@ -1110,6 +1110,15 @@ function saveChanges() {
     .then(data => {
         if (data.success) {
             alert('수정이 완료되었습니다.');
+            
+            // 팝업 모드인 경우 부모 창 새로고침
+            {% if is_popup %}
+            if (window.opener && !window.opener.closed) {
+                window.opener.location.reload();
+            }
+            {% endif %}
+            
+            // 현재 창 새로고침
             location.reload();
         } else {
             alert('수정 중 오류가 발생했습니다: ' + data.message);

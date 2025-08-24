@@ -34,6 +34,9 @@ def generate_manual_accident_number(cursor):
 
 app = Flask(__name__, static_folder='static')
 
+# 메뉴 설정
+menu = MENU_CONFIG
+
 # 설정 파일에서 환경 설정 로드
 app.secret_key = db_config.config.get('DEFAULT', 'SECRET_KEY')
 app.debug = db_config.config.getboolean('DEFAULT', 'DEBUG')
@@ -50,6 +53,22 @@ app.jinja_env.filters['from_json'] = from_json_filter
 DB_PATH = db_config.local_db_path
 PASSWORD = db_config.config.get('DEFAULT', 'EDIT_PASSWORD')
 UPLOAD_FOLDER = db_config.config.get('DEFAULT', 'UPLOAD_FOLDER')
+
+# 드롭다운 코드 매핑
+DROPDOWN_MAPPINGS = {
+    'column3': {
+        'COLUMN3_001': '진행중',
+        'COLUMN3_002': '완료대기',
+        'COLUMN3_003': '보류',
+        'COLUMN3_004': '보류3'
+    }
+}
+
+def convert_dropdown_code(column_key, code):
+    """드롭다운 코드를 실제 값으로 변환"""
+    if column_key in DROPDOWN_MAPPINGS:
+        return DROPDOWN_MAPPINGS[column_key].get(code, code)
+    return code
 
 # 로깅 설정
 logging.basicConfig(
@@ -914,7 +933,12 @@ def convert_code_to_value(column_key, code):
     """코드를 표시 값으로 변환"""
     if not code:
         return code
-        
+    
+    # DROPDOWN_MAPPINGS 사용
+    if column_key in DROPDOWN_MAPPINGS:
+        return DROPDOWN_MAPPINGS[column_key].get(code, code)
+    
+    # 매핑이 없으면 DB 조회 시도
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -3026,6 +3050,27 @@ def delete_partners():
     except Exception as e:
         logging.error(f"협력사 삭제 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
+
+# 새로운 메뉴들의 라우트
+@app.route('/work-safety')
+def work_safety():
+    """작업안전 현황 페이지"""
+    return render_template('work-safety.html', menu=menu)
+
+@app.route('/risk-assessment')
+def risk_assessment():
+    """위험성평가 현황 페이지"""
+    return render_template('risk-assessment.html', menu=menu)
+
+@app.route('/qualification-assessment')
+def qualification_assessment():
+    """적격성평가 현황 페이지"""
+    return render_template('qualification-assessment.html', menu=menu)
+
+@app.route('/safety-culture')
+def safety_culture():
+    """안전문화 현황 페이지"""
+    return render_template('safety-culture.html', menu=menu)
 
 @app.after_request
 def add_header(response):
