@@ -280,6 +280,22 @@
                             <div class="alert alert-info" style="font-size: 13px;">
                                 <i class="bi bi-info-circle"></i> 드롭다운 옵션은 코드 관리 페이지에서 설정합니다.
                             </div>
+                            
+                            <!-- 현재 옵션 미리보기 -->
+                            <div id="optionPreview" class="mb-3" style="display: none;">
+                                <h6>현재 설정된 옵션:</h6>
+                                <table class="table table-sm table-bordered">
+                                    <thead>
+                                        <tr>
+                                            <th width="40%">코드</th>
+                                            <th>표시값</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="optionPreviewBody">
+                                    </tbody>
+                                </table>
+                            </div>
+                            
                             <button type="button" class="btn btn-primary w-100" onclick="openCodeEditor()">
                                 <i class="bi bi-code-square"></i> 코드 편집기 열기
                             </button>
@@ -539,32 +555,40 @@ let editingId = null;
             document.getElementById('columnType').dataset.originalType = column.column_type;
             document.getElementById('isActive').checked = column.is_active;
             
-            if (column.dropdown_options) {
-                try {
-                    let options;
-                    if (typeof column.dropdown_options === 'string') {
-                        // JSON 파싱 시도
-                        try {
-                            options = JSON.parse(column.dropdown_options);
-                        } catch (e) {
-                            // JSON이 아니면 그냥 문자열로 처리
-                            options = [column.dropdown_options];
+            // 드롭다운 타입일 때 옵션 처리
+            if (column.column_type === 'dropdown') {
+                // 미리보기 로드
+                loadOptionPreview(column.column_key);
+                
+                // 기존 옵션 처리 (호환성 유지)
+                if (column.dropdown_options) {
+                    try {
+                        let options;
+                        if (typeof column.dropdown_options === 'string') {
+                            try {
+                                options = JSON.parse(column.dropdown_options);
+                            } catch (e) {
+                                options = [column.dropdown_options];
+                            }
+                        } else {
+                            options = column.dropdown_options;
                         }
-                    } else {
-                        options = column.dropdown_options;
+                        
+                        if (Array.isArray(options)) {
+                            document.getElementById('dropdownOptions').value = JSON.stringify(options);
+                        } else {
+                            document.getElementById('dropdownOptions').value = String(options);
+                        }
+                    } catch (e) {
+                        console.error('드롭다운 옵션 처리 오류:', e);
+                        document.getElementById('dropdownOptions').value = '';
                     }
-                    
-                    if (Array.isArray(options)) {
-                        document.getElementById('dropdownOptions').value = options.join('\n');
-                    } else {
-                        document.getElementById('dropdownOptions').value = String(options);
-                    }
-                } catch (e) {
-                    console.error('드롭다운 옵션 처리 오류:', e);
+                } else {
                     document.getElementById('dropdownOptions').value = '';
                 }
             } else {
                 document.getElementById('dropdownOptions').value = '';
+                document.getElementById('optionPreview').style.display = 'none';
             }
             
             toggleOptionsField();
@@ -1031,6 +1055,32 @@ let editingId = null;
         // 코드 편집기 관련 함수들
         let currentEditingColumnKey = null;
         
+        // 드롭다운 옵션 미리보기 로드
+        async function loadOptionPreview(columnKey) {
+            try {
+                const response = await fetch(`/api/dropdown-codes/${columnKey}`);
+                const data = await response.json();
+                
+                if (data.success && data.codes && data.codes.length > 0) {
+                    const previewDiv = document.getElementById('optionPreview');
+                    const previewBody = document.getElementById('optionPreviewBody');
+                    
+                    previewBody.innerHTML = data.codes.map(code => `
+                        <tr>
+                            <td><code>${code.code}</code></td>
+                            <td>${code.value}</td>
+                        </tr>
+                    `).join('');
+                    
+                    previewDiv.style.display = 'block';
+                } else {
+                    document.getElementById('optionPreview').style.display = 'none';
+                }
+            } catch (error) {
+                console.error('옵션 미리보기 로드 실패:', error);
+            }
+        }
+        
         function openCodeEditor() {
             const columnKey = document.getElementById('columnKey').value;
             if (!columnKey) {
@@ -1062,9 +1112,12 @@ let editingId = null;
         
         function handleCodesSaved(columnKey, codes) {
             if (columnKey === currentEditingColumnKey) {
-                // 코드를 JSON 문자열로 변환하여 저장
+                // 코드를 JSON 문자열로 저장 (배열 형태 유지)
                 const optionValues = codes.map(code => code.value);
                 document.getElementById('dropdownOptions').value = JSON.stringify(optionValues);
+                
+                // 미리보기 업데이트
+                loadOptionPreview(columnKey);
                 
                 // 사용자에게 알림
                 const alert = document.createElement('div');
