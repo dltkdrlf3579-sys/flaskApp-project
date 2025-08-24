@@ -1,6 +1,9 @@
 # 사용자 설정 파일 (GitHub 업로드 방지)
-config.ini
-*.db
+# config.ini - 다른 컴퓨터와 환경 동일화를 위해 업로드
+# *.db - 샘플 데이터 포함을 위해 업로드
+
+# 임시 작업 폴더
+gpt/
 *.log
 .last_sync
 
