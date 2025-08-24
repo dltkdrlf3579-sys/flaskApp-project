@@ -141,7 +141,13 @@
                         {% elif col.column_type == 'dropdown' %}
                             <select class="dynamic-input" data-column-key="{{ col.column_key }}">
                                 <option value="">선택하세요</option>
-                                {% if col.dropdown_options %}
+                                {% if col.dropdown_options_mapped %}
+                                    {# 새로운 코드-값 매핑 방식 #}
+                                    {% for option in col.dropdown_options_mapped %}
+                                        <option value="{{ option.code }}" {% if col_value == option.code %}selected{% endif %}>{{ option.value }}</option>
+                                    {% endfor %}
+                                {% elif col.dropdown_options %}
+                                    {# 기존 JSON 방식 (하위 호환성) #}
                                     {% set options = col.dropdown_options | from_json %}
                                     {% for option in options %}
                                         <option value="{{ option }}" {% if col_value == option %}selected{% endif %}>{{ option }}</option>

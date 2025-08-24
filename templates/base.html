@@ -138,7 +138,7 @@
       border-radius: 0 0 4px 4px; /* 상단 모서리는 직각으로 */
       box-shadow: 0 8px 18px rgba(0,0,0,.08);
       padding: 6px 0; display: none; list-style: none; margin: 0;
-      z-index: 10000;  /* 최상위로 설정 */
+      z-index: 10002;  /* border보다 높게 설정 */
       border-top: 2px solid #2f5fd3; /* 상단에 강조선 추가 */
     }
     .submenu-link {
@@ -157,18 +157,7 @@
     
     /* 화살표 제거 - 깔끔한 디자인 유지 */
 
-    /* 모바일 반응형 조정 */
-    @media (max-width: 991.98px) {
-      .topbar-inner { height: auto; flex-wrap: wrap; padding: 8px 10px; gap: 8px; }
-      .brand { padding: 6px 0; }
-      .nav-main { width: 100%; overflow-x: auto; white-space: nowrap; gap: 0; }
-      .nav-link { padding: 8px 12px; }
-      .sep { display: none; }
-      .submenu {
-        position: static; border: 1px solid #e5e7eb; border-top: none; box-shadow: none; border-radius: 0 0 4px 4px;
-      }
-      .right-tools { width: 100%; justify-content: flex-end; }
-    }
+    /* 반응형 CSS 제거 - 데스크톱 전용 */
 
     /* 컨텐츠 영역 */
     .container { 

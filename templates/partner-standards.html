@@ -367,6 +367,7 @@
 <div class="table-section">
     <div class="table-header">
         <div class="header-left">
+            <span class="total-count">총 {{ total_count }}건</span>
             <div class="per-page-selector">
                 <select onchange="changePerPage(this.value)">
                     <option value="10" {% if request.args.get('per_page', '10') == '10' %}selected{% endif %}>10개씩</option>
@@ -374,7 +375,6 @@
                     <option value="50" {% if request.args.get('per_page', '10') == '50' %}selected{% endif %}>50개씩</option>
                 </select>
             </div>
-            <span class="total-count">총 {{ total_count }}건</span>
         </div>
         <div class="header-actions">
             <div class="action-buttons">

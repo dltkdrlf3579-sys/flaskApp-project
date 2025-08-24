@@ -804,13 +804,29 @@ def accident_detail(accident_id):
     """, (accident['accident_number'],)).fetchall()
     
     # Phase 2: 동적 컬럼 설정 가져오기
-    dynamic_columns = conn.execute("""
+    dynamic_columns_rows = conn.execute("""
         SELECT * FROM accident_column_config 
         WHERE is_active = 1 
         ORDER BY column_order
     """).fetchall()
     
+    # Row 객체를 딕셔너리로 변환
+    dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    
     conn.close()
+    
+    # 드롭다운 컬럼에 대해 코드-값 매핑 적용 (등록 페이지와 동일한 로직)
+    for col in dynamic_columns:
+        if col['column_type'] == 'dropdown':
+            # 코드-값 매핑 방식으로 옵션 가져오기
+            code_options = get_dropdown_options_for_display(col['column_key'])
+            if code_options:
+                # 새로운 방식의 옵션이 있으면 사용
+                col['dropdown_options_mapped'] = code_options
+                logging.info(f"  - {col['column_name']} ({col['column_key']}): 코드-값 매핑 {len(code_options)}개 옵션")
+            else:
+                # 기존 JSON 방식 유지 (하위 호환성)
+                col['dropdown_options_mapped'] = None
     
     # 딕셔너리를 객체처럼 사용할 수 있도록 변환
     class DictAsAttr:
@@ -859,10 +875,35 @@ def get_dropdown_options_for_display(column_key):
             ORDER BY display_order
         """, (column_key,)).fetchall()
         
+        logging.info(f"[DEBUG] get_dropdown_options_for_display({column_key}): {len(codes) if codes else 0}개 행 조회됨")
+        if codes:
+            for c in codes:
+                logging.info(f"  - {c['option_code']}: {c['option_value']}")
+        
         conn.close()
         
         if codes:
-            # 코드-값 매핑 방식 반환
+            # 🔐 방탄: 만약 '단 1행'이고 그 값이 JSON 배열 문자열이면 바로 분해해서 반환
+            if len(codes) == 1:
+                v = codes[0]['option_value']
+                if isinstance(v, str):
+                    s = v.strip()
+                    if s.startswith('[') and s.endswith(']'):
+                        try:
+                            arr = json.loads(s)
+                            if isinstance(arr, list):
+                                logging.warning(
+                                    f"[{column_key}] option_value가 배열 문자열 1건으로 저장되어 있어 런타임 분해 처리합니다. "
+                                    f"원본={v} (len={len(arr)})"
+                                )
+                                return [
+                                    {'code': f"{column_key.upper()}_{i+1:03d}", 'value': str(item)}
+                                    for i, item in enumerate(arr)
+                                ]
+                        except Exception as e:
+                            logging.error(f"[{column_key}] 배열 문자열 파싱 실패: {e}")
+            
+            # 정상 케이스
             return [{'code': row['option_code'], 'value': row['option_value']} for row in codes]
         else:
             return None
@@ -944,11 +985,11 @@ def accident_register():
             if code_options:
                 # 새로운 방식의 옵션이 있으면 사용
                 col['dropdown_options_mapped'] = code_options
-                logging.info(f"  - {col['column_name']}: 코드-값 매핑 {len(code_options)}개 옵션")
+                logging.info(f"  - {col['column_name']} ({col['column_key']}): 코드-값 매핑 {len(code_options)}개 옵션 = {code_options}")
             else:
                 # 기존 JSON 방식 유지 (하위 호환성)
                 col['dropdown_options_mapped'] = None
-                logging.info(f"  - {col['column_name']}: 기존 JSON 방식 사용")
+                logging.info(f"  - {col['column_name']} ({col['column_key']}): 기존 JSON 방식 사용, dropdown_options = {col.get('dropdown_options')}")
     
     logging.info(f"동적 컬럼 {len(dynamic_columns)}개 로드됨")
     
@@ -1953,10 +1994,57 @@ def get_dropdown_codes(column_key):
 @app.route("/api/dropdown-codes", methods=["POST"])
 def save_dropdown_codes():
     """드롭다운 코드 저장/업데이트 (변경 이력 추적 포함)"""
+    conn = None
     try:
         data = request.json
         column_key = data.get('column_key')
         codes = data.get('codes', [])
+        
+        logging.info(f"[dropdown-codes] v3 handler called: column_key={column_key}, codes count={len(codes)}")
+        logging.info(f"[dropdown-codes] raw codes: {codes}")
+        
+        # === 유틸: JSON 배열 문자열인지 판별
+        def _looks_like_json_array_text(s):
+            return isinstance(s, str) and s.strip().startswith('[') and s.strip().endswith(']')
+        
+        # === 유틸: 어떤 형태로 와도 재귀적으로 평탄화
+        def _deep_flatten_values(value):
+            import json
+            out = []
+            stack = [value]
+            while stack:
+                v = stack.pop()
+                if isinstance(v, list):
+                    # 리스트면 항목을 뒤에서 앞으로 스택에
+                    for i in range(len(v) - 1, -1, -1):
+                        stack.append(v[i])
+                elif isinstance(v, str) and _looks_like_json_array_text(v):
+                    # 문자열이더라도 [ ... ] 꼴이면 다시 파싱해서 반복
+                    try:
+                        parsed = json.loads(v)
+                        stack.append(parsed)
+                    except Exception:
+                        sv = v.strip()
+                        if sv:
+                            out.append(sv)
+                else:
+                    sv = (str(v)).strip()
+                    if sv:
+                        out.append(sv)
+            return out
+        
+        # 들어온 codes를 재귀 평탄화해서 완전한 리스트로 만들기
+        flattened = []
+        for c in codes:  # codes는 [{code: "...", value: "..."} ...] 형태
+            vals = _deep_flatten_values(c.get('value'))
+            for v in vals:
+                flattened.append({'value': v})
+        
+        # flattened가 비어있으면 빈 값 하나라도 넣기
+        if not flattened:
+            flattened = [{'value': ''}]
+        
+        logging.info(f"[dropdown-codes] flattened to {len(flattened)} values: {[f['value'] for f in flattened]}")
         
         # 요청 정보 수집 (감사 로그용)
         ip_address = request.remote_addr
@@ -1984,16 +2072,16 @@ def save_dropdown_codes():
             WHERE column_key = ?
         """, (column_key,))
         
-        # 새 코드 삽입 또는 업데이트
-        for idx, code_item in enumerate(codes, 1):
-            option_code = code_item.get('code')
-            option_value = code_item.get('value')
+        # 새 코드 재생성 (순번 부여)
+        for idx, item in enumerate(flattened, 1):
+            new_code = f"{column_key.upper()}_{str(idx).zfill(3)}"
+            option_value = item['value']
             
             # 기존 코드가 있는지 확인
             existing = cursor.execute("""
                 SELECT id, option_value, display_order FROM dropdown_option_codes
                 WHERE column_key = ? AND option_code = ?
-            """, (column_key, option_code)).fetchone()
+            """, (column_key, new_code)).fetchone()
             
             if existing:
                 old_value = existing[1]
@@ -2005,7 +2093,7 @@ def save_dropdown_codes():
                     SET option_value = ?, display_order = ?, is_active = 1,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE column_key = ? AND option_code = ?
-                """, (option_value, idx, column_key, option_code))
+                """, (option_value, idx, column_key, new_code))
                 
                 # 변경 이력 기록 (값이나 순서가 변경된 경우만)
                 if old_value != option_value or old_order != idx:
@@ -2014,15 +2102,15 @@ def save_dropdown_codes():
                         (column_key, option_code, action_type, old_value, new_value, 
                          old_order, new_order, ip_address, user_agent)
                         VALUES (?, ?, 'UPDATE', ?, ?, ?, ?, ?, ?)
-                    """, (column_key, option_code, old_value, option_value, 
+                    """, (column_key, new_code, old_value, option_value, 
                           old_order, idx, ip_address, user_agent))
             else:
                 # 새로 삽입
                 cursor.execute("""
-                    INSERT INTO dropdown_option_codes 
+                    INSERT OR REPLACE INTO dropdown_option_codes 
                     (column_key, option_code, option_value, display_order, is_active)
                     VALUES (?, ?, ?, ?, 1)
-                """, (column_key, option_code, option_value, idx))
+                """, (column_key, new_code, option_value, idx))
                 
                 # 생성 이력 기록
                 cursor.execute("""
@@ -2030,10 +2118,10 @@ def save_dropdown_codes():
                     (column_key, option_code, action_type, new_value, new_order, 
                      ip_address, user_agent)
                     VALUES (?, ?, 'CREATE', ?, ?, ?, ?)
-                """, (column_key, option_code, option_value, idx, ip_address, user_agent))
+                """, (column_key, new_code, option_value, idx, ip_address, user_agent))
         
-        # 삭제된 코드 확인 및 기록
-        new_codes = {item['code'] for item in codes}
+        # 삭제된 코드 확인 및 기록 (재생성된 코드 기준)
+        new_codes = {f"{column_key.upper()}_{str(i+1).zfill(3)}" for i in range(len(flattened))}
         for old_code, old_data in existing_dict.items():
             if old_code not in new_codes:
                 cursor.execute("""
@@ -2938,6 +3026,14 @@ def delete_partners():
     except Exception as e:
         logging.error(f"협력사 삭제 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
+
+@app.after_request
+def add_header(response):
+    """응답 헤더 추가 - 캐시 무효화"""
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 if __name__ == "__main__":
     print("Flask 앱 시작 중...", flush=True)

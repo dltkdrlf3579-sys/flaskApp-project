@@ -597,6 +597,7 @@ function renderCodeEditor() {
                 </td>
                 <td class="value-cell">
                     <input type="text" value="${code.value}" 
+                           oninput="updateCode(${index}, 'value', this.value)"
                            onchange="updateCode(${index}, 'value', this.value)"
                            placeholder="표시값 입력">
                 </td>
@@ -683,6 +684,60 @@ async function selectColumn(columnKey, columnName) {
     updateSaveStatus();
 }
 
+// 배열 문자열 감지
+function looksLikeJSONArray(s) {
+    return typeof s === 'string' && s.trim().startsWith('[') && s.trim().endsWith(']');
+}
+
+// 깊은 평탄화: 값이 ["aa","bb"] 이든, ["[\"aa\",\"bb\"]"] 이든, [[[...]]] 이든 끝까지 "문자열 값"으로 뽑아냄
+function deepFlattenValue(v) {
+    const out = [];
+    const stack = [v];
+    while (stack.length) {
+        const cur = stack.pop();
+        if (Array.isArray(cur)) {
+            for (let i = cur.length - 1; i >= 0; i--) stack.push(cur[i]);
+        } else if (typeof cur === 'string' && looksLikeJSONArray(cur)) {
+            try { stack.push(JSON.parse(cur)); }
+            catch { const s = String(cur).trim(); if (s) out.push(s); }
+        } else {
+            const s = String(cur).trim();
+            if (s) out.push(s);
+        }
+    }
+    return out;
+}
+
+// 기존 expandJSONArrayValueIfNeeded를 "재귀 평탄화" 버전으로 교체
+function expandJSONArrayValueIfNeeded(codes, columnKey, forSave=false) {
+    const result = [];
+    let seq = 1;
+    let touched = false;
+    
+    for (const c of codes) {
+        if (!c || !c.value) continue;
+        
+        const vals = deepFlattenValue(c.value);
+        if (vals.length > 0) {
+            for (const v of vals) {
+                result.push({ 
+                    code: forSave ? (c.code || null) : `${columnKey.toUpperCase()}_${String(seq).padStart(3,'0')}`,
+                    value: v,
+                    order: seq
+                });
+                seq++;
+            }
+            if (vals.length > 1) touched = true;
+        }
+    }
+    
+    if (touched && !forSave) {
+        showToast('info', '배열 형태 값을 개별 옵션으로 분해했습니다.');
+    }
+    
+    return result.length > 0 ? result : codes;  // 결과가 없으면 원본 반환
+}
+
 // 코드 로드
 async function loadCodes(columnKey) {
     try {
@@ -696,6 +751,9 @@ async function loadCodes(columnKey) {
                 order: code.order
             }));
             console.log('코드 로드 성공:', currentCodes);
+            
+            // 배열 문자열 자동 분해
+            currentCodes = expandJSONArrayValueIfNeeded(currentCodes, columnKey);
         } else {
             // 기존 형식에서 마이그레이션 또는 빈 배열
             currentCodes = await migrateFromOldFormat(columnKey);
@@ -733,6 +791,8 @@ function updateCode(index, field, value) {
     if (currentCodes[index]) {
         currentCodes[index][field] = value;
         setHasChanges(true);
+        console.log(`Updated [${index}][${field}] = "${value}"`);
+        console.log('Current codes:', currentCodes);
     }
 }
 
@@ -1008,8 +1068,11 @@ async function saveCodes() {
         return;
     }
     
+    // saveCodes() 내부 - 저장 직전에 무조건 평탄화해서 보냄
+    const flattened = expandJSONArrayValueIfNeeded(currentCodes, currentColumn.key, true);
+    
     // 빈 값 체크
-    const validCodes = currentCodes.filter(code => code.value && code.value.trim());
+    const validCodes = flattened.filter(code => code.value && code.value.trim());
     
     if (validCodes.length === 0) {
         showToast('error', '최소 하나 이상의 옵션을 입력해주세요');
@@ -1022,6 +1085,9 @@ async function saveCodes() {
         value: code.value.trim(),
         order: index + 1
     }));
+    
+    console.log('저장할 데이터:', codes);
+    console.log('현재 currentCodes:', currentCodes);
     
     const saveButton = document.getElementById('saveButton');
     const originalText = saveButton.innerHTML;
@@ -1044,7 +1110,7 @@ async function saveCodes() {
             showToast('success', '저장되었습니다');
             setHasChanges(false);
             
-            // Embedded 모드에서는 부모 창에 메시지 전송 후 창 닫기
+            // Embedded 모드에서는 부모 창에 메시지 전송 후 즉시 창 닫기
             if (isEmbedded && window.opener) {
                 window.opener.postMessage({
                     type: 'DROPDOWN_CODES_SAVED',
@@ -1052,11 +1118,9 @@ async function saveCodes() {
                     codes: codes
                 }, '*');
                 
-                // 저장 성공 메시지 표시 후 창 닫기
-                showToast('success', '저장이 완료되었습니다. 2초 후 창이 닫힙니다.');
-                setTimeout(() => {
-                    window.close();
-                }, 2000);
+                // 저장 완료 즉시 창 닫기
+                alert('저장이 완료되었습니다.');
+                window.close();
             }
             
             if (!isEmbedded) {
