@@ -90,7 +90,8 @@ class PartnerDataManager:
             'annual_revenue': 'BIGINT',
             'transaction_count': 'TEXT',
             'permanent_workers': 'INTEGER',
-            'synced_at': 'DATETIME DEFAULT CURRENT_TIMESTAMP'
+            'synced_at': 'DATETIME DEFAULT CURRENT_TIMESTAMP',
+            'is_deleted': 'INTEGER DEFAULT 0'
         }
         
         # 테이블이 없거나 구조가 다르면 재생성
@@ -111,7 +112,8 @@ class PartnerDataManager:
                     annual_revenue BIGINT,
                     transaction_count TEXT,
                     permanent_workers INTEGER,
-                    synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    is_deleted INTEGER DEFAULT 0
                 )
             ''')
             print("[SUCCESS] partners_cache 테이블 재생성 완료")
@@ -225,6 +227,70 @@ class PartnerDataManager:
             else:
                 logging.warning(f"permanent_workers 컬럼 추가 중 오류: {e}")
         
+        # 건물 마스터 테이블
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS building_master (
+                building_code TEXT PRIMARY KEY,
+                building_name TEXT NOT NULL,
+                building_address TEXT,
+                building_type TEXT
+            )
+        ''')
+        
+        # 부서 마스터 테이블
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS department_master (
+                dept_code TEXT PRIMARY KEY,
+                dept_name TEXT NOT NULL,
+                parent_dept_code TEXT,
+                dept_level INTEGER
+            )
+        ''')
+        
+        # 더미 데이터 삽입 (건물)
+        cursor.execute("SELECT COUNT(*) FROM building_master")
+        if cursor.fetchone()[0] == 0:
+            buildings = [
+                ('BLD001', '본관', '서울시 강남구 테헤란로 123', '사무실'),
+                ('BLD002', '신관', '서울시 강남구 테헤란로 124', '사무실'),
+                ('BLD003', '연구동', '서울시 강남구 테헤란로 125', '연구소'),
+                ('BLD004', '공장 A동', '경기도 수원시 영통구 광교로 100', '생산시설'),
+                ('BLD005', '공장 B동', '경기도 수원시 영통구 광교로 101', '생산시설'),
+                ('BLD006', '물류센터', '경기도 용인시 기흥구 동백중앙로 200', '물류시설'),
+                ('BLD007', '연수원', '경기도 이천시 부발읍 신하리 100', '교육시설'),
+                ('BLD008', '기숙사 A동', '서울시 강남구 테헤란로 126', '주거시설'),
+                ('BLD009', '기숙사 B동', '서울시 강남구 테헤란로 127', '주거시설'),
+                ('BLD010', '체육관', '서울시 강남구 테헤란로 128', '체육시설')
+            ]
+            cursor.executemany('INSERT INTO building_master VALUES (?, ?, ?, ?)', buildings)
+        
+        # 더미 데이터 삽입 (부서)
+        cursor.execute("SELECT COUNT(*) FROM department_master")
+        if cursor.fetchone()[0] == 0:
+            departments = [
+                ('DEPT001', '경영지원본부', None, 1),
+                ('DEPT002', '인사팀', 'DEPT001', 2),
+                ('DEPT003', '총무팀', 'DEPT001', 2),
+                ('DEPT004', '재무팀', 'DEPT001', 2),
+                ('DEPT005', '영업본부', None, 1),
+                ('DEPT006', '국내영업팀', 'DEPT005', 2),
+                ('DEPT007', '해외영업팀', 'DEPT005', 2),
+                ('DEPT008', '마케팅팀', 'DEPT005', 2),
+                ('DEPT009', '생산본부', None, 1),
+                ('DEPT010', '생산1팀', 'DEPT009', 2),
+                ('DEPT011', '생산2팀', 'DEPT009', 2),
+                ('DEPT012', '품질관리팀', 'DEPT009', 2),
+                ('DEPT013', '연구개발본부', None, 1),
+                ('DEPT014', 'SW개발팀', 'DEPT013', 2),
+                ('DEPT015', 'HW개발팀', 'DEPT013', 2),
+                ('DEPT016', '신기술연구팀', 'DEPT013', 2),
+                ('DEPT017', '안전보건팀', None, 1),
+                ('DEPT018', '환경안전파트', 'DEPT017', 2),
+                ('DEPT019', '산업보건파트', 'DEPT017', 2),
+                ('DEPT020', '시설관리팀', None, 1)
+            ]
+            cursor.executemany('INSERT INTO department_master VALUES (?, ?, ?, ?)', departments)
+        
         conn.commit()
         conn.close()
     
@@ -252,19 +318,27 @@ class PartnerDataManager:
             conn = sqlite3.connect(self.local_db_path)
             cursor = conn.cursor()
             
+            # 기존 is_deleted 값을 보존하기 위해 먼저 백업
+            cursor.execute("SELECT business_number, is_deleted FROM partners_cache WHERE is_deleted = 1")
+            deleted_partners = {row[0]: row[1] for row in cursor.fetchall()}
+            
             # 기존 캐시 데이터 삭제
             cursor.execute("DELETE FROM partners_cache")
             
             # DataFrame을 레코드 배열로 변환하여 SQLite에 삽입
             for _, row in df.iterrows():
+                business_number = row.get('business_number', '')
+                # 이전에 삭제된 협력사면 is_deleted = 1 유지, 아니면 0
+                is_deleted_value = deleted_partners.get(business_number, 0)
+                
                 cursor.execute('''
                     INSERT INTO partners_cache (
                         business_number, company_name, partner_class, business_type_major,
                         business_type_minor, hazard_work_flag, representative, address,
-                        average_age, annual_revenue, transaction_count, permanent_workers
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        average_age, annual_revenue, transaction_count, permanent_workers, is_deleted
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
-                    row.get('business_number', ''),
+                    business_number,
                     row.get('company_name', ''),
                     row.get('partner_class', ''),
                     row.get('business_type_major', ''),
@@ -275,7 +349,8 @@ class PartnerDataManager:
                     row.get('average_age', None),
                     row.get('annual_revenue', None),
                     row.get('transaction_count', ''),  # TEXT로 변경
-                    row.get('permanent_workers', None)  # 추가
+                    row.get('permanent_workers', None),  # 추가
+                    is_deleted_value  # 기존 삭제 상태 유지
                 ))
             
             conn.commit()
@@ -373,8 +448,8 @@ class PartnerDataManager:
         conn = sqlite3.connect(self.local_db_path)
         conn.row_factory = sqlite3.Row
         
-        # 기본 쿼리
-        query = "SELECT * FROM partners_cache WHERE 1=1"
+        # 기본 쿼리 (삭제되지 않은 데이터만)
+        query = "SELECT * FROM partners_cache WHERE (is_deleted = 0 OR is_deleted IS NULL)"
         params = []
         
         # 필터 적용

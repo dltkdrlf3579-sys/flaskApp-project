@@ -1131,6 +1131,7 @@ function deleteSelected() {
     .then(data => {
         if (data.success) {
             alert(`${data.deleted_count}개의 협력사가 삭제되었습니다.`);
+            // 페이지 새로고침
             location.reload();
         } else {
             alert('삭제 실패: ' + data.message);

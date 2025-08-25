@@ -166,11 +166,30 @@
                                 <input type="text" 
                                        class="dynamic-input popup-person" 
                                        data-column-key="{{ col.column_key }}"
+                                       data-linked-dept=""
                                        value="{{ col_value.name if col_value is mapping else col_value }}"
                                        placeholder="담당자 선택"
                                        readonly>
                                 <button class="btn-popup" onclick="openPersonPopup('{{ col.column_key }}')">선택</button>
                             </div>
+                        
+                        {% elif col.column_type == 'linked_dept' %}
+                            <input type="text" 
+                                   class="dynamic-input linked-dept" 
+                                   data-column-key="{{ col.column_key }}"
+                                   value="{{ col_value }}"
+                                   placeholder="담당부서 (자동입력)"
+                                   readonly
+                                   style="background-color: #f8f9fa; cursor: not-allowed;">
+                                   
+                        {% elif col.column_type == 'linked_text' %}
+                            <input type="text" 
+                                   class="dynamic-input linked-text" 
+                                   data-column-key="{{ col.column_key }}"
+                                   value="{{ col_value }}"
+                                   placeholder="자동입력"
+                                   readonly
+                                   style="background-color: #f8f9fa; cursor: not-allowed;">
                         
                         {% elif col.column_type == 'popup_company' %}
                             <div class="popup-input-wrapper">
@@ -181,6 +200,39 @@
                                        placeholder="업체 선택"
                                        readonly>
                                 <button class="btn-popup" onclick="openCompanyPopup('{{ col.column_key }}')">선택</button>
+                            </div>
+                            
+                        {% elif col.column_type == 'popup_contractor' %}
+                            <div class="popup-input-wrapper">
+                                <input type="text" 
+                                       class="dynamic-input popup-contractor" 
+                                       data-column-key="{{ col.column_key }}"
+                                       value="{{ col_value.name if col_value is mapping else col_value }}"
+                                       placeholder="협력사 근로자 선택"
+                                       readonly>
+                                <button class="btn-popup" onclick="openContractorPopup('{{ col.column_key }}')">선택</button>
+                            </div>
+                            
+                        {% elif col.column_type == 'popup_building' %}
+                            <div class="popup-input-wrapper">
+                                <input type="text" 
+                                       class="dynamic-input popup-building" 
+                                       data-column-key="{{ col.column_key }}"
+                                       value="{{ col_value.building_name if col_value is mapping else col_value }}"
+                                       placeholder="건물 선택"
+                                       readonly>
+                                <button class="btn-popup" onclick="openBuildingPopup('{{ col.column_key }}')">선택</button>
+                            </div>
+                            
+                        {% elif col.column_type == 'popup_department' %}
+                            <div class="popup-input-wrapper">
+                                <input type="text" 
+                                       class="dynamic-input popup-department" 
+                                       data-column-key="{{ col.column_key }}"
+                                       value="{{ col_value.dept_name if col_value is mapping else col_value }}"
+                                       placeholder="부서 선택"
+                                       readonly>
+                                <button class="btn-popup" onclick="openDepartmentPopup('{{ col.column_key }}')">선택</button>
                             </div>
                         
                         {% else %}
@@ -1047,23 +1099,14 @@ function saveChanges() {
         if (element.tagName === 'SELECT') {
             value = element.value || '';
         } else {
-            value = element.value || element.textContent || '';
+            // dataset.value가 있으면 우선 사용 (팝업에서 설정한 값)
+            value = element.dataset.value || element.value || element.textContent || '';
         }
         
         console.log(`Collecting: ${columnKey} = ${value} (type: ${element.tagName})`);  // 디버깅용
         
-        // popup 타입인 경우 객체로 저장
-        if (element.classList.contains('popup-person')) {
-            const department = element.dataset.department || '';
-            if (value) {
-                value = { name: value, department: department };
-            }
-        } else if (element.classList.contains('popup-company')) {
-            const businessNumber = element.dataset.businessNumber || '';
-            if (value) {
-                value = { name: value, business_number: businessNumber };
-            }
-        }
+        // popup 타입이어도 문자열로만 저장 (JSON 객체 X)
+        // 이미 handlePersonSelection에서 "이름 / ID" 형식으로 value가 설정됨
         
         customData[columnKey] = value;
     });
@@ -1263,5 +1306,333 @@ function updateFileInfo() {
     document.getElementById('file-count').textContent = fileCount;
     document.getElementById('file-size').textContent = totalSize.toFixed(2);
 }
+
+// ==================== 검색 팝업 관련 함수 ====================
+
+// 담당자 검색 팝업 열기
+function openPersonPopup(columnKey) {
+    const width = 800;
+    const height = 600;
+    const left = (window.screen.width - width) / 2;
+    const top = (window.screen.height - height) / 2;
+    
+    // 콜백 함수명을 전역으로 생성
+    window.currentColumnKey = columnKey;
+    
+    const popup = window.open(
+        `/search-popup?type=person&callback=handlePersonSelection`,
+        'personSearchPopup',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+    );
+    
+    if (!popup) {
+        alert('팝업 차단이 감지되었습니다. 팝업을 허용해주세요.');
+    }
+}
+
+// 업체 검색 팝업 열기
+function openCompanyPopup(columnKey) {
+    const width = 800;
+    const height = 600;
+    const left = (window.screen.width - width) / 2;
+    const top = (window.screen.height - height) / 2;
+    
+    // 콜백 함수명을 전역으로 생성
+    window.currentColumnKey = columnKey;
+    
+    const popup = window.open(
+        `/search-popup?type=company&callback=handleCompanySelection`,
+        'companySearchPopup',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+    );
+    
+    if (!popup) {
+        alert('팝업 차단이 감지되었습니다. 팝업을 허용해주세요.');
+    }
+}
+
+// 담당자 선택 콜백
+function handlePersonSelection(selectedItem) {
+    if (!selectedItem || !window.currentColumnKey) return;
+    
+    console.log('Selected person:', selectedItem); // 디버깅용
+    
+    // 해당 컬럼의 input 찾기
+    const input = document.querySelector(`input[data-column-key="${window.currentColumnKey}"]`);
+    if (input) {
+        // 담당자 정보 표시 (이름 / ID 형식으로 변경)
+        const employeeId = selectedItem.employee_id || '';
+        const name = selectedItem.name || '';
+        const department = selectedItem.department || '';
+        
+        // 이름 / ID 형식으로 표시 (공백 포함) - 담당자 필드에는 이름/ID만 저장
+        const displayText = employeeId && name ? `${name} / ${employeeId}` : name;
+        input.value = displayText;
+        
+        // 실제 저장할 데이터는 문자열로 저장 (JSON 아님)
+        input.dataset.personId = selectedItem.id || '';
+        input.dataset.personName = name;
+        input.dataset.personDepartment = department;
+        input.dataset.personEmployeeId = employeeId;
+        input.dataset.value = displayText; // 실제 저장될 값
+        
+        // 담당부서 필드 찾기 - column4 또는 linked-dept 클래스
+        const deptField = document.querySelector('input[data-column-key="column4"]') || 
+                         document.querySelector('input.linked-dept');
+        
+        if (deptField) {
+            console.log('Found dept field:', deptField); // 디버깅용
+            // 담당부서 필드에 부서 정보만 입력 (문자열로)
+            deptField.value = department || '';
+            deptField.dataset.value = department || '';
+            
+            // 부서 필드도 change 이벤트 발생
+            const deptEvent = new Event('change', { bubbles: true });
+            deptField.dispatchEvent(deptEvent);
+        } else {
+            console.log('Dept field not found'); // 디버깅용
+        }
+        
+        // change 이벤트 발생
+        const event = new Event('change', { bubbles: true });
+        input.dispatchEvent(event);
+    }
+    
+    // 전역 변수 정리
+    delete window.currentColumnKey;
+}
+
+// 업체 선택 콜백
+function handleCompanySelection(selectedItem) {
+    if (!selectedItem || !window.currentColumnKey) return;
+    
+    // 해당 컬럼의 input 찾기
+    const input = document.querySelector(`input[data-column-key="${window.currentColumnKey}"]`);
+    if (input) {
+        // 업체명만 표시 (사업자번호는 별도 컬럼에 표시)
+        input.value = selectedItem.company_name || '';
+        
+        // 실제 저장할 데이터는 data 속성에 저장
+        input.dataset.companyId = selectedItem.id || '';
+        input.dataset.companyName = selectedItem.company_name || '';
+        input.dataset.companyBusinessNumber = selectedItem.company_business_number || '';
+        
+        // change 이벤트 발생
+        const event = new Event('change', { bubbles: true });
+        input.dispatchEvent(event);
+        
+        // linked 컬럼 자동 채우기 - 사업자번호
+        const biznoKey = window.currentColumnKey + '_bizno';
+        const biznoInput = document.querySelector(`input[data-column-key="${biznoKey}"]`);
+        if (biznoInput) {
+            biznoInput.value = selectedItem.company_business_number || '';
+            biznoInput.readOnly = true; // 자동 채워진 필드는 읽기 전용
+            biznoInput.style.backgroundColor = '#f8f9fa'; // 시각적 구분
+            
+            // change 이벤트 발생
+            const biznoEvent = new Event('change', { bubbles: true });
+            biznoInput.dispatchEvent(biznoEvent);
+        }
+    }
+    
+    // 전역 변수 정리
+    delete window.currentColumnKey;
+}
+
+// 협력사 근로자 검색 팝업 열기
+function openContractorPopup(columnKey) {
+    const width = 800;
+    const height = 600;
+    const left = (window.screen.width - width) / 2;
+    const top = (window.screen.height - height) / 2;
+    
+    // 콜백 함수명을 전역으로 생성
+    window.currentColumnKey = columnKey;
+    
+    const popup = window.open(
+        `/search-popup?type=contractor&callback=handleContractorSelection`,
+        'contractorSearchPopup',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+    );
+    
+    if (!popup) {
+        alert('팝업 차단이 감지되었습니다. 팝업을 허용해주세요.');
+    }
+}
+
+// 협력사 근로자 선택 콜백
+function handleContractorSelection(selectedItem) {
+    if (!selectedItem || !window.currentColumnKey) return;
+    
+    // 해당 컬럼의 input 찾기
+    const input = document.querySelector(`input[data-column-key="${window.currentColumnKey}"]`);
+    if (input) {
+        // 성함만 표시
+        input.value = selectedItem.worker_name || '';
+        
+        // 실제 저장할 데이터는 data 속성에 저장
+        input.dataset.contractorId = selectedItem.worker_id || '';
+        input.dataset.contractorName = selectedItem.worker_name || '';
+        input.dataset.contractorCompany = selectedItem.company_name || '';
+        input.dataset.contractorBizno = selectedItem.business_number || '';
+        
+        // change 이벤트 발생
+        const event = new Event('change', { bubbles: true });
+        input.dispatchEvent(event);
+        
+        // linked 컬럼 자동 채우기 - ID
+        const idKey = window.currentColumnKey + '_id';
+        const idInput = document.querySelector(`input[data-column-key="${idKey}"]`);
+        if (idInput) {
+            idInput.value = selectedItem.worker_id || '';
+            idInput.readOnly = true;
+            idInput.style.backgroundColor = '#f8f9fa';
+            const idEvent = new Event('change', { bubbles: true });
+            idInput.dispatchEvent(idEvent);
+        }
+        
+        // linked 컬럼 자동 채우기 - 소속업체
+        const companyKey = window.currentColumnKey + '_company';
+        const companyInput = document.querySelector(`input[data-column-key="${companyKey}"]`);
+        if (companyInput) {
+            companyInput.value = selectedItem.company_name || '';
+            companyInput.readOnly = true;
+            companyInput.style.backgroundColor = '#f8f9fa';
+            const companyEvent = new Event('change', { bubbles: true });
+            companyInput.dispatchEvent(companyEvent);
+        }
+        
+        // linked 컬럼 자동 채우기 - 사업자번호
+        const biznoKey = window.currentColumnKey + '_bizno';
+        const biznoInput = document.querySelector(`input[data-column-key="${biznoKey}"]`);
+        if (biznoInput) {
+            biznoInput.value = selectedItem.business_number || '';
+            biznoInput.readOnly = true;
+            biznoInput.style.backgroundColor = '#f8f9fa';
+            const biznoEvent = new Event('change', { bubbles: true });
+            biznoInput.dispatchEvent(biznoEvent);
+        }
+    }
+    
+    // 전역 변수 정리
+    delete window.currentColumnKey;
+}
+
+// 건물 검색 팝업 열기
+function openBuildingPopup(columnKey) {
+    const width = 800;
+    const height = 600;
+    const left = (window.screen.width - width) / 2;
+    const top = (window.screen.height - height) / 2;
+    
+    // 콜백 함수명을 전역으로 생성
+    window.currentColumnKey = columnKey;
+    
+    const popup = window.open(
+        `/search-popup?type=building&callback=handleBuildingSelection`,
+        'buildingSearchPopup',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+    );
+    
+    if (!popup) {
+        alert('팝업 차단이 감지되었습니다. 팝업을 허용해주세요.');
+    }
+}
+
+// 건물 선택 콜백
+function handleBuildingSelection(selectedItem) {
+    if (!selectedItem || !window.currentColumnKey) return;
+    
+    // 해당 컬럼의 input 찾기
+    const input = document.querySelector(`input[data-column-key="${window.currentColumnKey}"]`);
+    if (input) {
+        // 건물명 표시
+        input.value = selectedItem.building_name || '';
+        
+        // 실제 저장할 데이터는 data 속성에 저장
+        input.dataset.buildingCode = selectedItem.building_code || '';
+        input.dataset.buildingName = selectedItem.building_name || '';
+        input.dataset.buildingAddress = selectedItem.building_address || '';
+        input.dataset.buildingType = selectedItem.building_type || '';
+        
+        // change 이벤트 발생
+        const event = new Event('change', { bubbles: true });
+        input.dispatchEvent(event);
+        
+        // linked 컬럼 자동 채우기 - 건물코드
+        const codeKey = window.currentColumnKey + '_code';
+        const codeInput = document.querySelector(`input[data-column-key="${codeKey}"]`);
+        if (codeInput) {
+            codeInput.value = selectedItem.building_code || '';
+            codeInput.readOnly = true;
+            codeInput.style.backgroundColor = '#f8f9fa';
+            const codeEvent = new Event('change', { bubbles: true });
+            codeInput.dispatchEvent(codeEvent);
+        }
+    }
+    
+    // 전역 변수 정리
+    delete window.currentColumnKey;
+}
+
+// 부서 검색 팝업 열기
+function openDepartmentPopup(columnKey) {
+    const width = 800;
+    const height = 600;
+    const left = (window.screen.width - width) / 2;
+    const top = (window.screen.height - height) / 2;
+    
+    // 콜백 함수명을 전역으로 생성
+    window.currentColumnKey = columnKey;
+    
+    const popup = window.open(
+        `/search-popup?type=department&callback=handleDepartmentSelection`,
+        'departmentSearchPopup',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+    );
+    
+    if (!popup) {
+        alert('팝업 차단이 감지되었습니다. 팝업을 허용해주세요.');
+    }
+}
+
+// 부서 선택 콜백
+function handleDepartmentSelection(selectedItem) {
+    if (!selectedItem || !window.currentColumnKey) return;
+    
+    // 해당 컬럼의 input 찾기
+    const input = document.querySelector(`input[data-column-key="${window.currentColumnKey}"]`);
+    if (input) {
+        // 부서명 표시
+        input.value = selectedItem.dept_name || '';
+        
+        // 실제 저장할 데이터는 data 속성에 저장
+        input.dataset.deptCode = selectedItem.dept_code || '';
+        input.dataset.deptName = selectedItem.dept_name || '';
+        input.dataset.parentName = selectedItem.parent_name || '';
+        input.dataset.deptLevel = selectedItem.dept_level || '';
+        
+        // change 이벤트 발생
+        const event = new Event('change', { bubbles: true });
+        input.dispatchEvent(event);
+        
+        // linked 컬럼 자동 채우기 - 부서코드
+        const codeKey = window.currentColumnKey + '_code';
+        const codeInput = document.querySelector(`input[data-column-key="${codeKey}"]`);
+        if (codeInput) {
+            codeInput.value = selectedItem.dept_code || '';
+            codeInput.readOnly = true;
+            codeInput.style.backgroundColor = '#f8f9fa';
+            const codeEvent = new Event('change', { bubbles: true });
+            codeInput.dispatchEvent(codeEvent);
+        }
+    }
+    
+    // 전역 변수 정리
+    delete window.currentColumnKey;
+}
+
+// 저장 데이터 수집 함수 재정의는 제거 (JSON 저장 방지)
+// modifySaveData 함수 제거
 </script>
 {% endblock %}

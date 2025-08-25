@@ -1,0 +1,641 @@
+{% extends "popup-base.html" %}
+
+{% block head %}
+<style>
+    .search-popup-container {
+        padding: 20px;
+        max-width: 800px;
+        margin: 0 auto;
+    }
+
+    .search-section {
+        background: #fff;
+        border: 1px solid #e1e4e8;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+    }
+
+    .search-header {
+        margin-bottom: 20px;
+    }
+
+    .search-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #333;
+        margin: 0;
+    }
+
+    .search-controls {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+    }
+
+    .search-type-select {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+        min-width: 120px;
+        background: #fff;
+        cursor: pointer;
+    }
+
+    .search-input-wrapper {
+        flex: 1;
+        position: relative;
+    }
+
+    .search-input {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+
+    .search-input:focus {
+        outline: none;
+        border-color: #4285f4;
+        box-shadow: 0 0 0 2px rgba(66, 133, 244, 0.1);
+    }
+
+    .search-btn {
+        padding: 8px 20px;
+        background: #4285f4;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        font-size: 14px;
+        cursor: pointer;
+        white-space: nowrap;
+    }
+
+    .search-btn:hover {
+        background: #3367d6;
+    }
+
+    /* 자동완성 드롭다운 */
+    .autocomplete-dropdown {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        margin-top: 2px;
+        max-height: 200px;
+        overflow-y: auto;
+        z-index: 1000;
+        display: none;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .autocomplete-dropdown.show {
+        display: block;
+    }
+
+    .autocomplete-item {
+        padding: 10px 12px;
+        cursor: pointer;
+        font-size: 14px;
+        border-bottom: 1px solid #f5f5f5;
+    }
+
+    .autocomplete-item:last-child {
+        border-bottom: none;
+    }
+
+    .autocomplete-item:hover,
+    .autocomplete-item.selected {
+        background: #f8f9fa;
+    }
+
+    .autocomplete-item .item-main {
+        font-weight: 500;
+        color: #333;
+    }
+
+    .autocomplete-item .item-sub {
+        font-size: 12px;
+        color: #666;
+        margin-top: 2px;
+    }
+
+    /* 검색 결과 테이블 */
+    .result-section {
+        background: #fff;
+        border: 1px solid #e1e4e8;
+        border-radius: 8px;
+        padding: 20px;
+    }
+
+    .result-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+    }
+
+    .result-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #333;
+    }
+
+    .result-count {
+        font-size: 14px;
+        color: #666;
+    }
+
+    .result-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .result-table thead {
+        background: #f8f9fa;
+    }
+
+    .result-table th {
+        padding: 12px;
+        text-align: left;
+        font-size: 14px;
+        font-weight: 500;
+        color: #333;
+        border-bottom: 2px solid #e1e4e8;
+    }
+
+    .result-table td {
+        padding: 12px;
+        font-size: 14px;
+        color: #333;
+        border-bottom: 1px solid #e1e4e8;
+    }
+
+    .result-table tbody tr {
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+
+    .result-table tbody tr:hover {
+        background: #f8f9fa;
+    }
+
+    .result-table tbody tr.selected {
+        background: #e3f2fd;
+    }
+
+    .no-results {
+        padding: 40px;
+        text-align: center;
+        color: #666;
+        font-size: 14px;
+    }
+
+    /* 버튼 영역 */
+    .button-section {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 20px;
+    }
+
+    .btn-cancel,
+    .btn-confirm {
+        padding: 10px 24px;
+        border-radius: 4px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .btn-cancel {
+        background: #fff;
+        color: #333;
+        border: 1px solid #ddd;
+    }
+
+    .btn-cancel:hover {
+        background: #f8f9fa;
+    }
+
+    .btn-confirm {
+        background: #4285f4;
+        color: white;
+        border: none;
+    }
+
+    .btn-confirm:hover {
+        background: #3367d6;
+    }
+
+    .btn-confirm:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+    }
+
+    /* 로딩 상태 */
+    .loading {
+        display: none;
+        padding: 40px;
+        text-align: center;
+    }
+
+    .loading.show {
+        display: block;
+    }
+
+    .spinner {
+        display: inline-block;
+        width: 40px;
+        height: 40px;
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #4285f4;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+</style>
+{% endblock %}
+
+{% block popup_title %}{{ title or '검색' }}{% endblock %}
+
+{% block content %}
+<div class="search-popup-container">
+    <!-- 검색 영역 -->
+    <div class="search-section">
+        <div class="search-header">
+            <h3 class="search-title">{{ search_title or '검색' }}</h3>
+        </div>
+        
+        <div class="search-controls">
+            <select class="search-type-select" id="searchType">
+                {% for option in search_options %}
+                <option value="{{ option.value }}">{{ option.label }}</option>
+                {% endfor %}
+            </select>
+            
+            <div class="search-input-wrapper">
+                <input type="text" 
+                       class="search-input" 
+                       id="searchInput"
+                       placeholder="{{ placeholder or '검색어를 입력하세요' }}"
+                       autocomplete="off">
+                <div class="autocomplete-dropdown" id="autocompleteDropdown"></div>
+            </div>
+            
+            <button class="search-btn" onclick="performSearch()">검색</button>
+        </div>
+    </div>
+
+    <!-- 검색 결과 영역 -->
+    <div class="result-section">
+        <div class="result-header">
+            <span class="result-title">검색 결과</span>
+            <span class="result-count" id="resultCount">0건</span>
+        </div>
+        
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p style="margin-top: 10px; color: #666;">검색 중...</p>
+        </div>
+        
+        <div id="resultTableWrapper">
+            <table class="result-table" id="resultTable" style="display: none;">
+                <thead>
+                    <tr id="tableHeaders">
+                        <!-- 동적으로 생성됨 -->
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                    <!-- 동적으로 생성됨 -->
+                </tbody>
+            </table>
+            
+            <div class="no-results" id="noResults">
+                검색 결과가 없습니다.
+            </div>
+        </div>
+    </div>
+
+    <!-- 버튼 영역 -->
+    <div class="button-section">
+        <button class="btn-cancel" onclick="closePopup()">취소</button>
+        <button class="btn-confirm" id="confirmBtn" onclick="confirmSelection()" disabled>확인</button>
+    </div>
+</div>
+
+<script>
+// 전역 변수
+let searchConfig = {{ config|tojson|safe }};
+let selectedItem = null;
+let autocompleteItems = [];
+let currentAutocompleteIndex = -1;
+
+// 초기화
+document.addEventListener('DOMContentLoaded', function() {
+    // 검색 입력 이벤트 (자동완성 제거, Enter 키만 처리)
+    const searchInput = document.getElementById('searchInput');
+    // searchInput.addEventListener('input', handleSearchInput); // 자동완성 비활성화
+    searchInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            performSearch();
+        }
+    });
+    
+    // 클릭 외부 영역 처리
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('.search-input-wrapper')) {
+            hideAutocomplete();
+        }
+    });
+    
+    // 초기 테이블 헤더 설정
+    updateTableHeaders();
+    
+    // 검색 타입 변경 시
+    document.getElementById('searchType').addEventListener('change', function() {
+        document.getElementById('searchInput').value = '';
+        hideAutocomplete();
+        clearResults();
+    });
+});
+
+// 자동완성 처리
+function handleSearchInput(e) {
+    const query = e.target.value.trim();
+    
+    if (query.length < 1) {
+        hideAutocomplete();
+        return;
+    }
+    
+    // API 호출하여 자동완성 데이터 가져오기
+    fetchAutocomplete(query);
+}
+
+// 자동완성 데이터 가져오기
+async function fetchAutocomplete(query) {
+    const searchType = document.getElementById('searchType').value;
+    
+    try {
+        const response = await fetch(`${searchConfig.autocompleteUrl}?type=${searchType}&query=${encodeURIComponent(query)}`);
+        const data = await response.json();
+        
+        if (data.success && data.items.length > 0) {
+            showAutocomplete(data.items);
+        } else {
+            hideAutocomplete();
+        }
+    } catch (error) {
+        console.error('Autocomplete error:', error);
+    }
+}
+
+// 자동완성 표시
+function showAutocomplete(items) {
+    autocompleteItems = items;
+    currentAutocompleteIndex = -1;
+    
+    const dropdown = document.getElementById('autocompleteDropdown');
+    dropdown.innerHTML = '';
+    
+    items.forEach((item, index) => {
+        const div = document.createElement('div');
+        div.className = 'autocomplete-item';
+        div.innerHTML = `
+            <div class="item-main">${item.main}</div>
+            ${item.sub ? `<div class="item-sub">${item.sub}</div>` : ''}
+        `;
+        div.onclick = () => selectAutocompleteItem(item, index);
+        dropdown.appendChild(div);
+    });
+    
+    dropdown.classList.add('show');
+}
+
+// 자동완성 숨기기
+function hideAutocomplete() {
+    document.getElementById('autocompleteDropdown').classList.remove('show');
+    autocompleteItems = [];
+    currentAutocompleteIndex = -1;
+}
+
+// 자동완성 아이템 선택
+function selectAutocompleteItem(item, index) {
+    document.getElementById('searchInput').value = item.main;
+    hideAutocomplete();
+    performSearch();
+}
+
+// 키보드 이벤트 처리
+function handleKeyDown(e) {
+    const dropdown = document.getElementById('autocompleteDropdown');
+    
+    if (!dropdown.classList.contains('show')) {
+        if (e.key === 'Enter') {
+            performSearch();
+        }
+        return;
+    }
+    
+    const items = dropdown.querySelectorAll('.autocomplete-item');
+    
+    switch(e.key) {
+        case 'ArrowDown':
+            e.preventDefault();
+            currentAutocompleteIndex = Math.min(currentAutocompleteIndex + 1, items.length - 1);
+            updateAutocompleteSelection(items);
+            break;
+            
+        case 'ArrowUp':
+            e.preventDefault();
+            currentAutocompleteIndex = Math.max(currentAutocompleteIndex - 1, -1);
+            updateAutocompleteSelection(items);
+            break;
+            
+        case 'Enter':
+            e.preventDefault();
+            if (currentAutocompleteIndex >= 0) {
+                selectAutocompleteItem(autocompleteItems[currentAutocompleteIndex], currentAutocompleteIndex);
+            } else {
+                performSearch();
+            }
+            break;
+            
+        case 'Escape':
+            hideAutocomplete();
+            break;
+    }
+}
+
+// 자동완성 선택 업데이트
+function updateAutocompleteSelection(items) {
+    items.forEach((item, index) => {
+        if (index === currentAutocompleteIndex) {
+            item.classList.add('selected');
+        } else {
+            item.classList.remove('selected');
+        }
+    });
+}
+
+// 검색 수행
+async function performSearch() {
+    const searchType = document.getElementById('searchType').value;
+    const query = document.getElementById('searchInput').value.trim();
+    
+    // 빈 검색어도 허용 (전체 목록 보기)
+    hideAutocomplete();
+    showLoading();
+    
+    // URL 파라미터에서 search_type 구하기
+    const urlParams = new URLSearchParams(window.location.search);
+    const popupType = urlParams.get('type') || 'person';
+    
+    try {
+        const response = await fetch(`${searchConfig.searchUrl}?type=${popupType}&value=${searchType}&q=${encodeURIComponent(query)}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            displayResults(data.data || data.results || []);
+        } else {
+            showNoResults();
+        }
+    } catch (error) {
+        console.error('Search error:', error);
+        alert('검색 중 오류가 발생했습니다.');
+    } finally {
+        hideLoading();
+    }
+}
+
+// 테이블 헤더 업데이트
+function updateTableHeaders() {
+    const headers = searchConfig.columns || [];
+    const headerRow = document.getElementById('tableHeaders');
+    
+    headerRow.innerHTML = headers.map(col => 
+        `<th>${col.label}</th>`
+    ).join('');
+}
+
+// 검색 결과 표시
+function displayResults(results) {
+    const table = document.getElementById('resultTable');
+    const tbody = document.getElementById('tableBody');
+    const noResults = document.getElementById('noResults');
+    const resultCount = document.getElementById('resultCount');
+    
+    if (!results || results.length === 0) {
+        showNoResults();
+        return;
+    }
+    
+    // 결과 건수 표시
+    resultCount.textContent = `${results.length}건`;
+    
+    // 테이블 내용 생성
+    tbody.innerHTML = '';
+    results.forEach((item, index) => {
+        const tr = document.createElement('tr');
+        tr.dataset.index = index;
+        tr.onclick = () => selectResult(item, tr);
+        
+        const columns = searchConfig.columns || [];
+        tr.innerHTML = columns.map(col => 
+            `<td>${item[col.field] || '-'}</td>`
+        ).join('');
+        
+        tbody.appendChild(tr);
+    });
+    
+    // 테이블 표시
+    table.style.display = 'table';
+    noResults.style.display = 'none';
+}
+
+// 검색 결과 선택
+function selectResult(item, row) {
+    // 이전 선택 제거
+    document.querySelectorAll('.result-table tbody tr').forEach(tr => {
+        tr.classList.remove('selected');
+    });
+    
+    // 새로운 선택
+    row.classList.add('selected');
+    selectedItem = item;
+    
+    // 확인 버튼 활성화
+    document.getElementById('confirmBtn').disabled = false;
+}
+
+// 결과 없음 표시
+function showNoResults() {
+    const table = document.getElementById('resultTable');
+    const noResults = document.getElementById('noResults');
+    const resultCount = document.getElementById('resultCount');
+    
+    table.style.display = 'none';
+    noResults.style.display = 'block';
+    resultCount.textContent = '0건';
+}
+
+// 결과 초기화
+function clearResults() {
+    const table = document.getElementById('resultTable');
+    const tbody = document.getElementById('tableBody');
+    const noResults = document.getElementById('noResults');
+    const resultCount = document.getElementById('resultCount');
+    
+    tbody.innerHTML = '';
+    table.style.display = 'none';
+    noResults.style.display = 'block';
+    resultCount.textContent = '0건';
+    selectedItem = null;
+    document.getElementById('confirmBtn').disabled = true;
+}
+
+// 로딩 표시
+function showLoading() {
+    document.getElementById('loading').classList.add('show');
+    document.getElementById('resultTableWrapper').style.display = 'none';
+}
+
+// 로딩 숨기기
+function hideLoading() {
+    document.getElementById('loading').classList.remove('show');
+    document.getElementById('resultTableWrapper').style.display = 'block';
+}
+
+// 선택 확인
+function confirmSelection() {
+    if (!selectedItem) {
+        alert('항목을 선택해주세요.');
+        return;
+    }
+    
+    // 부모 창에 데이터 전달
+    if (window.opener && searchConfig.callback) {
+        window.opener[searchConfig.callback](selectedItem);
+    }
+    
+    window.close();
+}
+
+// 팝업 닫기
+function closePopup() {
+    window.close();
+}
+</script>
+{% endblock %}

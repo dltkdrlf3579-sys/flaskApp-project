@@ -284,7 +284,9 @@ def init_sample_data():
 
 @app.before_request
 def before_request():
-    init_db()
+    # 데이터 복구 페이지는 init_db 건너뛰기 (동기화 방지)
+    if request.path != '/data-recovery':
+        init_db()
 
 @app.route("/")
 def index():
@@ -322,10 +324,20 @@ def data_recovery():
     """).fetchall()
     
     deleted_accidents = [dict(row) for row in deleted_accidents_rows]
+    
+    # 삭제된 협력사 조회
+    deleted_partners_rows = conn.execute("""
+        SELECT * FROM partners_cache 
+        WHERE is_deleted = 1
+        ORDER BY company_name
+    """).fetchall()
+    
+    deleted_partners = [dict(row) for row in deleted_partners_rows]
     conn.close()
     
     return render_template('data-recovery.html', 
                          deleted_accidents=deleted_accidents,
+                         deleted_partners=deleted_partners,
                          menu=MENU_CONFIG,
                          active_slug='data-recovery')
 
@@ -911,8 +923,9 @@ def get_dropdown_options_for_display(column_key):
                         try:
                             arr = json.loads(s)
                             if isinstance(arr, list):
-                                logging.warning(
-                                    f"[{column_key}] option_value가 배열 문자열 1건으로 저장되어 있어 런타임 분해 처리합니다. "
+                                # 경고를 디버그 레벨로 변경 (운영 환경에서는 표시되지 않음)
+                                logging.debug(
+                                    f"[{column_key}] option_value가 배열 문자열로 저장됨. 런타임 분해 처리. "
                                     f"원본={v} (len={len(arr)})"
                                 )
                                 return [
@@ -1730,6 +1743,24 @@ def get_deleted_accidents():
     
     return jsonify({"success": True, "accidents": deleted_accidents})
 
+@app.route("/api/partners/deleted")
+def get_deleted_partners():
+    """삭제된 협력사 목록 API"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    
+    # 삭제된 협력사만 조회
+    deleted_partners_rows = conn.execute("""
+        SELECT * FROM partners_cache 
+        WHERE is_deleted = 1
+        ORDER BY company_name
+    """).fetchall()
+    
+    deleted_partners = [dict(row) for row in deleted_partners_rows]
+    conn.close()
+    
+    return jsonify({"success": True, "partners": deleted_partners})
+
 @app.route('/api/accidents/delete', methods=['POST'])
 def delete_accidents():
     """선택한 사고들을 소프트 삭제"""
@@ -1797,6 +1828,291 @@ def restore_accidents():
     except Exception as e:
         logging.error(f"사고 복구 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route('/api/partners/restore', methods=['POST'])
+def restore_partners():
+    """삭제된 협력사들을 복구"""
+    try:
+        data = request.json
+        business_numbers = data.get('business_numbers', [])
+        
+        if not business_numbers:
+            return jsonify({"success": False, "message": "복구할 항목이 없습니다."}), 400
+        
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cursor = conn.cursor()
+        
+        # 선택한 협력사들을 복구 (is_deleted = 0)
+        placeholders = ','.join('?' * len(business_numbers))
+        cursor.execute(f"""
+            UPDATE partners_cache 
+            SET is_deleted = 0 
+            WHERE business_number IN ({placeholders})
+        """, business_numbers)
+        
+        restored_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "restored_count": restored_count,
+            "message": f"{restored_count}개의 협력사가 복구되었습니다."
+        })
+    except Exception as e:
+        logging.error(f"협력사 복구 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route('/api/buildings/search', methods=['GET'])
+def search_buildings():
+    """건물 검색 API"""
+    try:
+        search_term = request.args.get('q', '').strip()
+        
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cursor = conn.cursor()
+        
+        if search_term:
+            cursor.execute("""
+                SELECT building_code, building_name
+                FROM building_master
+                WHERE building_name LIKE ? OR building_code LIKE ?
+                ORDER BY building_name
+                LIMIT 50
+            """, (f'%{search_term}%', f'%{search_term}%'))
+        else:
+            cursor.execute("""
+                SELECT building_code, building_name
+                FROM building_master
+                ORDER BY building_name
+                LIMIT 50
+            """)
+        
+        buildings = []
+        for row in cursor.fetchall():
+            buildings.append({
+                'building_code': row[0],
+                'building_name': row[1]
+            })
+        
+        conn.close()
+        return jsonify({'success': True, 'buildings': buildings})
+    except Exception as e:
+        logging.error(f"건물 검색 중 오류: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/departments/search', methods=['GET'])
+def search_departments():
+    """부서 검색 API"""
+    try:
+        search_term = request.args.get('q', '').strip()
+        
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cursor = conn.cursor()
+        
+        if search_term:
+            cursor.execute("""
+                SELECT d.dept_code, d.dept_name, 
+                       p.dept_name as parent_name, d.dept_level
+                FROM department_master d
+                LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
+                WHERE d.dept_name LIKE ? OR d.dept_code LIKE ?
+                ORDER BY d.dept_level, d.dept_name
+                LIMIT 50
+            """, (f'%{search_term}%', f'%{search_term}%'))
+        else:
+            cursor.execute("""
+                SELECT d.dept_code, d.dept_name, 
+                       p.dept_name as parent_name, d.dept_level
+                FROM department_master d
+                LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
+                ORDER BY d.dept_level, d.dept_name
+                LIMIT 50
+            """)
+        
+        departments = []
+        for row in cursor.fetchall():
+            departments.append({
+                'dept_code': row[0],
+                'dept_name': row[1],
+                'parent_name': row[2] or '',
+                'dept_level': row[3] or 0
+            })
+        
+        conn.close()
+        return jsonify({'success': True, 'departments': departments})
+    except Exception as e:
+        logging.error(f"부서 검색 중 오류: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/search', methods=['GET'])
+def api_search():
+    """범용 검색 API"""
+    try:
+        search_type = request.args.get('type', 'person')
+        search_value = request.args.get('value', 'person')
+        search_term = request.args.get('q', '').strip()
+        
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cursor = conn.cursor()
+        
+        results = []
+        
+        if search_type == 'person':
+            # 담당자 검색 (더미 데이터)
+            sample_persons = [
+                {'employee_id': '10001', 'name': '김철수', 'department': '안전보건팀'},
+                {'employee_id': '10002', 'name': '이영희', 'department': '생산1팀'},
+                {'employee_id': '10003', 'name': '박민수', 'department': '품질관리팀'},
+                {'employee_id': '10004', 'name': '정수진', 'department': '인사팀'},
+                {'employee_id': '10005', 'name': '최동욱', 'department': '총무팀'}
+            ]
+            
+            if search_term:
+                if search_value == 'employee_id':
+                    results = [p for p in sample_persons if search_term in p['employee_id']]
+                else:
+                    results = [p for p in sample_persons if search_term in p['name'] or search_term in p['department']]
+            else:
+                results = sample_persons
+                
+        elif search_type == 'company':
+            # 협력사 검색
+            if search_term:
+                if search_value == 'business_number':
+                    cursor.execute("""
+                        SELECT business_number, company_name, representative, 
+                               business_type_major, NULL as phone
+                        FROM partners_cache
+                        WHERE business_number LIKE ? AND is_deleted = 0
+                        LIMIT 50
+                    """, (f'%{search_term}%',))
+                else:
+                    cursor.execute("""
+                        SELECT business_number, company_name, representative, 
+                               business_type_major, NULL as phone
+                        FROM partners_cache
+                        WHERE company_name LIKE ? AND is_deleted = 0
+                        LIMIT 50
+                    """, (f'%{search_term}%',))
+            else:
+                cursor.execute("""
+                    SELECT business_number, company_name, representative, 
+                           business_type_major, NULL as phone
+                    FROM partners_cache
+                    WHERE is_deleted = 0
+                    LIMIT 50
+                """)
+            
+            for row in cursor.fetchall():
+                results.append({
+                    'company_business_number': row[0],
+                    'company_name': row[1],
+                    'representative_name': row[2] or '',
+                    'business_type': row[3] or '',
+                    'company_phone': row[4] or ''
+                })
+                
+        elif search_type == 'building':
+            # 건물 검색
+            if search_term:
+                if search_value == 'building_code':
+                    cursor.execute("""
+                        SELECT building_code, building_name
+                        FROM building_master
+                        WHERE building_code LIKE ?
+                        ORDER BY building_name
+                        LIMIT 50
+                    """, (f'%{search_term}%',))
+                else:
+                    cursor.execute("""
+                        SELECT building_code, building_name
+                        FROM building_master
+                        WHERE building_name LIKE ?
+                        ORDER BY building_name
+                        LIMIT 50
+                    """, (f'%{search_term}%',))
+            else:
+                cursor.execute("""
+                    SELECT building_code, building_name
+                    FROM building_master
+                    ORDER BY building_name
+                    LIMIT 50
+                """)
+            
+            for row in cursor.fetchall():
+                results.append({
+                    'building_code': row[0],
+                    'building_name': row[1]
+                })
+                
+        elif search_type == 'department':
+            # 부서 검색
+            if search_term:
+                if search_value == 'dept_code':
+                    cursor.execute("""
+                        SELECT d.dept_code, d.dept_name, 
+                               p.dept_name as parent_name, d.dept_level
+                        FROM department_master d
+                        LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
+                        WHERE d.dept_code LIKE ?
+                        ORDER BY d.dept_level, d.dept_name
+                        LIMIT 50
+                    """, (f'%{search_term}%',))
+                else:
+                    cursor.execute("""
+                        SELECT d.dept_code, d.dept_name, 
+                               p.dept_name as parent_name, d.dept_level
+                        FROM department_master d
+                        LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
+                        WHERE d.dept_name LIKE ?
+                        ORDER BY d.dept_level, d.dept_name
+                        LIMIT 50
+                    """, (f'%{search_term}%',))
+            else:
+                cursor.execute("""
+                    SELECT d.dept_code, d.dept_name, 
+                           p.dept_name as parent_name, d.dept_level
+                    FROM department_master d
+                    LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
+                    ORDER BY d.dept_level, d.dept_name
+                    LIMIT 50
+                """)
+            
+            for row in cursor.fetchall():
+                results.append({
+                    'dept_code': row[0],
+                    'dept_name': row[1],
+                    'parent_name': row[2] or '',
+                    'dept_level': row[3] or 0
+                })
+                
+        elif search_type == 'contractor':
+            # 협력사 근로자 검색 (더미 데이터 - 사업자번호 하이픈 제거)
+            sample_contractors = [
+                {'worker_id': 'C001', 'worker_name': '김민수', 'company_name': '삼성건설', 'business_number': '1248100998'},
+                {'worker_id': 'C002', 'worker_name': '이철호', 'company_name': '대림산업', 'business_number': '1108114055'},
+                {'worker_id': 'C003', 'worker_name': '박영진', 'company_name': 'GS건설', 'business_number': '1048145271'},
+                {'worker_id': 'C004', 'worker_name': '최성훈', 'company_name': '현대건설', 'business_number': '1018116293'},
+                {'worker_id': 'C005', 'worker_name': '정미경', 'company_name': '롯데건설', 'business_number': '2148111745'},
+                {'worker_id': 'C006', 'worker_name': '홍길동', 'company_name': '포스코건설', 'business_number': '5068151224'},
+                {'worker_id': 'C007', 'worker_name': '김수연', 'company_name': 'SK건설', 'business_number': '1018143363'},
+                {'worker_id': 'C008', 'worker_name': '장민호', 'company_name': '두산건설', 'business_number': '1028144723'}
+            ]
+            
+            if search_term:
+                if search_value == 'worker_id':  # ID로 검색
+                    results = [c for c in sample_contractors if search_term.upper() in c['worker_id'].upper()]
+                else:  # name (이름으로 검색)
+                    results = [c for c in sample_contractors if search_term in c['worker_name']]
+            else:
+                results = sample_contractors
+        
+        conn.close()
+        return jsonify({'success': True, 'data': results})
+    except Exception as e:
+        logging.error(f"검색 API 오류: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/accidents/permanent-delete', methods=['POST'])
 def permanent_delete_accidents():
@@ -1993,11 +2309,23 @@ def get_dropdown_codes(column_key):
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
+        
+        # 먼저 dropdown_code_mapping 테이블에서 조회 (새로운 방식)
         codes = conn.execute("""
-            SELECT * FROM dropdown_option_codes
+            SELECT code as option_code, option_value, display_order 
+            FROM dropdown_code_mapping
             WHERE column_key = ? AND is_active = 1
             ORDER BY display_order
         """, (column_key,)).fetchall()
+        
+        # 데이터가 없으면 dropdown_option_codes에서 조회 (구식 방식)
+        if not codes:
+            codes = conn.execute("""
+                SELECT * FROM dropdown_option_codes
+                WHERE column_key = ? AND is_active = 1
+                ORDER BY display_order
+            """, (column_key,)).fetchall()
+        
         conn.close()
         
         # 응답 형식 통일
@@ -2096,12 +2424,25 @@ def save_dropdown_codes():
             WHERE column_key = ?
         """, (column_key,))
         
+        # dropdown_code_mapping 테이블 초기화
+        cursor.execute("""
+            DELETE FROM dropdown_code_mapping 
+            WHERE column_key = ?
+        """, (column_key,))
+        
         # 새 코드 재생성 (순번 부여)
         for idx, item in enumerate(flattened, 1):
             new_code = f"{column_key.upper()}_{str(idx).zfill(3)}"
             option_value = item['value']
             
-            # 기존 코드가 있는지 확인
+            # dropdown_code_mapping 테이블에 삽입
+            cursor.execute("""
+                INSERT INTO dropdown_code_mapping 
+                (column_key, code, option_value, display_order, is_active)
+                VALUES (?, ?, ?, ?, 1)
+            """, (column_key, new_code, option_value, idx))
+            
+            # 기존 코드가 있는지 확인 (dropdown_option_codes)
             existing = cursor.execute("""
                 SELECT id, option_value, display_order FROM dropdown_option_codes
                 WHERE column_key = ? AND option_code = ?
@@ -2333,6 +2674,254 @@ def get_person_master():
     except Exception as e:
         logging.error(f"담당자 조회 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/search/autocomplete", methods=["GET"])
+def search_autocomplete():
+    """범용 자동완성 API"""
+    try:
+        search_type = request.args.get('type', 'person')
+        query = request.args.get('query', '').strip()
+        
+        if not query:
+            return jsonify({"success": True, "items": []})
+        
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        
+        items = []
+        
+        if search_type == 'person':
+            # 먼저 emp_table에서 검색 시도
+            try:
+                results = conn.execute("""
+                    SELECT DISTINCT emp_name as name, emp_dept as department, emp_company as company_name 
+                    FROM emp_table 
+                    WHERE enabled = 1 
+                    AND (emp_name LIKE ? OR emp_id LIKE ?)
+                    LIMIT 10
+                """, (f'%{query}%', f'%{query}%')).fetchall()
+            except:
+                # emp_table이 없으면 person_master에서 검색
+                try:
+                    results = conn.execute("""
+                        SELECT DISTINCT name, department, company_name 
+                        FROM person_master 
+                        WHERE is_active = 1 
+                        AND (name LIKE ? OR employee_id LIKE ?)
+                        LIMIT 10
+                    """, (f'%{query}%', f'%{query}%')).fetchall()
+                except:
+                    # 둘 다 없으면 더미 데이터 사용
+                    dummy_data = [
+                        {'name': '홍길동', 'department': '안전관리팀', 'company_name': '삼성전자'},
+                        {'name': '김철수', 'department': '시설관리팀', 'company_name': '삼성전자'},
+                        {'name': '이영희', 'department': '품질관리팀', 'company_name': '삼성전자'},
+                        {'name': '박민수', 'department': '생산관리팀', 'company_name': '협력사A'},
+                        {'name': '정수진', 'department': '환경안전팀', 'company_name': '협력사B'}
+                    ]
+                    results = [d for d in dummy_data if query.lower() in d['name'].lower() or query in d['department']]
+            
+            for row in results:
+                if isinstance(row, dict):
+                    dept = row.get('department', '')
+                    items.append({
+                        'main': row.get('name', ''),
+                        'sub': dept if dept else '부서 정보 없음'
+                    })
+                else:
+                    dept = row['department'] if row['department'] else '부서 정보 없음'
+                    items.append({
+                        'main': row['name'],
+                        'sub': dept
+                    })
+                
+        elif search_type == 'employee_id':
+            # ID로 검색
+            try:
+                results = conn.execute("""
+                    SELECT DISTINCT emp_id as employee_id, emp_name as name, emp_dept as department 
+                    FROM emp_table 
+                    WHERE enabled = 1 
+                    AND emp_id LIKE ?
+                    LIMIT 10
+                """, (f'%{query}%',)).fetchall()
+            except:
+                try:
+                    results = conn.execute("""
+                        SELECT DISTINCT employee_id, name, department 
+                        FROM person_master 
+                        WHERE is_active = 1 
+                        AND employee_id LIKE ?
+                        LIMIT 10
+                    """, (f'%{query}%',)).fetchall()
+                except:
+                    # 더미 데이터
+                    dummy_data = [
+                        {'employee_id': 'E001', 'name': '홍길동', 'department': '안전관리팀'},
+                        {'employee_id': 'E002', 'name': '김철수', 'department': '시설관리팀'},
+                        {'employee_id': 'E003', 'name': '이영희', 'department': '품질관리팀'},
+                        {'employee_id': 'E004', 'name': '박민수', 'department': '생산관리팀'},
+                        {'employee_id': 'E005', 'name': '정수진', 'department': '환경안전팀'}
+                    ]
+                    results = [d for d in dummy_data if query.upper() in d['employee_id']]
+            
+            for row in results:
+                if isinstance(row, dict):
+                    items.append({
+                        'main': row['employee_id'],
+                        'sub': f"{row['name']} / {row['department']}"
+                    })
+                else:
+                    items.append({
+                        'main': row['employee_id'],
+                        'sub': f"{row['name']} / {row['department']}"
+                    })
+                
+        elif search_type == 'company':
+            # 업체명 검색 - partners_cache 테이블 사용
+            try:
+                results = conn.execute("""
+                    SELECT DISTINCT company_name, business_number 
+                    FROM partners_cache 
+                    WHERE company_name LIKE ?
+                    LIMIT 10
+                """, (f'%{query}%',)).fetchall()
+            except:
+                # partners_cache 테이블이 없으면 빈 결과 반환
+                results = []
+            
+            for row in results:
+                items.append({
+                    'main': row['company_name'],
+                    'sub': row['business_number']
+                })
+                
+        elif search_type == 'business_number':
+            # 사업자번호 검색 - partners_cache 테이블 사용
+            try:
+                results = conn.execute("""
+                    SELECT DISTINCT business_number, company_name 
+                    FROM partners_cache 
+                    WHERE business_number LIKE ?
+                    LIMIT 10
+                """, (f'%{query}%',)).fetchall()
+            except:
+                # partners_cache 테이블이 없으면 빈 결과 반환
+                results = []
+            
+            for row in results:
+                items.append({
+                    'main': row['business_number'],
+                    'sub': row['company_name']
+                })
+        
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "items": items
+        })
+        
+    except Exception as e:
+        logging.error(f"자동완성 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/search-popup")
+def search_popup():
+    """범용 검색 팝업 페이지"""
+    search_type = request.args.get('type', 'person')
+    callback = request.args.get('callback', 'handleSearchResult')
+    
+    # 검색 타입별 설정
+    configs = {
+        'person': {
+            'title': '담당자 검색',
+            'search_title': '담당자 검색',
+            'placeholder': '이름 또는 부서를 입력하세요',
+            'search_options': [
+                {'value': 'person', 'label': '이름'},
+                {'value': 'employee_id', 'label': 'ID'}
+            ],
+            'columns': [
+                {'field': 'employee_id', 'label': 'ID'},
+                {'field': 'name', 'label': '이름'},
+                {'field': 'department', 'label': '부서'}
+            ]
+        },
+        'company': {
+            'title': '업체 검색',
+            'search_title': '업체 검색',
+            'placeholder': '업체명 또는 사업자번호를 입력하세요',
+            'search_options': [
+                {'value': 'company', 'label': '업체명'},
+                {'value': 'business_number', 'label': '사업자번호'}
+            ],
+            'columns': [
+                {'field': 'company_business_number', 'label': '사업자번호'},
+                {'field': 'company_name', 'label': '업체명'},
+                {'field': 'representative_name', 'label': '대표자'},
+                {'field': 'business_type', 'label': '업종'},
+                {'field': 'company_phone', 'label': '연락처'}
+            ]
+        },
+        'building': {
+            'title': '건물 검색',
+            'search_title': '건물 검색',
+            'placeholder': '건물명 또는 건물코드를 입력하세요',
+            'search_options': [
+                {'value': 'building', 'label': '건물명'},
+                {'value': 'building_code', 'label': '건물코드'}
+            ],
+            'columns': [
+                {'field': 'building_code', 'label': '건물코드'},
+                {'field': 'building_name', 'label': '건물명'}
+            ]
+        },
+        'department': {
+            'title': '부서 검색',
+            'search_title': '부서 검색',
+            'placeholder': '부서명 또는 부서코드를 입력하세요',
+            'search_options': [
+                {'value': 'department', 'label': '부서명'},
+                {'value': 'dept_code', 'label': '부서코드'}
+            ],
+            'columns': [
+                {'field': 'dept_code', 'label': '부서코드'},
+                {'field': 'dept_name', 'label': '부서명'},
+                {'field': 'parent_name', 'label': '상위부서'},
+                {'field': 'dept_level', 'label': '레벨'}
+            ]
+        },
+        'contractor': {
+            'title': '협력사 근로자 검색',
+            'search_title': '협력사 근로자 검색',
+            'placeholder': '이름 또는 ID를 입력하세요',
+            'search_options': [
+                {'value': 'name', 'label': '이름'},
+                {'value': 'worker_id', 'label': 'ID'}
+            ],
+            'columns': [
+                {'field': 'worker_id', 'label': 'ID'},
+                {'field': 'worker_name', 'label': '성함'},
+                {'field': 'company_name', 'label': '소속업체'},
+                {'field': 'business_number', 'label': '사업자번호'}
+            ]
+        }
+    }
+    
+    config = configs.get(search_type, configs['person'])
+    config['searchUrl'] = '/api/search'
+    config['autocompleteUrl'] = '/api/search/autocomplete'
+    config['callback'] = callback
+    
+    return render_template('search-popup.html', 
+                         config=config,
+                         title=config['title'],
+                         search_title=config['search_title'],
+                         placeholder=config['placeholder'],
+                         search_options=config['search_options'],
+                         is_popup=True)
 
 # Catch-all 라우트는 맨 마지막에 위치 (다른 모든 라우트 다음)
 @app.route("/<path:url>")
@@ -2800,8 +3389,8 @@ def export_partners_to_excel():
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            # 쿼리 구성
-            query = "SELECT * FROM partners_cache WHERE 1=1"
+            # 쿼리 구성 (삭제되지 않은 데이터만)
+            query = "SELECT * FROM partners_cache WHERE (is_deleted = 0 OR is_deleted IS NULL)"
             params = []
             
             if company_name:
@@ -3007,44 +3596,23 @@ def delete_partners():
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        deleted_count = 0
+        # Soft delete (is_deleted = 1로 설정)
+        placeholders = ','.join('?' * len(business_numbers))
+        cursor.execute(f"""
+            UPDATE partners_cache 
+            SET is_deleted = 1 
+            WHERE business_number IN ({placeholders})
+        """, business_numbers)
         
-        # 각 협력사를 삭제
-        for business_number in business_numbers:
-            # 실제 삭제 대신 soft delete 구현 (is_deleted 플래그)
-            # 만약 테이블에 is_deleted 컬럼이 없다면 실제 삭제
-            try:
-                # 먼저 컬럼 존재 확인
-                cursor.execute("PRAGMA table_info(partners_cache)")
-                columns = [col[1] for col in cursor.fetchall()]
-                
-                if 'is_deleted' in columns:
-                    # Soft delete
-                    cursor.execute(
-                        "UPDATE partners_cache SET is_deleted = 1 WHERE business_number = ?",
-                        (business_number,)
-                    )
-                else:
-                    # Hard delete
-                    cursor.execute(
-                        "DELETE FROM partners_cache WHERE business_number = ?",
-                        (business_number,)
-                    )
-                
-                if cursor.rowcount > 0:
-                    deleted_count += 1
-                    
-            except Exception as e:
-                logging.error(f"협력사 {business_number} 삭제 중 오류: {e}")
-                continue
-        
+        deleted_count = cursor.rowcount
         conn.commit()
         conn.close()
         
         return jsonify({
             "success": True,
             "deleted_count": deleted_count,
-            "message": f"{deleted_count}개의 협력사가 삭제되었습니다."
+            "message": f"{deleted_count}개의 협력사가 삭제되었습니다.",
+            "reload": True  # 페이지 새로고침 필요 플래그 추가
         })
         
     except Exception as e:

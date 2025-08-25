@@ -163,8 +163,8 @@
                 삭제된 협력사 데이터를 복구할 수 있습니다. 복구 후 협력사 목록에서 다시 확인 가능합니다.
             </div>
             
-            <div class="deleted-partners">
-                <p class="no-data">삭제된 협력사 데이터가 없습니다.</p>
+            <div class="deleted-partners" id="deletedPartnersContainer">
+                <p class="loading">데이터를 불러오는 중...</p>
             </div>
         </div>
     </div>
@@ -206,9 +206,11 @@ function switchTab(tabName) {
     document.querySelector(`a[href="#${tabName}"]`).classList.add('active');
     document.getElementById(`${tabName}-tab`).classList.add('active');
     
-    // 사고 탭이면 데이터 로드
+    // 탭별 데이터 로드
     if (tabName === 'accident') {
         loadDeletedAccidents();
+    } else if (tabName === 'partner') {
+        loadDeletedPartners();
     }
 }
 
@@ -293,15 +295,97 @@ function restoreAccident(id) {
     });
 }
 
-// 협력사 데이터 새로고침 (향후 구현)
-function refreshPartnerData() {
-    alert('협력사 데이터 복구 기능은 준비 중입니다.');
+// 삭제된 협력사 데이터 로드
+function loadDeletedPartners() {
+    fetch('/api/partners/deleted')
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('deletedPartnersContainer');
+            
+            if (data.success && data.partners && data.partners.length > 0) {
+                let html = `
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>사업자번호</th>
+                                <th>업체명</th>
+                                <th>대표자</th>
+                                <th>작업</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                
+                data.partners.forEach(partner => {
+                    html += `
+                        <tr>
+                            <td>${partner.business_number || '-'}</td>
+                            <td>${partner.company_name || '-'}</td>
+                            <td>${partner.representative || '-'}</td>
+                            <td>
+                                <button class="btn btn-sm btn-success" onclick="restorePartner('${partner.business_number}')">
+                                    <i class="bi bi-arrow-counterclockwise"></i> 복구
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                });
+                
+                html += '</tbody></table>';
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '<p class="no-data">삭제된 협력사 데이터가 없습니다.</p>';
+            }
+        })
+        .catch(error => {
+            console.error('협력사 데이터 로드 실패:', error);
+            document.getElementById('deletedPartnersContainer').innerHTML = 
+                '<p class="error">데이터를 불러오는 중 오류가 발생했습니다.</p>';
+        });
 }
 
-// 페이지 로드 시 사고 탭이 활성화되어 있으면 데이터 로드
+// 협력사 복구
+function restorePartner(businessNumber) {
+    if (!confirm('이 협력사를 복구하시겠습니까?')) {
+        return;
+    }
+    
+    fetch('/api/partners/restore', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ business_numbers: [businessNumber] })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('협력사가 복구되었습니다.');
+            loadDeletedPartners();  // 목록 새로고침
+        } else {
+            alert('복구 실패: ' + data.message);
+        }
+    })
+    .catch(error => {
+        alert('복구 중 오류가 발생했습니다.');
+        console.error(error);
+    });
+}
+
+// 협력사 데이터 새로고침
+function refreshPartnerData() {
+    loadDeletedPartners();
+}
+
+// 페이지 로드 시 적절한 탭 활성화 및 데이터 로드
 window.addEventListener('DOMContentLoaded', () => {
     if (window.location.hash === '#accident') {
         switchTab('accident');
+    } else if (window.location.hash === '#partner') {
+        switchTab('partner');
+    } else {
+        // 기본적으로 협력사 탭 데이터 로드
+        loadDeletedPartners();
     }
 });
 </script>

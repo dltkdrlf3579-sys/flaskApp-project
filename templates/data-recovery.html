@@ -61,12 +61,44 @@
 <div id="partner-tab" class="tab-content">
     <div class="info-message">
         <i class="bi bi-info-circle"></i>
-        삭제된 협력사 데이터를 복구할 수 있습니다. (준비 중)
+        삭제된 협력사 데이터를 복구할 수 있습니다. 복구 후 협력사 목록에서 다시 확인 가능합니다.
     </div>
     
     <div class="table-section">
-        <div class="no-data" style="padding: 40px; text-align: center;">
-            협력사 데이터 복구 기능은 준비 중입니다.
+        <div class="table-header">
+            <div class="left-controls">
+                <span class="total-count">삭제된 협력사: {{ deleted_partners|length }}건</span>
+            </div>
+        </div>
+        <div class="table-wrapper">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>사업자번호</th>
+                        <th>업체명</th>
+                        <th>대표자</th>
+                        <th>작업</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for partner in deleted_partners %}
+                    <tr>
+                        <td>{{ partner.business_number }}</td>
+                        <td>{{ partner.company_name or '-' }}</td>
+                        <td>{{ partner.representative or '-' }}</td>
+                        <td>
+                            <button class="btn btn-sm btn-success" onclick="restorePartner('{{ partner.business_number }}')">
+                                <i class="bi bi-arrow-counterclockwise"></i> 복구
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="no-data">삭제된 협력사 데이터가 없습니다.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 </div>
@@ -170,6 +202,33 @@ function restoreAccident(id) {
     .then(data => {
         if (data.success) {
             alert('사고가 복구되었습니다.');
+            location.reload();
+        } else {
+            alert('복구 실패: ' + data.message);
+        }
+    })
+    .catch(error => {
+        alert('복구 중 오류가 발생했습니다.');
+        console.error(error);
+    });
+}
+
+function restorePartner(businessNumber) {
+    if (!confirm('이 협력사를 복구하시겠습니까?')) {
+        return;
+    }
+    
+    fetch('/api/partners/restore', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ business_numbers: [businessNumber] })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('협력사가 복구되었습니다.');
             location.reload();
         } else {
             alert('복구 실패: ' + data.message);

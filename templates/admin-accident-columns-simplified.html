@@ -510,7 +510,12 @@ async function loadColumns() {
         const response = await fetch('/api/accident-columns');
         const columns = await response.json();
         
-        allColumns = columns.filter(col => col.column_type === 'dropdown');
+        // dropdown과 linked 타입 모두 표시 (linked는 읽기 전용으로)
+        allColumns = columns.filter(col => 
+            col.column_type === 'dropdown' || 
+            col.column_type === 'linked_text' || 
+            col.column_type === 'linked_dept'
+        );
         renderColumnList();
     } catch (error) {
         console.error('컬럼 로드 실패:', error);
@@ -635,39 +640,53 @@ function renderColumnList() {
     
     let html = '';
     allColumns.forEach(column => {
-        const optionCount = getOptionCount(column);
-        html += `
-            <div class="column-item ${currentColumn && currentColumn.key === column.column_key ? 'active' : ''}" 
-                 onclick="selectColumn('${column.column_key}', '${column.column_name}')">
-                <div class="column-name">${column.column_name}</div>
-                <div class="column-info">
-                    <span class="column-key">
-                        <i class="bi bi-key"></i> ${column.column_key}
-                    </span>
-                    <span class="option-count">${optionCount}개 옵션</span>
+        // linked 컬럼인지 확인
+        const isLinked = column.column_type === 'linked_text' || column.column_type === 'linked_dept';
+        const lockedIcon = isLinked ? '<i class="bi bi-lock-fill text-muted ms-2"></i>' : '';
+        
+        if (isLinked) {
+            // linked 컬럼은 완전히 비활성화
+            html += `
+                <div class="column-item disabled-column" 
+                     style="opacity: 0.5; cursor: not-allowed; background-color: #f8f9fa; pointer-events: none; user-select: none;">
+                    <div class="column-name">${column.column_name}${lockedIcon}</div>
+                    <div class="column-info">
+                        <span class="column-key">
+                            <i class="bi bi-key"></i> ${column.column_key}
+                        </span>
+                        <small class="text-muted d-block mt-1">
+                            <i class="bi bi-lock"></i> 연결된 컬럼 (수정 불가)
+                        </small>
+                    </div>
                 </div>
-            </div>
-        `;
+            `;
+        } else {
+            // 일반 컬럼은 클릭 가능
+            html += `
+                <div class="column-item ${currentColumn && currentColumn.key === column.column_key ? 'active' : ''}" 
+                     onclick="selectColumn('${column.column_key}', '${column.column_name}', '${column.column_type}')">
+                    <div class="column-name">${column.column_name}</div>
+                    <div class="column-info">
+                        <span class="column-key">
+                            <i class="bi bi-key"></i> ${column.column_key}
+                        </span>
+                    </div>
+                </div>
+            `;
+        }
     });
     
     container.innerHTML = html;
 }
 
-// 옵션 개수 계산
-function getOptionCount(column) {
-    if (!column.dropdown_options) return 0;
-    try {
-        const options = typeof column.dropdown_options === 'string' 
-            ? JSON.parse(column.dropdown_options) 
-            : column.dropdown_options;
-        return Array.isArray(options) ? options.length : 0;
-    } catch {
-        return 0;
-    }
-}
-
 // 컬럼 선택
-async function selectColumn(columnKey, columnName) {
+async function selectColumn(columnKey, columnName, columnType) {
+    // linked 타입 컬럼인지 확인
+    if (columnType === 'linked_text' || columnType === 'linked_dept') {
+        alert('연결된 데이터 컬럼은 코드 편집이 불가능합니다.\n메인 컬럼에서 데이터를 관리해주세요.');
+        return;
+    }
+    
     if (hasChanges && !confirm('저장하지 않은 변경사항이 있습니다. 계속하시겠습니까?')) {
         return;
     }
@@ -862,11 +881,6 @@ function renderEditor() {
             </div>
         </div>
         
-        <div class="info-bar">
-            <span class="info-text">
-                총 <strong id="rowCount">${currentCodes.length}</strong>개 옵션
-            </span>
-        </div>
         
         <table class="code-table">
             <thead>
@@ -1007,9 +1021,6 @@ function updateRowNumbers() {
     rows.forEach((row, index) => {
         row.querySelector('.row-number').textContent = index + 1;
     });
-    
-    const countEl = document.getElementById('rowCount');
-    if (countEl) countEl.textContent = rows.length;
 }
 
 // Sortable 초기화
@@ -1110,6 +1121,13 @@ async function saveCodes() {
             showToast('success', '저장되었습니다');
             setHasChanges(false);
             
+            // 저장 후 현재 코드를 업데이트
+            currentCodes = codes.map(c => ({
+                code: c.code,
+                value: c.value,
+                order: c.order
+            }));
+            
             // Embedded 모드에서는 부모 창에 메시지 전송 후 즉시 창 닫기
             if (isEmbedded && window.opener) {
                 window.opener.postMessage({
@@ -1118,9 +1136,11 @@ async function saveCodes() {
                     codes: codes
                 }, '*');
                 
-                // 저장 완료 즉시 창 닫기
-                alert('저장이 완료되었습니다.');
-                window.close();
+                // 저장 완료 후 창 닫기
+                showToast('success', '저장이 완료되었습니다.');
+                setTimeout(() => {
+                    window.close();
+                }, 100);
             }
             
             if (!isEmbedded) {

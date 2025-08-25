@@ -211,7 +211,7 @@
     
     <!-- 컬럼 추가/수정 모달 -->
     <div class="modal fade" id="columnModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog" style="margin-top: 100px;">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="modalTitle">컬럼 추가</h5>
@@ -244,14 +244,30 @@
                         
                         <div class="mb-3">
                             <label class="form-label">입력 타입 <span class="text-danger">*</span></label>
-                            <select class="form-select" id="columnType" onchange="toggleOptionsField(); checkTypeChange();">
+                            <select class="form-select" id="columnType" onchange="toggleOptionsField(); toggleTableField(); checkTypeChange();">
+                                <option value="" disabled selected>타입을 선택하세요</option>
                                 <option value="text">텍스트</option>
                                 <option value="dropdown">드롭다운</option>
                                 <option value="date">날짜</option>
-                                <option value="table_select">테이블 선택</option>
+                                <option value="table">테이블</option>
                             </select>
                             <div id="typeChangeWarning" class="alert alert-warning mt-2" style="display: none; font-size: 13px; padding: 8px 12px;">
                                 <i class="bi bi-exclamation-triangle"></i> 타입 변경 시 기존 데이터가 삭제될 수 있습니다.
+                            </div>
+                        </div>
+                        
+                        <!-- 테이블 설정 영역 -->
+                        <div class="mb-3" id="tableConfigField" style="display: none;">
+                            <label class="form-label">테이블 설정</label>
+                            <div class="d-flex gap-2 align-items-center">
+                                <input type="text" class="form-control" id="selectedTableDisplay" readonly placeholder="테이블을 선택하세요">
+                                <button type="button" class="btn btn-outline-primary" onclick="openTableConfigModal()">
+                                    설정
+                                </button>
+                            </div>
+                            <input type="hidden" id="selectedTableConfig" value="">
+                            <div id="tableColumnsPreview" class="mt-2" style="display: none;">
+                                <!-- 테이블 컬럼 미리보기 영역 -->
                             </div>
                         </div>
                         
@@ -314,6 +330,44 @@
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">취소</button>
                     <button type="button" class="btn btn-primary" onclick="saveColumnToQueue()">입력 완료</button>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 테이블 설정 모달 -->
+<div class="modal fade" id="tableConfigModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg" style="margin-top: 100px; max-width: 900px;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">테이블 설정</h5>
+                <button type="button" class="btn-close" onclick="closeTableConfigModal()"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <!-- 왼쪽: 테이블 목록 -->
+                    <div class="col-md-4">
+                        <h6 class="mb-3">테이블 선택</h6>
+                        <div class="list-group" id="tableList">
+                            <!-- 테이블 목록이 JavaScript로 동적 생성됨 -->
+                        </div>
+                    </div>
+                    
+                    <!-- 오른쪽: 미리보기 -->
+                    <div class="col-md-8">
+                        <h6 class="mb-3">생성될 컬럼 미리보기</h6>
+                        <div id="tablePreview" style="border: 1px solid #dee2e6; border-radius: 4px; padding: 15px; min-height: 300px; background-color: #f8f9fa;">
+                            <div class="text-muted text-center" style="padding: 50px 0;">
+                                <i class="bi bi-table" style="font-size: 48px;"></i>
+                                <p class="mt-3">왼쪽에서 테이블을 선택하세요</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeTableConfigModal()">취소</button>
+                <button type="button" class="btn btn-primary" onclick="confirmTableSelection()" id="confirmTableBtn" disabled>선택 완료</button>
             </div>
         </div>
     </div>
@@ -389,12 +443,22 @@ let editingId = null;
                     // 원본 저장
                     columns = activeData;
                     // 작업용 복사본 생성 (플래그 초기화)
-                    pendingColumns = activeData.map(col => ({
-                        ...col,
-                        _isNew: false,
-                        _modified: false,
-                        _toDelete: false
-                    }));
+                    pendingColumns = activeData.map(col => {
+                        // 테이블 정보 복원 (DB에 저장된 경우)
+                        const column = {
+                            ...col,
+                            _isNew: false,
+                            _modified: false,
+                            _toDelete: false
+                        };
+                        
+                        // 메타데이터에서 테이블 정보 복원
+                        if (col.table_group) column._tableGroup = col.table_group;
+                        if (col.table_type) column._tableType = col.table_type;
+                        if (col.table_name) column._tableName = col.table_name;
+                        
+                        return column;
+                    });
                     
                     console.log('로드된 활성 컬럼:', pendingColumns.length, '개');
                     renderColumns();
@@ -450,7 +514,7 @@ let editingId = null;
                                     } else if (Array.isArray(column.dropdown_options)) {
                                         optCount = column.dropdown_options.length;
                                     }
-                                    return `<span class="text-muted"> | 옵션: ${optCount}개</span>`;
+                                    return ``;
                                 } catch (e) {
                                     return '';
                                 }
@@ -513,9 +577,15 @@ let editingId = null;
                 'text': '텍스트',
                 'dropdown': '드롭다운',
                 'date': '날짜',
+                'table': '테이블',
                 'table_select': '테이블 선택',
                 'popup_person': '담당자',
-                'popup_company': '업체'
+                'popup_company': '업체',
+                'popup_contractor': '협력사 근로자',
+                'popup_department': '부서',
+                'popup_building': '건물',
+                'linked_dept': '연결-부서',
+                'linked_text': '연결-텍스트'
             };
             return labels[type] || type;
         }
@@ -525,11 +595,24 @@ let editingId = null;
             document.getElementById('modalTitle').textContent = '컬럼 추가';
             document.getElementById('columnForm').reset();
             document.getElementById('columnKey').disabled = false;
-            document.getElementById('columnType').dataset.originalType = '';
+            
+            // 타입 선택 드롭다운 초기화 - placeholder 선택
+            const typeSelect = document.getElementById('columnType');
+            typeSelect.value = '';  // placeholder 옵션으로 설정
+            typeSelect.dataset.originalType = '';
+            
+            // 테이블 설정 초기화
+            document.getElementById('selectedTableDisplay').value = '';
+            document.getElementById('selectedTableConfig').value = '';
+            document.getElementById('tableColumnsPreview').innerHTML = '';
+            document.getElementById('tableColumnsPreview').style.display = 'none';
+            selectedTableType = null;
+            
             document.getElementById('isActive').checked = true;
             document.getElementById('typeChangeWarning').style.display = 'none';
             document.getElementById('dropdownOptions').value = '';  // 드롭다운 옵션 초기화
             toggleOptionsField();
+            toggleTableField();
             
             // 기존 모달 인스턴스가 있으면 재사용, 없으면 새로 생성
             const modalElement = document.getElementById('columnModal');
@@ -551,7 +634,85 @@ let editingId = null;
             document.getElementById('columnName').value = column.column_name;
             document.getElementById('columnKey').value = column.column_key;
             document.getElementById('columnKey').disabled = !column._isNew;
-            document.getElementById('columnType').value = column.column_type;
+            
+            // 테이블 타입 관련 처리
+            if (column._tableGroup) {
+                // 테이블로 생성된 컬럼인 경우 원래 타입 표시
+                document.getElementById('columnType').value = column.column_type;
+                
+                // popup 타입들은 타입 변경 불가
+                if (column.column_type === 'popup_person' || 
+                    column.column_type === 'popup_company' || 
+                    column.column_type === 'popup_contractor') {
+                    document.getElementById('columnType').disabled = true;
+                }
+                
+                // 테이블 설정 정보 복원
+                if (column._tableType) {
+                    document.getElementById('selectedTableConfig').value = column._tableType;
+                    selectedTableType = column._tableType;
+                }
+                if (column._tableName) {
+                    document.getElementById('selectedTableDisplay').value = column._tableName;
+                }
+                
+                // 테이블 설정 영역 표시 (테이블로 생성된 컬럼인 경우)
+                if (column._tableType) {
+                    document.getElementById('tableConfigField').style.display = 'block';
+                    
+                    // 미리보기 업데이트
+                    const config = tableColumnMappings[column._tableType];
+                    if (config) {
+                        let previewHtml = `<small class="text-muted">연결된 테이블: </small>`;
+                        previewHtml += `<span class="badge bg-info">${config.name}</span>`;
+                        if (column.column_type.startsWith('popup_')) {
+                            previewHtml += `<small class="text-warning ms-2">(팝업 타입 - 타입 변경 불가)</small>`;
+                        }
+                        document.getElementById('tableColumnsPreview').innerHTML = previewHtml;
+                        document.getElementById('tableColumnsPreview').style.display = 'block';
+                    }
+                }
+            } else if (column.column_type === 'linked_text' || column.column_type === 'linked_dept') {
+                // linked 타입은 강제로 타입 설정하고 변경 불가능하게
+                document.getElementById('columnType').value = column.column_type;
+                
+                // linked 타입은 타입 변경 불가능
+                document.getElementById('columnType').disabled = true;
+                
+                // 타입 변경 경고 숨기기
+                document.getElementById('typeChangeWarning').style.display = 'none';
+                
+                // linked 컬럼도 테이블 정보 유지
+                if (column._tableType) {
+                    document.getElementById('selectedTableConfig').value = column._tableType;
+                    selectedTableType = column._tableType;
+                    document.getElementById('selectedTableDisplay').value = column._tableName || '';
+                    
+                    // 테이블 설정 영역 표시
+                    document.getElementById('tableConfigField').style.display = 'block';
+                    
+                    // 미리보기 업데이트
+                    const config = tableColumnMappings[column._tableType];
+                    if (config) {
+                        let previewHtml = `<small class="text-muted">연결된 테이블: </small>`;
+                        previewHtml += `<span class="badge bg-info">${config.name}</span>`;
+                        previewHtml += `<small class="text-warning ms-2">(Linked 컬럼 - 타입 변경 불가)</small>`;
+                        document.getElementById('tableColumnsPreview').innerHTML = previewHtml;
+                        document.getElementById('tableColumnsPreview').style.display = 'block';
+                    }
+                } else {
+                    // 테이블 정보가 없어도 linked 타입 표시
+                    let previewHtml = `<small class="text-warning">⚠️ Linked 컬럼 - 타입 변경 불가</small>`;
+                    document.getElementById('tableColumnsPreview').innerHTML = previewHtml;
+                    document.getElementById('tableColumnsPreview').style.display = 'block';
+                    document.getElementById('tableConfigField').style.display = 'block';
+                }
+            } else {
+                document.getElementById('columnType').value = column.column_type;
+                // 일반 컬럼은 타입 변경 가능
+                document.getElementById('columnType').disabled = false;
+            }
+            
             document.getElementById('columnType').dataset.originalType = column.column_type;
             document.getElementById('isActive').checked = column.is_active;
             
@@ -593,6 +754,11 @@ let editingId = null;
             
             toggleOptionsField();
             
+            // linked 타입이 아닌 경우에만 toggleTableField 호출
+            if (column.column_type !== 'linked_text' && column.column_type !== 'linked_dept') {
+                toggleTableField();
+            }
+            
             const modalElement = document.getElementById('columnModal');
             let modalInstance = bootstrap.Modal.getInstance(modalElement);
             if (!modalInstance) {
@@ -607,6 +773,12 @@ let editingId = null;
                 type === 'dropdown' ? 'block' : 'none';
             document.getElementById('tableSelectField').style.display = 
                 type === 'table_select' ? 'block' : 'none';
+        }
+        
+        function toggleTableField() {
+            const type = document.getElementById('columnType').value;
+            document.getElementById('tableConfigField').style.display = 
+                type === 'table' ? 'block' : 'none';
         }
         
         function updateMappingFields() {
@@ -705,13 +877,26 @@ let editingId = null;
         function saveColumnToQueue() {
             const columnName = document.getElementById('columnName').value.trim();
             const columnKey = document.getElementById('columnKey').value.trim();
-            const columnType = document.getElementById('columnType').value;
-            const originalType = document.getElementById('columnType').dataset.originalType;
+            const columnTypeElement = document.getElementById('columnType');
+            const columnType = columnTypeElement.value;
+            const originalType = columnTypeElement.dataset.originalType;
             const isActive = document.getElementById('isActive').checked;
+            
+            // 디버깅: disabled 상태에서도 값이 제대로 읽히는지 확인
+            console.log('Column Type:', columnType, 'Disabled:', columnTypeElement.disabled);
             
             if (!columnName || !columnKey) {
                 alert('컬럼명과 컬럼 키는 필수 입력 항목입니다.');
                 return;
+            }
+            
+            if (!columnType || columnType === '') {
+                // linked 타입이나 popup 타입이 아닌 경우에만 타입 선택 요구
+                if (!columnTypeElement.disabled) {
+                    alert('타입을 선택해주세요.');
+                    columnTypeElement.focus();
+                    return;
+                }
             }
             
             // 컬럼명 유효성 검사 - 숫자로만 구성된 이름 금지
@@ -757,32 +942,89 @@ let editingId = null;
                 // 기존 컬럼 수정
                 const index = pendingColumns.findIndex(c => String(c.id) === String(editingId));
                 if (index !== -1) {
+                    const existingColumn = pendingColumns[index];
+                    
+                    // 테이블로 생성된 컬럼인 경우 테이블 정보 유지
                     pendingColumns[index] = {
-                        ...pendingColumns[index],
+                        ...existingColumn,
                         column_name: columnName,
                         column_key: columnKey,
                         column_type: columnType,
                         is_active: isActive,
                         dropdown_options: dropdownOptions,
-                        _modified: !pendingColumns[index]._isNew // 새 컬럼이 아니면 수정됨 표시
+                        _modified: !existingColumn._isNew, // 새 컬럼이 아니면 수정됨 표시
+                        // 테이블 관련 정보 유지
+                        _tableGroup: existingColumn._tableGroup,
+                        _tableType: existingColumn._tableType,
+                        _tableName: existingColumn._tableName
                     };
                 }
             } else {
                 // 새 컬럼 추가
-                const newId = Date.now(); // 임시 ID
-                pendingColumns.push({
-                    id: newId,
-                    column_name: columnName,
-                    column_key: columnKey,
-                    column_type: columnType,
-                    is_active: isActive,
-                    dropdown_options: dropdownOptions,
-                    column_order: pendingColumns.length,
-                    _isNew: true
-                });
+                if (columnType === 'table') {
+                    // 테이블 타입: 선택된 테이블 설정 확인
+                    const selectedTable = document.getElementById('selectedTableConfig').value;
+                    if (!selectedTable) {
+                        alert('테이블을 선택해주세요.');
+                        return;
+                    }
+                    
+                    const config = tableColumnMappings[selectedTable];
+                    if (!config) {
+                        alert('선택된 테이블 설정을 찾을 수 없습니다.');
+                        return;
+                    }
+                    
+                    // 여러 개의 컬럼 생성
+                    const baseOrder = pendingColumns.length;
+                    const createdColumns = [];
+                    
+                    config.columns.forEach((col, index) => {
+                        const newId = Date.now() + index;
+                        const colName = index === 0 ? columnName : `${columnName} ${col.name.split(' ').slice(-1)[0]}`;
+                        const colKey = columnKey + col.key_suffix;
+                        
+                        const newColumn = {
+                            id: newId,
+                            column_name: colName,
+                            column_key: colKey,
+                            column_type: col.type,
+                            is_active: isActive,
+                            dropdown_options: col.type === 'dropdown' ? ['옵션1', '옵션2', '옵션3'] : null,
+                            column_order: baseOrder + index,
+                            _isNew: true,
+                            _tableGroup: columnKey, // 그룹 표시용
+                            _tableType: selectedTable, // 테이블 타입 저장
+                            _tableName: config.name // 테이블 이름 저장
+                        };
+                        
+                        pendingColumns.push(newColumn);
+                        createdColumns.push(colName);
+                        console.log(`테이블 컬럼 생성 [${index + 1}/${config.columns.length}]:`, newColumn);
+                    });
+                    
+                    // 생성된 컬럼 목록 표시
+                    alert(`✅ ${config.name} 테이블 컬럼 ${createdColumns.length}개가 생성되었습니다:\n\n${createdColumns.join('\n')}\n\n"전체 변경사항 저장" 버튼을 눌러야 최종 반영됩니다.`);
+                    
+                } else {
+                    // 일반 타입
+                    const newId = Date.now();
+                    const newColumn = {
+                        id: newId,
+                        column_name: columnName,
+                        column_key: columnKey,
+                        column_type: columnType,
+                        is_active: isActive,
+                        dropdown_options: dropdownOptions,
+                        column_order: pendingColumns.length,
+                        _isNew: true
+                    };
+                    pendingColumns.push(newColumn);
+                    
+                    alert('변경사항이 저장 대기중입니다.\n"전체 변경사항 저장" 버튼을 눌러야 최종 반영됩니다.');
+                }
             }
             
-            alert('변경사항이 저장 대기중입니다.\n"전체 변경사항 저장" 버튼을 눌러야 최종 반영됩니다.');
             
             forceCloseModal();
             renderColumns();
@@ -791,6 +1033,9 @@ let editingId = null;
         
         function forceCloseModal() {
             const modalElement = document.getElementById('columnModal');
+            
+            // 타입 드롭다운 다시 활성화 (다음 사용을 위해)
+            document.getElementById('columnType').disabled = false;
             
             // Bootstrap 모달 인스턴스 제거
             const modalInstance = bootstrap.Modal.getInstance(modalElement);
@@ -927,7 +1172,11 @@ let editingId = null;
                             column_type: column.column_type,
                             is_active: column.is_active ? 1 : 0,
                             dropdown_options: column.dropdown_options,
-                            column_order: column.column_order
+                            column_order: column.column_order,
+                            // 테이블 정보도 저장 (메타데이터로)
+                            table_group: column._tableGroup || null,
+                            table_type: column._tableType || null,
+                            table_name: column._tableName || null
                         };
                         console.log('추가 처리 중:', data);
                         const response = await fetch('/api/accident-columns', {
@@ -949,7 +1198,11 @@ let editingId = null;
                             column_type: column.column_type,
                             is_active: column.is_active ? 1 : 0,
                             dropdown_options: column.dropdown_options,
-                            column_order: column.column_order
+                            column_order: column.column_order,
+                            // 테이블 정보도 저장 (메타데이터로)
+                            table_group: column._tableGroup || null,
+                            table_type: column._tableType || null,
+                            table_name: column._tableName || null
                         };
                         console.log('수정 처리 중:', column.id, data);
                         const response = await fetch(`/api/accident-columns/${column.id}`, {
@@ -1133,5 +1386,223 @@ let editingId = null;
                 }, 3000);
             }
         }
+        
+        // ==================== 테이블 설정 관련 함수 ====================
+        let selectedTableType = null;
+        let tableColumnMappings = {
+            'person': {
+                name: '담당자',
+                columns: [
+                    { name: '담당자', key_suffix: '', type: 'popup_person' },
+                    { name: '담당자 부서', key_suffix: '_dept', type: 'linked_dept' }
+                ]
+            },
+            'company': {
+                name: '업체',
+                columns: [
+                    { name: '업체명', key_suffix: '', type: 'popup_company' },
+                    { name: '사업자번호', key_suffix: '_bizno', type: 'linked_text' }
+                ]
+            },
+            'department': {
+                name: '부서',
+                columns: [
+                    { name: '부서명', key_suffix: '', type: 'popup_department' },
+                    { name: '부서코드', key_suffix: '_code', type: 'linked_text' }
+                ]
+            },
+            'building': {
+                name: '건물',
+                columns: [
+                    { name: '건물명', key_suffix: '', type: 'popup_building' },
+                    { name: '건물코드', key_suffix: '_code', type: 'linked_text' }
+                ]
+            },
+            'contractor': {
+                name: '협력사 근로자',
+                columns: [
+                    { name: '성함', key_suffix: '', type: 'popup_contractor' },
+                    { name: 'ID', key_suffix: '_id', type: 'linked_text' },
+                    { name: '소속업체', key_suffix: '_company', type: 'popup_company' },
+                    { name: '사업자번호', key_suffix: '_bizno', type: 'linked_text' }
+                ]
+            }
+        };
+        
+        function openTableConfigModal() {
+            selectedTableType = null;
+            
+            // 테이블 목록 동적 생성
+            const tableListContainer = document.getElementById('tableList');
+            tableListContainer.innerHTML = '';
+            
+            // 아이콘 매핑
+            const icons = {
+                'person': 'bi-person-fill',
+                'company': 'bi-building',
+                'department': 'bi-diagram-3',
+                'building': 'bi-house-door',
+                'contractor': 'bi-people-fill'
+            };
+            
+            // tableColumnMappings에서 테이블 목록 생성
+            for (const [key, config] of Object.entries(tableColumnMappings)) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'list-group-item list-group-item-action';
+                button.dataset.tableType = key;  // 데이터 속성 추가
+                button.onclick = () => selectTable(key);
+                button.innerHTML = `
+                    <i class="bi ${icons[key] || 'bi-table'}"></i> ${config.name}
+                `;
+                tableListContainer.appendChild(button);
+            }
+            
+            document.getElementById('confirmTableBtn').disabled = true;
+            
+            // 초기 미리보기 표시
+            document.getElementById('tablePreview').innerHTML = `
+                <div class="text-muted text-center" style="padding: 50px 0;">
+                    <i class="bi bi-table" style="font-size: 48px;"></i>
+                    <p class="mt-3">왼쪽에서 테이블을 선택하세요</p>
+                </div>
+            `;
+            
+            const modalElement = document.getElementById('tableConfigModal');
+            let modalInstance = bootstrap.Modal.getInstance(modalElement);
+            if (!modalInstance) {
+                modalInstance = new bootstrap.Modal(modalElement);
+            }
+            modalInstance.show();
+        }
+        
+        function selectTable(tableType) {
+            selectedTableType = tableType;
+            
+            // 활성 표시 업데이트 - 데이터 속성 사용
+            document.querySelectorAll('#tableList .list-group-item').forEach((item) => {
+                if (item.dataset.tableType === tableType) {
+                    item.classList.add('active');
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+            
+            // 확인 버튼 활성화
+            document.getElementById('confirmTableBtn').disabled = false;
+            
+            // 미리보기 업데이트
+            updateTablePreview(tableType);
+        }
+        
+        function updateTablePreview(tableType) {
+            const config = tableColumnMappings[tableType];
+            if (!config) return;
+            
+            const baseColumnName = document.getElementById('columnName').value || config.name;
+            const baseColumnKey = document.getElementById('columnKey').value || tableType;
+            
+            let previewHtml = `
+                <div class="mb-3">
+                    <h6 class="text-primary mb-3">
+                        <i class="bi bi-info-circle"></i> 
+                        "${config.name}" 테이블 선택 시 생성될 컬럼들
+                    </h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered">
+                            <thead class="table-light">
+                                <tr>
+                                    <th width="40">#</th>
+                                    <th>컬럼명</th>
+                                    <th>컬럼 키</th>
+                                    <th>타입</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+            `;
+            
+            config.columns.forEach((col, index) => {
+                const columnName = index === 0 ? baseColumnName : `${baseColumnName} ${col.name.split(' ').slice(-1)[0]}`;
+                const columnKey = baseColumnKey + col.key_suffix;
+                const typeLabel = getTypeLabel(col.type);
+                
+                previewHtml += `
+                    <tr>
+                        <td class="text-center">${index + 1}</td>
+                        <td>${columnName}</td>
+                        <td><code>${columnKey}</code></td>
+                        <td><span class="badge bg-secondary">${typeLabel}</span></td>
+                    </tr>
+                `;
+            });
+            
+            previewHtml += `
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="alert alert-info mt-3" style="font-size: 13px;">
+                        <i class="bi bi-lightbulb"></i> 
+                        위 컬럼들이 자동으로 생성되며, 생성 후 개별적으로 수정 가능합니다.
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('tablePreview').innerHTML = previewHtml;
+        }
+        
+        function closeTableConfigModal() {
+            const modalElement = document.getElementById('tableConfigModal');
+            const modalInstance = bootstrap.Modal.getInstance(modalElement);
+            if (modalInstance) {
+                modalInstance.hide();
+            }
+            
+            // 백드롭 제거
+            document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+                backdrop.remove();
+            });
+            document.body.classList.remove('modal-open');
+            document.body.style.removeProperty('overflow');
+            document.body.style.removeProperty('padding-right');
+        }
+        
+        function confirmTableSelection() {
+            if (!selectedTableType) return;
+            
+            const config = tableColumnMappings[selectedTableType];
+            document.getElementById('selectedTableDisplay').value = config.name;
+            document.getElementById('selectedTableConfig').value = selectedTableType;
+            
+            // 메인 모달의 미리보기 업데이트
+            const baseColumnName = document.getElementById('columnName').value || config.name;
+            const baseColumnKey = document.getElementById('columnKey').value || selectedTableType;
+            
+            let previewHtml = `
+                <small class="text-muted">생성될 컬럼: </small>
+            `;
+            
+            config.columns.forEach((col, index) => {
+                const columnName = index === 0 ? baseColumnName : `${baseColumnName} ${col.name.split(' ').slice(-1)[0]}`;
+                previewHtml += `<span class="badge bg-info me-1">${columnName}</span>`;
+            });
+            
+            document.getElementById('tableColumnsPreview').innerHTML = previewHtml;
+            document.getElementById('tableColumnsPreview').style.display = 'block';
+            
+            closeTableConfigModal();
+        }
+        
+        // 컬럼명이나 키가 변경될 때 테이블 미리보기 업데이트
+        document.getElementById('columnName').addEventListener('input', function() {
+            if (selectedTableType) {
+                updateTablePreview(selectedTableType);
+            }
+        });
+        
+        document.getElementById('columnKey').addEventListener('input', function() {
+            if (selectedTableType) {
+                updateTablePreview(selectedTableType);
+            }
+        });
 </script>
 {% endblock %}
