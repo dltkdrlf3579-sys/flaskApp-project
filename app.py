@@ -330,10 +330,355 @@ def partner_change_request_route():
     """기준정보 변경요청 페이지 라우트"""
     return partner_change_request()
 
+@app.route("/change-request-detail/<int:request_id>")
+def change_request_detail_route(request_id):
+    """변경요청 상세정보 페이지 라우트"""
+    return change_request_detail(request_id)
+
 @app.route("/partner-accident")
 def partner_accident_route():
     """협력사 사고 페이지 라우트"""
     return partner_accident()
+
+@app.route("/safety-instruction")
+def safety_instruction_route():
+    """환경안전 지시서 페이지 라우트"""
+    # partner_accident와 완전히 동일한 로직 사용하되 템플릿만 변경
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    
+    # 검색 조건 (재해날짜 제외)
+    filters = {
+        'company_name': request.args.get('company_name', '').strip(),
+        'business_number': request.args.get('business_number', '').strip()
+    }
+    
+    # partner_accident와 동일한 로직으로 데이터 조회
+    # Phase 1: 동적 컬럼 설정 가져오기
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    dynamic_columns_rows = conn.execute("""
+        SELECT * FROM accident_column_config 
+        WHERE is_active = 1 
+        ORDER BY column_order
+    """).fetchall()
+    dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    
+    # 드롭다운 컬럼에 대해 코드-값 매핑 정보 추가
+    for col in dynamic_columns:
+        if col['column_type'] == 'dropdown':
+            col['code_mapping'] = get_dropdown_options_for_display(col['column_key'])
+    
+    # 환경안전 지시서 더미 데이터 생성
+    all_accidents = []
+    
+    # 월별로 발부번호 생성 (YYYY-MM-00 형식)
+    month_counters = {}  # 월별 카운터
+    
+    for i in range(30):
+        # 년월 생성
+        year = 2024
+        month = (i % 12) + 1
+        year_month = f'{year}-{month:02d}'
+        
+        # 해당 년월의 카운터 증가
+        if year_month not in month_counters:
+            month_counters[year_month] = 0
+        month_counters[year_month] += 1
+        
+        # YYYY-MM-00 형식으로 발부번호 생성
+        issue_number = f'{year_month}-{month_counters[year_month]:02d}'
+        
+        # 더미 데이터 배열들
+        classifications = ['환경', '안전', '보건', '품질']
+        employment_types = ['정규직', '계약직', '파견직', '임시직']
+        discipline_types = ['경고', '견책', '정직', '출입정지']
+        violation_types = ['작업절차위반', '안전장비미착용', '무단작업', '환경오염']
+        accident_types = ['추락', '협착', '절단', '화재', '누출']
+        grades = ['경미', '일반', '중대', '치명']
+        
+        safety_item = {
+            'id': i + 1,
+            'no': i + 1,  # No 컬럼
+            'issue_number': issue_number,  # 발부번호
+            'issuer': f'발행인{i+1}',  # 발행인
+            'issuer_department': f'안전관리팀{(i % 3) + 1}',  # 발행부서
+            'classification': classifications[i % 4],  # 분류
+            'employment_type': employment_types[i % 4],  # 고용형태
+            'primary_company': f'협력사{(i % 20) + 1}',  # 1차사명
+            'primary_business_number': f'{1000000000 + i * 11111}',  # 1차사_사업자번호
+            'subcontractor': f'하도급사{(i % 10) + 1}' if i % 3 == 0 else '-',  # 하도사명
+            'subcontractor_business_number': f'{2000000000 + i * 22222}' if i % 3 == 0 else '-',  # 하도사_사업자번호
+            'disciplined_person': f'징계자{i+1}',  # 징계자
+            'gbm': f'GBM{(i % 5) + 1}',  # GBM
+            'business_division': f'사업부{(i % 4) + 1}',  # 사업부
+            'team': f'팀{(i % 8) + 1}',  # 팀
+            'department': f'부서{(i % 6) + 1}',  # 소속부서
+            'violation_date': f'2024-{(i % 12) + 1:02d}-{(i % 28) + 1:02d}',  # 위반일자
+            'discipline_date': f'2024-{(i % 12) + 1:02d}-{((i % 28) + 2):02d}',  # 징계일자
+            'discipline_department': f'징계발의부서{(i % 3) + 1}',  # 징계발의부서
+            'discipline_type': discipline_types[i % 4],  # 징계유형
+            'accident_type': accident_types[i % 5],  # 사고유형
+            'accident_grade': grades[i % 4],  # 사고등급
+            'safety_violation_grade': grades[i % 4],  # 환경안전수칙 위반등급
+            'violation_type': violation_types[i % 4],  # 위반유형
+            'violation_content': f'위반내용 상세설명 {i+1}번 항목',  # 위반내용
+            'access_ban_start_date': f'2024-{(i % 12) + 1:02d}-{((i % 28) + 3):02d}' if i % 4 == 0 else '-',  # 출입정지 시작일
+            'access_ban_end_date': f'2024-{(i % 12) + 1:02d}-{((i % 28) + 10):02d}' if i % 4 == 0 else '-',  # 출입정지 종료일
+            'period': f'{(i % 30) + 1}일' if i % 4 == 0 else '-',  # 기간
+            'work_grade': f'등급{(i % 5) + 1}',  # 작업등급
+            'penalty_points': (i % 10) + 1,  # 감점
+            'disciplined_person_id': f'EMP{1000 + i}',  # 징계자ID
+            'custom_data': '{}'  # 동적 컬럼용
+        }
+        all_accidents.append(safety_item)
+    
+    # 필터링 (환경안전 지시서 컬럼에 맞게 수정)
+    filtered_accidents = all_accidents
+    if filters['company_name']:
+        filtered_accidents = [a for a in filtered_accidents if filters['company_name'].lower() in a['primary_company'].lower()]
+    if filters['business_number']:
+        filtered_accidents = [a for a in filtered_accidents if filters['business_number'] in str(a['primary_business_number'])]
+    
+    total_count = len(filtered_accidents)
+    
+    # 페이지네이션
+    start = (page - 1) * per_page
+    end = start + per_page
+    accidents = filtered_accidents[start:end]
+    
+    # 페이지네이션 객체 생성 (partner_accident와 동일)
+    class Pagination:
+        def __init__(self, page, per_page, total_count):
+            self.page = page
+            self.per_page = per_page
+            self.total_count = total_count
+            self.pages = math.ceil(total_count / per_page) if total_count > 0 else 1
+            self.has_prev = page > 1
+            self.prev_num = page - 1 if self.has_prev else None
+            self.has_next = page < self.pages
+            self.next_num = page + 1 if self.has_next else None
+        
+        def iter_pages(self, window_size=10):
+            start = ((self.page - 1) // window_size) * window_size + 1
+            end = min(start + window_size - 1, self.pages)
+            for num in range(start, end + 1):
+                yield num
+        
+        def get_window_info(self, window_size=10):
+            start = ((self.page - 1) // window_size) * window_size + 1
+            end = min(start + window_size - 1, self.pages)
+            has_prev_window = start > 1
+            has_next_window = end < self.pages
+            prev_window_start = max(1, start - window_size)
+            next_window_start = min(end + 1, self.pages)
+            return {
+                'start': start,
+                'end': end,
+                'has_prev_window': has_prev_window,
+                'has_next_window': has_next_window,
+                'prev_window_start': prev_window_start,
+                'next_window_start': next_window_start
+            }
+    
+    pagination = Pagination(page, per_page, total_count)
+    conn.close()
+    
+    return render_template('safety-instruction.html',
+                         accidents=accidents,
+                         total_count=total_count,
+                         pagination=pagination,
+                         dynamic_columns=dynamic_columns,
+                         menu=MENU_CONFIG)
+
+@app.route("/safety-instruction-register")
+def safety_instruction_register():
+    """환경안전 지시서 등록 페이지"""
+    logging.info("환경안전 지시서 등록 페이지 접근")
+    
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    
+    # 동적 컬럼 설정 가져오기 (사고와 동일한 컬럼 구조 사용)
+    dynamic_columns_rows = conn.execute("""
+        SELECT * FROM accident_column_config 
+        WHERE is_active = 1 
+        ORDER BY column_order
+    """).fetchall()
+    
+    # Row 객체를 딕셔너리로 변환
+    dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    
+    conn.close()
+    
+    # 드롭다운 컬럼에 대해 코드-값 매핑 적용
+    for col in dynamic_columns:
+        if col['column_type'] == 'dropdown':
+            # 코드-값 매핑 방식으로 옵션 가져오기
+            code_options = get_dropdown_options_for_display(col['column_key'])
+            if code_options:
+                # 새로운 방식의 옵션이 있으면 사용
+                col['dropdown_options_mapped'] = code_options
+                logging.info(f"  - {col['column_name']} ({col['column_key']}): 코드-값 매핑 {len(code_options)}개 옵션 = {code_options}")
+            else:
+                # 기존 JSON 방식 유지 (하위 호환성)
+                col['dropdown_options_mapped'] = None
+                logging.info(f"  - {col['column_name']} ({col['column_key']}): 기존 JSON 방식 사용, dropdown_options = {col.get('dropdown_options')}")
+    
+    logging.info(f"동적 컬럼 {len(dynamic_columns)}개 로드됨")
+    
+    # 팝업 모드인지 확인
+    is_popup = request.args.get('popup') == '1'
+    
+    return render_template('safety-instruction-register.html',
+                         dynamic_columns=dynamic_columns,
+                         menu=MENU_CONFIG,
+                         is_popup=is_popup)
+
+@app.route("/safety-instruction-detail/<issue_number>")
+def safety_instruction_detail(issue_number):
+    """환경안전 지시서 상세정보 페이지"""
+    logging.info(f"환경안전 지시서 상세 정보 조회: {issue_number}")
+    
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    
+    # 실제 데이터베이스에서 조회 시도
+    instruction = None
+    try:
+        instruction = conn.execute("""
+            SELECT * FROM safety_instructions 
+            WHERE issue_number = ? AND is_deleted = 0
+        """, (issue_number,)).fetchone()
+    except sqlite3.OperationalError:
+        # 테이블이 없는 경우 더미 데이터 사용
+        logging.info("safety_instructions 테이블이 없음 - 더미 데이터 사용")
+        instruction = None
+    
+    if not instruction:
+        # 더미 데이터에서 찾기 (개발 중이므로)
+        # safety-instruction 라우트와 동일한 더미 데이터 사용
+        month_counters = {}
+        all_instructions = []
+        
+        for i in range(30):
+            year = 2024
+            month = (i % 12) + 1
+            year_month = f'{year}-{month:02d}'
+            
+            if year_month not in month_counters:
+                month_counters[year_month] = 0
+            month_counters[year_month] += 1
+            
+            dummy_issue_number = f'{year_month}-{month_counters[year_month]:02d}'
+            
+            if dummy_issue_number == issue_number:
+                classifications = ['환경', '안전', '보건', '품질']
+                employment_types = ['정규직', '계약직', '파견직', '임시직']
+                discipline_types = ['경고', '견책', '정직', '출입정지']
+                violation_types = ['작업절차위반', '안전장비미착용', '무단작업', '환경오염']
+                accident_types = ['추락', '협착', '절단', '화재', '누출']
+                grades = ['경미', '일반', '중대', '치명']
+                
+                instruction_data = {
+                    'id': i + 1,
+                    'issue_number': dummy_issue_number,
+                    'issuer': f'발행인{i+1}',
+                    'issuer_department': f'안전관리팀{(i % 3) + 1}',
+                    'classification': classifications[i % 4],
+                    'employment_type': employment_types[i % 4],
+                    'primary_company': f'협력사{(i % 20) + 1}',
+                    'primary_business_number': f'{1000000000 + i * 11111}',
+                    'subcontractor': f'하도급사{(i % 10) + 1}' if i % 3 == 0 else '-',
+                    'subcontractor_business_number': f'{2000000000 + i * 22222}' if i % 3 == 0 else '-',
+                    'disciplined_person': f'징계자{i+1}',
+                    'gbm': f'GBM{(i % 5) + 1}',
+                    'business_division': f'사업부{(i % 4) + 1}',
+                    'team': f'팀{(i % 8) + 1}',
+                    'department': f'부서{(i % 6) + 1}',
+                    'violation_date': f'2024-{(i % 12) + 1:02d}-{(i % 28) + 1:02d}',
+                    'discipline_date': f'2024-{(i % 12) + 1:02d}-{((i % 28) + 2):02d}',
+                    'discipline_department': f'징계발의부서{(i % 3) + 1}',
+                    'discipline_type': discipline_types[i % 4],
+                    'accident_type': accident_types[i % 5],
+                    'accident_grade': grades[i % 4],
+                    'safety_violation_grade': grades[i % 4],
+                    'violation_type': violation_types[i % 4],
+                    'violation_content': f'위반내용 상세설명 {i+1}번 항목',
+                    'access_ban_start_date': f'2024-{(i % 12) + 1:02d}-{((i % 28) + 3):02d}' if i % 4 == 0 else '-',
+                    'access_ban_end_date': f'2024-{(i % 12) + 1:02d}-{((i % 28) + 10):02d}' if i % 4 == 0 else '-',
+                    'period': f'{(i % 30) + 1}일' if i % 4 == 0 else '-',
+                    'work_grade': f'등급{(i % 5) + 1}',
+                    'penalty_points': (i % 10) + 1,
+                    'disciplined_person_id': f'EMP{1000 + i}',
+                    'custom_data': '{}',
+                    'created_at': f'2024-{(i % 12) + 1:02d}-{(i % 28) + 1:02d} 09:00:00'
+                }
+                instruction = instruction_data
+                break
+    
+    if not instruction:
+        logging.warning(f"환경안전 지시서를 찾을 수 없습니다: {issue_number}")
+        conn.close()
+        return "환경안전 지시서 정보를 찾을 수 없습니다.", 404
+    
+    # 동적 컬럼 설정 가져오기
+    dynamic_columns_rows = conn.execute("""
+        SELECT * FROM accident_column_config 
+        WHERE is_active = 1 
+        ORDER BY column_order
+    """).fetchall()
+    dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    
+    # 첨부파일 조회 (실제 DB에서)
+    attachments = []
+    try:
+        attachments = conn.execute("""
+            SELECT * FROM safety_instruction_attachments 
+            WHERE issue_number = ? 
+            ORDER BY upload_date DESC
+        """, (issue_number,)).fetchall()
+    except sqlite3.OperationalError:
+        # 테이블이 없는 경우 빈 배열 사용
+        logging.info("safety_instruction_attachments 테이블이 없음 - 빈 배열 사용")
+        attachments = []
+    
+    conn.close()
+    
+    # custom_data 파싱
+    custom_data = {}
+    if isinstance(instruction, dict):
+        if instruction.get('custom_data'):
+            try:
+                custom_data = json.loads(instruction['custom_data'])
+            except:
+                custom_data = {}
+        # 딕셔너리를 DictAsAttr로 변환
+        class DictAsAttr:
+            def __init__(self, d):
+                for k, v in d.items():
+                    setattr(self, k, v)
+        instruction = DictAsAttr(instruction)
+    else:
+        # SQLite Row 객체인 경우
+        if hasattr(instruction, 'custom_data') and instruction.custom_data:
+            try:
+                custom_data = json.loads(instruction.custom_data)
+            except:
+                custom_data = {}
+    
+    logging.info(f"환경안전 지시서 {issue_number} ({instruction.disciplined_person}) 상세 페이지 로드")
+    
+    # 팝업 모드인지 확인
+    is_popup = request.args.get('popup') == '1'
+    
+    return render_template('safety-instruction-detail.html',
+                         instruction=instruction,
+                         attachments=[dict(att) for att in attachments],
+                         dynamic_columns=dynamic_columns,
+                         custom_data=custom_data,
+                         menu=MENU_CONFIG,
+                         is_popup=is_popup)
 
 @app.route("/data-recovery")
 def data_recovery():
@@ -435,13 +780,202 @@ def partner_standards():
 
 def partner_change_request():
     """기준정보 변경요청 페이지"""
-    # 더미 페이지네이션 객체 생성 (실제 데이터 로딩 시 교체 예정)
-    class DummyPagination:
-        def __init__(self):
-            self.pages = 1
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
     
-    pagination = DummyPagination()
-    return render_template('partner-change-request.html', menu=MENU_CONFIG, pagination=pagination, total_count=0)
+    # 검색 조건
+    filters = {
+        'requester_name': request.args.get('requester_name', '').strip(),
+        'company_name': request.args.get('company_name', '').strip()
+    }
+    
+    # 실제 데이터베이스에서 조회
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # 검색 조건 적용
+        where_conditions = []
+        params = []
+        
+        if filters['requester_name']:
+            where_conditions.append("requester_name LIKE ?")
+            params.append(f"%{filters['requester_name']}%")
+        
+        if filters['company_name']:
+            where_conditions.append("company_name LIKE ?")
+            params.append(f"%{filters['company_name']}%")
+        
+        where_clause = ""
+        if where_conditions:
+            where_clause = "WHERE " + " AND ".join(where_conditions)
+        
+        # 총 개수 조회
+        count_query = f"SELECT COUNT(*) as total FROM partner_change_requests {where_clause}"
+        cursor.execute(count_query, params)
+        total_count = cursor.fetchone()['total']
+        
+        # 페이지네이션 적용하여 데이터 조회
+        offset = (page - 1) * per_page
+        data_query = f"""
+            SELECT id, requester_name, requester_department, company_name, business_number,
+                   change_type, current_value, new_value, change_reason, 
+                   created_at, status, request_number
+            FROM partner_change_requests 
+            {where_clause}
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        """
+        cursor.execute(data_query, params + [per_page, offset])
+        rows = cursor.fetchall()
+        
+        # 데이터 변환
+        change_requests = []
+        for i, row in enumerate(rows):
+            # status 필드 안전하게 처리
+            try:
+                status = row['status'] if 'status' in row.keys() else 'pending'
+            except:
+                status = 'pending'
+                
+            change_request = type('obj', (object,), {
+                'id': row['id'],
+                'no': offset + i + 1,
+                'requester_name': row['requester_name'],
+                'requester_department': row['requester_department'],
+                'company_name': row['company_name'],
+                'business_number': row['business_number'],
+                'change_type': row['change_type'],
+                'current_value': row['current_value'],
+                'new_value': row['new_value'],
+                'change_reason': row['change_reason'],
+                'created_at': row['created_at'],
+                'status': status
+            })()
+            change_requests.append(change_request)
+            
+        conn.close()
+        
+    except Exception as e:
+        logging.error(f"변경요청 목록 조회 중 오류: {e}")
+        change_requests = []
+        total_count = 0
+    
+    # 페이지네이션 객체 생성
+    class DummyPagination:
+        def __init__(self, page, per_page, total):
+            self.page = page
+            self.per_page = per_page
+            self.total = total
+            self.pages = (total + per_page - 1) // per_page
+            
+        def iter_pages(self):
+            for i in range(max(1, self.page - 5), min(self.pages + 1, self.page + 6)):
+                yield i
+                
+        def get_window_info(self):
+            return type('obj', (object,), {
+                'has_prev_window': self.page > 10,
+                'has_next_window': self.page + 10 <= self.pages,
+                'prev_window_start': max(1, self.page - 10),
+                'next_window_start': min(self.pages, self.page + 10)
+            })()
+    
+    pagination = DummyPagination(page, per_page, total_count)
+    return render_template('partner-change-request.html', 
+                         menu=MENU_CONFIG, 
+                         pagination=pagination, 
+                         total_count=total_count,
+                         change_requests=change_requests)
+
+
+def change_request_detail(request_id):
+    """변경요청 상세정보 페이지"""
+    logging.info(f"변경요청 상세 정보 조회: {request_id}")
+    
+    # 실제 데이터베이스에서 조회 (일단 더미데이터)
+    request_data = type('obj', (object,), {
+        'id': request_id,
+        'change_reason': f'변경사유{request_id}'
+    })()
+    
+    # Phase 1: 동적 컬럼 설정 가져오기  
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    
+    # safety_instruction_column_config 테이블이 있으면 사용, 없으면 accident_column_config 사용
+    table_name = 'safety_instruction_column_config'
+    try:
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
+        if not cursor.fetchone():
+            table_name = 'accident_column_config'
+        
+        dynamic_columns_rows = conn.execute(f"""
+            SELECT * FROM {table_name} 
+            WHERE is_active = 1 
+            ORDER BY column_order
+        """).fetchall()
+        
+        conn.close()
+        
+    except Exception as e:
+        logging.error(f"동적 컬럼 로딩 중 오류: {e}")
+        dynamic_columns_rows = []
+        conn.close()
+    
+    # Phase 2: 동적 컬럼 처리
+    dynamic_columns = []
+    for row in dynamic_columns_rows:
+        col_dict = dict(row)
+        
+        # dropdown 옵션 처리
+        if col_dict['column_type'] == 'dropdown' and col_dict.get('dropdown_options'):
+            try:
+                import json
+                options_list = json.loads(col_dict['dropdown_options'])
+                col_dict['dropdown_options_mapped'] = [{'code': opt, 'value': opt} for opt in options_list]
+            except:
+                col_dict['dropdown_options_mapped'] = []
+        
+        dynamic_columns.append(type('Column', (), col_dict)())
+    
+    # 빈 custom_data (실제로는 DB에서 조회)
+    custom_data = {}
+    
+    logging.info(f"변경요청 동적 컬럼 {len(dynamic_columns)}개 로드됨")
+    
+    # popup 파라미터 확인
+    is_popup = request.args.get('popup', '0') == '1'
+    
+    return render_template('change-request-detail.html', 
+                         request_data=request_data,
+                         dynamic_columns=dynamic_columns,
+                         custom_data=custom_data,
+                         attachments=[],
+                         is_popup=is_popup,
+                         menu=MENU_CONFIG)
+
+
+@app.route('/update-change-request', methods=['POST'])
+def update_change_request():
+    """변경요청 수정 API"""
+    try:
+        request_id = request.form.get('request_id')
+        approval_comments = request.form.get('approval_comments', '')
+        custom_data = request.form.get('custom_data', '{}')
+        
+        logging.info(f"변경요청 {request_id} 수정 완료")
+        
+        return jsonify({
+            "success": True, 
+            "message": "수정이 완료되었습니다."
+        })
+        
+    except Exception as e:
+        logging.error(f"변경요청 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
 
 
 def partner_accident():
@@ -1314,6 +1848,203 @@ def register_accident():
         if conn:
             conn.close()
 
+@app.route("/register-safety-instruction", methods=["POST"])
+def register_safety_instruction():
+    """새 환경안전 지시서 등록"""
+    conn = None
+    try:
+        import json
+        import datetime
+        
+        # 환경안전 지시서 31개 필드 받기
+        issue_number = request.form.get('issue_number', '')  # 발부번호 (자동생성)
+        issuer = request.form.get('issuer', '')  # 발행인
+        issuer_department = request.form.get('issuer_department', '')  # 발행부서
+        classification = request.form.get('classification', '')  # 분류
+        employment_type = request.form.get('employment_type', '')  # 고용형태
+        primary_company = request.form.get('primary_company', '')  # 1차사명
+        primary_business_number = request.form.get('primary_business_number', '')  # 1차사_사업자번호
+        subcontractor = request.form.get('subcontractor', '')  # 하도사명
+        subcontractor_business_number = request.form.get('subcontractor_business_number', '')  # 하도사_사업자번호
+        disciplined_person = request.form.get('disciplined_person', '')  # 징계자
+        gbm = request.form.get('gbm', '')  # GBM
+        business_division = request.form.get('business_division', '')  # 사업부
+        team = request.form.get('team', '')  # 팀
+        department = request.form.get('department', '')  # 소속부서
+        violation_date = request.form.get('violation_date', '')  # 위반일자
+        discipline_date = request.form.get('discipline_date', '')  # 징계일자
+        discipline_department = request.form.get('discipline_department', '')  # 징계발의부서
+        discipline_type = request.form.get('discipline_type', '')  # 징계유형
+        accident_type = request.form.get('accident_type', '')  # 사고유형
+        accident_grade = request.form.get('accident_grade', '')  # 사고등급
+        safety_violation_grade = request.form.get('safety_violation_grade', '')  # 환경안전수칙 위반등급
+        violation_type = request.form.get('violation_type', '')  # 위반유형
+        violation_content = request.form.get('violation_content', '')  # 위반내용
+        access_ban_start_date = request.form.get('access_ban_start_date', '')  # 출입정지 시작일
+        access_ban_end_date = request.form.get('access_ban_end_date', '')  # 출입정지 종료일
+        period = request.form.get('period', '')  # 기간
+        work_grade = request.form.get('work_grade', '')  # 작업등급
+        penalty_points = request.form.get('penalty_points', '')  # 감점
+        disciplined_person_id = request.form.get('disciplined_person_id', '')  # 징계자ID
+        
+        # 동적 컬럼 및 첨부파일
+        custom_data = json.loads(request.form.get('custom_data', '{}'))
+        attachment_data = json.loads(request.form.get('attachment_data', '[]'))
+        files = request.files.getlist('files')
+        
+        logging.info(f"환경안전 지시서 등록 요청 받음 - 징계자: {disciplined_person}")
+        logging.info(f"위반일자: {violation_date}, 징계일자: {discipline_date}")
+        logging.info(f"동적 컬럼 데이터: {custom_data}")
+        logging.info(f"첨부파일 개수: {len(files)}")
+        
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.execute("PRAGMA journal_mode=WAL")
+        cursor = conn.cursor()
+        
+        # 발부번호 자동 생성 (YYYY-MM-00 형식)
+        if violation_date:
+            # 위반일자를 기준으로 년월 추출
+            try:
+                date_obj = datetime.datetime.strptime(violation_date, '%Y-%m-%d')
+                year_month = f"{date_obj.year}-{date_obj.month:02d}"
+            except ValueError:
+                # 파싱 실패시 현재 날짜 사용
+                today = datetime.date.today()
+                year_month = f"{today.year}-{today.month:02d}"
+        else:
+            # 위반일자가 없으면 현재 날짜 사용
+            today = datetime.date.today()
+            year_month = f"{today.year}-{today.month:02d}"
+        
+        # 환경안전 지시서 테이블이 없으면 생성
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS safety_instructions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                issue_number TEXT UNIQUE NOT NULL,
+                issuer TEXT,
+                issuer_department TEXT,
+                classification TEXT,
+                employment_type TEXT,
+                primary_company TEXT,
+                primary_business_number TEXT,
+                subcontractor TEXT,
+                subcontractor_business_number TEXT,
+                disciplined_person TEXT,
+                gbm TEXT,
+                business_division TEXT,
+                team TEXT,
+                department TEXT,
+                violation_date TEXT,
+                discipline_date TEXT,
+                discipline_department TEXT,
+                discipline_type TEXT,
+                accident_type TEXT,
+                accident_grade TEXT,
+                safety_violation_grade TEXT,
+                violation_type TEXT,
+                violation_content TEXT,
+                access_ban_start_date TEXT,
+                access_ban_end_date TEXT,
+                period TEXT,
+                work_grade TEXT,
+                penalty_points INTEGER,
+                disciplined_person_id TEXT,
+                custom_data TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_deleted INTEGER DEFAULT 0
+            )
+        """)
+        
+        # 해당 년월의 마지막 발부번호 찾기
+        cursor.execute("""
+            SELECT issue_number FROM safety_instructions 
+            WHERE issue_number LIKE ? 
+            ORDER BY issue_number DESC 
+            LIMIT 1
+        """, (f"{year_month}-%",))
+        
+        last_instruction = cursor.fetchone()
+        if last_instruction:
+            # 마지막 번호에서 1 증가 (뒤 2자리)
+            last_num = int(last_instruction[0].split('-')[2])
+            generated_issue_number = f"{year_month}-{str(last_num + 1).zfill(2)}"
+        else:
+            generated_issue_number = f"{year_month}-01"
+        
+        logging.info(f"새 환경안전 지시서 발부번호 생성: {generated_issue_number}")
+        
+        # 환경안전 지시서 정보 등록
+        cursor.execute("""
+            INSERT INTO safety_instructions (
+                issue_number, issuer, issuer_department, classification, employment_type,
+                primary_company, primary_business_number, subcontractor, subcontractor_business_number,
+                disciplined_person, gbm, business_division, team, department,
+                violation_date, discipline_date, discipline_department, discipline_type,
+                accident_type, accident_grade, safety_violation_grade, violation_type,
+                violation_content, access_ban_start_date, access_ban_end_date, period,
+                work_grade, penalty_points, disciplined_person_id, custom_data
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            generated_issue_number, issuer, issuer_department, classification, employment_type,
+            primary_company, primary_business_number, subcontractor, subcontractor_business_number,
+            disciplined_person, gbm, business_division, team, department,
+            violation_date, discipline_date, discipline_department, discipline_type,
+            accident_type, accident_grade, safety_violation_grade, violation_type,
+            violation_content, access_ban_start_date, access_ban_end_date, period,
+            work_grade, int(penalty_points) if penalty_points else None, disciplined_person_id,
+            json.dumps(custom_data)
+        ))
+        
+        # 첨부파일 처리
+        if files:
+            # 첨부파일 테이블 생성
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS safety_instruction_attachments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    issue_number TEXT NOT NULL,
+                    file_name TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    file_size INTEGER,
+                    description TEXT,
+                    upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (issue_number) REFERENCES safety_instructions (issue_number)
+                )
+            """)
+            
+            upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'safety_instructions')
+            os.makedirs(upload_folder, exist_ok=True)
+            
+            for i, file in enumerate(files):
+                if file and file.filename:
+                    filename = secure_filename(file.filename)
+                    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+                    unique_filename = f"{generated_issue_number}_{timestamp}_{filename}".replace('-', '_')
+                    file_path = os.path.join(upload_folder, unique_filename)
+                    
+                    file.save(file_path)
+                    
+                    # 첨부파일 정보 저장
+                    description = attachment_data[i]['description'] if i < len(attachment_data) else ''
+                    cursor.execute("""
+                        INSERT INTO safety_instruction_attachments (issue_number, file_name, file_path, file_size, description)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (generated_issue_number, filename, file_path, os.path.getsize(file_path), description))
+        
+        conn.commit()
+        logging.info(f"환경안전 지시서 {generated_issue_number} 등록 완료")
+        
+        return jsonify({"success": True, "issue_number": generated_issue_number})
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logging.error(f"환경안전 지시서 등록 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)})
+    finally:
+        if conn:
+            conn.close()
+
 @app.route("/verify-password", methods=["POST"])
 def verify_password():
     """게시판별 비밀번호 검증"""
@@ -1820,6 +2551,498 @@ def admin_accident_columns_enhanced():
 def admin_accident_columns_simplified():
     """사고 컬럼 관리 페이지 Simplified - 간소화 버전"""
     return render_template('admin-accident-columns-simplified.html', menu=MENU_CONFIG)
+
+@app.route("/admin/person-master")
+@require_admin_auth
+def admin_person_master():
+    """담당자 마스터 관리 페이지"""
+    return render_template('admin-person-master.html', menu=MENU_CONFIG)
+
+@app.route("/admin/safety-instruction-columns")
+@require_admin_auth  
+def admin_safety_instruction_columns():
+    """환경안전 지시서 컬럼 관리 페이지"""
+    return render_template('admin-safety-instruction-columns.html', menu=MENU_CONFIG)
+
+@app.route("/admin/change-request-columns")
+@require_admin_auth
+def admin_change_request_columns():
+    """기준정보 변경요청 컬럼 관리 페이지"""
+    return render_template('admin-change-request-columns.html', menu=MENU_CONFIG)
+
+@app.route("/admin/change-request-columns-simplified")
+@require_admin_auth
+def admin_change_request_columns_simplified():
+    """기준정보 변경요청 컬럼 관리 페이지 Simplified - 간소화 버전"""
+    return render_template('admin-change-request-columns-simplified.html', menu=MENU_CONFIG)
+
+# ===== 기준정보 변경요청 컬럼 관리 API =====
+
+@app.route("/api/change-request-columns", methods=["GET"])
+def get_change_request_columns():
+    """기준정보 변경요청 페이지 동적 컬럼 설정 조회"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        
+        # 테이블이 없으면 생성
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS change_request_column_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                column_key TEXT UNIQUE NOT NULL,
+                column_name TEXT NOT NULL,
+                column_type TEXT DEFAULT 'text',
+                column_order INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                dropdown_options TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        
+        columns = conn.execute("""
+            SELECT * FROM change_request_column_config 
+            ORDER BY column_order
+        """).fetchall()
+        conn.close()
+        
+        return jsonify([dict(col) for col in columns])
+    except Exception as e:
+        logging.error(f"변경요청 컬럼 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/change-request-columns", methods=["POST"])
+def add_change_request_column():
+    """기준정보 변경요청 페이지 동적 컬럼 추가"""
+    try:
+        data = request.json
+        
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cursor = conn.cursor()
+        
+        # 테이블이 없으면 생성
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS change_request_column_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                column_key TEXT UNIQUE NOT NULL,
+                column_name TEXT NOT NULL,
+                column_type TEXT DEFAULT 'text',
+                column_order INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                dropdown_options TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # 컬럼 키 사용 (사용자가 직접 입력하거나 자동 생성)
+        column_key = data.get('column_key')
+        if not column_key:
+            # 새 컬럼 키 자동 생성
+            cursor.execute("SELECT MAX(CAST(SUBSTR(column_key, 7) AS INTEGER)) FROM change_request_column_config WHERE column_key LIKE 'column%'")
+            result = cursor.fetchone()
+            max_num = result[0] if result and result[0] else 0
+            column_key = f"column{max_num + 1}"
+        
+        # 최대 순서 번호 조회
+        cursor.execute("SELECT MAX(column_order) FROM change_request_column_config")
+        max_order_result = cursor.fetchone()
+        max_order = max_order_result[0] if max_order_result and max_order_result[0] else 0
+        
+        import json
+        dropdown_options = None
+        if data.get('column_type') == 'dropdown' and 'dropdown_options' in data:
+            dropdown_options = json.dumps(data['dropdown_options'], ensure_ascii=False)
+        
+        cursor.execute("""
+            INSERT INTO change_request_column_config 
+            (column_key, column_name, column_type, column_order, is_active, dropdown_options)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            column_key,
+            data['column_name'],
+            data.get('column_type', 'text'),
+            max_order + 1,
+            data.get('is_active', 1),
+            dropdown_options
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            "success": True, 
+            "message": "컬럼이 추가되었습니다.",
+            "column_key": column_key
+        })
+    except Exception as e:
+        logging.error(f"변경요청 컬럼 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/change-request-columns/<int:column_id>", methods=["PUT"])
+def update_change_request_column(column_id):
+    """기준정보 변경요청 페이지 동적 컬럼 수정"""
+    try:
+        data = request.json
+        
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cursor = conn.cursor()
+        
+        # 현재 컬럼 정보 조회
+        cursor.execute("SELECT column_key, column_type FROM change_request_column_config WHERE id = ?", (column_id,))
+        column_info = cursor.fetchone()
+        if not column_info:
+            return jsonify({"success": False, "message": "컬럼을 찾을 수 없습니다."}), 404
+        
+        current_column_key, current_column_type = column_info
+        
+        # 업데이트할 필드 준비
+        update_fields = []
+        params = []
+        
+        if 'column_name' in data:
+            update_fields.append("column_name = ?")
+            params.append(data['column_name'])
+        
+        if 'column_type' in data:
+            update_fields.append("column_type = ?")
+            params.append(data['column_type'])
+        
+        if 'is_active' in data:
+            update_fields.append("is_active = ?")
+            params.append(1 if data['is_active'] else 0)
+        
+        if 'dropdown_options' in data:
+            import json
+            dropdown_options = json.dumps(data['dropdown_options'], ensure_ascii=False) if data['dropdown_options'] else None
+            update_fields.append("dropdown_options = ?")
+            params.append(dropdown_options)
+        
+        if update_fields:
+            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(column_id)
+            
+            query = f"UPDATE change_request_column_config SET {', '.join(update_fields)} WHERE id = ?"
+            cursor.execute(query, params)
+            conn.commit()
+        
+        conn.close()
+        
+        return jsonify({"success": True, "message": "컬럼이 수정되었습니다."})
+    except Exception as e:
+        logging.error(f"변경요청 컬럼 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/change-request-columns/<int:column_id>", methods=["DELETE"])
+def delete_change_request_column(column_id):
+    """기준정보 변경요청 페이지 동적 컬럼 삭제 (실제로는 비활성화)"""
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cursor = conn.cursor()
+        
+        # 컬럼을 실제로 삭제하지 않고 비활성화
+        cursor.execute("""
+            UPDATE change_request_column_config 
+            SET is_active = 0, updated_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+        """, (column_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True, "message": "컬럼이 삭제되었습니다."})
+    except Exception as e:
+        logging.error(f"변경요청 컬럼 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/change-request-columns/order", methods=["PUT"])
+def update_change_request_columns_order():
+    """기준정보 변경요청 페이지 동적 컬럼 순서 변경"""
+    try:
+        data = request.json  # [{id: 1, column_order: 0}, {id: 2, column_order: 1}, ...]
+        
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cursor = conn.cursor()
+        
+        for item in data:
+            cursor.execute("""
+                UPDATE change_request_column_config 
+                SET column_order = ?, updated_at = CURRENT_TIMESTAMP 
+                WHERE id = ?
+            """, (item['column_order'], item['id']))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True, "message": "순서가 변경되었습니다."})
+    except Exception as e:
+        logging.error(f"변경요청 컬럼 순서 변경 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+# ===== 기준정보 변경요청 드롭다운 코드 관리 API =====
+
+@app.route("/api/change-request-dropdown-codes/<column_key>", methods=["GET"])
+def get_change_request_dropdown_codes(column_key):
+    """특정 컬럼의 드롭다운 코드 조회"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        
+        # 테이블이 없으면 생성
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS change_request_dropdown_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                column_key TEXT NOT NULL,
+                code TEXT NOT NULL,
+                value TEXT NOT NULL,
+                display_order INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(column_key, code)
+            )
+        """)
+        conn.commit()
+        
+        # 해당 컬럼의 코드 조회
+        codes = conn.execute("""
+            SELECT * FROM change_request_dropdown_codes 
+            WHERE column_key = ? AND is_active = 1
+            ORDER BY display_order, id
+        """, (column_key,)).fetchall()
+        
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "codes": [dict(code) for code in codes],
+            "column_key": column_key
+        })
+    except Exception as e:
+        logging.error(f"변경요청 드롭다운 코드 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/change-request-dropdown-codes", methods=["POST"])
+def save_change_request_dropdown_codes():
+    """드롭다운 코드 일괄 저장"""
+    try:
+        data = request.json
+        column_key = data.get('column_key')
+        codes = data.get('codes', [])
+        
+        if not column_key:
+            return jsonify({"success": False, "message": "컬럼 키가 필요합니다."}), 400
+        
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cursor = conn.cursor()
+        
+        # 테이블이 없으면 생성
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS change_request_dropdown_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                column_key TEXT NOT NULL,
+                code TEXT NOT NULL,
+                value TEXT NOT NULL,
+                display_order INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(column_key, code)
+            )
+        """)
+        
+        # 기존 코드 비활성화
+        cursor.execute("""
+            UPDATE change_request_dropdown_codes 
+            SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+            WHERE column_key = ?
+        """, (column_key,))
+        
+        # 새 코드 삽입 또는 업데이트
+        for idx, code_data in enumerate(codes):
+            cursor.execute("""
+                INSERT INTO change_request_dropdown_codes 
+                (column_key, code, value, display_order, is_active)
+                VALUES (?, ?, ?, ?, 1)
+                ON CONFLICT(column_key, code) DO UPDATE SET
+                    value = excluded.value,
+                    display_order = excluded.display_order,
+                    is_active = 1,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (column_key, code_data['code'], code_data['value'], idx))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True, "message": "코드가 저장되었습니다."})
+    except Exception as e:
+        logging.error(f"변경요청 드롭다운 코드 저장 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/change-request-dropdown-codes/<int:code_id>", methods=["DELETE"])
+def delete_change_request_dropdown_code(code_id):
+    """드롭다운 코드 삭제"""
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE change_request_dropdown_codes 
+            SET is_active = 0, updated_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+        """, (code_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True, "message": "코드가 삭제되었습니다."})
+    except Exception as e:
+        logging.error(f"변경요청 드롭다운 코드 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/change-request/save", methods=["POST"])
+def save_change_request():
+    """변경요청 저장"""
+    try:
+        data = request.json
+        request_number = data.get('request_number')
+        
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cursor = conn.cursor()
+        
+        # 테이블이 없으면 생성
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS change_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_number TEXT UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # 동적 컬럼들을 위한 ALTER TABLE
+        for key, value in data.items():
+            if key != 'request_number':
+                try:
+                    cursor.execute(f"ALTER TABLE change_requests ADD COLUMN {key} TEXT")
+                except:
+                    pass  # 컬럼이 이미 존재하면 무시
+        
+        # 데이터 삽입
+        columns = list(data.keys())
+        values = list(data.values())
+        placeholders = ', '.join(['?' for _ in values])
+        column_names = ', '.join(columns)
+        
+        cursor.execute(f"""
+            INSERT INTO change_requests ({column_names})
+            VALUES ({placeholders})
+        """, values)
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True, "message": "변경요청이 저장되었습니다."})
+    except Exception as e:
+        logging.error(f"변경요청 저장 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/change-request-register")
+def change_request_register():
+    """변경요청 등록 팝업 페이지"""
+    import datetime
+    
+    # 요청번호 자동 생성 (CMRyymmdd00)
+    today = datetime.date.today()
+    base_number = f"CMR{today.strftime('%y%m%d')}"
+    
+    try:
+        # 오늘 날짜의 마지막 번호 찾기
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # 테이블이 없으면 생성
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS partner_change_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_number TEXT UNIQUE,
+                requester_name TEXT NOT NULL,
+                requester_department TEXT NOT NULL,
+                company_name TEXT NOT NULL,
+                business_number TEXT NOT NULL,
+                change_type TEXT NOT NULL,
+                current_value TEXT NOT NULL,
+                new_value TEXT NOT NULL,
+                change_reason TEXT NOT NULL,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        cursor.execute("""
+            SELECT MAX(CAST(SUBSTR(request_number, 10, 2) AS INTEGER))
+            FROM partner_change_requests
+            WHERE request_number LIKE ?
+        """, (f"{base_number}%",))
+        
+        last_number = cursor.fetchone()[0]
+        if last_number is None:
+            last_number = 0
+        
+        request_number = f"{base_number}{str(last_number + 1).zfill(2)}"
+        conn.commit()
+        
+        # 동적 컬럼 설정 가져오기
+        conn.row_factory = sqlite3.Row
+        dynamic_columns_rows = conn.execute("""
+            SELECT * FROM change_request_column_config 
+            WHERE is_active = 1 
+            ORDER BY column_order
+        """).fetchall()
+        
+        # Row 객체를 딕셔너리로 변환
+        dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+        
+        conn.close()
+    except Exception as e:
+        logging.error(f"요청번호 생성 중 오류: {e}")
+        request_number = f"{base_number}01"  # 오류 시 기본값
+        dynamic_columns = []
+    
+    # 드롭다운 컬럼에 대해 코드-값 매핑 적용
+    for col in dynamic_columns:
+        if col['column_type'] == 'dropdown':
+            # 코드-값 매핑 방식으로 옵션 가져오기
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            codes = conn.execute("""
+                SELECT code, value FROM change_request_dropdown_codes 
+                WHERE column_key = ? AND is_active = 1
+                ORDER BY display_order, id
+            """, (col['column_key'],)).fetchall()
+            conn.close()
+            
+            if codes:
+                col['dropdown_options_mapped'] = [{"code": c["code"], "value": c["value"]} for c in codes]
+                logging.info(f"  - {col['column_name']} ({col['column_key']}): {len(codes)}개 옵션")
+            else:
+                col['dropdown_options_mapped'] = None
+    
+    logging.info(f"변경요청 동적 컬럼 {len(dynamic_columns)}개 로드됨")
+    
+    # 팝업 모드 확인
+    is_popup = request.args.get('popup', '0') == '1'
+    
+    return render_template('change-request-register.html', 
+                         menu=MENU_CONFIG, 
+                         request_number=request_number,
+                         today=today,
+                         is_popup=is_popup,
+                         dynamic_columns=dynamic_columns)
 
 @app.route("/admin/menu-settings")
 @require_admin_auth
@@ -2601,7 +3824,8 @@ def save_dropdown_codes():
         ip_address = request.remote_addr
         user_agent = request.headers.get('User-Agent', '')
         
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.execute("PRAGMA journal_mode=WAL")
         cursor = conn.cursor()
         
         # 트랜잭션 시작
@@ -2839,6 +4063,202 @@ def update_accident_columns_order():
         return jsonify({"success": True, "message": "순서가 변경되었습니다."})
     except Exception as e:
         logging.error(f"컬럼 순서 변경 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+# ==================== 환경안전 지시서 컬럼 관리 API ====================
+
+@app.route("/api/safety-instruction-columns", methods=["GET"])
+def get_safety_instruction_columns():
+    """환경안전 지시서 페이지 동적 컬럼 설정 조회"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        
+        # safety_instruction_column_config 테이블이 없으면 accident_column_config 사용
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='safety_instruction_column_config'")
+        table_exists = cursor.fetchone()
+        
+        if table_exists:
+            columns = conn.execute("""
+                SELECT * FROM safety_instruction_column_config 
+                ORDER BY column_order
+            """).fetchall()
+        else:
+            # 테이블이 없으면 accident_column_config 사용 (호환성)
+            columns = conn.execute("""
+                SELECT * FROM accident_column_config 
+                ORDER BY column_order
+            """).fetchall()
+        
+        conn.close()
+        
+        return jsonify([dict(col) for col in columns])
+    except Exception as e:
+        logging.error(f"지시서 컬럼 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/safety-instruction-columns", methods=["POST"])
+def add_safety_instruction_column():
+    """환경안전 지시서 페이지 동적 컬럼 추가"""
+    try:
+        data = request.json
+        
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cursor = conn.cursor()
+        
+        # safety_instruction_column_config 테이블이 없으면 accident_column_config 사용
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='safety_instruction_column_config'")
+        table_exists = cursor.fetchone()
+        
+        table_name = 'safety_instruction_column_config' if table_exists else 'accident_column_config'
+        
+        # 컬럼 키 사용
+        column_key = data.get('column_key')
+        if not column_key:
+            cursor.execute(f"SELECT MAX(CAST(SUBSTR(column_key, 7) AS INTEGER)) FROM {table_name} WHERE column_key LIKE 'column%'")
+            max_num = cursor.fetchone()[0] or 10
+            column_key = f"column{max_num + 1}"
+        
+        # 최대 순서 번호 조회
+        cursor.execute(f"SELECT MAX(column_order) FROM {table_name}")
+        max_order = cursor.fetchone()[0] or 0
+        
+        # 새 컬럼 추가
+        cursor.execute(f"""
+            INSERT INTO {table_name} (
+                column_key, column_name, column_type, 
+                dropdown_options, is_active, column_order,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """, (
+            column_key,
+            data['column_name'],
+            data['column_type'],
+            json.dumps(data.get('dropdown_options', [])) if data['column_type'] == 'dropdown' else None,
+            1,  # 기본 활성화
+            max_order + 1
+        ))
+        
+        conn.commit()
+        column_id = cursor.lastrowid
+        conn.close()
+        
+        return jsonify({"success": True, "id": column_id, "column_key": column_key})
+    except Exception as e:
+        logging.error(f"지시서 컬럼 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/safety-instruction-columns/<int:column_id>", methods=["PUT"])
+def update_safety_instruction_column(column_id):
+    """환경안전 지시서 페이지 동적 컬럼 수정"""
+    try:
+        data = request.json
+        
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cursor = conn.cursor()
+        
+        # safety_instruction_column_config 테이블이 없으면 accident_column_config 사용
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='safety_instruction_column_config'")
+        table_exists = cursor.fetchone()
+        
+        table_name = 'safety_instruction_column_config' if table_exists else 'accident_column_config'
+        
+        # 업데이트 필드 준비
+        update_fields = []
+        params = []
+        
+        if 'column_name' in data:
+            update_fields.append("column_name = ?")
+            params.append(data['column_name'])
+        
+        if 'column_type' in data:
+            update_fields.append("column_type = ?")
+            params.append(data['column_type'])
+        
+        if 'dropdown_options' in data:
+            update_fields.append("dropdown_options = ?")
+            params.append(json.dumps(data['dropdown_options']))
+        
+        if 'is_active' in data:
+            update_fields.append("is_active = ?")
+            params.append(1 if data['is_active'] else 0)
+        
+        if 'column_order' in data:
+            update_fields.append("column_order = ?")
+            params.append(data['column_order'])
+        
+        if update_fields:
+            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(column_id)
+            
+            query = f"UPDATE {table_name} SET {', '.join(update_fields)} WHERE id = ?"
+            cursor.execute(query, params)
+            conn.commit()
+        
+        conn.close()
+        
+        return jsonify({"success": True})
+    except Exception as e:
+        logging.error(f"지시서 컬럼 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/safety-instruction-columns/<int:column_id>", methods=["DELETE"])
+def delete_safety_instruction_column(column_id):
+    """환경안전 지시서 페이지 동적 컬럼 삭제 (비활성화)"""
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cursor = conn.cursor()
+        
+        # safety_instruction_column_config 테이블이 없으면 accident_column_config 사용
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='safety_instruction_column_config'")
+        table_exists = cursor.fetchone()
+        
+        table_name = 'safety_instruction_column_config' if table_exists else 'accident_column_config'
+        
+        # 비활성화
+        cursor.execute(f"""
+            UPDATE {table_name} 
+            SET is_active = 0, updated_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+        """, (column_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True})
+    except Exception as e:
+        logging.error(f"지시서 컬럼 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/safety-instruction-columns/order", methods=["PUT"])
+def update_safety_instruction_columns_order():
+    """환경안전 지시서 페이지 동적 컬럼 순서 변경"""
+    try:
+        data = request.json
+        
+        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        cursor = conn.cursor()
+        
+        # safety_instruction_column_config 테이블이 없으면 accident_column_config 사용
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='safety_instruction_column_config'")
+        table_exists = cursor.fetchone()
+        
+        table_name = 'safety_instruction_column_config' if table_exists else 'accident_column_config'
+        
+        for item in data:
+            cursor.execute(f"""
+                UPDATE {table_name}
+                SET column_order = ?, updated_at = CURRENT_TIMESTAMP 
+                WHERE id = ?
+            """, (item['column_order'], item['id']))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True, "message": "순서가 변경되었습니다."})
+    except Exception as e:
+        logging.error(f"지시서 컬럼 순서 변경 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route("/api/person-master", methods=["GET"])
@@ -3166,9 +4586,10 @@ def export_accidents_excel():
         dynamic_columns = [dict(row) for row in dynamic_columns_rows]
         
         # 사고 데이터 조회 (partner_accident 함수와 동일한 로직)
+        # 삭제되지 않은 데이터만 조회
         query = """
             SELECT * FROM accidents_cache 
-            WHERE 1=1
+            WHERE (is_deleted = 0 OR is_deleted IS NULL)
         """
         params = []
         
@@ -3915,6 +5336,516 @@ def create_partner_change_request():
     except Exception as e:
         logging.error(f"변경요청 등록 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route('/api/partner-change-requests', methods=['GET'])
+def get_partner_change_requests():
+    """기준정보 변경요청 목록 조회 API"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, requester_name, requester_department, company_name, business_number,
+                   change_type, current_value, new_value, change_reason, status, created_at
+            FROM partner_change_requests
+            ORDER BY created_at DESC
+        """)
+        
+        requests = []
+        for row in cursor.fetchall():
+            requests.append({
+                'id': row[0],
+                'requester_name': row[1],
+                'requester_department': row[2],
+                'company_name': row[3],
+                'business_number': row[4],
+                'change_type': row[5],
+                'current_value': row[6],
+                'new_value': row[7],
+                'change_reason': row[8],
+                'status': row[9],
+                'created_at': row[10]
+            })
+        
+        conn.close()
+        return jsonify({'success': True, 'requests': requests})
+        
+    except Exception as e:
+        logging.error(f"변경요청 목록 조회 중 오류: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+# 변경요청 컬럼 관리 API
+@app.route('/api/change-request-columns', methods=['GET'])
+def api_get_change_request_columns():
+    """변경요청 컬럼 설정 목록 조회"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # 테이블이 없으면 생성
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS change_request_column_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                column_key VARCHAR(50) UNIQUE NOT NULL,
+                column_name VARCHAR(100) NOT NULL,
+                column_type VARCHAR(20) DEFAULT 'text',
+                column_order INTEGER DEFAULT 0,
+                is_active BOOLEAN DEFAULT 1,
+                dropdown_options TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # 기본 컬럼들이 없으면 초기 데이터 삽입
+        cursor.execute("SELECT COUNT(*) FROM change_request_column_config")
+        if cursor.fetchone()[0] == 0:
+            default_columns = [
+                ('id', '요청번호', 'text', 1, 1, None),
+                ('created_at', '요청일', 'date', 2, 1, None),  # 요청번호 바로 옆으로 이동
+                ('requester_name', '요청자', 'text', 3, 1, None),
+                ('requester_department', '소속부서', 'text', 4, 1, None),
+                ('company_name', '대상협력사', 'text', 5, 1, None),
+                ('business_number', '사업자번호', 'text', 6, 1, None),
+                ('change_type', '변경유형', 'dropdown', 7, 1, '기본정보,업종정보,대표자정보,연락처정보,근로자정보,재무정보,인증정보,기타'),
+                ('current_value', '기존값', 'textarea', 8, 1, None),
+                ('new_value', '변경값', 'textarea', 9, 1, None),
+                ('change_reason', '변경사유', 'textarea', 10, 1, None),
+                ('status', '상태', 'dropdown', 11, 1, '대기,승인,반려,완료')
+            ]
+            
+            for col_key, col_name, col_type, col_order, is_active, dropdown_opts in default_columns:
+                cursor.execute("""
+                    INSERT INTO change_request_column_config 
+                    (column_key, column_name, column_type, column_order, is_active, dropdown_options)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (col_key, col_name, col_type, col_order, is_active, dropdown_opts))
+        
+        # 요청일 컬럼 순서 조정 (요청번호 바로 옆으로)
+        cursor.execute("""
+            UPDATE change_request_column_config 
+            SET column_order = 2 
+            WHERE column_key = 'created_at'
+        """)
+        
+        # 다른 컬럼들 순서 재정렬
+        cursor.execute("""
+            UPDATE change_request_column_config 
+            SET column_order = CASE column_key
+                WHEN 'id' THEN 1
+                WHEN 'created_at' THEN 2
+                WHEN 'requester_name' THEN 3
+                WHEN 'requester_department' THEN 4
+                WHEN 'company_name' THEN 5
+                WHEN 'business_number' THEN 6
+                WHEN 'change_type' THEN 7
+                WHEN 'current_value' THEN 8
+                WHEN 'new_value' THEN 9
+                WHEN 'change_reason' THEN 10
+                WHEN 'status' THEN 11
+                ELSE column_order
+            END
+            WHERE column_key IN ('id', 'created_at', 'requester_name', 'requester_department', 
+                                'company_name', 'business_number', 'change_type', 'current_value', 
+                                'new_value', 'change_reason', 'status')
+        """)
+        
+        # 컬럼 설정 조회
+        cursor.execute("""
+            SELECT id, column_key, column_name, column_type, column_order, is_active, dropdown_options
+            FROM change_request_column_config
+            ORDER BY column_order, id
+        """)
+        
+        columns = []
+        for row in cursor.fetchall():
+            columns.append({
+                'id': row[0],
+                'column_key': row[1],
+                'column_name': row[2],
+                'column_type': row[3],
+                'column_order': row[4],
+                'is_active': bool(row[5]),
+                'dropdown_options': row[6]
+            })
+        
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'columns': columns})
+        
+    except Exception as e:
+        logging.error(f"변경요청 컬럼 조회 오류: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/change-request-columns/<int:column_id>', methods=['GET'])
+def api_get_change_request_column_detail(column_id):
+    """변경요청 컬럼 상세 정보 조회"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, column_key, column_name, column_type, column_order, is_active, dropdown_options
+            FROM change_request_column_config
+            WHERE id = ?
+        """, (column_id,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            column = {
+                'id': row[0],
+                'column_key': row[1],
+                'column_name': row[2],
+                'column_type': row[3],
+                'column_order': row[4],
+                'is_active': bool(row[5]),
+                'dropdown_options': row[6]
+            }
+            return jsonify({'success': True, 'column': column})
+        else:
+            return jsonify({'success': False, 'message': '컬럼을 찾을 수 없습니다.'}), 404
+            
+    except Exception as e:
+        logging.error(f"변경요청 컬럼 상세 조회 오류: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/change-request-columns', methods=['POST'])
+@require_admin_auth
+def api_create_change_request_column():
+    """변경요청 컬럼 추가"""
+    try:
+        data = request.get_json()
+        
+        if not data.get('column_key') or not data.get('column_name'):
+            return jsonify({'success': False, 'message': '컬럼 키와 컬럼명은 필수 입력 항목입니다.'}), 400
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # 중복 체크
+        cursor.execute("SELECT id FROM change_request_column_config WHERE column_key = ?", (data['column_key'],))
+        if cursor.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'message': '이미 존재하는 컬럼 키입니다.'}), 400
+        
+        cursor.execute("""
+            INSERT INTO change_request_column_config 
+            (column_key, column_name, column_type, column_order, dropdown_options)
+            VALUES (?, ?, ?, ?, ?)
+        """, (
+            data.get('column_key'),
+            data.get('column_name'),
+            data.get('column_type', 'text'),
+            data.get('column_order', 0),
+            data.get('dropdown_options', '')
+        ))
+        
+        column_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'column_id': column_id, 'message': '컬럼이 추가되었습니다.'})
+        
+    except sqlite3.IntegrityError as e:
+        return jsonify({'success': False, 'message': '컬럼 키가 중복됩니다.'}), 400
+    except Exception as e:
+        logging.error(f"변경요청 컬럼 추가 오류: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/change-request-columns/<int:column_id>', methods=['PUT'])
+@require_admin_auth
+def api_update_change_request_column(column_id):
+    """변경요청 컬럼 수정"""
+    try:
+        data = request.get_json()
+        
+        if not data.get('column_key') or not data.get('column_name'):
+            return jsonify({'success': False, 'message': '컬럼 키와 컬럼명은 필수 입력 항목입니다.'}), 400
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # 다른 컬럼에서 같은 키 사용하는지 체크
+        cursor.execute("SELECT id FROM change_request_column_config WHERE column_key = ? AND id != ?", (data['column_key'], column_id))
+        if cursor.fetchone():
+            conn.close()
+            return jsonify({'success': False, 'message': '이미 존재하는 컬럼 키입니다.'}), 400
+        
+        cursor.execute("""
+            UPDATE change_request_column_config 
+            SET column_key = ?, column_name = ?, column_type = ?, column_order = ?, 
+                dropdown_options = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (
+            data.get('column_key'),
+            data.get('column_name'),
+            data.get('column_type', 'text'),
+            data.get('column_order', 0),
+            data.get('dropdown_options', ''),
+            column_id
+        ))
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            return jsonify({'success': False, 'message': '컬럼을 찾을 수 없습니다.'}), 404
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': '컬럼이 수정되었습니다.'})
+        
+    except sqlite3.IntegrityError as e:
+        return jsonify({'success': False, 'message': '컬럼 키가 중복됩니다.'}), 400
+    except Exception as e:
+        logging.error(f"변경요청 컬럼 수정 오류: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/change-request-columns/<int:column_id>/toggle', methods=['POST'])
+@require_admin_auth
+def api_toggle_change_request_column(column_id):
+    """변경요청 컬럼 활성화/비활성화 토글"""
+    try:
+        data = request.get_json()
+        is_active = bool(data.get('is_active', False))
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE change_request_column_config 
+            SET is_active = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (is_active, column_id))
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            return jsonify({'success': False, 'message': '컬럼을 찾을 수 없습니다.'}), 404
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': f'컬럼이 {"활성화" if is_active else "비활성화"}되었습니다.'})
+        
+    except Exception as e:
+        logging.error(f"변경요청 컬럼 토글 오류: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/change-request-columns/<int:column_id>', methods=['DELETE'])
+@require_admin_auth
+def api_delete_change_request_column(column_id):
+    """변경요청 컬럼 삭제"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # 기본 컬럼들은 삭제 방지 (필요시)
+        cursor.execute("SELECT column_key FROM change_request_column_config WHERE id = ?", (column_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'success': False, 'message': '컬럼을 찾을 수 없습니다.'}), 404
+        
+        # 실제 삭제 (소프트 삭제 대신 하드 삭제)
+        cursor.execute("DELETE FROM change_request_column_config WHERE id = ?", (column_id,))
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            return jsonify({'success': False, 'message': '컬럼을 찾을 수 없습니다.'}), 404
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': '컬럼이 삭제되었습니다.'})
+        
+    except Exception as e:
+        logging.error(f"변경요청 컬럼 삭제 오류: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+# 담당자 마스터 관리 API
+@app.route('/api/person-master', methods=['GET'])
+def api_get_person_master():
+    """담당자 마스터 목록 조회"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, name, department, position, company_name, phone, email, is_active
+            FROM person_master
+            WHERE is_active = 1
+            ORDER BY name
+        """)
+        
+        persons = []
+        for row in cursor.fetchall():
+            persons.append({
+                'id': row[0],
+                'name': row[1],
+                'department': row[2],
+                'position': row[3],
+                'company_name': row[4],
+                'phone': row[5],
+                'email': row[6],
+                'is_active': row[7]
+            })
+        
+        conn.close()
+        return jsonify({'success': True, 'persons': persons})
+        
+    except Exception as e:
+        logging.error(f"담당자 마스터 조회 오류: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/person-master/<int:person_id>', methods=['GET'])
+def api_get_person_detail(person_id):
+    """담당자 상세 정보 조회"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT id, name, department, position, company_name, phone, email
+            FROM person_master
+            WHERE id = ? AND is_active = 1
+        """, (person_id,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            person = {
+                'id': row[0],
+                'name': row[1],
+                'department': row[2],
+                'position': row[3],
+                'company_name': row[4],
+                'phone': row[5],
+                'email': row[6]
+            }
+            return jsonify({'success': True, 'person': person})
+        else:
+            return jsonify({'success': False, 'message': '담당자를 찾을 수 없습니다.'}), 404
+            
+    except Exception as e:
+        logging.error(f"담당자 상세 조회 오류: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/person-master', methods=['POST'])
+@require_admin_auth
+def api_create_person():
+    """담당자 추가"""
+    try:
+        data = request.get_json()
+        
+        if not data.get('name'):
+            return jsonify({'success': False, 'message': '이름은 필수 입력 항목입니다.'}), 400
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO person_master (name, department, position, company_name, phone, email)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            data.get('name'),
+            data.get('department', ''),
+            data.get('position', ''),
+            data.get('company_name', ''),
+            data.get('phone', ''),
+            data.get('email', '')
+        ))
+        
+        person_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'person_id': person_id, 'message': '담당자가 추가되었습니다.'})
+        
+    except Exception as e:
+        logging.error(f"담당자 추가 오류: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/person-master/<int:person_id>', methods=['PUT'])
+@require_admin_auth
+def api_update_person(person_id):
+    """담당자 수정"""
+    try:
+        data = request.get_json()
+        
+        if not data.get('name'):
+            return jsonify({'success': False, 'message': '이름은 필수 입력 항목입니다.'}), 400
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE person_master 
+            SET name = ?, department = ?, position = ?, company_name = ?, phone = ?, email = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND is_active = 1
+        """, (
+            data.get('name'),
+            data.get('department', ''),
+            data.get('position', ''),
+            data.get('company_name', ''),
+            data.get('phone', ''),
+            data.get('email', ''),
+            person_id
+        ))
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            return jsonify({'success': False, 'message': '담당자를 찾을 수 없습니다.'}), 404
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': '담당자가 수정되었습니다.'})
+        
+    except Exception as e:
+        logging.error(f"담당자 수정 오류: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/person-master/<int:person_id>', methods=['DELETE'])
+@require_admin_auth
+def api_delete_person(person_id):
+    """담당자 삭제 (소프트 삭제)"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE person_master 
+            SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND is_active = 1
+        """, (person_id,))
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            return jsonify({'success': False, 'message': '담당자를 찾을 수 없습니다.'}), 404
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': '담당자가 삭제되었습니다.'})
+        
+    except Exception as e:
+        logging.error(f"담당자 삭제 오류: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 if __name__ == "__main__":

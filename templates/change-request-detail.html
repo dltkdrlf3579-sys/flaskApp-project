@@ -1,0 +1,1143 @@
+{% if is_popup %}
+{% extends "popup-base.html" %}
+{% else %}
+{% extends "base.html" %}
+{% endif %}
+
+{% block head %}
+{% endblock %}
+
+{% block title %}변경요청 상세정보{% endblock %}
+{% block popup_title %}{{ request_data.id }} - 변경요청 상세정보{% endblock %}
+{% block content %}
+
+{% if not is_popup %}
+<div class="page-header">
+    <h2 class="page-title">변경요청 상세정보</h2>
+    <div class="breadcrumb">
+        <a href="{{ url_for('page_view', url='partner-change-request') }}">기준정보 변경요청</a>
+        <span class="separator">></span>
+        <span class="current">CR-{{ request_data.id }}</span>
+    </div>
+</div>
+{% endif %}
+
+<div class="safety-instruction-detail-container">
+    <!-- 1. 기본정보 영역 -->
+    <div class="section basic-info-section">
+        <div class="section-header">
+            <h3 class="section-title">기본정보</h3>
+            <button class="collapse-btn" onclick="toggleSection('basic-info')">
+                <span class="collapse-icon">▲</span>
+            </button>
+        </div>
+        <div class="section-content" id="basic-info-content">
+            <div class="info-table">
+                <div class="info-row">
+                    <div class="info-cell">
+                        <label>요청번호</label>
+                        <div class="value">CR-{{ request_data.id }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. 추가 기입정보 영역 (동적 컬럼 입력 폼) -->
+    <div class="section additional-info-section">
+        <div class="section-header">
+            <h3 class="section-title">추가 기입정보</h3>
+            <button class="collapse-btn" onclick="toggleSection('additional-info')">
+                <span class="collapse-icon">▲</span>
+            </button>
+        </div>
+        <div class="section-content" id="additional-info-content">
+            
+            <div class="info-table">
+                {% set columns_per_row = 4 %}
+                {% for chunk in dynamic_columns | batch(columns_per_row) %}
+                <div class="info-row">
+                    {% for col in chunk %}
+                    <div class="info-cell">
+                        <label>{{ col.column_name }}</label>
+                        {% set col_value = custom_data.get(col.column_key, '') %}
+                        
+                        {% if col.column_type == 'text' %}
+                            <input type="text" 
+                                   class="dynamic-input" 
+                                   data-column-key="{{ col.column_key }}"
+                                   value="{{ col_value }}"
+                                   placeholder="{{ col.column_name }} 입력">
+                        
+                        {% elif col.column_type == 'dropdown' %}
+                            <select class="dynamic-input" data-column-key="{{ col.column_key }}">
+                                <option value="">선택하세요</option>
+                                {% if col.dropdown_options_mapped %}
+                                    {# 새로운 코드-값 매핑 방식 #}
+                                    {% for option in col.dropdown_options_mapped %}
+                                        <option value="{{ option.code }}" {% if col_value == option.code %}selected{% endif %}>{{ option.value }}</option>
+                                    {% endfor %}
+                                {% elif col.dropdown_options %}
+                                    {# 기존 JSON 방식 (하위 호환성) #}
+                                    {% set options = col.dropdown_options | from_json %}
+                                    {% for option in options %}
+                                        <option value="{{ option }}" {% if col_value == option %}selected{% endif %}>{{ option }}</option>
+                                    {% endfor %}
+                                {% endif %}
+                            </select>
+                        
+                        {% elif col.column_type == 'date' %}
+                            <input type="date" 
+                                   class="dynamic-input" 
+                                   data-column-key="{{ col.column_key }}"
+                                   value="{{ col_value }}">
+                        
+                        {% elif col.column_type == 'popup_person' %}
+                            <div class="popup-input-wrapper">
+                                <input type="text" 
+                                       class="dynamic-input popup-person" 
+                                       data-column-key="{{ col.column_key }}"
+                                       data-linked-dept=""
+                                       value="{{ col_value.name if col_value is mapping else col_value }}"
+                                       placeholder="담당자 선택"
+                                       readonly>
+                                <button class="btn-popup" onclick="openPersonPopup('{{ col.column_key }}')">선택</button>
+                            </div>
+                        
+                        {% elif col.column_type == 'linked_dept' %}
+                            <input type="text" 
+                                   class="dynamic-input linked-dept" 
+                                   data-column-key="{{ col.column_key }}"
+                                   value="{{ col_value }}"
+                                   placeholder="담당부서 (자동입력)"
+                                   readonly
+                                   style="background-color: #f8f9fa; cursor: not-allowed;">
+                                   
+                        {% elif col.column_type == 'linked_text' %}
+                            <input type="text" 
+                                   class="dynamic-input linked-text" 
+                                   data-column-key="{{ col.column_key }}"
+                                   value="{{ col_value }}"
+                                   placeholder="자동입력"
+                                   readonly
+                                   style="background-color: #f8f9fa; cursor: not-allowed;">
+                        
+                        {% elif col.column_type == 'popup_company' %}
+                            <div class="popup-input-wrapper">
+                                <input type="text" 
+                                       class="dynamic-input popup-company" 
+                                       data-column-key="{{ col.column_key }}"
+                                       value="{{ col_value.name if col_value is mapping else col_value }}"
+                                       placeholder="업체 선택"
+                                       readonly>
+                                <button class="btn-popup" onclick="openCompanyPopup('{{ col.column_key }}')">선택</button>
+                            </div>
+                            
+                        {% elif col.column_type == 'popup_contractor' %}
+                            <div class="popup-input-wrapper">
+                                <input type="text" 
+                                       class="dynamic-input popup-contractor" 
+                                       data-column-key="{{ col.column_key }}"
+                                       value="{{ col_value.name if col_value is mapping else col_value }}"
+                                       placeholder="협력사 근로자 선택"
+                                       readonly>
+                                <button class="btn-popup" onclick="openContractorPopup('{{ col.column_key }}')">선택</button>
+                            </div>
+                            
+                        {% elif col.column_type == 'popup_building' %}
+                            <div class="popup-input-wrapper">
+                                <input type="text" 
+                                       class="dynamic-input popup-building" 
+                                       data-column-key="{{ col.column_key }}"
+                                       value="{{ col_value.building_name if col_value is mapping else col_value }}"
+                                       placeholder="건물 선택"
+                                       readonly>
+                                <button class="btn-popup" onclick="openBuildingPopup('{{ col.column_key }}')">선택</button>
+                            </div>
+                            
+                        {% elif col.column_type == 'popup_department' %}
+                            <div class="popup-input-wrapper">
+                                <input type="text" 
+                                       class="dynamic-input popup-department" 
+                                       data-column-key="{{ col.column_key }}"
+                                       value="{{ col_value.dept_name if col_value is mapping else col_value }}"
+                                       placeholder="부서 선택"
+                                       readonly>
+                                <button class="btn-popup" onclick="openDepartmentPopup('{{ col.column_key }}')">선택</button>
+                            </div>
+                        
+                        {% else %}
+                            <input type="text" 
+                                   class="dynamic-input" 
+                                   data-column-key="{{ col.column_key }}"
+                                   value="{{ col_value }}"
+                                   placeholder="{{ col.column_name }} 입력">
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    
+                    {# 빈 셀 채우기 #}
+                    {% for _ in range(columns_per_row - chunk|length) %}
+                    <div class="info-cell"></div>
+                    {% endfor %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. 위반 상세내용 영역 -->
+    <div class="section detail-content-section">
+        <div class="section-header">
+            <h3 class="section-title">변경사유</h3>
+        </div>
+        <div class="section-content">
+            <div class="content-editor">
+                <!-- 간단한 편집 가능한 영역 -->
+                <div id="detailed-content" 
+                     class="editable-content" 
+                     contenteditable="true" 
+                     placeholder="변경사유를 상세히 입력하세요.">{{ request_data.change_reason | safe if request_data.change_reason else '' }}</div>
+                
+                <!-- 숨겨진 textarea (저장용) -->
+                <textarea id="detailed-content-hidden" style="display: none;">{{ request_data.change_reason or '' }}</textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- 5. 첨부파일 영역 -->
+    <div class="section attachments-section">
+        <div class="section-header">
+            <h3 class="section-title">첨부파일</h3>
+            <button class="btn-add-file" onclick="document.getElementById('file-input').click();">추가</button>
+            <span class="file-count">총 <span id="file-count">0</span>개</span>
+            <span class="file-size"><span id="file-size">0</span> MB / 50 MB</span>
+        </div>
+        <div class="section-content">
+            <input type="file" id="file-input" multiple style="display: none;" onchange="handleFileUpload(this.files)">
+            <div class="attachments-table">
+                <div class="table-header">
+                    <div class="col-no">No.</div>
+                    <div class="col-file">파일명</div>
+                    <div class="col-desc">설명</div>
+                    <div class="col-action">상태</div>
+                </div>
+                <div class="table-body" id="attachments-tbody">
+                    <div class="table-row no-data" id="no-data-row">
+                        <div class="col-full">등록된 첨부파일이 없습니다.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 저장 버튼 영역 -->
+    <div class="save-section">
+        <button class="btn-save" onclick="showPasswordModal()">수정완료</button>
+    </div>
+
+    <!-- 비밀번호 입력 모달 -->
+    <div id="password-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>편집 권한 확인</h3>
+                <span class="close" onclick="closePasswordModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>편집을 위해 비밀번호를 입력해주세요.</p>
+                <input type="password" id="password-input" placeholder="비밀번호" class="password-field">
+                <div class="modal-buttons">
+                    <button class="btn-confirm" onclick="verifyPasswordAndSave()">확인</button>
+                    <button class="btn-cancel" onclick="closePasswordModal()">취소</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% if not is_popup %}
+    <div class="action-buttons">
+        <a href="{{ url_for('page_view', url='partner-change-request') }}" class="btn-back">목록으로</a>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+/* 페이지 헤더 */
+.page-header {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #2f5fd3;
+}
+.page-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #333;
+    margin: 0 0 8px 0;
+}
+.breadcrumb {
+    font-size: 14px;
+    color: #6b7280;
+}
+.breadcrumb a {
+    color: #2f5fd3;
+    text-decoration: none;
+}
+.breadcrumb a:hover {
+    text-decoration: underline;
+}
+.breadcrumb .separator {
+    margin: 0 8px;
+}
+.breadcrumb .current {
+    color: #374151;
+    font-weight: 600;
+}
+
+/* 팝업 모드일 때 헤더와 액션 버튼 숨김 */
+{% if is_popup %}
+.page-header, .action-buttons {
+    display: none !important;
+}
+{% endif %}
+
+/* 메인 컨테이너 */
+.safety-instruction-detail-container {
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+{% if is_popup %}
+.safety-instruction-detail-container {
+    padding: 0;
+    gap: 0;
+}
+
+.section {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+}
+
+.section:last-child {
+    border-bottom: none;
+}
+{% endif %}
+
+/* 섹션 공통 스타일 */
+.section {
+    background: white;
+    border: 1px solid #e1e5e9;
+}
+
+.section-header {
+    background: #f8f9fa;
+    padding: 12px 20px;
+    border-bottom: 1px solid #e1e5e9;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.section-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+    margin: 0;
+}
+
+.collapse-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+}
+
+.collapse-icon {
+    font-size: 12px;
+    color: #666;
+    transition: transform 0.2s;
+}
+
+.section-content {
+    padding: 20px;
+}
+
+/* 1. 기본정보 섹션 */
+.info-table {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.info-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+}
+
+.info-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.info-cell-double {
+    grid-column: span 2;
+}
+
+.info-cell label {
+    font-weight: 600;
+    color: #333;
+    font-size: 14px;
+    min-height: 20px;
+}
+
+.info-cell .value {
+    padding: 8px 12px;
+    background: #f8f9fa;
+    border: 1px solid #e1e5e9;
+    border-radius: 4px;
+    font-size: 14px;
+    color: #333;
+    min-height: 20px;
+    display: flex;
+    align-items: center;
+}
+
+/* 상태 뱃지 스타일 */
+.status-badge {
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.status-pending {
+    background-color: #fef3c7;
+    color: #d97706;
+}
+.status-approved {
+    background-color: #d1fae5;
+    color: #065f46;
+}
+.status-rejected {
+    background-color: #fee2e2;
+    color: #dc2626;
+}
+.status-completed {
+    background-color: #e0e7ff;
+    color: #3730a3;
+}
+
+/* 2. 추가 기입정보 섹션 (동적 컬럼 입력) */
+.additional-info-section .dynamic-input,
+.violation-info-section .dynamic-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 14px;
+    background: white;
+    transition: border-color 0.2s;
+}
+
+.additional-info-section .dynamic-input:focus,
+.violation-info-section .dynamic-input:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+.additional-info-section select.dynamic-input,
+.violation-info-section select.dynamic-input {
+    cursor: pointer;
+}
+
+.popup-input-wrapper {
+    display: flex;
+    gap: 8px;
+}
+
+.popup-input-wrapper .dynamic-input {
+    flex: 1;
+    background: #f9fafb;
+    cursor: not-allowed;
+}
+
+.btn-popup {
+    padding: 8px 16px;
+    background: #2f5fd3;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.btn-popup:hover {
+    background: #1d4ed8;
+}
+
+/* 3. 사고 상세내용 섹션 */
+.detail-content-section .section-content {
+    padding: 20px;
+}
+
+.content-editor {
+    position: relative;
+}
+
+/* 간단한 편집 가능한 영역 스타일 */
+.editable-content {
+    width: 100%;
+    min-height: 400px;
+    padding: 20px;
+    border: 1px solid #e1e5e9;
+    border-radius: 4px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #333;
+    font-family: inherit;
+    box-sizing: border-box;
+    background: white;
+    outline: none;
+    overflow-y: auto;
+}
+
+.editable-content:focus {
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+.editable-content:empty:before {
+    content: attr(placeholder);
+    color: #999;
+    font-style: italic;
+    white-space: pre-line;
+}
+
+.editable-content img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+    margin: 10px 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    display: block;
+}
+
+.editable-content table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 15px 0;
+    border: 1px solid #e1e5e9;
+}
+
+.editable-content table td,
+.editable-content table th {
+    border: 1px solid #e1e5e9;
+    padding: 8px 12px;
+    text-align: left;
+    min-width: 50px;
+}
+
+.editable-content table th {
+    background: #f8f9fa;
+    font-weight: 600;
+}
+
+.editable-content table tr:nth-child(even) {
+    background: #f8f9fa;
+}
+
+.editable-content p {
+    margin: 10px 0;
+}
+
+.editable-content br {
+    line-height: 1.6;
+}
+
+/* 3. 첨부파일 섹션 */
+.attachments-section .section-header {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.btn-add-file {
+    padding: 6px 12px;
+    background: #28a745;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-left: auto;
+    margin-right: 10px;
+}
+
+.btn-add-file:hover {
+    background: #218838;
+}
+
+.file-count, .file-size {
+    font-size: 14px;
+    color: #666;
+}
+
+.attachments-table {
+    border: 1px solid #e1e5e9;
+}
+
+.table-header {
+    display: grid;
+    grid-template-columns: 60px 30% 1fr 100px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e1e5e9;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.table-header > div {
+    padding: 12px 10px;
+    border-right: 1px solid #e1e5e9;
+    display: flex;
+    align-items: center;
+}
+
+.table-header > div:last-child {
+    border-right: none;
+}
+
+.table-body {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.table-row {
+    display: grid;
+    grid-template-columns: 60px 30% 1fr 100px;
+    border-bottom: 1px solid #f1f1f1;
+    font-size: 14px;
+}
+
+.table-row > div {
+    padding: 12px 10px;
+    border-right: 1px solid #f1f1f1;
+    display: flex;
+    align-items: center;
+    word-break: break-word;
+}
+
+.table-row > div:last-child {
+    border-right: none;
+}
+
+.table-row:hover {
+    background: #f8f9fa;
+}
+
+.no-data .col-full {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: #999;
+    padding: 40px;
+}
+
+.file-icon {
+    margin-right: 8px;
+}
+
+.file-link {
+    color: #2f5fd3;
+    text-decoration: none;
+    margin-right: 8px;
+}
+
+.file-link:hover {
+    text-decoration: underline;
+}
+
+.file-size {
+    color: #666;
+    font-size: 12px;
+}
+
+.col-desc input, .col-name input {
+    border: 1px solid #e1e5e9;
+    background: white;
+    width: 100%;
+    font-size: 14px;
+    color: #333;
+    padding: 4px 8px;
+    border-radius: 3px;
+}
+
+.col-desc input:focus {
+    outline: none;
+    border-color: #2f5fd3;
+}
+
+.btn-delete {
+    padding: 4px 12px;
+    background: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.btn-delete:hover {
+    background: #c82333;
+}
+
+/* 저장 섹션 */
+.save-section {
+    margin-top: 20px;
+    text-align: center;
+    padding: 20px;
+    border-top: 1px solid #e1e5e9;
+    background: #f8f9fa;
+}
+
+.btn-save {
+    padding: 12px 30px;
+    background: #2f5fd3;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn-save:hover {
+    background: #1d4ed8;
+}
+
+/* 비밀번호 모달 */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.4);
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: 15% auto;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    width: 400px;
+    max-width: 90%;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+
+.modal-header {
+    padding: 20px 25px 15px;
+    border-bottom: 1px solid #e1e5e9;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: #333;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.close {
+    color: #999;
+    font-size: 24px;
+    font-weight: bold;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.close:hover {
+    color: #333;
+}
+
+.modal-body {
+    padding: 25px;
+}
+
+.modal-body p {
+    margin: 0 0 20px 0;
+    color: #555;
+    font-size: 14px;
+}
+
+.password-field {
+    width: 100%;
+    padding: 12px 15px;
+    border: 1px solid #e1e5e9;
+    border-radius: 4px;
+    font-size: 14px;
+    margin-bottom: 20px;
+    box-sizing: border-box;
+}
+
+.password-field:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+.modal-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.btn-confirm, .btn-cancel {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    min-width: 80px;
+}
+
+.btn-confirm {
+    background: #2f5fd3;
+    color: white;
+}
+
+.btn-confirm:hover {
+    background: #1d4ed8;
+}
+
+.btn-cancel {
+    background: #6b7280;
+    color: white;
+}
+
+.btn-cancel:hover {
+    background: #4b5563;
+}
+
+/* 액션 버튼 */
+.action-buttons {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-start;
+    margin-top: 20px;
+}
+
+.btn-back {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    background: #6b7280;
+    color: white;
+}
+
+.btn-back:hover {
+    background: #4b5563;
+    color: white;
+    text-decoration: none;
+}
+
+/* 반응형 */
+@media (max-width: 768px) {
+    .info-row {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    .table-header,
+    .table-row {
+        grid-template-columns: 1fr;
+        gap: 0;
+    }
+    
+    .table-header > div,
+    .table-row > div {
+        border-right: none;
+        border-bottom: 1px solid #e1e5e9;
+    }
+    
+    .table-header > div:last-child,
+    .table-row > div:last-child {
+        border-bottom: none;
+    }
+    
+    .action-buttons {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .btn-back {
+        text-align: center;
+    }
+}
+</style>
+
+<script>
+let pendingFiles = [];
+let deletedAttachments = [];
+
+function toggleSection(sectionId) {
+    const content = document.getElementById(sectionId + '-content');
+    const icon = document.querySelector(`[onclick="toggleSection('${sectionId}')"] .collapse-icon`);
+    
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        icon.textContent = '▲';
+    } else {
+        content.style.display = 'none';
+        icon.textContent = '▼';
+    }
+}
+
+function handleFileUpload(files) {
+    const tbody = document.getElementById('attachments-tbody');
+    const noDataRow = document.getElementById('no-data-row');
+    
+    if (noDataRow) {
+        noDataRow.remove();
+    }
+    
+    Array.from(files).forEach((file, index) => {
+        const fileSize = (file.size / 1024).toFixed(2);
+        const newRow = document.createElement('div');
+        newRow.className = 'table-row';
+        newRow.dataset.isNew = 'true';
+        
+        const rowCount = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)').length + 1;
+        
+        newRow.innerHTML = `
+            <div class="col-no">${rowCount}</div>
+            <div class="col-file">
+                <span class="file-icon">📄</span>
+                <span class="file-link">${file.name}</span>
+                <span class="file-size">(${fileSize} KB)</span>
+            </div>
+            <div class="col-desc">
+                <input type="text" placeholder="설명을 입력하세요" class="attachment-desc">
+            </div>
+            <div class="col-action">
+                <button class="btn-delete" onclick="deleteAttachment(this)">삭제</button>
+            </div>
+        `;
+        
+        tbody.appendChild(newRow);
+        pendingFiles.push(file);
+    });
+    
+    updateFileCount();
+}
+
+function deleteAttachment(btn) {
+    const row = btn.closest('.table-row');
+    const attachmentId = row.dataset.id;
+    
+    if (attachmentId) {
+        deletedAttachments.push(attachmentId);
+    }
+    
+    row.remove();
+    updateFileCount();
+    updateRowNumbers();
+    
+    // 파일이 모두 삭제된 경우 "등록된 첨부파일이 없습니다" 표시
+    const tbody = document.getElementById('attachments-tbody');
+    if (tbody.children.length === 0) {
+        tbody.innerHTML = '<div class="table-row no-data" id="no-data-row"><div class="col-full">등록된 첨부파일이 없습니다.</div></div>';
+    }
+}
+
+function updateFileCount() {
+    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
+    document.getElementById('file-count').textContent = rows.length;
+}
+
+function updateRowNumbers() {
+    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
+    rows.forEach((row, index) => {
+        const noCell = row.querySelector('.col-no');
+        noCell.textContent = index + 1;
+    });
+}
+
+function showPasswordModal() {
+    document.getElementById('password-modal').style.display = 'block';
+    document.getElementById('password-input').focus();
+}
+
+function closePasswordModal() {
+    document.getElementById('password-modal').style.display = 'none';
+    document.getElementById('password-input').value = '';
+}
+
+function verifyPasswordAndSave() {
+    const password = document.getElementById('password-input').value;
+    
+    if (!password) {
+        alert('비밀번호를 입력해주세요.');
+        return;
+    }
+    
+    // 서버에서 비밀번호 검증
+    fetch('/verify-password', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+            password: password,
+            board_type: 'change_request'
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            closePasswordModal();
+            saveChanges();
+        } else {
+            alert(data.message || '비밀번호가 올바르지 않습니다.');
+            document.getElementById('password-input').value = '';
+            document.getElementById('password-input').focus();
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('비밀번호 검증 중 오류가 발생했습니다.');
+    });
+}
+
+function saveChanges() {
+    // contentEditable div에서 HTML 내용 가져오기
+    const editableDiv = document.getElementById('detailed-content');
+    const detailedContent = editableDiv.innerHTML;
+    
+    console.log('Saving content from contentEditable:', detailedContent);
+    
+    const requestId = '{{ request_data.id }}';
+    
+    // 동적 컬럼 데이터 수집
+    const customData = {};
+    document.querySelectorAll('.dynamic-input').forEach(element => {
+        const columnKey = element.dataset.columnKey;
+        let value = '';
+        
+        // select 요소인 경우 특별 처리
+        if (element.tagName === 'SELECT') {
+            value = element.value || '';
+        } else {
+            value = element.value || '';
+        }
+        
+        console.log(`Collecting: ${columnKey} = ${value} (type: ${element.tagName})`);
+        customData[columnKey] = value;
+    });
+    
+    console.log('Collected customData:', customData);
+    
+    // 첨부파일 데이터 수집
+    const attachments = [];
+    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
+    
+    rows.forEach(row => {
+        const desc = row.querySelector('.attachment-desc')?.value || '';
+        const id = row.dataset.id;
+        
+        attachments.push({
+            id: id || null,
+            description: desc,
+            isNew: row.dataset.isNew === 'true'
+        });
+    });
+    
+    // FormData 생성
+    const formData = new FormData();
+    formData.append('request_id', requestId);
+    formData.append('approval_comments', detailedContent);
+    formData.append('custom_data', JSON.stringify(customData));
+    formData.append('deleted_attachments', JSON.stringify(deletedAttachments));
+    formData.append('attachment_data', JSON.stringify(attachments));
+    
+    // 새 파일들 추가
+    pendingFiles.forEach((file, index) => {
+        console.log(`Adding file ${index}: ${file.name}`);
+        formData.append('files', file);
+    });
+    
+    console.log('Sending data to server...');
+    
+    // 서버로 전송
+    fetch('/update-change-request', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('수정이 완료되었습니다.');
+            
+            // 팝업 모드인 경우 부모 창 새로고침
+            {% if is_popup %}
+            if (window.opener && !window.opener.closed) {
+                window.opener.location.reload();
+            }
+            {% endif %}
+            
+            // 현재 창 새로고침
+            location.reload();
+        } else {
+            alert('수정 중 오류가 발생했습니다: ' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('수정 중 오류가 발생했습니다.');
+    });
+}
+
+// 페이지 로드시 첨부파일 정보 초기화
+document.addEventListener('DOMContentLoaded', function() {
+    updateFileInfo();
+});
+
+function updateFileInfo() {
+    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
+    const fileCount = rows.length;
+    
+    // 기존 파일 크기 계산
+    let totalSize = 0;
+    rows.forEach(row => {
+        const sizeText = row.querySelector('.file-size');
+        if (sizeText) {
+            const sizeMatch = sizeText.textContent.match(/\(([\d.]+)\s*KB\)/);
+            if (sizeMatch) {
+                totalSize += parseFloat(sizeMatch[1]) / 1024; // KB를 MB로 변환
+            }
+        }
+    });
+    
+    document.getElementById('file-count').textContent = fileCount;
+    document.getElementById('file-size').textContent = totalSize.toFixed(2);
+}
+</script>
+
+{% endblock %}

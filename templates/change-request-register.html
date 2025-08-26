@@ -1,0 +1,587 @@
+{% if is_popup %}
+{% extends "popup-base.html" %}
+{% else %}
+{% extends "base.html" %}
+{% endif %}
+
+{% block head %}
+{% endblock %}
+
+{% block title %}기준정보 변경요청 등록{% endblock %}
+{% block popup_title %}기준정보 변경요청 등록{% endblock %}
+{% block content %}
+
+{% if not is_popup %}
+<div class="page-header">
+    <h2 class="page-title">기준정보 변경요청 등록</h2>
+    <div class="breadcrumb">
+        <a href="{{ url_for('page_view', url='partner-change-request') }}">기준정보 변경요청</a>
+        <span class="separator">></span>
+        <span class="current">신규 등록</span>
+    </div>
+</div>
+{% endif %}
+
+<div class="accident-detail-container">
+    <!-- 1. 기본정보 영역 -->
+    <div class="section basic-info-section">
+        <div class="section-header">
+            <h3 class="section-title">기본정보</h3>
+            <button class="collapse-btn" onclick="toggleSection('basic-info')">
+                <span class="collapse-icon">▲</span>
+            </button>
+        </div>
+        <div class="section-content" id="basic-info-content">
+            <div class="info-table">
+                <div class="info-row">
+                    <div class="info-cell">
+                        <label>요청번호</label>
+                        <div class="value">{{ request_number }}</div>
+                    </div>
+                    <div class="info-cell">
+                        <label>등록일</label>
+                        <div class="value">{{ today.strftime('%Y-%m-%d') if today else '자동 생성' }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. 추가 기입정보 영역 (동적 컬럼 입력 폼) -->
+    <div class="section additional-info-section">
+        <div class="section-header">
+            <h3 class="section-title">추가 기입정보</h3>
+            <button class="collapse-btn" onclick="toggleSection('additional-info')">
+                <span class="collapse-icon">▲</span>
+            </button>
+        </div>
+        <div class="section-content" id="additional-info-content">
+            
+            <div class="info-table">
+                {% set columns_per_row = 4 %}
+                {% for chunk in dynamic_columns | batch(columns_per_row) %}
+                <div class="info-row">
+                    {% for col in chunk %}
+                    <div class="info-cell">
+                        <label>{{ col.column_name }}</label>
+                        
+                        {% if col.column_type == 'text' %}
+                            <input type="text" 
+                                   class="dynamic-input" 
+                                   data-column-key="{{ col.column_key }}"
+                                   value=""
+                                   placeholder="{{ col.column_name }} 입력">
+                        
+                        {% elif col.column_type == 'dropdown' %}
+                            <select class="dynamic-input" data-column-key="{{ col.column_key }}">
+                                <option value="">선택하세요</option>
+                                {% if col.dropdown_options_mapped %}
+                                    {# 새로운 코드-값 매핑 방식 #}
+                                    {% for option in col.dropdown_options_mapped %}
+                                        <option value="{{ option.code }}">{{ option.value }}</option>
+                                    {% endfor %}
+                                {% elif col.dropdown_options %}
+                                    {# 기존 JSON 방식 (하위 호환성) #}
+                                    {% set options = col.dropdown_options | from_json %}
+                                    {% for option in options %}
+                                        <option value="{{ option }}">{{ option }}</option>
+                                    {% endfor %}
+                                {% endif %}
+                            </select>
+                        
+                        {% elif col.column_type == 'date' %}
+                            <input type="date" 
+                                   class="dynamic-input" 
+                                   data-column-key="{{ col.column_key }}"
+                                   value="">
+                        
+                        {% elif col.column_type == 'popup_person' %}
+                            <div class="popup-input-wrapper">
+                                <input type="text" 
+                                       class="dynamic-input popup-person" 
+                                       data-column-key="{{ col.column_key }}"
+                                       value=""
+                                       placeholder="담당자 선택"
+                                       readonly>
+                                <button class="btn-popup" onclick="openPersonPopup('{{ col.column_key }}')">선택</button>
+                            </div>
+                        
+                        {% elif col.column_type == 'popup_company' %}
+                            <div class="popup-input-wrapper">
+                                <input type="text" 
+                                       class="dynamic-input popup-company" 
+                                       data-column-key="{{ col.column_key }}"
+                                       value=""
+                                       placeholder="업체 선택"
+                                       readonly>
+                                <button class="btn-popup" onclick="openCompanyPopup('{{ col.column_key }}')">선택</button>
+                            </div>
+                        
+                        {% else %}
+                            <input type="text" 
+                                   class="dynamic-input" 
+                                   data-column-key="{{ col.column_key }}"
+                                   value=""
+                                   placeholder="{{ col.column_name }} 입력">
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    
+                    {# 빈 셀 채우기 #}
+                    {% for _ in range(columns_per_row - chunk|length) %}
+                    <div class="info-cell"></div>
+                    {% endfor %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 저장 버튼 영역 -->
+    <div class="save-section">
+        <button class="btn-save" onclick="saveChangeRequest()">등록완료</button>
+    </div>
+</div>
+
+<style>
+/* 페이지 헤더 */
+.page-header {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #2f5fd3;
+}
+.page-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #333;
+    margin: 0 0 8px 0;
+}
+.breadcrumb {
+    font-size: 14px;
+    color: #6b7280;
+}
+.breadcrumb a {
+    color: #2f5fd3;
+    text-decoration: none;
+}
+.breadcrumb a:hover {
+    text-decoration: underline;
+}
+.breadcrumb .separator {
+    margin: 0 8px;
+}
+.breadcrumb .current {
+    color: #111827;
+}
+
+/* 컨테이너 */
+.accident-detail-container {
+    padding: 20px;
+    background: #f3f4f6;
+    min-height: calc(100vh - 100px);
+}
+
+/* 섹션 공통 */
+.section {
+    margin-bottom: 24px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.section-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+    margin: 0;
+}
+
+.collapse-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 8px;
+    color: #666;
+}
+
+.collapse-icon {
+    display: inline-block;
+    transition: transform 0.3s;
+}
+
+.collapsed .collapse-icon {
+    transform: rotate(180deg);
+}
+
+.section-content {
+    padding: 20px;
+}
+
+.section-content.collapsed {
+    display: none;
+}
+
+/* 정보 테이블 */
+.info-table {
+    width: 100%;
+}
+
+.info-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.info-row:last-child {
+    margin-bottom: 0;
+}
+
+.info-cell {
+    display: flex;
+    flex-direction: column;
+}
+
+.info-cell label {
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 6px;
+    font-size: 13px;
+}
+
+.info-cell .value {
+    padding: 8px 12px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    color: #111827;
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+}
+
+/* 입력 필드 */
+.basic-input,
+.dynamic-input,
+select,
+textarea {
+    padding: 8px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    font-size: 14px;
+    width: 100%;
+    box-sizing: border-box;
+    background: white;
+}
+
+.basic-input:focus,
+.dynamic-input:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+/* 팝업 입력 래퍼 */
+.popup-input-wrapper {
+    display: flex;
+    gap: 8px;
+}
+
+.popup-input-wrapper input {
+    flex: 1;
+}
+
+.btn-popup {
+    padding: 8px 16px;
+    background: #2f5fd3;
+    border: 1px solid #2f5fd3;
+    border-radius: 4px;
+    color: white;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.btn-popup:hover {
+    background: #1e4bb8;
+    border-color: #1e4bb8;
+}
+
+/* 저장 버튼 영역 */
+.save-section {
+    display: flex;
+    justify-content: center;
+    padding: 24px 20px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+}
+
+.btn-save {
+    padding: 12px 40px;
+    background: #2f5fd3;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-save:hover {
+    background: #1e4bb8;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(47, 95, 211, 0.3);
+}
+
+/* 반응형 */
+@media (max-width: 768px) {
+    .info-row {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 480px) {
+    .info-row {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+
+<script>
+// 페이지 로드 시 초기화
+document.addEventListener('DOMContentLoaded', function() {
+    // 동적 컬럼이 서버에서 이미 렌더링되므로 별도 로드 불필요
+    
+    // 연관 필드 설정 (예: 의뢰자 부서는 의뢰자 선택 시 자동으로 채워짐)
+    const linkedFields = ['requester_dept', 'requester_department'];
+    linkedFields.forEach(fieldKey => {
+        const field = document.querySelector(`.dynamic-input[data-column-key="${fieldKey}"]`);
+        if (field) {
+            field.placeholder = '의뢰자 선택 시 자동 입력';
+            field.style.backgroundColor = '#f9fafb';
+        }
+    });
+    
+    // 콜백 함수를 전역에 명시적으로 등록
+    window.handlePersonSelection = handlePersonSelection;
+    window.handleCompanySelection = handleCompanySelection;
+    console.log('Callbacks registered:', {
+        handlePersonSelection: typeof window.handlePersonSelection,
+        handleCompanySelection: typeof window.handleCompanySelection
+    });
+});
+
+// 섹션 토글
+function toggleSection(sectionId) {
+    const content = document.getElementById(sectionId + '-content');
+    const section = content.parentElement;
+    content.classList.toggle('collapsed');
+    section.classList.toggle('collapsed');
+}
+
+// 변경요청 저장
+function saveChangeRequest() {
+    // 동적 필드에서 데이터 수집
+    const dynamicData = {};
+    const dynamicInputs = document.querySelectorAll('.dynamic-input[data-column-key]');
+    dynamicInputs.forEach(input => {
+        const key = input.dataset.columnKey;
+        if (key) {
+            dynamicData[key] = input.value;
+        }
+    });
+    
+    // API 필수 필드 매핑
+    const data = {
+        request_number: '{{ request_number }}',
+        requester_name: dynamicData['requester_name'] || '요청자',
+        requester_department: dynamicData['requester_department'] || '부서',
+        company_name: dynamicData['company_name'] || '협력사',
+        business_number: dynamicData['business_number'] || '000-00-00000',
+        change_type: dynamicData['change_type'] || '기본정보',
+        current_value: dynamicData['current_value'] || '기존값',
+        new_value: dynamicData['new_value'] || '변경값',
+        change_reason: dynamicData['change_reason'] || '변경사유'
+    };
+    
+    // 저장 확인
+    if (confirm('변경요청을 등록하시겠습니까?')) {
+        fetch('/api/partner-change-request', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        })
+        .then(response => response.json())
+        .then(result => {
+            if (result.success) {
+                alert('변경요청이 성공적으로 등록되었습니다.');
+                
+                // 부모 창 새로고침
+                if (window.opener && !window.opener.closed) {
+                    window.opener.location.reload();
+                }
+                
+                // 창 닫기
+                window.close();
+            } else {
+                alert('등록 실패: ' + (result.message || '알 수 없는 오류가 발생했습니다.'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('등록 중 오류가 발생했습니다.');
+        });
+    }
+}
+
+// 담당자 선택 팝업
+function openPersonPopup(columnKey) {
+    // 팝업 위치 계산
+    const width = 800;
+    const height = 600;
+    const left = (window.screen.width - width) / 2;
+    const top = (window.screen.height - height) / 2;
+    
+    // 현재 컬럼 키 저장
+    window.currentColumnKey = columnKey;
+    
+    const popup = window.open(
+        `/search-popup?type=person&callback=handlePersonSelection`,
+        'personSearchPopup',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+    );
+}
+
+// 담당자 선택 콜백 (전역 함수로 정의)
+function handlePersonSelection(selectedItem) {
+    console.log('handlePersonSelection called with:', selectedItem); // 디버깅용
+    console.log('currentColumnKey:', window.currentColumnKey); // 디버깅용
+    
+    if (!selectedItem || !window.currentColumnKey) {
+        console.error('Missing selectedItem or currentColumnKey');
+        return;
+    }
+    
+    // 해당 컬럼의 input 찾기
+    const input = document.querySelector(`input[data-column-key="${window.currentColumnKey}"]`);
+    console.log('Found input:', input); // 디버깅용
+    
+    if (input) {
+        // 담당자 정보 표시 (사고 페이지와 동일한 형식)
+        const employeeId = selectedItem.employee_id || selectedItem.ID || '';
+        const name = selectedItem.name || selectedItem.이름 || '';
+        const department = selectedItem.department || selectedItem.부서 || '';
+        
+        // 이름 / ID 형식으로 표시 (사고 페이지와 동일)
+        const displayText = employeeId && name ? `${name} / ${employeeId}` : name;
+        input.value = displayText;
+        
+        // 실제 저장할 데이터
+        input.dataset.personId = selectedItem.id || '';
+        input.dataset.personName = name;
+        input.dataset.personDepartment = department;
+        input.dataset.personEmployeeId = employeeId;
+        input.dataset.value = displayText;
+        
+        console.log('Input value set to:', displayText); // 디버깅용
+        
+        // 연관된 부서 필드 자동 채우기
+        // 의뢰자를 선택하면 의뢰자 부서를 자동으로 채움
+        if (window.currentColumnKey === 'requester' || window.currentColumnKey === 'requester_name') {
+            const deptInput = document.querySelector('.dynamic-input[data-column-key="requester_dept"]') || 
+                              document.querySelector('.dynamic-input[data-column-key="requester_department"]');
+            if (deptInput) {
+                deptInput.value = department;
+                deptInput.readOnly = true;  // 부서 필드를 읽기 전용으로 설정
+                deptInput.style.backgroundColor = '#f9fafb';  // 읽기 전용 스타일
+                console.log('Department field updated:', department); // 디버깅용
+            }
+        }
+    } else {
+        console.error('Input element not found for column key:', window.currentColumnKey);
+    }
+}
+
+// window 객체에 명시적으로 등록
+if (typeof window !== 'undefined') {
+    window.handlePersonSelection = handlePersonSelection;
+    console.log('handlePersonSelection registered globally');
+}
+
+// 업체 선택 팝업
+function openCompanyPopup(columnKey) {
+    // 팝업 위치 계산
+    const width = 800;
+    const height = 600;
+    const left = (window.screen.width - width) / 2;
+    const top = (window.screen.height - height) / 2;
+    
+    // 현재 컬럼 키 저장
+    window.currentColumnKey = columnKey;
+    
+    const popup = window.open(
+        `/search-popup?type=company&callback=handleCompanySelection`,
+        'companySearchPopup',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+    );
+}
+
+// 업체 선택 콜백 (전역 함수로 정의)
+function handleCompanySelection(selectedItem) {
+    console.log('handleCompanySelection called with:', selectedItem); // 디버깅용
+    console.log('currentColumnKey:', window.currentColumnKey); // 디버깅용
+    
+    if (!selectedItem || !window.currentColumnKey) {
+        console.error('Missing selectedItem or currentColumnKey');
+        return;
+    }
+    
+    // 해당 컬럼의 input 찾기
+    const input = document.querySelector(`input[data-column-key="${window.currentColumnKey}"]`);
+    console.log('Found input:', input); // 디버깅용
+    
+    if (input) {
+        // 업체 정보 표시
+        const companyName = selectedItem.company_name || selectedItem.업체명 || '';
+        const businessNumber = selectedItem.company_business_number || selectedItem.business_number || selectedItem.사업자번호 || '';
+        
+        // 업체명 표시 (사업자번호가 있으면 함께 표시)
+        const displayText = businessNumber ? `${companyName} (${businessNumber})` : companyName;
+        input.value = displayText;
+        
+        // 실제 저장할 데이터
+        input.dataset.companyData = JSON.stringify(selectedItem);
+        input.dataset.value = displayText;
+        
+        console.log('Input value set to:', displayText); // 디버깅용
+    } else {
+        console.error('Input element not found for column key:', window.currentColumnKey);
+    }
+}
+
+// window 객체에 명시적으로 등록
+if (typeof window !== 'undefined') {
+    window.handleCompanySelection = handleCompanySelection;
+    console.log('handleCompanySelection registered globally');
+}
+</script>
+
+{% endblock %}
