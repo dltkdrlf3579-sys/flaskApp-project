@@ -15,6 +15,9 @@ gpt/
 # 아이콘 파일 제외
 static/icons/excel-icon.svg
 
+# 설정 파일 (민감한 정보 포함)
+config.ini
+
 # 데이터베이스 파일 제외 (운영/개발 환경 분리)
 # portal.db  # 스키마 동기화를 위해 일단 포함
 # *.db
