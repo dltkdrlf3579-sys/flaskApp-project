@@ -14,3 +14,7 @@ gpt/
 
 # 아이콘 파일 제외
 static/icons/excel-icon.svg
+
+# 데이터베이스 파일 제외 (운영/개발 환경 분리)
+portal.db
+*.db

@@ -11,16 +11,9 @@ from datetime import datetime, timedelta
 config = configparser.ConfigParser()
 config_path = os.path.join(os.path.dirname(__file__), 'config.ini')
 
-# config.ini 파일을 먼저 읽어서 경로 가져오기
-if os.path.exists(config_path):
-    try:
-        config.read(config_path, encoding='utf-8')
-        module_folder = config.get('DATABASE', 'IQADB_MODULE_PATH', 
-                                  fallback='C:/Users/user/AppData/Local/aipforge/pkgs/dist/obf/PY310')
-    except:
-        module_folder = 'C:/Users/user/AppData/Local/aipforge/pkgs/dist/obf/PY310'
-else:
-    module_folder = 'C:/Users/user/AppData/Local/aipforge/pkgs/dist/obf/PY310'
+# config.ini 파일에서 module_folder 경로 가져오기
+config.read(config_path, encoding='utf-8')
+module_folder = config.get('DATABASE', 'IQADB_MODULE_PATH')
 
 # IQADB_CONNECT310 모듈 로드
 try:
@@ -483,8 +476,8 @@ class PartnerDataManager:
         count_query = query.replace("SELECT *", "SELECT COUNT(*)")
         total_count = conn.execute(count_query, params).fetchone()[0]
         
-        # 페이징 적용
-        query += " ORDER BY company_name LIMIT ? OFFSET ?"
+        # 페이징 적용 - 상시근로자 수 큰 순으로 정렬
+        query += " ORDER BY permanent_workers DESC NULLS LAST, company_name LIMIT ? OFFSET ?"
         params.extend([per_page, (page - 1) * per_page])
         
         partners = conn.execute(query, params).fetchall()

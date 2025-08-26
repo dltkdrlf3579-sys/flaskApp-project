@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}협력사 기준정보{% endblock %}
+{% block title %}기준정보 변경요청{% endblock %}
 {% block content %}
 <style>
 /* 전체 페이지 레이아웃 */
@@ -304,7 +304,7 @@
 </style>
 
 <div class="page-header">
-    <h2 class="page-title">협력사 기준정보</h2>
+    <h2 class="page-title">기준정보 변경요청</h2>
 </div>
 
 <!-- 검색 영역 -->
@@ -377,8 +377,8 @@
         </div>
         <div class="header-actions">
             <div class="action-buttons">
-                <button class="btn btn-sm btn-delete" onclick="deleteSelected()" style="display:none; background-color: #dc3545; color: white;">
-                    삭제
+                <button class="btn btn-sm btn-register" onclick="openRegisterModal()" style="background-color: #28a745; color: white;">
+                    ✏️ 변경요청 등록
                 </button>
                 <button class="btn btn-sm btn-excel-download" onclick="exportToExcel()">
                     <img src="/static/icons/excel-icon.png" style="vertical-align: middle; margin-right: 4px;" width="16" height="16">
@@ -409,33 +409,103 @@
                 </tr>
             </thead>
             <tbody>
-                {% for partner in partners %}
+                <!-- 변경요청 데이터는 동적으로 로드됩니다 -->
                 <tr>
-                    <td>
-                        <input type="checkbox" class="row-checkbox" value="{{ partner.business_number }}" onchange="updateDeleteButton()">
-                    </td>
-                    <td class="fixed-col">
-                        <a href="javascript:void(0)" class="company-link" onclick="openPartnerModal('{{ partner.business_number }}')">{{ partner.company_name }}</a>
-                    </td>
-                    <td>{{ partner.business_number }}</td>
-                    <td>{{ partner.transaction_count or '-' }}</td>
-                    <td>{{ partner.partner_class or '-' }}</td>
-                    <td>{{ partner.business_type_major or '-' }}</td>
-                    <td>{{ partner.business_type_minor or '-' }}</td>
-                    <td>{{ 'O' if partner.hazard_work_flag == 'O' else 'X' }}</td>
-                    <td>{{ partner.representative or '-' }}</td>
-                    <td>{{ partner.address or '-' }}</td>
-                    <td>{{ partner.average_age if partner.average_age else '-' }}</td>
-                    <td>{{ "{:,}".format(partner.annual_revenue // 100000000) if partner.annual_revenue else '-' }}억원</td>
-                    <td>{{ partner.permanent_workers if partner.permanent_workers else '-' }}명</td>
+                    <td colspan="13" class="no-data">등록된 변경요청이 없습니다.</td>
                 </tr>
-                {% else %}
-                <tr>
-                    <td colspan="13" class="no-data">검색 결과가 없습니다.</td>
-                </tr>
-                {% endfor %}
             </tbody>
         </table>
+    </div>
+</div>
+
+<!-- 변경요청 등록 모달 -->
+<div id="registerModal" class="modal" style="display: none;">
+    <div class="modal-overlay" onclick="closeRegisterModal()"></div>
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>기준정보 변경요청 등록</h3>
+            <button type="button" class="modal-close" onclick="closeRegisterModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="registerForm">
+                <div class="form-section">
+                    <h4>요청자 정보</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>의뢰자 성명 <span class="required">*</span></label>
+                            <div class="input-with-search">
+                                <input type="text" id="requester_name" name="requester_name" required placeholder="성명을 입력하세요">
+                                <button type="button" class="search-btn" onclick="openNameSearch()">🔍</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>소속부서 <span class="required">*</span></label>
+                            <div class="input-with-search">
+                                <input type="text" id="requester_department" name="requester_department" required placeholder="부서명을 입력하세요">
+                                <button type="button" class="search-btn" onclick="openDepartmentSearch()">🔍</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-section">
+                    <h4>대상 협력사 정보</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>변경요청 협력사명 <span class="required">*</span></label>
+                            <div class="input-with-search">
+                                <input type="text" id="company_name" name="company_name" required placeholder="협력사명을 입력하세요">
+                                <button type="button" class="search-btn" onclick="openCompanySearch()">🔍</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>사업자번호 <span class="required">*</span></label>
+                            <input type="text" id="business_number" name="business_number" required placeholder="사업자번호를 입력하세요" maxlength="10">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-section">
+                    <h4>변경 내용</h4>
+                    <div class="form-row">
+                        <div class="form-group full-width">
+                            <label>변경유형 <span class="required">*</span></label>
+                            <select id="change_type" name="change_type" required>
+                                <option value="">변경유형을 선택하세요</option>
+                                <option value="company_info">협력사 기본정보</option>
+                                <option value="business_type">업종정보</option>
+                                <option value="representative">대표자정보</option>
+                                <option value="contact">연락처정보</option>
+                                <option value="workers">근로자정보</option>
+                                <option value="financial">재무정보</option>
+                                <option value="certification">인증정보</option>
+                                <option value="other">기타</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>기존값 <span class="required">*</span></label>
+                            <textarea id="current_value" name="current_value" required placeholder="현재 설정된 값을 입력하세요" rows="3"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>변경값 <span class="required">*</span></label>
+                            <textarea id="new_value" name="new_value" required placeholder="변경하고자 하는 값을 입력하세요" rows="3"></textarea>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group full-width">
+                            <label>변경사유 <span class="required">*</span></label>
+                            <textarea id="change_reason" name="change_reason" required placeholder="변경이 필요한 사유를 상세히 입력하세요" rows="4"></textarea>
+                        </div>
+                    </div>
+                </div>
+            </form>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="closeRegisterModal()">취소</button>
+            <button type="button" class="btn-submit" onclick="submitRegister()">변경요청 등록</button>
+        </div>
     </div>
 </div>
 
@@ -800,6 +870,193 @@
     cursor: default;
 }
 
+/* 모달 스타일 */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1000;
+}
+.modal-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+}
+.modal-content {
+    position: relative;
+    background: white;
+    border-radius: 8px;
+    max-width: 800px;
+    width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+    margin: 5vh auto;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+.modal-header {
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.modal-header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #333;
+}
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: #666;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+}
+.modal-close:hover {
+    background: #f3f4f6;
+    color: #333;
+}
+.modal-body {
+    padding: 24px;
+}
+.modal-footer {
+    padding: 16px 24px 20px;
+    border-top: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+/* 폼 스타일 */
+.form-section {
+    margin-bottom: 32px;
+}
+.form-section:last-child {
+    margin-bottom: 0;
+}
+.form-section h4 {
+    margin: 0 0 16px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 8px;
+}
+.form-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+.form-row:last-child {
+    margin-bottom: 0;
+}
+.form-group {
+    flex: 1;
+}
+.form-group.full-width {
+    flex: 1 1 100%;
+}
+.form-group label {
+    display: block;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 6px;
+    font-size: 14px;
+}
+.form-group .required {
+    color: #e53e3e;
+}
+.form-group input,
+.form-group select,
+.form-group textarea {
+    width: 100%;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+.form-group input,
+.form-group select {
+    height: 40px;
+    padding: 0 12px;
+}
+.form-group textarea {
+    padding: 12px;
+    resize: vertical;
+    font-family: inherit;
+}
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+/* 검색 버튼이 있는 입력 필드 */
+.input-with-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+.input-with-search input {
+    padding-right: 40px !important;
+}
+.search-btn {
+    position: absolute;
+    right: 8px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    color: #666;
+    padding: 4px;
+    border-radius: 4px;
+}
+.search-btn:hover {
+    background: #f3f4f6;
+    color: #333;
+}
+
+/* 모달 버튼 */
+.btn-cancel,
+.btn-submit {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.btn-cancel {
+    background: #6b7280;
+    color: white;
+}
+.btn-cancel:hover {
+    background: #4b5563;
+}
+.btn-submit {
+    background: #2f5fd3;
+    color: white;
+}
+.btn-submit:hover {
+    background: #1e4bb8;
+}
+
 /* 반응형 */
 @media (max-width: 768px) {
     .search-fields {
@@ -829,6 +1086,32 @@
     .data-table th,
     .data-table td {
         padding: 8px 12px;
+    }
+    
+    /* 모달 반응형 */
+    .modal-content {
+        width: 95%;
+        margin: 2vh auto;
+        max-height: 96vh;
+    }
+    .form-row {
+        flex-direction: column;
+        gap: 12px;
+    }
+    .modal-header {
+        padding: 16px 20px 12px;
+    }
+    .modal-body {
+        padding: 20px;
+    }
+    .modal-footer {
+        padding: 12px 20px 16px;
+        flex-direction: column-reverse;
+    }
+    .btn-cancel,
+    .btn-submit {
+        width: 100%;
+        justify-content: center;
     }
 }
 </style>
@@ -1141,6 +1424,150 @@ function deleteSelected() {
         alert('삭제 중 오류가 발생했습니다.');
         console.error(error);
     });
+}
+
+// 변경요청 등록 모달 열기/닫기
+function openRegisterModal() {
+    document.getElementById('registerModal').style.display = 'block';
+    document.body.style.overflow = 'hidden'; // 배경 스크롤 방지
+}
+
+function closeRegisterModal() {
+    document.getElementById('registerModal').style.display = 'none';
+    document.body.style.overflow = ''; // 스크롤 복원
+    // 폼 초기화
+    document.getElementById('registerForm').reset();
+}
+
+// 검색 팝업 함수들 (공통 모듈 연동)
+function openNameSearch() {
+    // 담당자 검색 팝업 열기
+    const width = 800;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    // 담당자 검색 팝업 (추후 구현)
+    alert('담당자 검색 기능은 공통 모듈 연동 후 구현됩니다.');
+}
+
+function openDepartmentSearch() {
+    // 부서 검색 팝업 열기
+    const width = 800;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    // 부서 검색 팝업 (추후 구현)
+    alert('부서 검색 기능은 공통 모듈 연동 후 구현됩니다.');
+}
+
+function openCompanySearch() {
+    // 협력사 검색 팝업 열기
+    const width = 1200;
+    const height = 800;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    // 협력사 검색 팝업 (추후 구현)
+    alert('협력사 검색 기능은 공통 모듈 연동 후 구현됩니다.');
+}
+
+// 변경요청 등록 제출
+function submitRegister() {
+    const form = document.getElementById('registerForm');
+    
+    // 폼 유효성 검사
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+    
+    // 폼 데이터 수집
+    const formData = new FormData(form);
+    const data = {
+        requester_name: formData.get('requester_name'),
+        requester_department: formData.get('requester_department'),
+        company_name: formData.get('company_name'),
+        business_number: formData.get('business_number'),
+        change_type: formData.get('change_type'),
+        current_value: formData.get('current_value'),
+        new_value: formData.get('new_value'),
+        change_reason: formData.get('change_reason')
+    };
+    
+    // 서버에 변경요청 등록
+    fetch('/api/partner-change-request', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            alert('변경요청이 성공적으로 등록되었습니다.');
+            closeRegisterModal();
+            // 페이지 새로고침하여 목록 업데이트
+            location.reload();
+        } else {
+            alert('등록 실패: ' + (result.message || '알 수 없는 오류가 발생했습니다.'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('등록 중 오류가 발생했습니다.');
+    });
+}
+
+// ESC 키로 모달 닫기
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        const modal = document.getElementById('registerModal');
+        if (modal && modal.style.display === 'block') {
+            closeRegisterModal();
+        }
+    }
+});
+
+// 협력사 선택 시 사업자번호 자동 입력 (검색 팝업에서 호출될 함수)
+function selectCompany(companyName, businessNumber) {
+    document.getElementById('company_name').value = companyName;
+    document.getElementById('business_number').value = businessNumber;
+}
+
+// 담당자 선택 시 이름, 부서 자동 입력 (검색 팝업에서 호출될 함수)
+function selectEmployee(name, department) {
+    document.getElementById('requester_name').value = name;
+    document.getElementById('requester_department').value = department;
 }
 </script>
 {% endblock %}

@@ -58,7 +58,7 @@
                     </div>
                     <div class="info-cell">
                         <label>위험작업여부</label>
-                        <div class="value">{{ '예' if partner.hazard_work_flag == 'O' else '아니오' if partner.hazard_work_flag == 'X' else '-' }}</div>
+                        <div class="value">{{ 'O' if partner.hazard_work_flag == 'O' else 'X' }}</div>
                     </div>
                     <div class="info-cell">
                         <label>대표자성명</label>

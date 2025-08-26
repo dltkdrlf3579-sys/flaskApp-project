@@ -1,7 +1,7 @@
 import os
 import logging
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for
 from werkzeug.serving import run_simple
 from werkzeug.utils import secure_filename
 from config.menu import MENU_CONFIG
@@ -52,7 +52,24 @@ app.jinja_env.filters['from_json'] = from_json_filter
 
 DB_PATH = db_config.local_db_path
 PASSWORD = db_config.config.get('DEFAULT', 'EDIT_PASSWORD')
+ADMIN_PASSWORD = db_config.config.get('DEFAULT', 'ADMIN_PASSWORD')
 UPLOAD_FOLDER = db_config.config.get('DEFAULT', 'UPLOAD_FOLDER')
+
+# 관리자 인증 함수
+def require_admin_auth(f):
+    """관리자 인증이 필요한 함수에 사용하는 decorator"""
+    from functools import wraps
+    
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # 세션에서 관리자 인증 확인
+        if session.get('admin_authenticated') != True:
+            # 인증이 안된 경우 비밀번호 입력 페이지로 리다이렉트
+            return render_template('admin-login.html', 
+                                 redirect_url=request.url,
+                                 menu=MENU_CONFIG)
+        return f(*args, **kwargs)
+    return decorated_function
 
 # 드롭다운 코드 매핑
 DROPDOWN_MAPPINGS = {
@@ -83,6 +100,9 @@ logging.basicConfig(
 # Flask 템플릿 자동 리로드 설정
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+
+# Jinja2 템플릿 캐시 비우기
+app.jinja_env.cache = {}
 
 def init_db():
     """기본 설정 초기화 및 데이터 동기화"""
@@ -305,6 +325,11 @@ def partner_standards_route():
     """협력사 기준정보 페이지 라우트"""
     return partner_standards()
 
+@app.route("/partner-change-request")
+def partner_change_request_route():
+    """기준정보 변경요청 페이지 라우트"""
+    return partner_change_request()
+
 @app.route("/partner-accident")
 def partner_accident_route():
     """협력사 사고 페이지 라우트"""
@@ -406,6 +431,17 @@ def partner_standards():
                          total_count=total_count,
                          pagination=pagination,
                          menu=MENU_CONFIG)
+
+
+def partner_change_request():
+    """기준정보 변경요청 페이지"""
+    # 더미 페이지네이션 객체 생성 (실제 데이터 로딩 시 교체 예정)
+    class DummyPagination:
+        def __init__(self):
+            self.pages = 1
+    
+    pagination = DummyPagination()
+    return render_template('partner-change-request.html', menu=MENU_CONFIG, pagination=pagination, total_count=0)
 
 
 def partner_accident():
@@ -726,6 +762,7 @@ def partner_detail(business_number):
 @app.route("/accident-detail/<int:accident_id>")
 def accident_detail(accident_id):
     """사고 상세정보 페이지"""
+    print(f"[DEBUG] accident_detail 함수 호출됨: ID={accident_id}", flush=True)
     logging.info(f"사고 상세 정보 조회: {accident_id}")
     
     # 더미 데이터에서 해당 사고 찾기 (실제로는 DB에서 조회)
@@ -747,22 +784,34 @@ def accident_detail(accident_id):
         disaster_forms = ['낙하', '충돌', '전도']
         days_of_week = ['월', '화', '수', '목', '금', '토', '일']
         
+        # 새로운 필드 추가
+        major_categories = ['제조업', '건설업', 'IT업', '서비스업', '운수업']
+        location_categories = ['사무실', '생산현장', '창고', '야외', '기타']
+        
         dummy_accidents.append({
             'id': i + 1,
             'accident_number': accident_number,
             'accident_name': f'사고사례{i+1:03d}',
             'accident_date': accident_date_fixed,
             'accident_grade': grades[i % 3],
+            'major_category': major_categories[i % 5],  # 대분류 추가
             'accident_type': types[i % 4],
             'disaster_type': disaster_types[i % 2],
             'disaster_form': disaster_forms[i % 3],
+            'injury_form': disaster_forms[i % 3],  # 재해형태
+            'injury_type': disaster_types[i % 2],  # 재해유형
             'workplace': f'사업장{(i % 5) + 1}',
             'building': f'건물{(i % 10) + 1}',
             'floor': f'{(i % 20) + 1}층',
+            'location_category': location_categories[i % 5],  # 장소구분 추가
+            'location_detail': f'상세위치{i+1:03d}',  # 세부장소
             'detail_location': f'상세위치{i+1:03d}',
+            'report_date': accident_date_fixed,  # 등록일 추가
+            'accident_time': f'{9 + (i % 10):02d}:{(i * 5) % 60:02d}',  # 시간 -> accident_time으로 변경
             'time': f'{9 + (i % 10):02d}:{(i * 5) % 60:02d}',
             'day_of_week': days_of_week[i % 7],
             'accident_content': f'사고내용{i+1}에 대한 상세 설명입니다.',
+            'business_number': f'{1000000000 + i * 11111}',  # 사업자번호 추가
             'responsible_company_1': f'협력사{(i % 20) + 1}',
             'responsible_company_1_business_number': f'{1000000000 + i * 11111}',
             'responsible_company_2': f'협력사{(i % 15) + 1}' if i % 3 == 0 else None,
@@ -834,12 +883,21 @@ def accident_detail(accident_id):
         ORDER BY created_at DESC
     """, (accident['accident_number'],)).fetchall()
     
-    # Phase 2: 동적 컬럼 설정 가져오기
+    # Phase 2: 동적 컬럼 설정 가져오기 (추가정보 섹션용 - 기본정보 필드 제외)
+    # 기본정보 섹션에 이미 표시되는 필드들은 제외
+    basic_info_fields = [
+        'accident_number', 'accident_name', 'workplace', 'accident_grade',
+        'major_category', 'injury_form', 'injury_type', 'accident_date',
+        'day_of_week', 'report_date', 'building', 'floor',
+        'location_category', 'location_detail'
+    ]
+    
     dynamic_columns_rows = conn.execute("""
         SELECT * FROM accident_column_config 
         WHERE is_active = 1 
+        AND column_key NOT IN ({})
         ORDER BY column_order
-    """).fetchall()
+    """.format(','.join(['?'] * len(basic_info_fields))), basic_info_fields).fetchall()
     
     # Row 객체를 딕셔너리로 변환
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
@@ -859,11 +917,16 @@ def accident_detail(accident_id):
                 # 기존 JSON 방식 유지 (하위 호환성)
                 col['dropdown_options_mapped'] = None
     
-    # 딕셔너리를 객체처럼 사용할 수 있도록 변환
+    # 딕셔너리를 객체처럼 사용할 수 있도록 변환 (None 값 처리 개선)
     class DictAsAttr:
         def __init__(self, d):
+            self._data = d
             for k, v in d.items():
-                setattr(self, k, v)
+                setattr(self, k, v if v is not None else '')
+        
+        def __getattr__(self, name):
+            # 속성이 없으면 빈 문자열 반환
+            return self._data.get(name, '')
     
     # custom_data 파싱
     import json
@@ -876,12 +939,33 @@ def accident_detail(accident_id):
             logging.error(f"Error parsing custom_data: {e}")
             custom_data = {}
     
+    # 디버깅: 사고 데이터 확인
+    logging.info(f"사고 데이터: {accident}")
+    logging.info(f"accident_number: {accident.get('accident_number')}")
+    logging.info(f"accident_name: {accident.get('accident_name')}")
+    logging.info(f"accident_grade: {accident.get('accident_grade')}")
+    logging.info(f"major_category: {accident.get('major_category')}")
+    logging.info(f"injury_form: {accident.get('injury_form')}")
+    logging.info(f"injury_type: {accident.get('injury_type')}")
+    
     accident = DictAsAttr(accident)
     
     logging.info(f"사고 {accident_id} ({accident.accident_name}) 상세 페이지 로드")
     
     # 팝업 모드인지 확인
     is_popup = request.args.get('popup') == '1'
+    
+    # 템플릿 파일 경로 확인 (디버깅)
+    import os
+    template_path = os.path.join(app.template_folder, 'accident-detail.html')
+    print(f"[DEBUG] 렌더링할 템플릿 경로: {template_path}", flush=True)
+    print(f"[DEBUG] 템플릿 파일 존재: {os.path.exists(template_path)}", flush=True)
+    if os.path.exists(template_path):
+        with open(template_path, 'r', encoding='utf-8') as f:
+            first_100_lines = f.readlines()[:100]
+            for i, line in enumerate(first_100_lines):
+                if '기본정보' in line or '사고번호' in line or '대분류' in line:
+                    print(f"[DEBUG] 템플릿 라인 {i+1}: {line.strip()}", flush=True)
     
     return render_template('accident-detail.html', 
                          accident=accident,
@@ -1683,44 +1767,74 @@ def get_accident_columns():
         logging.error(f"컬럼 조회 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
+# 관리자 인증 라우트
+@app.route("/admin/login", methods=["POST"])
+def admin_login():
+    """관리자 비밀번호 인증 처리"""
+    password = request.form.get('password')
+    redirect_url = request.form.get('redirect_url', '/admin/menu-settings')
+    
+    if password == ADMIN_PASSWORD:
+        session['admin_authenticated'] = True
+        return redirect(redirect_url)
+    else:
+        return render_template('admin-login.html', 
+                             error='비밀번호가 틀렸습니다.',
+                             redirect_url=redirect_url,
+                             menu=MENU_CONFIG)
+
+@app.route("/admin/logout")
+def admin_logout():
+    """관리자 로그아웃"""
+    session.pop('admin_authenticated', None)
+    return redirect(url_for('index'))
+
 # 이 라우트는 아래에 더 완전한 버전이 있으므로 제거됨
 
 @app.route("/admin/accident-columns")
+@require_admin_auth
 def admin_accident_columns():
     """사고 컬럼 관리 페이지"""
     return render_template('admin-accident-columns.html', menu=MENU_CONFIG)
 
 @app.route("/admin/accident-columns-v2")
+@require_admin_auth
 def admin_accident_columns_v2():
     """사고 컬럼 관리 페이지 V2 - 코드 매핑 방식"""
     return render_template('admin-accident-columns-v2.html', menu=MENU_CONFIG)
 
 @app.route("/admin/accident-columns-v3")
+@require_admin_auth
 def admin_accident_columns_v3():
     """사고 컬럼 관리 페이지 V3 - 완전한 코드 매핑 시스템"""
     return render_template('admin-accident-columns-v3.html', menu=MENU_CONFIG)
 
 @app.route("/admin/accident-columns-enhanced")
+@require_admin_auth
 def admin_accident_columns_enhanced():
     """사고 컬럼 관리 페이지 Enhanced - Phase 2 고급 기능"""
     return render_template('admin-accident-columns-enhanced.html', menu=MENU_CONFIG)
 
 @app.route("/admin/accident-columns-simplified")
+@require_admin_auth
 def admin_accident_columns_simplified():
     """사고 컬럼 관리 페이지 Simplified - 간소화 버전"""
     return render_template('admin-accident-columns-simplified.html', menu=MENU_CONFIG)
 
 @app.route("/admin/menu-settings")
+@require_admin_auth
 def admin_menu_settings():
     """메뉴 설정 페이지"""
     return render_template('admin-menu-settings.html', menu=MENU_CONFIG)
 
 @app.route("/admin/permission-settings")
+@require_admin_auth
 def admin_permission_settings():
     """권한 설정 페이지"""
     return render_template('admin-permission-settings.html', menu=MENU_CONFIG)
 
 @app.route("/admin/data-management")
+@require_admin_auth
 def admin_data_management():
     """데이터 관리 페이지"""
     return render_template('admin-data-management.html', menu=MENU_CONFIG)
@@ -2014,99 +2128,184 @@ def api_search():
                 })
                 
         elif search_type == 'building':
-            # 건물 검색
-            if search_term:
-                if search_value == 'building_code':
-                    cursor.execute("""
-                        SELECT building_code, building_name
-                        FROM building_master
-                        WHERE building_code LIKE ?
-                        ORDER BY building_name
-                        LIMIT 50
-                    """, (f'%{search_term}%',))
+            # 건물 검색 - 외부 DB에서 조회
+            try:
+                from database_config import execute_SQL
+                
+                # config.ini에서 BUILDING_QUERY 가져오기
+                building_query = db_config.config.get('MASTER_DATA_QUERIES', 'BUILDING_QUERY')
+                
+                # 검색어 조건 추가
+                if search_term:
+                    if search_value == 'building_code':
+                        building_query += f" AND building_code LIKE '%{search_term}%'"
+                    else:
+                        building_query += f" AND building_name LIKE '%{search_term}%'"
+                
+                building_query += " ORDER BY building_name LIMIT 50"
+                
+                # 외부 DB에서 실행
+                df = execute_SQL(building_query)
+                
+                for _, row in df.iterrows():
+                    results.append({
+                        'building_code': row.get('building_code', ''),
+                        'building_name': row.get('building_name', '')
+                    })
+                    
+            except Exception as e:
+                logging.warning(f"외부 DB 건물 조회 실패, 로컬 DB 사용: {e}")
+                # 외부 DB 실패 시 로컬 DB 사용
+                if search_term:
+                    if search_value == 'building_code':
+                        cursor.execute("""
+                            SELECT building_code, building_name
+                            FROM building_master
+                            WHERE building_code LIKE ?
+                            ORDER BY building_name
+                            LIMIT 50
+                        """, (f'%{search_term}%',))
+                    else:
+                        cursor.execute("""
+                            SELECT building_code, building_name
+                            FROM building_master
+                            WHERE building_name LIKE ?
+                            ORDER BY building_name
+                            LIMIT 50
+                        """, (f'%{search_term}%',))
                 else:
                     cursor.execute("""
                         SELECT building_code, building_name
                         FROM building_master
-                        WHERE building_name LIKE ?
                         ORDER BY building_name
                         LIMIT 50
-                    """, (f'%{search_term}%',))
-            else:
-                cursor.execute("""
-                    SELECT building_code, building_name
-                    FROM building_master
-                    ORDER BY building_name
-                    LIMIT 50
-                """)
-            
-            for row in cursor.fetchall():
-                results.append({
-                    'building_code': row[0],
-                    'building_name': row[1]
-                })
+                    """)
+                
+                for row in cursor.fetchall():
+                    results.append({
+                        'building_code': row[0],
+                        'building_name': row[1]
+                    })
                 
         elif search_type == 'department':
-            # 부서 검색
-            if search_term:
-                if search_value == 'dept_code':
-                    cursor.execute("""
-                        SELECT d.dept_code, d.dept_name, 
-                               p.dept_name as parent_name, d.dept_level
-                        FROM department_master d
-                        LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
-                        WHERE d.dept_code LIKE ?
-                        ORDER BY d.dept_level, d.dept_name
-                        LIMIT 50
-                    """, (f'%{search_term}%',))
+            # 부서 검색 - 외부 DB에서 조회
+            try:
+                from database_config import execute_SQL
+                
+                # config.ini에서 DEPARTMENT_QUERY 가져오기
+                department_query = db_config.config.get('MASTER_DATA_QUERIES', 'DEPARTMENT_QUERY')
+                
+                # 검색어 조건 추가
+                if search_term:
+                    if search_value == 'dept_code':
+                        department_query += f" AND dept_code LIKE '%{search_term}%'"
+                    else:
+                        department_query += f" AND dept_name LIKE '%{search_term}%'"
+                
+                department_query += " ORDER BY dept_level, dept_name LIMIT 50"
+                
+                # 외부 DB에서 실행
+                df = execute_SQL(department_query)
+                
+                for _, row in df.iterrows():
+                    results.append({
+                        'dept_code': row.get('dept_code', ''),
+                        'dept_name': row.get('dept_name', ''),
+                        'parent_name': row.get('parent_dept_code', ''),  # 부모 부서코드를 이름으로 사용
+                        'dept_level': row.get('dept_level', 0)
+                    })
+                    
+            except Exception as e:
+                logging.warning(f"외부 DB 부서 조회 실패, 로컬 DB 사용: {e}")
+                # 외부 DB 실패 시 로컬 DB 사용
+                if search_term:
+                    if search_value == 'dept_code':
+                        cursor.execute("""
+                            SELECT d.dept_code, d.dept_name, 
+                                   p.dept_name as parent_name, d.dept_level
+                            FROM department_master d
+                            LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
+                            WHERE d.dept_code LIKE ?
+                            ORDER BY d.dept_level, d.dept_name
+                            LIMIT 50
+                        """, (f'%{search_term}%',))
+                    else:
+                        cursor.execute("""
+                            SELECT d.dept_code, d.dept_name, 
+                                   p.dept_name as parent_name, d.dept_level
+                            FROM department_master d
+                            LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
+                            WHERE d.dept_name LIKE ?
+                            ORDER BY d.dept_level, d.dept_name
+                            LIMIT 50
+                        """, (f'%{search_term}%',))
                 else:
                     cursor.execute("""
                         SELECT d.dept_code, d.dept_name, 
                                p.dept_name as parent_name, d.dept_level
                         FROM department_master d
                         LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
-                        WHERE d.dept_name LIKE ?
                         ORDER BY d.dept_level, d.dept_name
                         LIMIT 50
-                    """, (f'%{search_term}%',))
-            else:
-                cursor.execute("""
-                    SELECT d.dept_code, d.dept_name, 
-                           p.dept_name as parent_name, d.dept_level
-                    FROM department_master d
-                    LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
-                    ORDER BY d.dept_level, d.dept_name
-                    LIMIT 50
-                """)
-            
-            for row in cursor.fetchall():
-                results.append({
-                    'dept_code': row[0],
-                    'dept_name': row[1],
-                    'parent_name': row[2] or '',
-                    'dept_level': row[3] or 0
-                })
+                    """)
+                
+                for row in cursor.fetchall():
+                    results.append({
+                        'dept_code': row[0],
+                        'dept_name': row[1],
+                        'parent_name': row[2] or '',
+                        'dept_level': row[3] or 0
+                    })
                 
         elif search_type == 'contractor':
-            # 협력사 근로자 검색 (더미 데이터 - 사업자번호 하이픈 제거)
-            sample_contractors = [
-                {'worker_id': 'C001', 'worker_name': '김민수', 'company_name': '삼성건설', 'business_number': '1248100998'},
-                {'worker_id': 'C002', 'worker_name': '이철호', 'company_name': '대림산업', 'business_number': '1108114055'},
-                {'worker_id': 'C003', 'worker_name': '박영진', 'company_name': 'GS건설', 'business_number': '1048145271'},
-                {'worker_id': 'C004', 'worker_name': '최성훈', 'company_name': '현대건설', 'business_number': '1018116293'},
-                {'worker_id': 'C005', 'worker_name': '정미경', 'company_name': '롯데건설', 'business_number': '2148111745'},
-                {'worker_id': 'C006', 'worker_name': '홍길동', 'company_name': '포스코건설', 'business_number': '5068151224'},
-                {'worker_id': 'C007', 'worker_name': '김수연', 'company_name': 'SK건설', 'business_number': '1018143363'},
-                {'worker_id': 'C008', 'worker_name': '장민호', 'company_name': '두산건설', 'business_number': '1028144723'}
-            ]
-            
-            if search_term:
-                if search_value == 'worker_id':  # ID로 검색
-                    results = [c for c in sample_contractors if search_term.upper() in c['worker_id'].upper()]
-                else:  # name (이름으로 검색)
-                    results = [c for c in sample_contractors if search_term in c['worker_name']]
-            else:
-                results = sample_contractors
+            # 협력사 근로자 검색 - 외부 DB에서 조회
+            try:
+                from database_config import execute_SQL
+                
+                # config.ini에서 CONTRACTOR_QUERY 가져오기
+                contractor_query = db_config.config.get('MASTER_DATA_QUERIES', 'CONTRACTOR_QUERY')
+                
+                # 검색어 조건 추가
+                if search_term:
+                    if search_value == 'worker_id':
+                        contractor_query += f" AND worker_id LIKE '%{search_term}%'"
+                    else:
+                        contractor_query += f" AND worker_name LIKE '%{search_term}%'"
+                
+                contractor_query += " ORDER BY worker_name LIMIT 50"
+                
+                # 외부 DB에서 실행
+                df = execute_SQL(contractor_query)
+                
+                for _, row in df.iterrows():
+                    results.append({
+                        'worker_id': row.get('worker_id', ''),
+                        'worker_name': row.get('worker_name', ''),
+                        'company_name': row.get('company_name', ''),
+                        'business_number': row.get('business_number', '')
+                    })
+                    
+            except Exception as e:
+                logging.warning(f"외부 DB 협력사 근로자 조회 실패, 더미 데이터 사용: {e}")
+                # 외부 DB 실패 시 더미 데이터 사용
+                sample_contractors = [
+                    {'worker_id': 'C001', 'worker_name': '김민수', 'company_name': '삼성건설', 'business_number': '1248100998'},
+                    {'worker_id': 'C002', 'worker_name': '이철호', 'company_name': '대림산업', 'business_number': '1108114055'},
+                    {'worker_id': 'C003', 'worker_name': '박영진', 'company_name': 'GS건설', 'business_number': '1048145271'},
+                    {'worker_id': 'C004', 'worker_name': '최성훈', 'company_name': '현대건설', 'business_number': '1018116293'},
+                    {'worker_id': 'C005', 'worker_name': '정미경', 'company_name': '롯데건설', 'business_number': '2148111745'},
+                    {'worker_id': 'C006', 'worker_name': '홍길동', 'company_name': '포스코건설', 'business_number': '5068151224'},
+                    {'worker_id': 'C007', 'worker_name': '김수연', 'company_name': 'SK건설', 'business_number': '1018143363'},
+                    {'worker_id': 'C008', 'worker_name': '장민호', 'company_name': '두산건설', 'business_number': '1028144723'}
+                ]
+                
+                if search_term:
+                    if search_value == 'worker_id':  # ID로 검색
+                        results = [c for c in sample_contractors if search_term.upper() in c['worker_id'].upper()]
+                    else:  # name (이름으로 검색)
+                        results = [c for c in sample_contractors if search_term in c['worker_name']]
+                else:
+                    results = sample_contractors
         
         conn.close()
         return jsonify({'success': True, 'data': results})
@@ -3647,6 +3846,76 @@ def add_header(response):
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
     return response
+
+
+@app.route('/api/partner-change-request', methods=['POST'])
+def create_partner_change_request():
+    """기준정보 변경요청 등록 API"""
+    try:
+        data = request.get_json()
+        
+        # 필수 필드 검증
+        required_fields = ['requester_name', 'requester_department', 'company_name', 
+                          'business_number', 'change_type', 'current_value', 'new_value', 'change_reason']
+        
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({"success": False, "message": f"{field} 필드가 필요합니다."}), 400
+        
+        # DB 연결 및 테이블 생성
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # 변경요청 테이블 생성 (없을 경우)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS partner_change_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                requester_name TEXT NOT NULL,
+                requester_department TEXT NOT NULL,
+                company_name TEXT NOT NULL,
+                business_number TEXT NOT NULL,
+                change_type TEXT NOT NULL,
+                current_value TEXT NOT NULL,
+                new_value TEXT NOT NULL,
+                change_reason TEXT NOT NULL,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # 변경요청 데이터 삽입
+        cursor.execute("""
+            INSERT INTO partner_change_requests 
+            (requester_name, requester_department, company_name, business_number, 
+             change_type, current_value, new_value, change_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data['requester_name'],
+            data['requester_department'],
+            data['company_name'],
+            data['business_number'],
+            data['change_type'],
+            data['current_value'],
+            data['new_value'],
+            data['change_reason']
+        ))
+        
+        request_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "request_id": request_id,
+            "message": "변경요청이 성공적으로 등록되었습니다.",
+            "reload": True
+        })
+        
+    except Exception as e:
+        logging.error(f"변경요청 등록 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
 
 if __name__ == "__main__":
     print("Flask 앱 시작 중...", flush=True)
