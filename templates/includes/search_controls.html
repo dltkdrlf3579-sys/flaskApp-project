@@ -1,0 +1,167 @@
+{# 검색 컨트롤 공통 컴포넌트 #}
+{% macro render_search_buttons() %}
+<style>
+/* 검색 버튼 공통 스타일 */
+.search-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 24px;
+}
+
+.btn-reset, .btn-search {
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.btn-reset {
+    background: #6b7280;
+    color: white;
+}
+
+.btn-reset:hover {
+    background: #4b5563;
+}
+
+.btn-search {
+    background: #2f5fd3;
+    color: white;
+}
+
+.btn-search:hover {
+    background: #1d4ed8;
+}
+</style>
+
+<div class="search-buttons">
+    <button type="button" onclick="resetForm()" class="btn-reset">초기화</button>
+    <button type="button" onclick="validateAndSubmitSearch()" class="btn-search">검색</button>
+</div>
+
+<script>
+function resetForm() {
+    // 모든 input 초기화
+    document.querySelectorAll('.search-form input[type="text"]').forEach(input => {
+        input.value = '';
+    });
+    document.querySelectorAll('.search-form input[type="date"]').forEach(input => {
+        input.value = '';
+    });
+    document.querySelectorAll('.search-form input[type="number"]').forEach(input => {
+        input.value = '';
+    });
+    document.querySelectorAll('.search-form select').forEach(select => {
+        select.selectedIndex = 0;
+    });
+    
+    // 폼 제출
+    document.querySelector('.search-form').submit();
+}
+
+// 검색 검증 및 제출
+function validateAndSubmitSearch() {
+    // 모든 검색 input 필드 확인
+    const inputs = document.querySelectorAll('.search-form input[type="text"], .search-form input[type="date"], .search-form select');
+    let hasValue = false;
+    
+    inputs.forEach(input => {
+        if (input.value && input.value.trim() !== '') {
+            hasValue = true;
+        }
+    });
+    
+    if (!hasValue) {
+        alert('최소 하나 이상의 검색 조건을 입력해주세요.');
+        return;
+    }
+    
+    document.querySelector('.search-form').submit();
+}
+</script>
+{% endmacro %}
+
+{# 검색 섹션 전체 래퍼 #}
+{% macro render_search_section(content) %}
+<style>
+/* 검색 영역 공통 스타일 */
+.search-section {
+    background: #f8f9fa;
+    padding: 20px;
+    margin-bottom: 20px;
+    border-radius: 4px;
+    border: 1px solid #e5e7eb;
+}
+
+.search-form {
+    width: 100%;
+}
+
+.search-fields {
+    display: flex;
+    gap: 32px;
+    flex-wrap: wrap;
+}
+
+.search-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 0 0 auto;
+}
+
+.search-group label {
+    font-weight: 600;
+    color: #333;
+    font-size: 14px;
+    white-space: nowrap;
+    width: 80px;
+    flex-shrink: 0;
+    text-align: left;
+}
+
+/* 모든 입력 요소의 공통 스타일 */
+.search-group input[type="text"],
+.search-group input[type="date"],
+.search-group input[type="number"],
+.search-group select {
+    padding: 8px 12px;
+    height: 40px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+.search-group input[type="text"],
+.search-group input[type="number"] {
+    width: 200px;
+}
+
+.search-group input[type="date"] {
+    width: 150px;
+}
+
+.search-group select {
+    width: 200px;
+    background: white;
+    cursor: pointer;
+}
+
+.search-group input:focus,
+.search-group select:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 3px rgba(47, 95, 211, 0.1);
+}
+</style>
+
+<div class="search-section">
+    {{ content | safe }}
+</div>
+{% endmacro %}

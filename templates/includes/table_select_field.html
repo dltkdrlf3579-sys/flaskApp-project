@@ -1,0 +1,41 @@
+{# 테이블 선택 필드 공통 컴포넌트 #}
+{# 
+    Parameters:
+    - tables: 테이블 옵션 리스트 [{value, label}]
+    - selected_value: 선택된 값
+    - field_id: 필드 ID (기본: tableSelect)
+    - field_name: 필드 name (기본: table_key)
+    - required: 필수 여부 (기본: false)
+#}
+
+{% set field_id = field_id|default('tableSelect') %}
+{% set field_name = field_name|default('table_key') %}
+{% set required = required|default(false) %}
+
+<div class="mb-3" id="tableSelectField">
+    <label class="form-label" for="{{ field_id }}">
+        테이블 선택
+        {% if required %}<span class="text-danger">*</span>{% endif %}
+    </label>
+    
+    {% if tables and tables|length > 1 %}
+        {# 테이블이 여러 개인 경우 드롭다운 표시 #}
+        <select class="form-select" id="{{ field_id }}" name="{{ field_name }}" {% if required %}required{% endif %}>
+            <option value="">-- 선택 --</option>
+            {% for table in tables %}
+                <option value="{{ table.value }}" {% if table.value == selected_value %}selected{% endif %}>
+                    {{ table.label }}
+                </option>
+            {% endfor %}
+        </select>
+    {% elif tables and tables|length == 1 %}
+        {# 테이블이 하나인 경우 hidden 필드로 처리 #}
+        <input type="hidden" id="{{ field_id }}" name="{{ field_name }}" value="{{ tables[0].value }}">
+        <div class="form-control-plaintext">{{ tables[0].label }}</div>
+    {% else %}
+        {# 테이블이 없는 경우 #}
+        <div class="alert alert-warning">
+            사용 가능한 테이블이 없습니다.
+        </div>
+    {% endif %}
+</div>

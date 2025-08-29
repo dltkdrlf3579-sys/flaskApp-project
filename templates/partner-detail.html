@@ -110,48 +110,9 @@
         </div>
     </div>
 
-    <!-- 3. 첨부파일 영역 -->
-    <div class="section attachments-section">
-        <div class="section-header">
-            <h3 class="section-title">첨부파일</h3>
-            <button class="btn-add-file" onclick="document.getElementById('file-input').click();">추가</button>
-            <span class="file-count">총 <span id="file-count">{{ attachments|length }}</span>개</span>
-            <span class="file-size"><span id="file-size">{{ (attachments | sum(attribute='file_size') / 1024 / 1024) | round(2) }}</span> MB / 50 MB</span>
-        </div>
-        <div class="section-content">
-            <input type="file" id="file-input" multiple style="display: none;" onchange="handleFileUpload(this.files)">
-            <div class="attachments-table">
-                <div class="table-header">
-                    <div class="col-no">No.</div>
-                    <div class="col-file">파일명</div>
-                    <div class="col-desc">설명</div>
-                    <div class="col-action">상태</div>
-                </div>
-                <div class="table-body" id="attachments-tbody">
-                    {% for attachment in attachments %}
-                    <div class="table-row" data-id="{{ attachment.id }}">
-                        <div class="col-no">{{ loop.index }}</div>
-                        <div class="col-file">
-                            <span class="file-icon">📄</span>
-                            <a href="/download/{{ attachment.id }}" class="file-link" download>{{ attachment.file_name }}</a>
-                            <span class="file-size">({{ (attachment.file_size / 1024) | round(2) }} KB)</span>
-                        </div>
-                        <div class="col-desc">
-                            <input type="text" value="{{ attachment.description or '' }}" placeholder="설명을 입력하세요" class="attachment-desc">
-                        </div>
-                        <div class="col-action">
-                            <button class="btn-delete" onclick="deleteAttachment(this)">삭제</button>
-                        </div>
-                    </div>
-                    {% else %}
-                    <div class="table-row no-data" id="no-data-row">
-                        <div class="col-full">등록된 첨부파일이 없습니다.</div>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-        </div>
-    </div>
+    <!-- 3. 첨부파일 영역 (공통 컴포넌트) -->
+    {% from 'includes/attachment_section.html' import render_attachment_section %}
+    {{ render_attachment_section(attachments, 'partner') }}
 
     <!-- 저장 버튼 영역 -->
     <div class="save-section">
@@ -783,8 +744,7 @@
 </style>
 
 <script>
-let pendingFiles = [];
-let deletedAttachments = [];
+// 첨부파일 관련 변수는 공통 컴포넌트에서 정의됨
 
 // 페이지 로드 시 초기화
 
@@ -1151,4 +1111,9 @@ function saveChanges() {
     });
 }
 </script>
+
+<!-- 공통 첨부파일 스크립트와 스타일 import -->
+{% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
+{{ attachment_styles() }}
+{{ attachment_scripts() }}
 {% endblock %}

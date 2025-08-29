@@ -73,15 +73,9 @@
                             <select class="dynamic-input" data-column-key="{{ col.column_key }}">
                                 <option value="">선택하세요</option>
                                 {% if col.dropdown_options_mapped %}
-                                    {# 새로운 코드-값 매핑 방식 #}
+                                    {# 코드-값 매핑 방식 (DB dropdown_option_codes_v2 테이블 사용) #}
                                     {% for option in col.dropdown_options_mapped %}
                                         <option value="{{ option.code }}" {% if col_value == option.code %}selected{% endif %}>{{ option.value }}</option>
-                                    {% endfor %}
-                                {% elif col.dropdown_options %}
-                                    {# 기존 JSON 방식 (하위 호환성) #}
-                                    {% set options = col.dropdown_options | from_json %}
-                                    {% for option in options %}
-                                        <option value="{{ option }}" {% if col_value == option %}selected{% endif %}>{{ option }}</option>
                                     {% endfor %}
                                 {% endif %}
                             </select>
@@ -99,8 +93,7 @@
                                        data-column-key="{{ col.column_key }}"
                                        data-linked-dept=""
                                        value="{{ col_value.name if col_value is mapping else col_value }}"
-                                       placeholder="담당자 선택"
-                                       readonly>
+                                       placeholder="담당자 선택">
                                 <button class="btn-popup" onclick="openPersonPopup('{{ col.column_key }}')">선택</button>
                             </div>
                         
@@ -128,8 +121,7 @@
                                        class="dynamic-input popup-company" 
                                        data-column-key="{{ col.column_key }}"
                                        value="{{ col_value.name if col_value is mapping else col_value }}"
-                                       placeholder="업체 선택"
-                                       readonly>
+                                       placeholder="업체 선택">
                                 <button class="btn-popup" onclick="openCompanyPopup('{{ col.column_key }}')">선택</button>
                             </div>
                             
@@ -139,8 +131,7 @@
                                        class="dynamic-input popup-contractor" 
                                        data-column-key="{{ col.column_key }}"
                                        value="{{ col_value.name if col_value is mapping else col_value }}"
-                                       placeholder="협력사 근로자 선택"
-                                       readonly>
+                                       placeholder="협력사 근로자 선택">
                                 <button class="btn-popup" onclick="openContractorPopup('{{ col.column_key }}')">선택</button>
                             </div>
                             
@@ -197,20 +188,20 @@
                 <div id="detailed-content" 
                      class="editable-content" 
                      contenteditable="true" 
-                     placeholder="변경사유를 상세히 입력하세요.">{{ request_data.change_reason | safe if request_data.change_reason else '' }}</div>
+                     placeholder="변경사유를 상세히 입력하세요.">{{ request_data.detailed_content | safe if request_data.detailed_content else '' }}</div>
                 
                 <!-- 숨겨진 textarea (저장용) -->
-                <textarea id="detailed-content-hidden" style="display: none;">{{ request_data.change_reason or '' }}</textarea>
+                <textarea id="detailed-content-hidden" style="display: none;">{{ request_data.detailed_content or '' }}</textarea>
             </div>
         </div>
     </div>
 
-    <!-- 5. 첨부파일 영역 -->
+    <!-- 4. 첨부파일 영역 -->
     <div class="section attachments-section">
         <div class="section-header">
             <h3 class="section-title">첨부파일</h3>
             <button class="btn-add-file" onclick="document.getElementById('file-input').click();">추가</button>
-            <span class="file-count">총 <span id="file-count">0</span>개</span>
+            <span class="file-count">총 <span id="file-count">{{ attachments|length if attachments else 0 }}</span>개</span>
             <span class="file-size"><span id="file-size">0</span> MB / 50 MB</span>
         </div>
         <div class="section-content">
@@ -223,9 +214,28 @@
                     <div class="col-action">상태</div>
                 </div>
                 <div class="table-body" id="attachments-tbody">
-                    <div class="table-row no-data" id="no-data-row">
-                        <div class="col-full">등록된 첨부파일이 없습니다.</div>
-                    </div>
+                    {% if attachments %}
+                        {% for attachment in attachments %}
+                        <div class="table-row" data-id="{{ attachment.id }}">
+                            <div class="col-no">{{ loop.index }}</div>
+                            <div class="col-file">
+                                <span class="file-icon">📄</span>
+                                <a href="/download-attachment/change_request/{{ attachment.id }}" class="file-link" download>{{ attachment.file_name }}</a>
+                                <span class="file-size">({{ (attachment.file_size / 1024) | round(2) }} KB)</span>
+                            </div>
+                            <div class="col-desc">
+                                <input type="text" class="attachment-desc" value="{{ attachment.description or '' }}" placeholder="설명을 입력하세요">
+                            </div>
+                            <div class="col-action">
+                                <button class="btn-delete" onclick="deleteAttachment(this)">삭제</button>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="table-row no-data" id="no-data-row">
+                            <div class="col-full">등록된 첨부파일이 없습니다.</div>
+                        </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -894,6 +904,7 @@
 </style>
 
 <script>
+// 전역 변수
 let pendingFiles = [];
 let deletedAttachments = [];
 
@@ -910,6 +921,7 @@ function toggleSection(sectionId) {
     }
 }
 
+// 첨부파일 처리 함수
 function handleFileUpload(files) {
     const tbody = document.getElementById('attachments-tbody');
     const noDataRow = document.getElementById('no-data-row');
@@ -976,8 +988,35 @@ function updateRowNumbers() {
     const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
     rows.forEach((row, index) => {
         const noCell = row.querySelector('.col-no');
-        noCell.textContent = index + 1;
+        if (noCell) {
+            noCell.textContent = index + 1;
+        }
     });
+}
+
+// 페이지 로드시 첨부파일 정보 초기화
+document.addEventListener('DOMContentLoaded', function() {
+    updateFileInfo();
+});
+
+function updateFileInfo() {
+    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
+    const fileCount = rows.length;
+    
+    // 기존 파일 크기 계산
+    let totalSize = 0;
+    rows.forEach(row => {
+        const sizeText = row.querySelector('.file-size');
+        if (sizeText) {
+            const sizeMatch = sizeText.textContent.match(/\(([\d.]+)\s*KB\)/);
+            if (sizeMatch) {
+                totalSize += parseFloat(sizeMatch[1]) / 1024; // KB를 MB로 변환
+            }
+        }
+    });
+    
+    document.getElementById('file-count').textContent = fileCount;
+    document.getElementById('file-size').textContent = totalSize.toFixed(2);
 }
 
 function showPasswordModal() {
@@ -1071,8 +1110,10 @@ function saveChanges() {
     
     // FormData 생성
     const formData = new FormData();
-    formData.append('request_id', requestId);
-    formData.append('approval_comments', detailedContent);
+    formData.append('request_id', requestId);  // ID로 전송
+    formData.append('request_number', '{{ request_data.request_number }}');  // 실제 request_number 전송
+    formData.append('change_content', '');  // 변경내용 (필요시 추가)
+    formData.append('detailed_content', detailedContent);  // detailed_content로 변경
     formData.append('custom_data', JSON.stringify(customData));
     formData.append('deleted_attachments', JSON.stringify(deletedAttachments));
     formData.append('attachment_data', JSON.stringify(attachments));
@@ -1102,8 +1143,10 @@ function saveChanges() {
             }
             {% endif %}
             
-            // 현재 창 새로고침
-            location.reload();
+            // 약간의 지연 후 현재 창 새로고침 (캐시 무시)
+            setTimeout(() => {
+                window.location.href = window.location.href + '&t=' + new Date().getTime();
+            }, 100);
         } else {
             alert('수정 중 오류가 발생했습니다: ' + data.message);
         }
@@ -1138,6 +1181,260 @@ function updateFileInfo() {
     document.getElementById('file-count').textContent = fileCount;
     document.getElementById('file-size').textContent = totalSize.toFixed(2);
 }
+
+// 담당자 검색 팝업 열기
+function openPersonPopup(columnKey) {
+    const width = 800;
+    const height = 600;
+    const left = (window.screen.width - width) / 2;
+    const top = (window.screen.height - height) / 2;
+    
+    // 콜백 함수명을 전역으로 생성
+    window.currentColumnKey = columnKey;
+    
+    const popup = window.open(
+        `/search-popup?type=person&callback=handlePersonSelection`,
+        'personSearchPopup',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+    );
+    
+    if (!popup) {
+        alert('팝업 차단이 감지되었습니다. 팝업을 허용해주세요.');
+    }
+}
+
+// 업체 검색 팝업 열기
+function openCompanyPopup(columnKey) {
+    const width = 800;
+    const height = 600;
+    const left = (window.screen.width - width) / 2;
+    const top = (window.screen.height - height) / 2;
+    
+    // 콜백 함수명을 전역으로 생성
+    window.currentColumnKey = columnKey;
+    
+    const popup = window.open(
+        `/search-popup?type=company&callback=handleCompanySelection`,
+        'companySearchPopup',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+    );
+    
+    if (!popup) {
+        alert('팝업 차단이 감지되었습니다. 팝업을 허용해주세요.');
+    }
+}
+
+// 담당자 선택 콜백
+function handlePersonSelection(selectedItem) {
+    if (!selectedItem || !window.currentColumnKey) return;
+    
+    console.log('Selected person:', selectedItem); // 디버깅용
+    
+    // 해당 컬럼의 input 찾기
+    const input = document.querySelector(`input[data-column-key="${window.currentColumnKey}"]`);
+    if (input) {
+        // 담당자 정보 표시 (이름 / ID 형식으로 변경)
+        const employeeId = selectedItem.employee_id || '';
+        const displayText = selectedItem.name + (employeeId ? ` / ${employeeId}` : '');
+        input.value = displayText;
+        
+        // 실제 저장할 데이터는 data 속성에 저장
+        input.dataset.personId = selectedItem.id || '';
+        input.dataset.personName = selectedItem.name || '';
+        input.dataset.personEmployeeId = employeeId;
+        
+        // linked-dept 컬럼 찾아서 업데이트
+        const linkedDeptKeys = {
+            'requester': 'requester_department',
+            'req_name': 'req_name_dept',
+            'reqname': 'reqname_dept'
+        };
+        
+        // 현재 컬럼 키에 대응하는 부서 키 찾기
+        let linkedKey = null;
+        for (const [personKey, deptKey] of Object.entries(linkedDeptKeys)) {
+            if (window.currentColumnKey === personKey || window.currentColumnKey.startsWith(personKey)) {
+                linkedKey = deptKey;
+                break;
+            }
+        }
+        
+        // 부서 정보 업데이트
+        if (linkedKey) {
+            const linkedInput = document.querySelector(`input[data-column-key="${linkedKey}"]`);
+            if (linkedInput && selectedItem.department) {
+                linkedInput.value = selectedItem.department;
+            }
+        }
+        
+        // input 이벤트 발생시켜 변경사항 감지
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+}
+
+// 업체 선택 콜백
+function handleCompanySelection(selectedItem) {
+    if (!selectedItem || !window.currentColumnKey) return;
+    
+    // 해당 컬럼의 input 찾기
+    const input = document.querySelector(`input[data-column-key="${window.currentColumnKey}"]`);
+    if (input) {
+        // 업체명 표시
+        input.value = selectedItem.company_name || '';
+        
+        // 실제 저장할 데이터는 data 속성에 저장
+        input.dataset.companyId = selectedItem.id || '';
+        input.dataset.companyName = selectedItem.company_name || '';
+        input.dataset.businessNumber = selectedItem.business_number || '';
+        
+        // 사업자번호 컬럼이 있으면 업데이트
+        const bizNoInput = document.querySelector('input[data-column-key="business_number"]');
+        if (bizNoInput && selectedItem.business_number) {
+            bizNoInput.value = selectedItem.business_number;
+        }
+        
+        // input 이벤트 발생시켜 변경사항 감지
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+}
+
+// 협력사 근로자 검색 팝업 열기
+function openContractorPopup(columnKey) {
+    const width = 800;
+    const height = 600;
+    const left = (window.screen.width - width) / 2;
+    const top = (window.screen.height - height) / 2;
+    
+    // 콜백 함수명을 전역으로 생성
+    window.currentColumnKey = columnKey;
+    
+    const popup = window.open(
+        `/search-popup?type=contractor&callback=handleContractorSelection`,
+        'contractorSearchPopup',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+    );
+    
+    if (!popup) {
+        alert('팝업 차단이 감지되었습니다. 팝업을 허용해주세요.');
+    }
+}
+
+// 협력사 근로자 선택 콜백
+function handleContractorSelection(selectedItem) {
+    if (!selectedItem || !window.currentColumnKey) return;
+    
+    // 해당 컬럼의 input 찾기
+    const input = document.querySelector(`input[data-column-key="${window.currentColumnKey}"]`);
+    if (input) {
+        // 성함만 표시
+        input.value = selectedItem.worker_name || '';
+        
+        // 실제 저장할 데이터는 data 속성에 저장
+        input.dataset.contractorId = selectedItem.id || '';
+        input.dataset.contractorName = selectedItem.worker_name || '';
+        input.dataset.companyName = selectedItem.company_name || '';
+        
+        // 회사명 컬럼이 있으면 업데이트
+        const companyNameCols = ['partner_company', 'contractor_company', 'vendor_company'];
+        for (const colKey of companyNameCols) {
+            const companyInput = document.querySelector(`input[data-column-key="${colKey}"]`);
+            if (companyInput && selectedItem.company_name) {
+                companyInput.value = selectedItem.company_name;
+                break;
+            }
+        }
+        
+        // input 이벤트 발생시켜 변경사항 감지
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+}
+
+// 건물 검색 팝업 열기
+function openBuildingPopup(columnKey) {
+    const width = 800;
+    const height = 600;
+    const left = (window.screen.width - width) / 2;
+    const top = (window.screen.height - height) / 2;
+    
+    // 콜백 함수명을 전역으로 생성
+    window.currentColumnKey = columnKey;
+    
+    const popup = window.open(
+        `/search-popup?type=building&callback=handleBuildingSelection`,
+        'buildingSearchPopup',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+    );
+    
+    if (!popup) {
+        alert('팝업 차단이 감지되었습니다. 팝업을 허용해주세요.');
+    }
+}
+
+// 건물 선택 콜백
+function handleBuildingSelection(selectedItem) {
+    if (!selectedItem || !window.currentColumnKey) return;
+    
+    // 해당 컬럼의 input 찾기
+    const input = document.querySelector(`input[data-column-key="${window.currentColumnKey}"]`);
+    if (input) {
+        // 건물명 표시
+        input.value = selectedItem.building_name || '';
+        
+        // 실제 저장할 데이터는 data 속성에 저장
+        input.dataset.buildingId = selectedItem.id || '';
+        input.dataset.buildingName = selectedItem.building_name || '';
+        input.dataset.buildingCode = selectedItem.building_code || '';
+        
+        // input 이벤트 발생시켜 변경사항 감지
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+}
+
+// 부서 검색 팝업 열기
+function openDepartmentPopup(columnKey) {
+    const width = 800;
+    const height = 600;
+    const left = (window.screen.width - width) / 2;
+    const top = (window.screen.height - height) / 2;
+    
+    // 콜백 함수명을 전역으로 생성
+    window.currentColumnKey = columnKey;
+    
+    const popup = window.open(
+        `/search-popup?type=department&callback=handleDepartmentSelection`,
+        'departmentSearchPopup',
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+    );
+    
+    if (!popup) {
+        alert('팝업 차단이 감지되었습니다. 팝업을 허용해주세요.');
+    }
+}
+
+// 부서 선택 콜백
+function handleDepartmentSelection(selectedItem) {
+    if (!selectedItem || !window.currentColumnKey) return;
+    
+    // 해당 컬럼의 input 찾기
+    const input = document.querySelector(`input[data-column-key="${window.currentColumnKey}"]`);
+    if (input) {
+        // 부서명 표시
+        input.value = selectedItem.dept_name || '';
+        
+        // 실제 저장할 데이터는 data 속성에 저장
+        input.dataset.departmentId = selectedItem.id || '';
+        input.dataset.departmentName = selectedItem.dept_name || '';
+        input.dataset.departmentCode = selectedItem.dept_code || '';
+        
+        // input 이벤트 발생시켜 변경사항 감지
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+}
 </script>
+
+<!-- 공통 첨부파일 스크립트와 스타일 import -->
+{% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
+{{ attachment_styles() }}
+{{ attachment_scripts() }}
 
 {% endblock %}

@@ -1,0 +1,104 @@
+{
+  "board": "partner_standards",
+  "display_name": "협력사 기준정보",
+  "columns": [
+    {
+      "key": "company_name",
+      "name": "협력사명",
+      "type": "text",
+      "order": 1,
+      "active": true,
+      "required": true,
+      "table_display": true
+    },
+    {
+      "key": "business_number",
+      "name": "사업자번호",
+      "type": "text",
+      "order": 2,
+      "active": true,
+      "required": true,
+      "table_display": true
+    },
+    {
+      "key": "transaction_count",
+      "name": "거래차수",
+      "type": "text",
+      "order": 3,
+      "active": true,
+      "table_display": true
+    },
+    {
+      "key": "partner_class",
+      "name": "Class",
+      "type": "text",
+      "order": 4,
+      "active": true,
+      "table_display": true
+    },
+    {
+      "key": "business_type_major",
+      "name": "업종(대분류)",
+      "type": "text",
+      "order": 5,
+      "active": true,
+      "table_display": true
+    },
+    {
+      "key": "business_type_minor",
+      "name": "업종(소분류)",
+      "type": "text",
+      "order": 6,
+      "active": true,
+      "table_display": true
+    },
+    {
+      "key": "hazard_work_flag",
+      "name": "위험작업여부",
+      "type": "dropdown",
+      "order": 7,
+      "active": true,
+      "table_display": true
+    },
+    {
+      "key": "representative",
+      "name": "대표자성명",
+      "type": "text",
+      "order": 8,
+      "active": true,
+      "table_display": true
+    },
+    {
+      "key": "address",
+      "name": "주소",
+      "type": "text",
+      "order": 9,
+      "active": true,
+      "table_display": true
+    },
+    {
+      "key": "average_age",
+      "name": "평균연령",
+      "type": "number",
+      "order": 10,
+      "active": true,
+      "table_display": true
+    },
+    {
+      "key": "annual_revenue",
+      "name": "매출액",
+      "type": "number",
+      "order": 11,
+      "active": true,
+      "table_display": true
+    },
+    {
+      "key": "permanent_workers",
+      "name": "상시근로자",
+      "type": "number",
+      "order": 12,
+      "active": true,
+      "table_display": true
+    }
+  ]
+}

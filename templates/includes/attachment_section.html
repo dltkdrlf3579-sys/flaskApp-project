@@ -1,0 +1,216 @@
+<!-- 공통 첨부파일 섹션 템플릿 -->
+{% macro render_attachment_section(attachments, board_type) %}
+<div class="section attachments-section">
+    <div class="section-header">
+        <h3 class="section-title">첨부파일</h3>
+        <button class="btn-add-file" onclick="document.getElementById('file-input').click();">추가</button>
+        <span class="file-count">총 <span id="file-count">{{ attachments|length if attachments else 0 }}</span>개</span>
+        <span class="file-size"><span id="file-size">0</span> MB / 50 MB</span>
+    </div>
+    <div class="section-content">
+        <input type="file" id="file-input" multiple style="display: none;" onchange="handleFileUpload(this.files)">
+        <div class="attachments-table">
+            <div class="table-header">
+                <div class="col-no">No.</div>
+                <div class="col-file">파일명</div>
+                <div class="col-desc">설명</div>
+                <div class="col-action">상태</div>
+            </div>
+            <div class="table-body" id="attachments-tbody">
+                {% if attachments %}
+                    {% for attachment in attachments %}
+                    <div class="table-row" data-id="{{ attachment.id }}" data-board="{{ board_type }}">
+                        <div class="col-no">{{ loop.index }}</div>
+                        <div class="col-file">
+                            <span class="file-icon">📄</span>
+                            <a href="/download-attachment/{{ board_type }}/{{ attachment.id }}" class="file-link" download>{{ attachment.file_name }}</a>
+                            <span class="file-size">({{ (attachment.file_size / 1024) | round(2) }} KB)</span>
+                        </div>
+                        <div class="col-desc">
+                            <input type="text" class="attachment-desc" value="{{ attachment.description or '' }}" placeholder="설명을 입력하세요">
+                        </div>
+                        <div class="col-action">
+                            <button class="btn-delete" onclick="markFileForDeletion(this)" title="삭제">🗑️</button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="table-row no-data" id="no-data-row">
+                        <div class="col-full">등록된 첨부파일이 없습니다.</div>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endmacro %}
+
+<!-- 공통 첨부파일 스타일 -->
+{% macro attachment_styles() %}
+<style>
+.attachments-table .btn-delete {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 2px 6px;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+.attachments-table .btn-delete:hover {
+    opacity: 1;
+}
+
+.attachments-table .file-link {
+    color: #2f5fd3;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.attachments-table .file-link:hover {
+    text-decoration: underline;
+}
+
+.attachments-table .file-size {
+    color: #666;
+    font-size: 12px;
+    margin-left: 5px;
+}
+
+.attachments-table .col-action {
+    width: 60px;
+    text-align: center;
+}
+</style>
+{% endmacro %}
+
+<!-- 공통 첨부파일 JavaScript -->
+{% macro attachment_scripts() %}
+<script>
+// 전역 변수
+let pendingFiles = [];
+let deletedAttachments = [];
+
+function handleFileUpload(files) {
+    const tbody = document.getElementById('attachments-tbody');
+    const noDataRow = document.getElementById('no-data-row');
+    
+    if (noDataRow) {
+        noDataRow.remove();
+    }
+    
+    Array.from(files).forEach((file, index) => {
+        const newRow = document.createElement('div');
+        newRow.className = 'table-row';
+        newRow.dataset.isNew = 'true';
+        
+        const rowCount = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)').length + 1;
+        const fileSize = `(${(file.size / 1024).toFixed(2)} KB)`;
+        
+        newRow.innerHTML = `
+            <div class="col-no">${rowCount}</div>
+            <div class="col-file">
+                <span class="file-icon">📄</span>
+                <span class="file-link">${file.name}</span>
+                <span class="file-size">${fileSize}</span>
+            </div>
+            <div class="col-desc">
+                <input type="text" class="attachment-desc" placeholder="설명을 입력하세요">
+            </div>
+            <div class="col-action">
+                <button class="btn-delete" onclick="removeNewFile(this, ${pendingFiles.length})" title="취소">🗑️</button>
+            </div>
+        `;
+        
+        tbody.appendChild(newRow);
+        pendingFiles.push(file);
+    });
+    
+    updateFileCount();
+    updateFileSize();
+    document.getElementById('file-input').value = '';
+}
+
+function markFileForDeletion(button) {
+    const row = button.closest('.table-row');
+    const attachmentId = row.dataset.id;
+    
+    if (attachmentId && !row.dataset.isNew) {
+        deletedAttachments.push(parseInt(attachmentId));
+    }
+    
+    row.remove();
+    updateRowNumbers();
+    updateFileCount();
+    
+    // 파일이 모두 삭제된 경우
+    const tbody = document.getElementById('attachments-tbody');
+    if (tbody.children.length === 0) {
+        tbody.innerHTML = '<div class="table-row no-data" id="no-data-row"><div class="col-full">등록된 첨부파일이 없습니다.</div></div>';
+    }
+}
+
+function removeNewFile(button, fileIndex) {
+    const row = button.closest('.table-row');
+    pendingFiles.splice(fileIndex, 1);
+    row.remove();
+    updateRowNumbers();
+    updateFileCount();
+    
+    const tbody = document.getElementById('attachments-tbody');
+    if (tbody.children.length === 0) {
+        tbody.innerHTML = '<div class="table-row no-data" id="no-data-row"><div class="col-full">등록된 첨부파일이 없습니다.</div></div>';
+    }
+}
+
+function updateFileCount() {
+    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
+    document.getElementById('file-count').textContent = rows.length;
+}
+
+function updateRowNumbers() {
+    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
+    rows.forEach((row, index) => {
+        const noCell = row.querySelector('.col-no');
+        if (noCell) {
+            noCell.textContent = index + 1;
+        }
+    });
+}
+
+function updateFileSize() {
+    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
+    let totalSize = 0;
+    
+    // 기존 파일 크기 계산
+    rows.forEach(row => {
+        const sizeText = row.querySelector('.file-size')?.textContent || '(0 KB)';
+        const sizeMatch = sizeText.match(/\(([\d.]+)\s*KB\)/);
+        if (sizeMatch) {
+            totalSize += parseFloat(sizeMatch[1]) * 1024; // KB to bytes
+        }
+    });
+    
+    // 새로 추가된 파일 크기
+    pendingFiles.forEach(file => {
+        totalSize += file.size;
+    });
+    
+    // MB로 변환
+    const totalSizeMB = (totalSize / (1024 * 1024)).toFixed(2);
+    
+    // UI 업데이트
+    const sizeElement = document.getElementById('file-size');
+    if (sizeElement) {
+        sizeElement.textContent = totalSizeMB;
+    }
+}
+
+// 페이지 로드시 파일 개수와 크기 업데이트
+document.addEventListener('DOMContentLoaded', function() {
+    updateFileCount();
+    updateFileSize();
+});
+</script>
+{% endmacro %}

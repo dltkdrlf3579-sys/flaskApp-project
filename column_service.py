@@ -1,0 +1,369 @@
+"""
+동적 컬럼 관리 공통 서비스
+모든 보드의 동적 컬럼 설정을 통합 관리
+"""
+import sqlite3
+import json
+import logging
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+from db_connection import get_db_connection
+
+class ColumnConfigService:
+    """동적 컬럼 설정 관리 서비스"""
+    
+    def __init__(self, board_type: str, db_path: str):
+        """
+        Args:
+            board_type: 보드 타입 (accident, safety_instruction, change_request)
+            db_path: 데이터베이스 경로
+        """
+        self.board_type = board_type
+        self.db_path = db_path
+        self.table_name = f"{board_type}_column_config"
+        self.data_table = self._get_data_table_name()
+        
+        # 테이블 생성 (없으면)
+        self._ensure_tables_exist()
+    
+    
+    def _get_data_table_name(self) -> str:
+        """보드별 데이터 테이블명 반환"""
+        table_map = {
+            'accident': 'accidents_cache',
+            'safety_instruction': 'safety_instructions',
+            'change_request': 'change_requests',
+            'partner_standards': 'partner_standards'
+        }
+        return table_map.get(self.board_type, f"{self.board_type}s")
+    
+    def _ensure_tables_exist(self):
+        """필요한 테이블 생성"""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        
+        # 컬럼 설정 테이블
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS {self.table_name} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                column_key TEXT UNIQUE NOT NULL,
+                column_name TEXT NOT NULL,
+                column_type TEXT NOT NULL,
+                column_order INTEGER DEFAULT 999,
+                is_active INTEGER DEFAULT 1,
+                is_required INTEGER DEFAULT 0,
+                dropdown_values TEXT,  -- JSON 형식
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # 데이터 테이블에 custom_data 컬럼 추가 (없으면)
+        cursor.execute(f"""
+            SELECT COUNT(*) FROM pragma_table_info('{self.data_table}') 
+            WHERE name='custom_data'
+        """)
+        
+        if cursor.fetchone()[0] == 0:
+            cursor.execute(f"""
+                ALTER TABLE {self.data_table} 
+                ADD COLUMN custom_data TEXT DEFAULT '{{}}'
+            """)
+        
+        conn.commit()
+        conn.close()
+    
+    def list_columns(self, active_only: bool = False) -> List[Dict[str, Any]]:
+        """
+        컬럼 목록 조회
+        
+        Args:
+            active_only: True면 활성 컬럼만 조회
+        
+        Returns:
+            컬럼 설정 리스트
+        """
+        conn = get_db_connection(self.db_path, row_factory=True)
+        
+        query = f"SELECT * FROM {self.table_name}"
+        if active_only:
+            query += " WHERE is_active = 1"
+        query += " ORDER BY column_order, id"
+        
+        columns = conn.execute(query).fetchall()
+        conn.close()
+        
+        result = []
+        for col in columns:
+            column_dict = dict(col)
+            # dropdown_values JSON 파싱
+            if column_dict.get('dropdown_values'):
+                try:
+                    column_dict['dropdown_values'] = json.loads(column_dict['dropdown_values'])
+                except json.JSONDecodeError:
+                    column_dict['dropdown_values'] = []
+            result.append(column_dict)
+        
+        return result
+    
+    def get_column(self, column_id: int) -> Optional[Dict[str, Any]]:
+        """
+        특정 컬럼 조회
+        
+        Args:
+            column_id: 컬럼 ID
+        
+        Returns:
+            컬럼 정보 또는 None
+        """
+        conn = get_db_connection(self.db_path, row_factory=True)
+        
+        column = conn.execute(
+            f"SELECT * FROM {self.table_name} WHERE id = ?", 
+            (column_id,)
+        ).fetchone()
+        conn.close()
+        
+        if column:
+            column_dict = dict(column)
+            if column_dict.get('dropdown_values'):
+                try:
+                    column_dict['dropdown_values'] = json.loads(column_dict['dropdown_values'])
+                except json.JSONDecodeError:
+                    column_dict['dropdown_values'] = []
+            return column_dict
+        
+        return None
+    
+    def add_column(self, column_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        컬럼 추가
+        
+        Args:
+            column_data: 컬럼 정보
+        
+        Returns:
+            추가된 컬럼 정보
+        """
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            # 트랜잭션 시작
+            conn.execute("BEGIN IMMEDIATE")
+            
+            # column_key 자동 생성 (필요시)
+            column_key = column_data.get('column_key')
+            if not column_key:
+                cursor.execute(
+                    f"SELECT MAX(CAST(SUBSTR(column_key, 7) AS INTEGER)) FROM {self.table_name} WHERE column_key LIKE 'column%'"
+                )
+                max_num = cursor.fetchone()[0] or 10
+                column_key = f"column{max_num + 1}"
+            
+            # 최대 순서 조회
+            cursor.execute(f"SELECT MAX(column_order) FROM {self.table_name}")
+            max_order = cursor.fetchone()[0] or 0
+            
+            # dropdown_values JSON 변환
+            dropdown_values = column_data.get('dropdown_values', [])
+            if isinstance(dropdown_values, list):
+                dropdown_values = json.dumps(dropdown_values, ensure_ascii=False)
+            
+            # 컬럼 추가
+            cursor.execute(f"""
+                INSERT INTO {self.table_name} 
+                (column_key, column_name, column_type, column_order, is_active, 
+                 is_required, dropdown_values)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                column_key,
+                column_data['column_name'],
+                column_data.get('column_type', 'text'),
+                max_order + 1,
+                column_data.get('is_active', 1),
+                column_data.get('is_required', 0),
+                dropdown_values
+            ))
+            
+            column_id = cursor.lastrowid
+            conn.commit()
+            
+        except Exception as e:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        
+        logging.info(f"컬럼 추가됨: {column_key} ({column_data['column_name']})")
+        
+        return {
+            'id': column_id,
+            'column_key': column_key,
+            'column_name': column_data['column_name'],
+            'success': True,
+            'message': '컬럼이 추가되었습니다.'
+        }
+    
+    def update_column(self, column_id: int, column_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        컬럼 수정
+        
+        Args:
+            column_id: 컬럼 ID
+            column_data: 수정할 컬럼 정보
+        
+        Returns:
+            작업 결과
+        """
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            # 트랜잭션 시작
+            conn.execute("BEGIN IMMEDIATE")
+            
+            # 현재 컬럼 정보 조회
+            cursor.execute(
+                f"SELECT column_key FROM {self.table_name} WHERE id = ?", 
+                (column_id,)
+            )
+            if not cursor.fetchone():
+                conn.rollback()
+                return {'success': False, 'message': '컬럼을 찾을 수 없습니다.'}
+            
+            # dropdown_values JSON 변환
+            if 'dropdown_values' in column_data:
+                dropdown_values = column_data['dropdown_values']
+                if isinstance(dropdown_values, list):
+                    column_data['dropdown_values'] = json.dumps(dropdown_values, ensure_ascii=False)
+            
+            # 업데이트할 필드 구성
+            update_fields = []
+            update_values = []
+            
+            allowed_fields = ['column_name', 'column_type', 'is_active', 
+                             'is_required', 'dropdown_values', 'column_order']
+            
+            for field in allowed_fields:
+                if field in column_data:
+                    update_fields.append(f"{field} = ?")
+                    update_values.append(column_data[field])
+            
+            if update_fields:
+                update_fields.append("updated_at = CURRENT_TIMESTAMP")
+                update_values.append(column_id)
+                
+                cursor.execute(
+                    f"UPDATE {self.table_name} SET {', '.join(update_fields)} WHERE id = ?",
+                    update_values
+                )
+            
+            conn.commit()
+            
+        except Exception as e:
+            conn.rollback()
+            logging.error(f"컬럼 수정 중 오류: {e}")
+            raise
+        finally:
+            conn.close()
+        
+        logging.info(f"컬럼 수정됨: ID {column_id}")
+        
+        return {'success': True, 'message': '컬럼이 수정되었습니다.'}
+    
+    def delete_column(self, column_id: int) -> Dict[str, Any]:
+        """
+        컬럼 삭제 (비활성화)
+        
+        Args:
+            column_id: 컬럼 ID
+        
+        Returns:
+            작업 결과
+        """
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            # 트랜잭션 시작
+            conn.execute("BEGIN IMMEDIATE")
+            
+            # 소프트 삭제 (비활성화)
+            cursor.execute(f"""
+                UPDATE {self.table_name} 
+                SET is_active = 0, updated_at = CURRENT_TIMESTAMP 
+                WHERE id = ?
+            """, (column_id,))
+            
+            if cursor.rowcount == 0:
+                conn.rollback()
+                return {'success': False, 'message': '컬럼을 찾을 수 없습니다.'}
+            
+            conn.commit()
+            
+        except Exception as e:
+            conn.rollback()
+            logging.error(f"컬럼 삭제 중 오류: {e}")
+            raise
+        finally:
+            conn.close()
+        
+        logging.info(f"컬럼 비활성화됨: ID {column_id}")
+        
+        return {'success': True, 'message': '컬럼이 비활성화되었습니다.'}
+    
+    def update_columns_order(self, order_data: List[Dict[str, int]]) -> Dict[str, Any]:
+        """
+        컬럼 순서 변경
+        
+        Args:
+            order_data: [{id: 1, column_order: 0}, ...]
+        
+        Returns:
+            작업 결과
+        """
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        
+        try:
+            # 트랜잭션 시작
+            conn.execute("BEGIN IMMEDIATE")
+            
+            for item in order_data:
+                cursor.execute(f"""
+                    UPDATE {self.table_name} 
+                    SET column_order = ?, updated_at = CURRENT_TIMESTAMP 
+                    WHERE id = ?
+                """, (item['column_order'], item['id']))
+            
+            conn.commit()
+            
+        except Exception as e:
+            conn.rollback()
+            logging.error(f"컬럼 순서 변경 중 오류: {e}")
+            raise
+        finally:
+            conn.close()
+        
+        logging.info(f"컬럼 순서 변경됨: {len(order_data)}개")
+        
+        return {'success': True, 'message': '컬럼 순서가 변경되었습니다.'}
+    
+    def sync_with_external(self, external_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        외부 데이터와 동기화 (더미 데이터용)
+        
+        Args:
+            external_data: 외부 데이터 리스트
+        
+        Returns:
+            동기화 결과
+        """
+        # 더미 데이터 환경에서는 동기화 건너뛰기
+        logging.info(f"더미 데이터 모드 - {self.board_type} 동기화 건너뜀")
+        return {
+            'success': True, 
+            'message': '더미 데이터 모드에서 실행 중',
+            'synced': 0
+        }

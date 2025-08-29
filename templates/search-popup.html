@@ -495,7 +495,12 @@ async function performSearch() {
     const searchType = document.getElementById('searchType').value;
     const query = document.getElementById('searchInput').value.trim();
     
-    // 빈 검색어도 허용 (전체 목록 보기)
+    // 검색어가 비어있으면 검색하지 않음
+    if (!query) {
+        alert('검색어를 입력해주세요.');
+        return;
+    }
+    
     hideAutocomplete();
     showLoading();
     

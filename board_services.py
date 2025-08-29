@@ -1,0 +1,920 @@
+"""
+보드 서비스 계층
+각 보드에 대한 공통 서비스 로직을 제공합니다.
+"""
+import sqlite3
+import json
+import logging
+from datetime import datetime
+from typing import List, Dict, Any, Optional
+from db_connection import get_db_connection
+
+# 보드 설정
+BOARD_CONFIGS = {
+    'accident': {
+        'board_type': 'accident',
+        'display_name': '협력사 사고',
+        'number_prefix': 'ACC',
+        'cache_table': 'accidents_cache',
+        'column_table': 'accident_column_config',
+        'upload_path': 'uploads/accident/',
+    },
+    'safety_instruction': {
+        'board_type': 'safety_instruction',
+        'display_name': '환경안전 지시서',
+        'number_prefix': 'SI',
+        'cache_table': 'safety_instructions',
+        'column_table': 'safety_instruction_column_config',
+        'upload_path': 'uploads/safety_instruction/',
+    },
+    'change_request': {
+        'board_type': 'change_request',
+        'display_name': '기준정보 변경요청',
+        'number_prefix': 'CR',
+        'cache_table': 'change_requests',
+        'column_table': 'change_request_column_config',
+        'upload_path': 'uploads/change_request/',
+    }
+}
+
+class ColumnService:
+    """컬럼 관리 서비스"""
+    
+    def __init__(self, board_type: str, db_path: str):
+        self.board_type = board_type
+        self.db_path = db_path
+        self.config = BOARD_CONFIGS.get(board_type)
+        if not self.config:
+            raise ValueError(f"Unknown board type: {board_type}")
+    
+    def list(self, active_only=True) -> List[Dict]:
+        """컬럼 목록 조회"""
+        conn = get_db_connection(self.db_path)
+        conn.row_factory = sqlite3.Row
+        
+        query = f"""
+            SELECT * FROM {self.config['column_table']}
+            {' WHERE is_active = 1' if active_only else ''}
+            ORDER BY column_order
+        """
+        
+        columns = conn.execute(query).fetchall()
+        conn.close()
+        
+        return [dict(col) for col in columns]
+    
+    def add(self, data: Dict) -> int:
+        """컬럼 추가"""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        
+        # column_key 자동 생성 (필요시)
+        column_key = data.get('column_key')
+        if not column_key:
+            cursor.execute(f"""
+                SELECT MAX(CAST(SUBSTR(column_key, 7) AS INTEGER))
+                FROM {self.config['column_table']}
+                WHERE column_key LIKE 'column%'
+            """)
+            max_num = cursor.fetchone()[0] or 0
+            column_key = f"column{max_num + 1}"
+        
+        # 최대 순서 번호 조회
+        cursor.execute(f"SELECT MAX(column_order) FROM {self.config['column_table']}")
+        max_order = cursor.fetchone()[0] or 0
+        
+        # 테이블에 따라 동적으로 컬럼 구성
+        columns = ['column_key', 'column_name', 'column_type', 'column_order', 'is_active']
+        values = [column_key, data['column_name'], data['column_type'], max_order + 1, 1]
+        
+        # dropdown_options 처리
+        columns.append('dropdown_options')
+        if data['column_type'] == 'dropdown':
+            values.append(json.dumps(data.get('dropdown_options', [])))
+        else:
+            values.append(None)
+        
+        # table_name과 table_type이 테이블에 있는지 확인
+        cursor.execute(f"PRAGMA table_info({self.config['column_table']})")
+        existing_columns = [row[1] for row in cursor.fetchall()]
+        
+        if 'table_name' in existing_columns and 'table_name' in data:
+            columns.append('table_name')
+            values.append(data['table_name'])
+        
+        if 'table_type' in existing_columns and 'table_type' in data:
+            columns.append('table_type')
+            values.append(data['table_type'])
+        
+        # created_at, updated_at 추가
+        columns.extend(['created_at', 'updated_at'])
+        
+        # 쿼리 구성
+        placeholders = ', '.join(['?' for _ in values])
+        columns_str = ', '.join(columns)
+        
+        cursor.execute(f"""
+            INSERT INTO {self.config['column_table']}
+            ({columns_str})
+            VALUES ({placeholders}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """, values)
+        
+        column_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return column_id
+    
+    def update(self, column_id: int, data: Dict) -> bool:
+        """컬럼 수정"""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        
+        update_fields = []
+        params = []
+        
+        if 'column_name' in data:
+            update_fields.append("column_name = ?")
+            params.append(data['column_name'])
+        
+        if 'column_type' in data:
+            update_fields.append("column_type = ?")
+            params.append(data['column_type'])
+        
+        if 'dropdown_options' in data:
+            update_fields.append("dropdown_options = ?")
+            params.append(json.dumps(data['dropdown_options']))
+        
+        if 'is_active' in data:
+            update_fields.append("is_active = ?")
+            params.append(1 if data['is_active'] else 0)
+        
+        if 'column_order' in data:
+            update_fields.append("column_order = ?")
+            params.append(data['column_order'])
+        
+        if update_fields:
+            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(column_id)
+            
+            query = f"""
+                UPDATE {self.config['column_table']}
+                SET {', '.join(update_fields)}
+                WHERE id = ?
+            """
+            cursor.execute(query, params)
+            conn.commit()
+        
+        conn.close()
+        return True
+    
+    def delete(self, column_id: int, hard_delete=False) -> bool:
+        """컬럼 삭제 (기본: 비활성화)"""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        
+        if hard_delete:
+            cursor.execute(f"DELETE FROM {self.config['column_table']} WHERE id = ?", (column_id,))
+        else:
+            cursor.execute(f"""
+                UPDATE {self.config['column_table']}
+                SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (column_id,))
+        
+        conn.commit()
+        conn.close()
+        return True
+    
+    def reorder(self, items: List[Dict]) -> bool:
+        """컬럼 순서 변경"""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        
+        for item in items:
+            cursor.execute(f"""
+                UPDATE {self.config['column_table']}
+                SET column_order = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (item['column_order'], item['id']))
+        
+        conn.commit()
+        conn.close()
+        return True
+
+
+class CodeService:
+    """드롭다운 코드 관리 서비스"""
+    
+    def __init__(self, board_type: str, db_path: str):
+        self.board_type = board_type
+        self.db_path = db_path
+    
+    def list(self, column_key: str) -> List[Dict]:
+        """드롭다운 코드 목록 조회"""
+        conn = get_db_connection(self.db_path)
+        conn.row_factory = sqlite3.Row
+        
+        # v2 테이블 우선 조회
+        codes = conn.execute("""
+            SELECT * FROM dropdown_option_codes_v2
+            WHERE board_type = ? AND column_key = ? AND is_active = 1
+            ORDER BY display_order
+        """, (self.board_type, column_key)).fetchall()
+        
+        # v2에 없으면 레거시 테이블 조회 (임시 호환)
+        if not codes:
+            codes = conn.execute("""
+                SELECT * FROM dropdown_option_codes
+                WHERE column_key = ? AND is_active = 1
+                ORDER BY display_order
+            """, (column_key,)).fetchall()
+        
+        conn.close()
+        
+        return [dict(code) for code in codes]
+    
+    def save(self, column_key: str, codes: List[Dict]) -> bool:
+        """드롭다운 코드 일괄 저장"""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        
+        # 기존 코드 비활성화
+        cursor.execute("""
+            UPDATE dropdown_option_codes_v2
+            SET is_active = 0
+            WHERE board_type = ? AND column_key = ?
+        """, (self.board_type, column_key))
+        
+        # 새 코드 추가
+        for i, code in enumerate(codes):
+            cursor.execute("""
+                INSERT OR REPLACE INTO dropdown_option_codes_v2
+                (board_type, column_key, option_code, option_value, 
+                 display_order, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """, (
+                self.board_type,
+                column_key,
+                code['code'],
+                code['value'],
+                i
+            ))
+        
+        conn.commit()
+        conn.close()
+        return True
+    
+    def delete(self, code_id: int) -> bool:
+        """드롭다운 코드 삭제"""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE dropdown_option_codes_v2
+            SET is_active = 0
+            WHERE id = ?
+        """, (code_id,))
+        
+        conn.commit()
+        conn.close()
+        return True
+
+
+class ItemService:
+    """보드 아이템 관리 서비스"""
+    
+    def __init__(self, board_type: str, db_path: str):
+        self.board_type = board_type
+        self.db_path = db_path
+        self.config = BOARD_CONFIGS.get(board_type)
+        if not self.config:
+            raise ValueError(f"Unknown board type: {board_type}")
+    
+    def list(self, filters: Dict = None, page: int = 1, per_page: int = 10) -> Dict:
+        """아이템 목록 조회"""
+        conn = get_db_connection(self.db_path)
+        conn.row_factory = sqlite3.Row
+        
+        # WHERE 절 구성
+        where_clauses = ["is_deleted = 0"]
+        params = []
+        
+        if filters:
+            if filters.get('company_name'):
+                where_clauses.append("company_name LIKE ?")
+                params.append(f"%{filters['company_name']}%")
+            
+            if filters.get('business_number'):
+                where_clauses.append("business_number LIKE ?")
+                params.append(f"%{filters['business_number']}%")
+            
+            if filters.get('date_start'):
+                where_clauses.append(f"{self.board_type}_date >= ?")
+                params.append(filters['date_start'])
+            
+            if filters.get('date_end'):
+                where_clauses.append(f"{self.board_type}_date <= ?")
+                params.append(filters['date_end'])
+        
+        where_sql = " AND ".join(where_clauses)
+        
+        # 전체 개수 조회
+        total_count = conn.execute(
+            f"SELECT COUNT(*) FROM {self.config['cache_table']} WHERE {where_sql}",
+            params
+        ).fetchone()[0]
+        
+        # 페이징 처리
+        offset = (page - 1) * per_page
+        params.extend([per_page, offset])
+        
+        # 데이터 조회
+        items = conn.execute(f"""
+            SELECT * FROM {self.config['cache_table']}
+            WHERE {where_sql}
+            ORDER BY id DESC
+            LIMIT ? OFFSET ?
+        """, params).fetchall()
+        
+        conn.close()
+        
+        return {
+            'items': [dict(item) for item in items],
+            'total': total_count,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': (total_count + per_page - 1) // per_page
+        }
+    
+    def detail(self, item_id: int) -> Optional[Dict]:
+        """아이템 상세 조회"""
+        conn = get_db_connection(self.db_path)
+        conn.row_factory = sqlite3.Row
+        
+        item = conn.execute(f"""
+            SELECT * FROM {self.config['cache_table']}
+            WHERE id = ? AND is_deleted = 0
+        """, (item_id,)).fetchone()
+        
+        conn.close()
+        
+        return dict(item) if item else None
+    
+    def register(self, data: Dict) -> Dict:
+        """아이템 등록"""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        
+        # 번호 생성
+        year = datetime.now().year
+        month = datetime.now().month
+        
+        cursor.execute(f"""
+            SELECT MAX(CAST(SUBSTR({self.board_type}_number, -4) AS INTEGER))
+            FROM {self.config['cache_table']}
+            WHERE {self.board_type}_number LIKE ?
+        """, (f"{self.config['number_prefix']}-{year:04d}-{month:02d}-%",))
+        
+        max_seq = cursor.fetchone()[0] or 0
+        number = f"{self.config['number_prefix']}-{year:04d}-{month:02d}-{max_seq + 1:04d}"
+        
+        # 데이터 저장
+        cursor.execute(f"""
+            INSERT INTO {self.config['cache_table']}
+            ({self.board_type}_number, {self.board_type}_date, title, content, 
+             custom_data, created_by, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """, (
+            number,
+            data.get('date'),
+            data.get('title'),
+            data.get('content'),
+            json.dumps(data.get('custom_data', {})),
+            data.get('created_by', 'system')
+        ))
+        
+        item_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        return {
+            'id': item_id,
+            'number': number
+        }
+    
+    def update(self, item_id: int, data: Dict) -> bool:
+        """아이템 수정"""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute(f"""
+            UPDATE {self.config['cache_table']}
+            SET title = ?, content = ?, custom_data = ?, 
+                updated_at = CURRENT_TIMESTAMP, updated_by = ?
+            WHERE id = ?
+        """, (
+            data.get('title'),
+            data.get('content'),
+            json.dumps(data.get('custom_data', {})),
+            data.get('updated_by', 'system'),
+            item_id
+        ))
+        
+        conn.commit()
+        conn.close()
+        return True
+    
+    def delete(self, item_ids: List[int], hard_delete=False) -> bool:
+        """아이템 삭제"""
+        conn = get_db_connection(self.db_path)
+        cursor = conn.cursor()
+        
+        if hard_delete:
+            cursor.execute(
+                f"DELETE FROM {self.config['cache_table']} WHERE id IN ({','.join('?' * len(item_ids))})",
+                item_ids
+            )
+        else:
+            cursor.execute(
+                f"""UPDATE {self.config['cache_table']}
+                   SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP
+                   WHERE id IN ({','.join('?' * len(item_ids))})""",
+                item_ids
+            )
+        
+        conn.commit()
+        conn.close()
+        return True
+
+
+def get_board_type_from_path(path: str) -> Optional[str]:
+    """경로에서 보드 타입 추출"""
+    # /api/accident/columns -> accident
+    # /api/safety-instruction/columns -> safety_instruction
+    
+    parts = path.split('/')
+    if len(parts) >= 3 and parts[1] == 'api':
+        board_name = parts[2]
+        # 하이픈을 언더스코어로 변환
+        board_type = board_name.replace('-', '_')
+        return board_type if board_type in BOARD_CONFIGS else None
+    return None
+
+class AttachmentService:
+    """첨부파일 관리 서비스 - 보드 격리 원칙 준수"""
+    
+    def __init__(self, board_type: str, db_path: str, conn=None):
+        """
+        첨부파일 서비스 초기화
+        
+        Args:
+            board_type: 보드 타입 (accident, safety_instruction, change_request)
+            db_path: 데이터베이스 경로
+            conn: 기존 DB 연결 (없으면 새로 생성)
+        """
+        self.board_type = board_type
+        self.db_path = db_path
+        self.conn = conn  # 기존 연결 재사용
+        self.config = BOARD_CONFIGS.get(board_type)
+        if not self.config:
+            raise ValueError(f"Unknown board type: {board_type}")
+        
+        # 보드별 첨부파일 테이블명 설정
+        self.attachment_table = f"{board_type}_attachments"
+        
+        # 테이블 생성 (없으면)
+        self._ensure_table_exists()
+    
+    def _ensure_table_exists(self):
+        """첨부파일 테이블 생성 (없으면)"""
+        # 기존 연결이 있으면 재사용, 없으면 새로 생성
+        if self.conn:
+            conn = self.conn
+            should_close = False
+        else:
+            conn = get_db_connection(self.db_path)
+            should_close = True
+        cursor = conn.cursor()
+        
+        # 보드별 테이블 전략 사용 (현재 구조 유지)
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS {self.attachment_table} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_id TEXT NOT NULL,  -- 보드별 식별자 (accident_number, issue_number, request_number 등)
+                file_name TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                file_size INTEGER,
+                mime_type TEXT,
+                description TEXT,
+                uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                uploaded_by TEXT DEFAULT 'system',
+                is_deleted INTEGER DEFAULT 0
+            )
+        """)
+        
+        # 인덱스 추가
+        cursor.execute(f"""
+            CREATE INDEX IF NOT EXISTS idx_{self.attachment_table}_item_id 
+            ON {self.attachment_table}(item_id)
+        """)
+        
+        # 새로 생성한 연결만 닫기
+        if should_close:
+            conn.commit()
+            conn.close()
+        else:
+            conn.commit()  # 커밋은 하지만 연결은 닫지 않음
+    
+    def list(self, item_id: str) -> List[Dict]:
+        """
+        특정 아이템의 첨부파일 목록 조회
+        
+        Args:
+            item_id: 아이템 식별자
+            
+        Returns:
+            첨부파일 목록
+        """
+        # 기존 연결이 있으면 재사용, 없으면 새로 생성
+        if self.conn:
+            conn = self.conn
+            should_close = False
+        else:
+            conn = get_db_connection(self.db_path)
+            should_close = True
+        
+        conn.row_factory = sqlite3.Row
+        
+        attachments = conn.execute(f"""
+            SELECT * FROM {self.attachment_table}
+            WHERE item_id = ? AND is_deleted = 0
+            ORDER BY uploaded_at DESC
+        """, (item_id,)).fetchall()
+        
+        # 새로 생성한 연결만 닫기
+        if should_close:
+            conn.close()
+        
+        return [dict(attachment) for attachment in attachments]
+    
+    def add(self, item_id: str, file, meta: Dict = None) -> int:
+        """
+        첨부파일 추가
+        
+        Args:
+            item_id: 아이템 식별자
+            file: 업로드된 파일 객체 (werkzeug.FileStorage)
+            meta: 추가 메타데이터 (description, uploaded_by 등)
+            
+        Returns:
+            첨부파일 ID
+        """
+        import os
+        import time
+        from werkzeug.utils import secure_filename
+        
+        if not file or not file.filename:
+            raise ValueError("파일이 없습니다.")
+        
+        # 안전한 파일명 생성
+        original_filename = secure_filename(file.filename)
+        timestamp = str(int(time.time()))
+        safe_filename = f"{timestamp}_{original_filename}"
+        
+        # 업로드 경로 생성
+        upload_folder = self.config['upload_path']
+        os.makedirs(upload_folder, exist_ok=True)
+        
+        # 파일 저장
+        file_path = os.path.join(upload_folder, safe_filename)
+        file.save(file_path)
+        
+        # 파일 크기 계산
+        file_size = os.path.getsize(file_path)
+        
+        # MIME 타입 추출
+        mime_type = file.content_type if hasattr(file, 'content_type') else 'application/octet-stream'
+        
+        # DB에 저장
+        # 기존 연결이 있으면 재사용, 없으면 새로 생성
+        if self.conn:
+            conn = self.conn
+            should_close = False
+        else:
+            conn = get_db_connection(self.db_path)
+            should_close = True
+        
+        cursor = conn.cursor()
+        
+        cursor.execute(f"""
+            INSERT INTO {self.attachment_table}
+            (item_id, file_name, file_path, file_size, mime_type, description, uploaded_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            item_id,
+            original_filename,
+            file_path,
+            file_size,
+            mime_type,
+            meta.get('description', '') if meta else '',
+            meta.get('uploaded_by', 'system') if meta else 'system'
+        ))
+        
+        attachment_id = cursor.lastrowid
+        conn.commit()
+        
+        # 새로 생성한 연결만 닫기
+        if should_close:
+            conn.close()
+        
+        logging.info(f"[{self.board_type}] 첨부파일 추가: {original_filename} (ID: {attachment_id})")
+        
+        return attachment_id
+    
+    def update_meta(self, attachment_id: int, meta: Dict) -> bool:
+        """
+        첨부파일 메타데이터 수정
+        
+        Args:
+            attachment_id: 첨부파일 ID
+            meta: 수정할 메타데이터
+            
+        Returns:
+            성공 여부
+        """
+        # 기존 연결이 있으면 재사용, 없으면 새로 생성
+        if self.conn:
+            conn = self.conn
+            should_close = False
+        else:
+            conn = get_db_connection(self.db_path)
+            should_close = True
+        
+        cursor = conn.cursor()
+        
+        update_fields = []
+        params = []
+        
+        if 'description' in meta:
+            update_fields.append("description = ?")
+            params.append(meta['description'])
+        
+        if 'uploaded_by' in meta:
+            update_fields.append("uploaded_by = ?")
+            params.append(meta['uploaded_by'])
+        
+        if not update_fields:
+            if should_close:
+                conn.close()
+            return False
+        
+        params.append(attachment_id)
+        
+        cursor.execute(f"""
+            UPDATE {self.attachment_table}
+            SET {', '.join(update_fields)}
+            WHERE id = ? AND is_deleted = 0
+        """, params)
+        
+        conn.commit()
+        success = cursor.rowcount > 0
+        
+        # 새로 생성한 연결만 닫기
+        if should_close:
+            conn.close()
+        
+        return success
+    
+    def delete(self, ids: List[int], hard_delete: bool = False) -> int:
+        """
+        첨부파일 삭제 (기본: soft delete)
+        
+        Args:
+            ids: 삭제할 첨부파일 ID 목록
+            hard_delete: True면 실제 파일도 삭제
+            
+        Returns:
+            삭제된 개수
+        """
+        if not ids:
+            return 0
+        
+        # 기존 연결이 있으면 재사용, 없으면 새로 생성
+        if self.conn:
+            conn = self.conn
+            should_close = False
+        else:
+            conn = get_db_connection(self.db_path)
+            should_close = True
+        cursor = conn.cursor()
+        
+        if hard_delete:
+            # 파일 경로 먼저 조회
+            cursor.execute(f"""
+                SELECT file_path FROM {self.attachment_table}
+                WHERE id IN ({','.join('?' * len(ids))})
+            """, ids)
+            file_paths = [row[0] for row in cursor.fetchall()]
+            
+            # DB에서 삭제
+            cursor.execute(f"""
+                DELETE FROM {self.attachment_table}
+                WHERE id IN ({','.join('?' * len(ids))})
+            """, ids)
+            
+            # 실제 파일 삭제
+            import os
+            for file_path in file_paths:
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                        logging.info(f"파일 삭제: {file_path}")
+                    except Exception as e:
+                        logging.error(f"파일 삭제 실패: {file_path}, {e}")
+        else:
+            # Soft delete
+            cursor.execute(f"""
+                UPDATE {self.attachment_table}
+                SET is_deleted = 1
+                WHERE id IN ({','.join('?' * len(ids))})
+            """, ids)
+        
+        deleted_count = cursor.rowcount
+        conn.commit()
+        
+        # 새로 생성한 연결만 닫기
+        if should_close:
+            conn.close()
+        
+        logging.info(f"[{self.board_type}] {deleted_count}개 첨부파일 삭제")
+        
+        return deleted_count
+    
+    def download(self, attachment_id: int) -> Optional[Dict]:
+        """
+        첨부파일 다운로드 정보 조회
+        
+        Args:
+            attachment_id: 첨부파일 ID
+            
+        Returns:
+            파일 정보 (path, name, mime_type)
+        """
+        # 기존 연결이 있으면 재사용, 없으면 새로 생성
+        if self.conn:
+            conn = self.conn
+            should_close = False
+        else:
+            conn = get_db_connection(self.db_path)
+            should_close = True
+        
+        conn.row_factory = sqlite3.Row
+        
+        attachment = conn.execute(f"""
+            SELECT file_path, file_name, mime_type
+            FROM {self.attachment_table}
+            WHERE id = ? AND is_deleted = 0
+        """, (attachment_id,)).fetchone()
+        
+        # 새로 생성한 연결만 닫기
+        if should_close:
+            conn.close()
+        
+        if attachment:
+            import os
+            if os.path.exists(attachment['file_path']):
+                return {
+                    'path': attachment['file_path'],
+                    'name': attachment['file_name'],
+                    'mime_type': attachment['mime_type']
+                }
+        
+        return None
+    
+    def bulk_add(self, item_id: str, files: List, meta: Dict = None) -> List[int]:
+        """
+        여러 파일 일괄 업로드
+        
+        Args:
+            item_id: 아이템 식별자
+            files: 파일 목록
+            meta: 공통 메타데이터
+            
+        Returns:
+            첨부파일 ID 목록
+        """
+        import os
+        import time
+        from werkzeug.utils import secure_filename
+        
+        attachment_ids = []
+        
+        # 기존 연결이 있으면 재사용, 없으면 새로 생성
+        if self.conn:
+            conn = self.conn
+            should_close = False
+        else:
+            conn = get_db_connection(self.db_path)
+            should_close = True
+        
+        cursor = conn.cursor()
+        
+        for file in files:
+            if file and file.filename:
+                try:
+                    # 안전한 파일명 생성
+                    original_filename = secure_filename(file.filename)
+                    timestamp = str(int(time.time()))
+                    safe_filename = f"{timestamp}_{original_filename}"
+                    
+                    # 업로드 경로 생성
+                    upload_folder = self.config['upload_path']
+                    os.makedirs(upload_folder, exist_ok=True)
+                    
+                    # 파일 저장
+                    file_path = os.path.join(upload_folder, safe_filename)
+                    file.save(file_path)
+                    
+                    # 파일 크기 계산
+                    file_size = os.path.getsize(file_path)
+                    
+                    # MIME 타입 추출
+                    mime_type = file.content_type if hasattr(file, 'content_type') else 'application/octet-stream'
+                    
+                    # DB에 저장 (같은 연결 사용)
+                    cursor.execute(f"""
+                        INSERT INTO {self.attachment_table}
+                        (item_id, file_name, file_path, file_size, mime_type, description, uploaded_by)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        item_id,
+                        original_filename,
+                        file_path,
+                        file_size,
+                        mime_type,
+                        meta.get('description', '') if meta else '',
+                        meta.get('uploaded_by', 'system') if meta else 'system'
+                    ))
+                    
+                    attachment_id = cursor.lastrowid
+                    attachment_ids.append(attachment_id)
+                    logging.info(f"[{self.board_type}] 첨부파일 추가: {original_filename} (ID: {attachment_id})")
+                    
+                except Exception as e:
+                    logging.error(f"파일 업로드 실패: {file.filename}, {e}")
+        
+        # 커밋
+        conn.commit()
+        
+        # 새로 생성한 연결만 닫기
+        if should_close:
+            conn.close()
+        
+        return attachment_ids
+    
+    def get_stats(self, item_id: str = None) -> Dict:
+        """
+        첨부파일 통계 조회
+        
+        Args:
+            item_id: 특정 아이템만 조회 (None이면 전체)
+            
+        Returns:
+            통계 정보
+        """
+        # 기존 연결이 있으면 재사용, 없으면 새로 생성
+        if self.conn:
+            conn = self.conn
+            should_close = False
+        else:
+            conn = get_db_connection(self.db_path)
+            should_close = True
+        
+        if item_id:
+            stats = conn.execute(f"""
+                SELECT 
+                    COUNT(*) as total_count,
+                    SUM(file_size) as total_size,
+                    AVG(file_size) as avg_size,
+                    MAX(file_size) as max_size
+                FROM {self.attachment_table}
+                WHERE item_id = ? AND is_deleted = 0
+            """, (item_id,)).fetchone()
+        else:
+            stats = conn.execute(f"""
+                SELECT 
+                    COUNT(*) as total_count,
+                    SUM(file_size) as total_size,
+                    AVG(file_size) as avg_size,
+                    MAX(file_size) as max_size,
+                    COUNT(DISTINCT item_id) as item_count
+                FROM {self.attachment_table}
+                WHERE is_deleted = 0
+            """).fetchone()
+        
+        # 새로 생성한 연결만 닫기
+        if should_close:
+            conn.close()
+        
+        return dict(stats)

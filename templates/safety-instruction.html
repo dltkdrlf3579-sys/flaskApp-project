@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 {% block title %}환경안전 지시서{% endblock %}
+
+{% from 'includes/table_controls.html' import render_table_controls %}
+{% from 'includes/search_controls.html' import render_search_section, render_search_buttons %}
+
 {% block content %}
 <style>
 /* 페이지 헤더 - 기준정보 스타일과 통일 */
@@ -39,44 +43,12 @@
 
 <!-- 검색 버튼 영역 -->
 <div class="search-buttons-section">
-    <div class="search-buttons">
-        <button type="button" onclick="resetForm()" class="btn-reset">초기화</button>
-        <button type="button" onclick="document.querySelector('.search-form').submit()" class="btn-search">검색</button>
-    </div>
+    {{ render_search_buttons() }}
 </div>
 
 <!-- 목록 테이블 -->
 <div class="table-section">
-    <div class="table-header">
-        <div class="left-controls">
-            <span class="total-count">총 {{ total_count }}건</span>
-            <div class="per-page-selector">
-                <select onchange="changePerPage(this.value)">
-                    <option value="10" {% if request.args.get('per_page', '10') == '10' %}selected{% endif %}>10개씩</option>
-                    <option value="25" {% if request.args.get('per_page', '10') == '25' %}selected{% endif %}>25개씩</option>
-                    <option value="50" {% if request.args.get('per_page', '10') == '50' %}selected{% endif %}>50개씩</option>
-                </select>
-            </div>
-        </div>
-        <div class="action-buttons">
-            <button class="btn btn-sm btn-delete" onclick="deleteSelected()" style="display:none; background-color: #dc3545; color: white;">
-                삭제
-            </button>
-            <!-- 엑셀 업로드 기능 임시 숨김
-            <button class="btn btn-sm btn-excel-upload" onclick="showImportModal()">
-                <img src="/static/icons/excel-icon.png" style="vertical-align: middle; margin-right: 4px;" width="16" height="16">
-                엑셀 업로드
-            </button>
-            -->
-            <button class="btn btn-sm btn-excel-download" onclick="exportToExcel()">
-                <img src="/static/icons/excel-icon.png" style="vertical-align: middle; margin-right: 4px;" width="16" height="16">
-                엑셀 다운로드
-            </button>
-            <button class="btn btn-sm btn-register" onclick="showRegisterModal()">
-                등록
-            </button>
-        </div>
-    </div>
+    {{ render_table_controls(total_count, show_excel=True, show_register=True) }}
     <div class="table-wrapper">
         <table class="data-table">
             <thead>
@@ -580,6 +552,11 @@ function changePerPage(perPage) {
 
 // Phase 1: 동적 컬럼 데이터 렌더링
 document.addEventListener('DOMContentLoaded', function() {
+    // 페이지 로드 시 삭제 버튼 숨기기 (초기 상태)
+    const deleteBtn = document.querySelector('.btn-delete');
+    if (deleteBtn) {
+        deleteBtn.style.display = 'none';
+    }
     // 각 행의 custom_data 파싱하고 표시
     document.querySelectorAll('tr').forEach(function(row) {
         var customDataScript = row.querySelector('script');
@@ -848,6 +825,19 @@ function updateDeleteButton() {
     } else {
         deleteBtn.style.display = 'none';
     }
+}
+
+// 비밀번호 확인 후 선택한 항목 삭제
+function deleteSelectedWithPassword() {
+    const password = prompt('삭제 비밀번호를 입력하세요:');
+    if (password === null) return;
+    
+    if (password !== 'admin123') {
+        alert('비밀번호가 틀렸습니다.');
+        return;
+    }
+    
+    deleteSelected();
 }
 
 // 선택한 항목 삭제

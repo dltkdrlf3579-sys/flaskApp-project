@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 {% block title %}협력사 기준정보{% endblock %}
+
+{% from 'includes/table_controls.html' import render_table_controls %}
+{% from 'includes/search_controls.html' import render_search_section, render_search_buttons %}
+
 {% block content %}
 <style>
 /* 전체 페이지 레이아웃 */
@@ -135,30 +139,7 @@
     justify-content: flex-end;
     gap: 8px;
 }
-.btn-reset, .btn-search {
-    padding: 8px 16px;
-    border-radius: 4px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    border: none;
-    transition: all 0.2s;
-    white-space: nowrap;
-}
-.btn-reset {
-    background: #6b7280;
-    color: white;
-}
-.btn-reset:hover {
-    background: #4b5563;
-}
-.btn-search {
-    background: #2f5fd3;
-    color: white;
-}
-.btn-search:hover {
-    background: #1d4ed8;
-}
+/* btn-reset, btn-search styles are in common component */
 
 /* 테이블 영역 */
 .table-section {
@@ -356,37 +337,12 @@
 
 <!-- 검색 버튼을 검색 영역 밖으로 이동 (사고 페이지와 동일) -->
 <div class="search-buttons-section">
-    <div class="search-buttons">
-        <button type="button" onclick="resetForm()" class="btn-reset">초기화</button>
-        <button type="button" onclick="document.querySelector('.search-form').submit()" class="btn-search">검색</button>
-    </div>
+    {{ render_search_buttons() }}
 </div>
 
 <!-- 액션 버튼과 테이블 헤더 통합 -->
 <div class="table-section">
-    <div class="table-header">
-        <div class="header-left">
-            <span class="total-count">총 {{ total_count }}건</span>
-            <div class="per-page-selector">
-                <select onchange="changePerPage(this.value)">
-                    <option value="10" {% if request.args.get('per_page', '10') == '10' %}selected{% endif %}>10개씩</option>
-                    <option value="25" {% if request.args.get('per_page', '10') == '25' %}selected{% endif %}>25개씩</option>
-                    <option value="50" {% if request.args.get('per_page', '10') == '50' %}selected{% endif %}>50개씩</option>
-                </select>
-            </div>
-        </div>
-        <div class="header-actions">
-            <div class="action-buttons">
-                <button class="btn btn-sm btn-delete" onclick="deleteSelected()" style="display:none; background-color: #dc3545; color: white;">
-                    삭제
-                </button>
-                <button class="btn btn-sm btn-excel-download" onclick="exportToExcel()">
-                    <img src="/static/icons/excel-icon.png" style="vertical-align: middle; margin-right: 4px;" width="16" height="16">
-                    엑셀 다운로드
-                </button>
-            </div>
-        </div>
-    </div>
+    {{ render_table_controls(total_count, show_excel=True, show_register=False) }}
     <div class="table-wrapper">
         <table class="data-table">
             <thead>
@@ -394,18 +350,11 @@
                     <th style="width: 40px;">
                         <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
                     </th>
-                    <th class="fixed-col">협력사명</th>
-                    <th>사업자번호</th>
-                    <th>거래차수</th>
-                    <th>Class</th>
-                    <th>업종(대분류)</th>
-                    <th>업종(소분류)</th>
-                    <th>위험작업여부</th>
-                    <th>대표자성명</th>
-                    <th>주소</th>
-                    <th>평균연령</th>
-                    <th>매출액</th>
-                    <th>상시근로자</th>
+                    {% for column in dynamic_columns %}
+                        {% if column.table_display %}
+                            <th {% if column.key == 'company_name' %}class="fixed-col"{% endif %}>{{ column.name }}</th>
+                        {% endif %}
+                    {% endfor %}
                 </tr>
             </thead>
             <tbody>
@@ -414,24 +363,29 @@
                     <td>
                         <input type="checkbox" class="row-checkbox" value="{{ partner.business_number }}" onchange="updateDeleteButton()">
                     </td>
-                    <td class="fixed-col">
-                        <a href="javascript:void(0)" class="company-link" onclick="openPartnerModal('{{ partner.business_number }}')">{{ partner.company_name }}</a>
-                    </td>
-                    <td>{{ partner.business_number }}</td>
-                    <td>{{ partner.transaction_count or '-' }}</td>
-                    <td>{{ partner.partner_class or '-' }}</td>
-                    <td>{{ partner.business_type_major or '-' }}</td>
-                    <td>{{ partner.business_type_minor or '-' }}</td>
-                    <td>{{ 'O' if partner.hazard_work_flag == 'O' else 'X' }}</td>
-                    <td>{{ partner.representative or '-' }}</td>
-                    <td>{{ partner.address or '-' }}</td>
-                    <td>{{ partner.average_age if partner.average_age else '-' }}</td>
-                    <td>{{ "{:,}".format(partner.annual_revenue // 100000000) if partner.annual_revenue else '-' }}억원</td>
-                    <td>{{ partner.permanent_workers if partner.permanent_workers else '-' }}명</td>
+                    {% for column in dynamic_columns %}
+                        {% if column.table_display %}
+                            <td {% if column.key == 'company_name' %}class="fixed-col"{% endif %}>
+                                {% if column.key == 'company_name' %}
+                                    <a href="javascript:void(0)" class="company-link" onclick="openPartnerModal('{{ partner.business_number }}')">{{ partner[column.key] or '-' }}</a>
+                                {% elif column.key == 'hazard_work_flag' %}
+                                    {{ 'O' if partner[column.key] == 'O' else 'X' }}
+                                {% elif column.key == 'annual_revenue' %}
+                                    {{ "{:,}".format(partner[column.key] // 100000000) if partner[column.key] else '-' }}억원
+                                {% elif column.key == 'permanent_workers' %}
+                                    {{ partner[column.key] if partner[column.key] else '-' }}명
+                                {% elif column.key == 'average_age' %}
+                                    {{ partner[column.key] if partner[column.key] else '-' }}
+                                {% else %}
+                                    {{ partner[column.key] or '-' }}
+                                {% endif %}
+                            </td>
+                        {% endif %}
+                    {% endfor %}
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="13" class="no-data">검색 결과가 없습니다.</td>
+                    <td colspan="{{ dynamic_columns|length + 1 }}" class="no-data">검색 결과가 없습니다.</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -851,6 +805,7 @@ const majorTypes = Object.keys(businessTypesData);
 // 페이지 로드 시 초기화
 document.addEventListener('DOMContentLoaded', function() {
     initializeFilters();
+    updateDeleteButton(); // 페이지 로드 시 삭제 버튼 초기 상태 설정
 });
 
 function initializeFilters() {
@@ -1085,8 +1040,10 @@ function updateDeleteButton() {
     
     if (checkedBoxes.length > 0) {
         deleteBtn.style.display = 'inline-flex';
+        deleteBtn.textContent = `선택 삭제 (${checkedBoxes.length}건)`;
     } else {
         deleteBtn.style.display = 'none';
+        deleteBtn.textContent = '선택 삭제';
     }
     
     // 전체 선택 체크박스 상태 업데이트
@@ -1102,6 +1059,19 @@ function updateDeleteButton() {
     } else {
         selectAllCheckbox.indeterminate = true;
     }
+}
+
+// 비밀번호 확인 후 선택된 협력사 삭제
+function deleteSelectedWithPassword() {
+    const password = prompt('삭제 비밀번호를 입력하세요:');
+    if (password === null) return;
+    
+    if (password !== 'admin123') {
+        alert('비밀번호가 틀렸습니다.');
+        return;
+    }
+    
+    deleteSelected();
 }
 
 // 선택된 협력사 삭제

@@ -33,78 +33,17 @@
         </div>
         <div class="section-content" id="basic-info-content">
             <div class="info-table">
+                {% set columns_per_row = 4 %}
+                {% for chunk in basic_info_columns | batch(columns_per_row) %}
                 <div class="info-row">
+                    {% for col in chunk %}
                     <div class="info-cell">
-                        <label>발부번호</label>
-                        <div class="value">{{ instruction.issue_number }}</div>
+                        <label>{{ col.column_name }}</label>
+                        <div class="value">{{ instruction[col.column_key] | default('-', true) }}</div>
                     </div>
-                    <div class="info-cell">
-                        <label>발행인</label>
-                        <div class="value">{{ instruction.issuer or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>발행부서</label>
-                        <div class="value">{{ instruction.issuer_department or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>분류</label>
-                        <div class="value">{{ instruction.classification or '-' }}</div>
-                    </div>
+                    {% endfor %}
                 </div>
-                <div class="info-row">
-                    <div class="info-cell">
-                        <label>고용형태</label>
-                        <div class="value">{{ instruction.employment_type or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>1차사명</label>
-                        <div class="value">{{ instruction.primary_company or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>1차사 사업자번호</label>
-                        <div class="value">{{ instruction.primary_business_number or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>하도사명</label>
-                        <div class="value">{{ instruction.subcontractor or '-' }}</div>
-                    </div>
-                </div>
-                <div class="info-row">
-                    <div class="info-cell">
-                        <label>하도사 사업자번호</label>
-                        <div class="value">{{ instruction.subcontractor_business_number or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>징계자</label>
-                        <div class="value">{{ instruction.disciplined_person or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>징계자ID</label>
-                        <div class="value">{{ instruction.disciplined_person_id or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>GBM</label>
-                        <div class="value">{{ instruction.gbm or '-' }}</div>
-                    </div>
-                </div>
-                <div class="info-row">
-                    <div class="info-cell">
-                        <label>사업부</label>
-                        <div class="value">{{ instruction.business_division or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>팀</label>
-                        <div class="value">{{ instruction.team or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>소속부서</label>
-                        <div class="value">{{ instruction.department or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>작업등급</label>
-                        <div class="value">{{ instruction.work_grade or '-' }}</div>
-                    </div>
-                </div>
+                {% endfor %}
             </div>
         </div>
     </div>
@@ -119,60 +58,19 @@
         </div>
         <div class="section-content" id="violation-info-content">
             <div class="info-table">
+                {% set columns_per_row = 4 %}
+                {% for chunk in violation_info_columns | batch(columns_per_row) %}
                 <div class="info-row">
+                    {% for col in chunk %}
+                    {% if col.column_key != 'violation_content' %}
                     <div class="info-cell">
-                        <label>위반일자</label>
-                        <div class="value">{{ instruction.violation_date or '-' }}</div>
+                        <label>{{ col.column_name }}</label>
+                        <div class="value">{{ instruction[col.column_key] | default('-', true) }}</div>
                     </div>
-                    <div class="info-cell">
-                        <label>징계일자</label>
-                        <div class="value">{{ instruction.discipline_date or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>징계발의부서</label>
-                        <div class="value">{{ instruction.discipline_department or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>징계유형</label>
-                        <div class="value">{{ instruction.discipline_type or '-' }}</div>
-                    </div>
+                    {% endif %}
+                    {% endfor %}
                 </div>
-                <div class="info-row">
-                    <div class="info-cell">
-                        <label>사고유형</label>
-                        <div class="value">{{ instruction.accident_type or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>사고등급</label>
-                        <div class="value">{{ instruction.accident_grade or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>환경안전수칙 위반등급</label>
-                        <div class="value">{{ instruction.safety_violation_grade or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>위반유형</label>
-                        <div class="value">{{ instruction.violation_type or '-' }}</div>
-                    </div>
-                </div>
-                <div class="info-row">
-                    <div class="info-cell">
-                        <label>출입정지 시작일</label>
-                        <div class="value">{{ instruction.access_ban_start_date or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>출입정지 종료일</label>
-                        <div class="value">{{ instruction.access_ban_end_date or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>기간</label>
-                        <div class="value">{{ instruction.period or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>감점</label>
-                        <div class="value">{{ instruction.penalty_points or '-' }}</div>
-                    </div>
-                </div>
+                {% endfor %}
             </div>
         </div>
     </div>
@@ -188,7 +86,7 @@
         <div class="section-content" id="additional-info-content">
             <div class="info-table">
                 {% set columns_per_row = 4 %}
-                {% for chunk in dynamic_columns | batch(columns_per_row) %}
+                {% for chunk in additional_columns | batch(columns_per_row) %}
                 <div class="info-row">
                     {% for col in chunk %}
                     <div class="info-cell">
@@ -206,15 +104,9 @@
                             <select class="dynamic-input" data-column-key="{{ col.column_key }}">
                                 <option value="">선택하세요</option>
                                 {% if col.dropdown_options_mapped %}
-                                    {# 새로운 코드-값 매핑 방식 #}
+                                    {# 코드-값 매핑 방식 (DB dropdown_option_codes_v2 테이블 사용) #}
                                     {% for option in col.dropdown_options_mapped %}
                                         <option value="{{ option.code }}" {% if col_value == option.code %}selected{% endif %}>{{ option.value }}</option>
-                                    {% endfor %}
-                                {% elif col.dropdown_options %}
-                                    {# 기존 JSON 방식 (하위 호환성) #}
-                                    {% set options = col.dropdown_options | from_json %}
-                                    {% for option in options %}
-                                        <option value="{{ option }}" {% if col_value == option %}selected{% endif %}>{{ option }}</option>
                                     {% endfor %}
                                 {% endif %}
                             </select>
@@ -330,56 +222,17 @@
                 <div id="detailed-content" 
                      class="editable-content" 
                      contenteditable="true" 
-                     placeholder="위반에 대한 상세 내용을 입력하세요.">{{ instruction.violation_content | safe if instruction.violation_content else '' }}</div>
+                     placeholder="위반에 대한 상세 내용을 입력하세요.">{{ instruction.detailed_content | safe if instruction.detailed_content else '' }}</div>
                 
                 <!-- 숨겨진 textarea (저장용) -->
-                <textarea id="detailed-content-hidden" style="display: none;">{{ instruction.violation_content or '' }}</textarea>
+                <textarea id="detailed-content-hidden" style="display: none;">{{ instruction.detailed_content or '' }}</textarea>
             </div>
         </div>
     </div>
 
-    <!-- 5. 첨부파일 영역 -->
-    <div class="section attachments-section">
-        <div class="section-header">
-            <h3 class="section-title">첨부파일</h3>
-            <button class="btn-add-file" onclick="document.getElementById('file-input').click();">추가</button>
-            <span class="file-count">총 <span id="file-count">{{ attachments|length }}</span>개</span>
-            <span class="file-size"><span id="file-size">0</span> MB / 50 MB</span>
-        </div>
-        <div class="section-content">
-            <input type="file" id="file-input" multiple style="display: none;" onchange="handleFileUpload(this.files)">
-            <div class="attachments-table">
-                <div class="table-header">
-                    <div class="col-no">No.</div>
-                    <div class="col-file">파일명</div>
-                    <div class="col-desc">설명</div>
-                    <div class="col-action">상태</div>
-                </div>
-                <div class="table-body" id="attachments-tbody">
-                    {% for attachment in attachments %}
-                    <div class="table-row" data-id="{{ attachment.id }}">
-                        <div class="col-no">{{ loop.index }}</div>
-                        <div class="col-file">
-                            <span class="file-icon">📄</span>
-                            <a href="/download/{{ attachment.id }}" class="file-link" download>{{ attachment.file_name }}</a>
-                            <span class="file-size">({{ (attachment.file_size / 1024) | round(2) }} KB)</span>
-                        </div>
-                        <div class="col-desc">
-                            <input type="text" value="{{ attachment.description or '' }}" placeholder="설명을 입력하세요" class="attachment-desc">
-                        </div>
-                        <div class="col-action">
-                            <button class="btn-delete" onclick="deleteAttachment(this)">삭제</button>
-                        </div>
-                    </div>
-                    {% else %}
-                    <div class="table-row no-data" id="no-data-row">
-                        <div class="col-full">등록된 첨부파일이 없습니다.</div>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-        </div>
-    </div>
+    <!-- 5. 첨부파일 영역 (공통 컴포넌트) -->
+    {% from 'includes/attachment_section.html' import render_attachment_section %}
+    {{ render_attachment_section(attachments, 'safety_instruction') }}
 
     <!-- 저장 버튼 영역 -->
     <div class="save-section">
@@ -1016,8 +869,7 @@
 </style>
 
 <script>
-let pendingFiles = [];
-let deletedAttachments = [];
+// 첨부파일 관련 변수는 공통 컴포넌트에서 정의됨
 
 function toggleSection(sectionId) {
     const content = document.getElementById(sectionId + '-content');
@@ -1032,75 +884,9 @@ function toggleSection(sectionId) {
     }
 }
 
-function handleFileUpload(files) {
-    const tbody = document.getElementById('attachments-tbody');
-    const noDataRow = document.getElementById('no-data-row');
-    
-    if (noDataRow) {
-        noDataRow.remove();
-    }
-    
-    Array.from(files).forEach((file, index) => {
-        const fileSize = (file.size / 1024).toFixed(2);
-        const newRow = document.createElement('div');
-        newRow.className = 'table-row';
-        newRow.dataset.isNew = 'true';
-        
-        const rowCount = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)').length + 1;
-        
-        newRow.innerHTML = `
-            <div class="col-no">${rowCount}</div>
-            <div class="col-file">
-                <span class="file-icon">📄</span>
-                <span class="file-link">${file.name}</span>
-                <span class="file-size">(${fileSize} KB)</span>
-            </div>
-            <div class="col-desc">
-                <input type="text" placeholder="설명을 입력하세요" class="attachment-desc">
-            </div>
-            <div class="col-action">
-                <button class="btn-delete" onclick="deleteAttachment(this)">삭제</button>
-            </div>
-        `;
-        
-        tbody.appendChild(newRow);
-        pendingFiles.push(file);
-    });
-    
-    updateFileCount();
-}
+// 첨부파일 관련 함수들은 모두 공통 컴포넌트에서 제공됨
 
-function deleteAttachment(btn) {
-    const row = btn.closest('.table-row');
-    const attachmentId = row.dataset.id;
-    
-    if (attachmentId) {
-        deletedAttachments.push(attachmentId);
-    }
-    
-    row.remove();
-    updateFileCount();
-    updateRowNumbers();
-    
-    // 파일이 모두 삭제된 경우 "등록된 첨부파일이 없습니다" 표시
-    const tbody = document.getElementById('attachments-tbody');
-    if (tbody.children.length === 0) {
-        tbody.innerHTML = '<div class="table-row no-data" id="no-data-row"><div class="col-full">등록된 첨부파일이 없습니다.</div></div>';
-    }
-}
-
-function updateFileCount() {
-    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
-    document.getElementById('file-count').textContent = rows.length;
-}
-
-function updateRowNumbers() {
-    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
-    rows.forEach((row, index) => {
-        const noCell = row.querySelector('.col-no');
-        noCell.textContent = index + 1;
-    });
-}
+// updateFileCount, updateRowNumbers 함수들도 공통 컴포넌트에서 제공됨
 
 function showPasswordModal() {
     document.getElementById('password-modal').style.display = 'block';
@@ -1199,7 +985,7 @@ function saveChanges() {
     // FormData 생성
     const formData = new FormData();
     formData.append('issue_number', issueNumber);
-    formData.append('violation_content', detailedContent);
+    formData.append('detailed_content', detailedContent);  // violation_content 대신 detailed_content
     formData.append('custom_data', JSON.stringify(customData));  // 동적 컬럼 데이터 추가
     formData.append('deleted_attachments', JSON.stringify(deletedAttachments));
     formData.append('attachment_data', JSON.stringify(attachments));
@@ -1703,4 +1489,9 @@ function handleDepartmentSelection(selectedItem) {
 // 저장 데이터 수집 함수 재정의는 제거 (JSON 저장 방지)
 // modifySaveData 함수 제거
 </script>
+
+<!-- 공통 첨부파일 스크립트와 스타일 import -->
+{% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
+{{ attachment_styles() }}
+{{ attachment_scripts() }}
 {% endblock %}

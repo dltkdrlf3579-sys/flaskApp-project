@@ -1,0 +1,133 @@
+{# 테이블 헤더 컨트롤 공통 컴포넌트 #}
+{% macro render_table_controls(total_count, show_excel=True, show_register=True, show_delete=True, register_callback='showRegisterModal()') %}
+<style>
+/* 테이블 헤더 공통 스타일 */
+.table-header {
+    padding: 12px 16px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* 왼쪽 컨트롤 영역 */
+.left-controls {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.total-count {
+    font-weight: 600;
+    color: #374151;
+    font-size: 14px;
+}
+
+.per-page-selector select {
+    padding: 5px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 13px;
+    background: white;
+}
+
+/* 액션 버튼 그룹 */
+.action-buttons {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.action-buttons .btn {
+    padding: 6px 12px;
+    font-size: 13px;
+}
+
+/* 버튼 스타일 */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: none;
+    border-radius: 4px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-excel-download {
+    background: white;
+    color: #333;
+    border: 1px solid #d1d5db;
+}
+
+.btn-excel-download:hover {
+    background: #f3f4f6;
+}
+
+.btn-register {
+    background-color: #198754 !important;
+    color: white !important;
+    border-color: #198754 !important;
+}
+
+.btn-register:hover {
+    background-color: #146c43 !important;
+    border-color: #146c43 !important;
+}
+
+.btn-delete {
+    background-color: #dc3545 !important;
+    color: white !important;
+    border-color: #dc3545 !important;
+    display: none;
+}
+
+.btn-delete:hover {
+    background-color: #bb2d3b !important;
+    border-color: #b02a37 !important;
+}
+</style>
+
+<div class="table-header">
+    <div class="left-controls">
+        <span class="total-count">총 {{ total_count }}건</span>
+        <div class="per-page-selector">
+            <select onchange="changePerPage(this.value)">
+                <option value="10" {% if request.args.get('per_page', '10') == '10' %}selected{% endif %}>10개씩</option>
+                <option value="25" {% if request.args.get('per_page', '10') == '25' %}selected{% endif %}>25개씩</option>
+                <option value="50" {% if request.args.get('per_page', '10') == '50' %}selected{% endif %}>50개씩</option>
+                <option value="100" {% if request.args.get('per_page', '10') == '100' %}selected{% endif %}>100개씩</option>
+            </select>
+        </div>
+    </div>
+    <div class="action-buttons">
+        {% if show_delete %}
+        <button class="btn btn-delete" onclick="deleteSelectedWithPassword()">
+            선택 삭제
+        </button>
+        {% endif %}
+        {% if show_excel %}
+        <button class="btn btn-excel-download" onclick="exportToExcel()">
+            <img src="/static/icons/excel-icon.png" style="vertical-align: middle;" width="16" height="16">
+            엑셀 다운로드
+        </button>
+        {% endif %}
+        {% if show_register %}
+        <button class="btn btn-register" onclick="{{ register_callback }}">
+            등록
+        </button>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+function changePerPage(value) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('per_page', value);
+    url.searchParams.set('page', '1');
+    window.location.href = url.toString();
+}
+</script>
+{% endmacro %}

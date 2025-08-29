@@ -40,61 +40,153 @@
                     </div>
                     <div class="info-cell info-cell-double">
                         <label>사고명</label>
+                        {% if is_direct_entry %}
+                        <input type="text" id="accident_name" class="basic-input" value="{{ accident.accident_name or '' }}">
+                        {% else %}
                         <div class="value">{{ accident.accident_name }}</div>
+                        {% endif %}
                     </div>
                     <div class="info-cell">
                         <label>사업장</label>
+                        {% if is_direct_entry %}
+                        <select id="workplace" class="basic-input">
+                            <option value="">선택하세요</option>
+                            {% for opt in basic_options.get('workplace', []) %}
+                            <option value="{{ opt.option_code }}" {% if accident.workplace == opt.option_code %}selected{% endif %}>{{ opt.option_value }}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
                         <div class="value">{{ accident.workplace or '-' }}</div>
+                        {% endif %}
                     </div>
                 </div>
                 <div class="info-row">
                     <div class="info-cell">
                         <label>등급</label>
+                        {% if is_direct_entry %}
+                        <select id="accident_grade" class="basic-input">
+                            <option value="">선택하세요</option>
+                            {% for opt in basic_options.get('accident_grade', []) %}
+                            <option value="{{ opt.option_code }}" {% if accident.accident_grade == opt.option_code %}selected{% endif %}>{{ opt.option_value }}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
                         <div class="value">{{ accident.accident_grade or '-' }}</div>
+                        {% endif %}
                     </div>
                     <div class="info-cell">
                         <label>대분류</label>
+                        {% if is_direct_entry %}
+                        <select id="major_category" class="basic-input">
+                            <option value="">선택하세요</option>
+                            {% for opt in basic_options.get('major_category', []) %}
+                            <option value="{{ opt.option_code }}" {% if accident.major_category == opt.option_code %}selected{% endif %}>{{ opt.option_value }}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
                         <div class="value">{{ accident.major_category or '-' }}</div>
+                        {% endif %}
                     </div>
                     <div class="info-cell">
                         <label>재해형태</label>
+                        {% if is_direct_entry %}
+                        <select id="injury_form" class="basic-input">
+                            <option value="">선택하세요</option>
+                            {% for opt in basic_options.get('disaster_form', []) %}
+                            <option value="{{ opt.option_code }}" {% if (accident.injury_form or accident.disaster_form) == opt.option_code %}selected{% endif %}>{{ opt.option_value }}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
                         <div class="value">{{ accident.injury_form or accident.disaster_form or '-' }}</div>
+                        {% endif %}
                     </div>
                     <div class="info-cell">
                         <label>재해유형</label>
+                        {% if is_direct_entry %}
+                        <select id="injury_type" class="basic-input">
+                            <option value="">선택하세요</option>
+                            {% for opt in basic_options.get('disaster_type', []) %}
+                            <option value="{{ opt.option_code }}" {% if (accident.injury_type or accident.disaster_type) == opt.option_code %}selected{% endif %}>{{ opt.option_value }}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
                         <div class="value">{{ accident.injury_type or accident.disaster_type or '-' }}</div>
+                        {% endif %}
                     </div>
                 </div>
                 <div class="info-row">
                     <div class="info-cell">
                         <label>재해날짜</label>
+                        {% if is_direct_entry %}
+                        <input type="date" id="accident_date" class="basic-input" value="{{ accident.accident_date or '' }}">
+                        {% else %}
                         <div class="value">{{ accident.accident_date }}</div>
+                        {% endif %}
                     </div>
                     <div class="info-cell">
                         <label>요일</label>
+                        {% if is_direct_entry %}
+                        <input type="text" id="day_of_week" class="basic-input" value="{{ accident.day_of_week or '' }}" readonly style="background-color: #f8f9fa;">
+                        {% else %}
                         <div class="value">{{ accident.day_of_week or '-' }}</div>
+                        {% endif %}
                     </div>
                     <div class="info-cell">
                         <label>등록일</label>
+                        {% if is_direct_entry %}
+                        <input type="date" id="report_date" class="basic-input" value="{{ accident.report_date or '' }}">
+                        {% else %}
                         <div class="value">{{ accident.report_date or '-' }}</div>
+                        {% endif %}
                     </div>
                     <div class="info-cell">
                         <label>건물</label>
+                        {% if is_direct_entry %}
+                        <select id="building" class="basic-input">
+                            <option value="">선택하세요</option>
+                            {% for opt in basic_options.get('building', []) %}
+                            <option value="{{ opt.option_code }}" {% if accident.building == opt.option_code %}selected{% endif %}>{{ opt.option_value }}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
                         <div class="value">{{ accident.building or '-' }}</div>
+                        {% endif %}
                     </div>
                 </div>
                 <div class="info-row">
                     <div class="info-cell">
                         <label>층</label>
+                        {% if is_direct_entry %}
+                        <select id="floor" class="basic-input">
+                            <option value="">선택하세요</option>
+                            {% for opt in basic_options.get('floor', []) %}
+                            <option value="{{ opt.option_code }}" {% if accident.floor == opt.option_code %}selected{% endif %}>{{ opt.option_value }}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
                         <div class="value">{{ accident.floor or '-' }}</div>
+                        {% endif %}
                     </div>
                     <div class="info-cell">
                         <label>장소구분</label>
+                        {% if is_direct_entry %}
+                        <select id="location_category" class="basic-input">
+                            <option value="">선택하세요</option>
+                            {% for opt in basic_options.get('location_category', []) %}
+                            <option value="{{ opt.option_code }}" {% if accident.location_category == opt.option_code %}selected{% endif %}>{{ opt.option_value }}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
                         <div class="value">{{ accident.location_category or '-' }}</div>
+                        {% endif %}
                     </div>
                     <div class="info-cell info-cell-double">
                         <label>세부장소</label>
+                        {% if is_direct_entry %}
+                        <input type="text" id="location_detail" class="basic-input" value="{{ accident.location_detail or accident.detail_location or '' }}">
+                        {% else %}
                         <div class="value">{{ accident.location_detail or accident.detail_location or '-' }}</div>
+                        {% endif %}
                     </div>
                 </div>
             </div>
@@ -130,15 +222,9 @@
                             <select class="dynamic-input" data-column-key="{{ col.column_key }}">
                                 <option value="">선택하세요</option>
                                 {% if col.dropdown_options_mapped %}
-                                    {# 새로운 코드-값 매핑 방식 #}
+                                    {# 코드-값 매핑 방식 (DB dropdown_option_codes_v2 테이블 사용) #}
                                     {% for option in col.dropdown_options_mapped %}
                                         <option value="{{ option.code }}" {% if col_value == option.code %}selected{% endif %}>{{ option.value }}</option>
-                                    {% endfor %}
-                                {% elif col.dropdown_options %}
-                                    {# 기존 JSON 방식 (하위 호환성) #}
-                                    {% set options = col.dropdown_options | from_json %}
-                                    {% for option in options %}
-                                        <option value="{{ option }}" {% if col_value == option %}selected{% endif %}>{{ option }}</option>
                                     {% endfor %}
                                 {% endif %}
                             </select>
@@ -262,48 +348,9 @@
         </div>
     </div>
 
-    <!-- 4. 첨부파일 영역 -->
-    <div class="section attachments-section">
-        <div class="section-header">
-            <h3 class="section-title">첨부파일</h3>
-            <button class="btn-add-file" onclick="document.getElementById('file-input').click();">추가</button>
-            <span class="file-count">총 <span id="file-count">{{ attachments|length }}</span>개</span>
-            <span class="file-size"><span id="file-size">0</span> MB / 50 MB</span>
-        </div>
-        <div class="section-content">
-            <input type="file" id="file-input" multiple style="display: none;" onchange="handleFileUpload(this.files)">
-            <div class="attachments-table">
-                <div class="table-header">
-                    <div class="col-no">No.</div>
-                    <div class="col-file">파일명</div>
-                    <div class="col-desc">설명</div>
-                    <div class="col-action">상태</div>
-                </div>
-                <div class="table-body" id="attachments-tbody">
-                    {% for attachment in attachments %}
-                    <div class="table-row" data-id="{{ attachment.id }}">
-                        <div class="col-no">{{ loop.index }}</div>
-                        <div class="col-file">
-                            <span class="file-icon">📄</span>
-                            <a href="/download/{{ attachment.id }}" class="file-link" download>{{ attachment.file_name }}</a>
-                            <span class="file-size">({{ (attachment.file_size / 1024) | round(2) }} KB)</span>
-                        </div>
-                        <div class="col-desc">
-                            <input type="text" value="{{ attachment.description or '' }}" placeholder="설명을 입력하세요" class="attachment-desc">
-                        </div>
-                        <div class="col-action">
-                            <button class="btn-delete" onclick="deleteAttachment(this)">삭제</button>
-                        </div>
-                    </div>
-                    {% else %}
-                    <div class="table-row no-data" id="no-data-row">
-                        <div class="col-full">등록된 첨부파일이 없습니다.</div>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-        </div>
-    </div>
+    <!-- 4. 첨부파일 영역 (공통 컴포넌트) -->
+    {% from 'includes/attachment_section.html' import render_attachment_section %}
+    {{ render_attachment_section(attachments, 'accident') }}
 
     <!-- 저장 버튼 영역 -->
     <div class="save-section">
@@ -479,6 +526,25 @@
     min-height: 20px;
     display: flex;
     align-items: center;
+}
+
+/* ACC 사고일 때 기본정보 입력 필드 스타일 */
+.basic-input {
+    width: 100%;
+    padding: 8px 12px;
+    background: white;
+    border: 1px solid #e1e5e9;
+    border-radius: 4px;
+    font-size: 14px;
+    color: #333;
+    min-height: 36px;
+    box-sizing: border-box;
+}
+
+.basic-input:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
 }
 
 /* 2. 추가 기입정보 섹션 (동적 컬럼 입력) */
@@ -940,8 +1006,7 @@
 </style>
 
 <script>
-let pendingFiles = [];
-let deletedAttachments = [];
+// 첨부파일 관련 변수는 공통 컴포넌트에서 정의됨
 
 function toggleSection(sectionId) {
     const content = document.getElementById(sectionId + '-content');
@@ -1072,6 +1137,9 @@ function verifyPasswordAndSave() {
     });
 }
 
+// ACC 사고인지 여부를 JavaScript에서 사용할 수 있도록 설정
+const IS_DIRECT = {{ 'true' if is_direct_entry else 'false' }};
+
 function saveChanges() {
     // contentEditable div에서 HTML 내용 가져오기
     const editableDiv = document.getElementById('detailed-content');
@@ -1080,6 +1148,25 @@ function saveChanges() {
     console.log('Saving content from contentEditable:', detailedContent);
     
     const accidentNumber = '{{ accident.accident_number }}';
+    
+    // ACC 사고일 때 기본정보 수집
+    const baseFields = {};
+    if (IS_DIRECT) {
+        baseFields.accident_name = document.getElementById('accident_name')?.value || '';
+        baseFields.accident_date = document.getElementById('accident_date')?.value || '';
+        baseFields.workplace = document.getElementById('workplace')?.value || '';
+        baseFields.accident_grade = document.getElementById('accident_grade')?.value || '';
+        baseFields.major_category = document.getElementById('major_category')?.value || '';
+        baseFields.injury_form = document.getElementById('injury_form')?.value || '';
+        baseFields.injury_type = document.getElementById('injury_type')?.value || '';
+        baseFields.building = document.getElementById('building')?.value || '';
+        baseFields.floor = document.getElementById('floor')?.value || '';
+        baseFields.location_category = document.getElementById('location_category')?.value || '';
+        baseFields.location_detail = document.getElementById('location_detail')?.value || '';
+        baseFields.report_date = document.getElementById('report_date')?.value || '';
+        baseFields.day_of_week = document.getElementById('day_of_week')?.value || '';
+        console.log('ACC 사고 기본정보:', baseFields);
+    }
     
     // Phase 2: 동적 컬럼 데이터 수집
     const customData = {};
@@ -1125,6 +1212,9 @@ function saveChanges() {
     formData.append('accident_number', accidentNumber);
     formData.append('detailed_content', detailedContent);
     formData.append('custom_data', JSON.stringify(customData));  // 동적 컬럼 데이터 추가
+    if (IS_DIRECT) {
+        formData.append('base_fields', JSON.stringify(baseFields));  // ACC 사고일 때 기본정보 추가
+    }
     formData.append('deleted_attachments', JSON.stringify(deletedAttachments));
     formData.append('attachment_data', JSON.stringify(attachments));
     
@@ -1277,6 +1367,32 @@ function insertAtCursor(element) {
 // 페이지 로드시 첨부파일 정보 초기화
 document.addEventListener('DOMContentLoaded', function() {
     updateFileInfo();
+    
+    // ACC 사고일 때 날짜 변경 시 요일 자동 계산
+    {% if is_direct_entry %}
+    const accidentDateInput = document.getElementById('accident_date');
+    const dayOfWeekInput = document.getElementById('day_of_week');
+    
+    if (accidentDateInput && dayOfWeekInput) {
+        // 날짜 변경 시 요일 자동 계산
+        accidentDateInput.addEventListener('change', function() {
+            if (this.value) {
+                const date = new Date(this.value);
+                const days = ['일', '월', '화', '수', '목', '금', '토'];
+                dayOfWeekInput.value = days[date.getDay()];
+            } else {
+                dayOfWeekInput.value = '';
+            }
+        });
+        
+        // 페이지 로드 시 기존 날짜에 대해서도 요일 계산
+        if (accidentDateInput.value) {
+            const date = new Date(accidentDateInput.value);
+            const days = ['일', '월', '화', '수', '목', '금', '토'];
+            dayOfWeekInput.value = days[date.getDay()];
+        }
+    }
+    {% endif %}
 });
 
 function updateFileInfo() {
@@ -1396,34 +1512,40 @@ function handlePersonSelection(selectedItem) {
 
 // 업체 선택 콜백
 function handleCompanySelection(selectedItem) {
+    console.log('handleCompanySelection called:', selectedItem);  // 디버깅용
+    console.log('currentColumnKey:', window.currentColumnKey);  // 디버깅용
+    
     if (!selectedItem || !window.currentColumnKey) return;
     
     // 해당 컬럼의 input 찾기
     const input = document.querySelector(`input[data-column-key="${window.currentColumnKey}"]`);
     if (input) {
-        // 업체명만 표시 (사업자번호는 별도 컬럼에 표시)
+        // 업체명만 표시
         input.value = selectedItem.company_name || '';
         
         // 실제 저장할 데이터는 data 속성에 저장
         input.dataset.companyId = selectedItem.id || '';
-        input.dataset.companyName = selectedItem.company_name || '';
-        input.dataset.companyBusinessNumber = selectedItem.company_business_number || '';
+        input.dataset.businessNumber = selectedItem.business_number || '';
         
         // change 이벤트 발생
         const event = new Event('change', { bubbles: true });
         input.dispatchEvent(event);
         
-        // linked 컬럼 자동 채우기 - 사업자번호
+        // 연관된 사업자번호 필드 자동 채우기
+        // _bizno로 끝나는 컬럼키 찾기
         const biznoKey = window.currentColumnKey + '_bizno';
+        console.log('Looking for bizno field:', biznoKey);  // 디버깅용
+        
         const biznoInput = document.querySelector(`input[data-column-key="${biznoKey}"]`);
         if (biznoInput) {
-            biznoInput.value = selectedItem.company_business_number || '';
-            biznoInput.readOnly = true; // 자동 채워진 필드는 읽기 전용
-            biznoInput.style.backgroundColor = '#f8f9fa'; // 시각적 구분
+            biznoInput.value = selectedItem.business_number || '';
+            console.log('Filled bizno field with:', selectedItem.business_number);  // 디버깅용
             
             // change 이벤트 발생
             const biznoEvent = new Event('change', { bubbles: true });
             biznoInput.dispatchEvent(biznoEvent);
+        } else {
+            console.log('Bizno field not found:', biznoKey);  // 디버깅용
         }
     }
     
@@ -1627,4 +1749,9 @@ function handleDepartmentSelection(selectedItem) {
 // 저장 데이터 수집 함수 재정의는 제거 (JSON 저장 방지)
 // modifySaveData 함수 제거
 </script>
+
+<!-- 공통 첨부파일 스크립트와 스타일 import -->
+{% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
+{{ attachment_styles() }}
+{{ attachment_scripts() }}
 {% endblock %}

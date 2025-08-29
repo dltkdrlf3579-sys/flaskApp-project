@@ -206,21 +206,21 @@
         </div>
     </div>
 
-    <!-- 2. 위반내용 영역 -->
+    <!-- 2. 위반 상세내용 영역 -->
     <div class="section detail-content-section">
         <div class="section-header">
-            <h3 class="section-title">위반내용</h3>
+            <h3 class="section-title">위반 상세내용</h3>
         </div>
         <div class="section-content">
             <div class="content-editor">
                 <!-- 간단한 편집 가능한 영역 -->
-                <div id="violation-content" 
+                <div id="detailed-content" 
                      class="editable-content" 
                      contenteditable="true" 
-                     placeholder="위반내용에 대한 상세 내용을 입력하세요."></div>
+                     placeholder="위반에 대한 상세 내용을 입력하세요."></div>
                 
                 <!-- 숨겨진 textarea (저장용) -->
-                <textarea id="violation-content-hidden" style="display: none;"></textarea>
+                <textarea id="detailed-content-hidden" style="display: none;"></textarea>
             </div>
         </div>
     </div>
@@ -413,7 +413,9 @@ function registerSafetyInstruction() {
     formData.append('accident_grade', document.getElementById('accident_grade').value);
     formData.append('safety_violation_grade', document.getElementById('safety_violation_grade').value);
     formData.append('violation_type', document.getElementById('violation_type').value);
-    formData.append('violation_content', document.getElementById('violation_content').value);
+    // violation_content 대신 detailed_content 전송
+    const detailedContent = document.getElementById('detailed-content').innerHTML;
+    formData.append('detailed_content', detailedContent);
     formData.append('access_ban_start_date', document.getElementById('access_ban_start_date').value);
     formData.append('access_ban_end_date', document.getElementById('access_ban_end_date').value);
     formData.append('period', document.getElementById('period').value);

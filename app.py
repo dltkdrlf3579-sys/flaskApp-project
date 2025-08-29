@@ -1,17 +1,46 @@
 import os
 import logging
 from datetime import datetime
+import pytz
 from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for
-from werkzeug.serving import run_simple
+from timezone_config import KST, get_korean_time, get_korean_time_str
 from werkzeug.utils import secure_filename
 from config.menu import MENU_CONFIG
 from database_config import db_config, partner_manager
 import sqlite3
 import math
+from board_services import ColumnService, CodeService, ItemService
+from column_service import ColumnConfigService
+from search_popup_service import SearchPopupService
+from column_sync_service import ColumnSyncService
+
+def get_db_connection(timeout=10.0):
+    """
+    데이터베이스 연결 생성 (WAL 모드 및 동시성 설정 포함)
+    
+    Args:
+        timeout: 연결 타임아웃 (기본값: 10초)
+    
+    Returns:
+        sqlite3.Connection: 설정된 데이터베이스 연결
+    """
+    conn = sqlite3.connect(db_config.local_db_path, timeout=timeout)
+    cursor = conn.cursor()
+    
+    # WAL 모드 설정 (동시성 개선)
+    cursor.execute("PRAGMA journal_mode=WAL")
+    
+    # Busy timeout 설정 (5초)
+    cursor.execute("PRAGMA busy_timeout=5000")
+    
+    # 동기화 모드 설정
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    
+    return conn
 
 def generate_manual_accident_number(cursor):
     """수기입력 사고번호 자동 생성 (ACCYYMMDD00 형식)"""
-    today = datetime.now()
+    today = get_korean_time()
     date_part = today.strftime('%y%m%d')  # 240822
     
     # 오늘 날짜의 마지막 번호 조회
@@ -42,10 +71,10 @@ app.secret_key = db_config.config.get('DEFAULT', 'SECRET_KEY')
 app.debug = db_config.config.getboolean('DEFAULT', 'DEBUG')
 
 # Jinja2 필터 추가 (JSON 파싱용)
-import json
+import json as pyjson  # GPT 권고: json 모듈 별칭 사용으로 충돌 방지
 def from_json_filter(value):
     try:
-        return json.loads(value) if value else []
+        return pyjson.loads(value) if value else []
     except:
         return []
 app.jinja_env.filters['from_json'] = from_json_filter
@@ -53,7 +82,6 @@ app.jinja_env.filters['from_json'] = from_json_filter
 DB_PATH = db_config.local_db_path
 PASSWORD = db_config.config.get('DEFAULT', 'EDIT_PASSWORD')
 ADMIN_PASSWORD = db_config.config.get('DEFAULT', 'ADMIN_PASSWORD')
-UPLOAD_FOLDER = db_config.config.get('DEFAULT', 'UPLOAD_FOLDER')
 
 # 관리자 인증 함수
 def require_admin_auth(f):
@@ -107,7 +135,7 @@ app.jinja_env.cache = {}
 def init_db():
     """기본 설정 초기화 및 데이터 동기화"""
     # 로컬 DB 테이블 초기화 (partner_manager에서 처리)
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
     
     # 페이지 테이블만 여기서 관리
@@ -119,6 +147,85 @@ def init_db():
             content TEXT
         )
     ''')
+
+    # Dropdown v2 table (board-scoped) and migration from legacy v1
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS dropdown_option_codes_v2 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                board_type TEXT NOT NULL,
+                column_key TEXT NOT NULL,
+                option_code TEXT NOT NULL,
+                option_value TEXT NOT NULL,
+                display_order INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_by TEXT,
+                updated_by TEXT,
+                UNIQUE(board_type, column_key, option_code)
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_doc_v2_board_col ON dropdown_option_codes_v2(board_type, column_key, is_active)')
+        # Migrate from v1 if v2 is empty and v1 exists
+        cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='dropdown_option_codes'")
+        v1_exists = cursor.fetchone()[0] > 0
+        cursor.execute("SELECT COUNT(*) FROM dropdown_option_codes_v2")
+        v2_count = cursor.fetchone()[0]
+        if v1_exists and v2_count == 0:
+            cursor.execute('''
+                INSERT OR IGNORE INTO dropdown_option_codes_v2
+                    (board_type, column_key, option_code, option_value, display_order, is_active)
+                SELECT 'accident', column_key, option_code, option_value, display_order, is_active
+                FROM dropdown_option_codes
+            ''')
+    except Exception as _e:
+        logging.debug(f"Dropdown v2 ensure/migrate skipped: {_e}")
+    
+    # Ensure board-specific column config tables exist (avoid cross-board fallback)
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS accident_column_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                column_key TEXT UNIQUE NOT NULL,
+                column_name TEXT NOT NULL,
+                column_type TEXT DEFAULT 'text',
+                column_order INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                dropdown_options TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS safety_instruction_column_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                column_key TEXT UNIQUE NOT NULL,
+                column_name TEXT NOT NULL,
+                column_type TEXT DEFAULT 'text',
+                column_order INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                dropdown_options TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS partner_standards_column_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                column_key TEXT UNIQUE NOT NULL,
+                column_name TEXT NOT NULL,
+                column_type TEXT DEFAULT 'text',
+                column_order INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                dropdown_options TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+    except Exception as _e:
+        logging.debug(f"Column config table ensure failed: {_e}")
     
     # 메뉴 설정에서 페이지 자동 생성
     for category in MENU_CONFIG:
@@ -308,6 +415,75 @@ def before_request():
     if request.path != '/data-recovery':
         init_db()
 
+@app.route("/api/test-simple")
+def test_simple():
+    return jsonify({"status": "ok"})
+
+# ===== 검색 팝업 공통 API =====
+@app.route("/api/search-popup/search", methods=["GET"])
+def api_search_popup():
+    """공통 검색 팝업 API"""
+    search_type = request.args.get('type', 'company')
+    search_field = request.args.get('value', '')  # 검색할 필드
+    query = request.args.get('q', '')  # 검색어
+    limit = int(request.args.get('limit', '50'))
+    
+    try:
+        # SearchPopupService 사용
+        search_service = SearchPopupService(DB_PATH)
+        result = search_service.search(search_type, query, search_field, limit)
+        
+        return jsonify({
+            'success': True,
+            'results': result['results'],
+            'total': result.get('total', len(result['results'])),
+            'config': result.get('config', {})
+        })
+    except Exception as e:
+        logging.error(f"Search popup API error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route("/api/search-popup/autocomplete", methods=["GET"])
+def api_search_popup_autocomplete():
+    """검색 팝업 자동완성 API"""
+    search_type = request.args.get('type', 'company')
+    query = request.args.get('query', '')
+    
+    try:
+        # SearchPopupService 사용 (자동완성은 최대 10개만)
+        search_service = SearchPopupService(DB_PATH)
+        result = search_service.search(search_type, query, limit=10)
+        
+        # 자동완성 형식으로 변환
+        config = search_service.search_configs.get(search_type, {})
+        display_fields = config.get('display_fields', [])
+        
+        items = []
+        for row in result['results'][:10]:
+            # 첫 번째 필드를 메인으로, 나머지를 서브로
+            if display_fields:
+                main = row.get(display_fields[0], '')
+                sub = ' | '.join([str(row.get(field, '')) for field in display_fields[1:] if row.get(field)])
+                items.append({
+                    'main': main,
+                    'sub': sub,
+                    'data': row
+                })
+        
+        return jsonify({
+            'success': True,
+            'items': items
+        })
+    except Exception as e:
+        logging.error(f"Autocomplete API error: {e}")
+        return jsonify({
+            'success': False,
+            'items': []
+        }), 500
+
 @app.route("/")
 def index():
     # 대시보드 설정 가져오기 (단순화)
@@ -318,6 +494,108 @@ def index():
                                               fallback=True)
     }
     return render_template("index.html", menu=MENU_CONFIG, dashboard_config=dashboard_config)
+
+# ===== 검색 팝업 라우트 =====
+@app.route("/search-popup")
+def search_popup():
+    """공통 검색 팝업"""
+    search_type = request.args.get('type', 'company')
+    callback = request.args.get('callback', 'handleSelection')
+    
+    # SearchPopupService 사용
+    search_service = SearchPopupService(DB_PATH)
+    
+    # 설정 정보 가져오기
+    config = search_service.search_configs.get(search_type, {})
+    
+    # search_fields를 search_options로 변환
+    search_options = []
+    if 'search_fields' in config:
+        for field_info in config['search_fields']:
+            search_options.append({
+                'value': field_info['field'],
+                'label': field_info['label']
+            })
+    
+    # config에 필요한 URL 추가
+    display_labels = config.get('display_labels', {})
+    enhanced_config = {
+        **config,
+        'searchUrl': '/api/search-popup/search',
+        'autocompleteUrl': '/api/search-popup/autocomplete',
+        'callback': callback,
+        'columns': [{'field': field, 'label': display_labels.get(field, field)} for field in config.get('display_fields', [])]
+    }
+    
+    # 템플릿 렌더링을 시도하고, 실패하면 간단한 HTML 반환
+    try:
+        return render_template('search-popup.html',
+                             search_type=search_type,
+                             search_title=config.get('title', '검색'),
+                             search_options=search_options,
+                             placeholder=config.get('placeholder', '검색어를 입력하세요'),
+                             config=enhanced_config,
+                             menu=MENU_CONFIG)
+    except:
+        # 템플릿이 없으면 간단한 HTML 반환
+        return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>{result['config'].get('title', '검색')}</title>
+        <style>
+            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
+            .search-container {{ background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+            h2 {{ margin-top: 0; color: #333; }}
+            .search-box {{ display: flex; gap: 10px; margin-bottom: 20px; }}
+            input[type="text"] {{ flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }}
+            button {{ padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }}
+            button:hover {{ background: #0056b3; }}
+            .results {{ max-height: 400px; overflow-y: auto; }}
+            .result-item {{ padding: 12px; border-bottom: 1px solid #eee; cursor: pointer; transition: background 0.2s; }}
+            .result-item:hover {{ background: #f8f9fa; }}
+            .result-item:last-child {{ border-bottom: none; }}
+            .no-results {{ text-align: center; color: #666; padding: 20px; }}
+            .field-label {{ font-size: 12px; color: #666; }}
+            .field-value {{ font-size: 14px; color: #333; margin-top: 2px; }}
+        </style>
+    </head>
+    <body>
+        <div class="search-container">
+            <h2>{result['config'].get('title', '검색')}</h2>
+            <form class="search-box" method="get">
+                <input type="hidden" name="type" value="{search_type}">
+                <input type="hidden" name="callback" value="{callback}">
+                <select name="search_field" style="padding: 10px; border: 1px solid #ddd; border-radius: 4px; margin-right: 5px;">
+                    {"".join([f'<option value="{field["field"] if isinstance(field, dict) else field}" {"selected" if (search_field == (field["field"] if isinstance(field, dict) else field)) or (not search_field and (field["field"] if isinstance(field, dict) else field) == result["config"].get("default_search_field")) else ""}>{field["label"] if isinstance(field, dict) else field}</option>' for field in result["config"].get("search_fields", [])])}
+                </select>
+                <input type="text" name="q" value="{query}" placeholder="{result['config'].get('placeholder', '검색어를 입력하세요')}" autofocus>
+                <button type="submit">검색</button>
+            </form>
+            <div class="results">
+                {"".join([f'''
+                <div class="result-item" onclick="selectItem('{row.get(result['config']['id_field'])}', '{row.get(result['config']['display_fields'][0])}')">
+                    {"".join([f'<div><span class="field-label">{field}:</span> <div class="field-value">{row.get(field, "")}</div></div>' for field in result['config'].get('display_fields', [])])}
+                </div>
+                ''' for row in result['results']]) if result['results'] else '<div class="no-results">검색 결과가 없습니다.</div>'}
+            </div>
+        </div>
+        <script>
+            function selectItem(id, name) {{
+                if (window.opener && !window.opener.closed) {{
+                    if (window.opener.{callback}) {{
+                        window.opener.{callback}(id, name);
+                    }}
+                    window.close();
+                }} else {{
+                    alert('부모 창을 찾을 수 없습니다.');
+                }}
+            }}
+        </script>
+    </body>
+    </html>
+    """
 
 # 개별 라우트들을 catch-all 라우트보다 먼저 정의
 @app.route("/partner-standards")
@@ -340,6 +618,133 @@ def partner_accident_route():
     """협력사 사고 페이지 라우트"""
     return partner_accident()
 
+def partner_accident():
+    """협력사 사고 목록 페이지"""
+    from common_search import DynamicSearchBuilder, get_static_columns
+    
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    
+    # 검색 조건
+    filters = {
+        'company_name': request.args.get('company_name', '').strip(),
+        'business_number': request.args.get('business_number', '').strip(),
+        'accident_date_from': request.args.get('accident_date_from'),
+        'accident_date_to': request.args.get('accident_date_to')
+    }
+    
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    
+    # 사고 목록 조회 - 공통 검색 모듈 사용
+    query = """
+        SELECT * FROM accidents_cache 
+        WHERE is_deleted = 0
+    """
+    params = []
+    
+    # DynamicSearchBuilder로 검색 조건 생성
+    search_builder = DynamicSearchBuilder('sqlite')
+    static_cols = get_static_columns('accident')
+    
+    # 각 필터 적용
+    for field_name, field_value in filters.items():
+        if not field_value:
+            continue
+            
+        # 날짜 필드 처리
+        if field_name == 'accident_date_from':
+            query, params = search_builder.add_search_condition(
+                query, params, 'accident_date', field_value,
+                search_type='gte', is_dynamic=False
+            )
+        elif field_name == 'accident_date_to':
+            query, params = search_builder.add_search_condition(
+                query, params, 'accident_date', field_value,
+                search_type='lte', is_dynamic=False
+            )
+        else:
+            # 동적 컬럼 여부 자동 판단
+            is_dynamic = field_name not in static_cols
+            
+            # 폴백 컬럼 설정
+            fallback = None
+            if field_name == 'company_name':
+                fallback = 'responsible_company1'
+            elif field_name == 'business_number':
+                fallback = 'responsible_company1_no'
+                
+            query, params = search_builder.add_search_condition(
+                query, params, field_name, field_value,
+                search_type='like', is_dynamic=is_dynamic,
+                fallback_column=fallback
+            )
+    
+    query += " ORDER BY accident_date DESC, accident_number DESC"
+    
+    # 전체 개수 조회
+    count_query = query.replace("SELECT *", "SELECT COUNT(*)")
+    total_count = conn.execute(count_query, params).fetchone()[0]
+    
+    # 페이지네이션 적용
+    query += f" LIMIT {per_page} OFFSET {(page - 1) * per_page}"
+    accidents = conn.execute(query, params).fetchall()
+    accidents = [dict(row) for row in accidents]
+    
+    # 동적 컬럼 설정 가져오기
+    dynamic_columns_rows = conn.execute("""
+        SELECT * FROM accident_column_config 
+        WHERE is_active = 1 
+        ORDER BY column_order
+    """).fetchall()
+    dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    
+    conn.close()
+    
+    # 페이지네이션 객체 생성
+    import math
+    class Pagination:
+        def __init__(self, page, per_page, total_count):
+            self.page = page
+            self.per_page = per_page
+            self.total_count = total_count
+            self.pages = math.ceil(total_count / per_page) if total_count > 0 else 1
+            self.has_prev = page > 1
+            self.prev_num = page - 1 if self.has_prev else None
+            self.has_next = page < self.pages
+            self.next_num = page + 1 if self.has_next else None
+        
+        def iter_pages(self, window_size=10):
+            start = ((self.page - 1) // window_size) * window_size + 1
+            end = min(start + window_size - 1, self.pages)
+            for num in range(start, end + 1):
+                yield num
+        
+        def get_window_info(self, window_size=10):
+            start = ((self.page - 1) // window_size) * window_size + 1
+            end = min(start + window_size - 1, self.pages)
+            has_prev_window = start > 1
+            has_next_window = end < self.pages
+            prev_window_start = max(1, start - window_size)
+            next_window_start = min(end + 1, self.pages)
+            return {
+                'start': start,
+                'end': end,
+                'has_prev_window': has_prev_window,
+                'has_next_window': has_next_window,
+                'prev_window_start': prev_window_start,
+                'next_window_start': next_window_start
+            }
+    
+    pagination = Pagination(page, per_page, total_count)
+    
+    return render_template('partner-accident.html',
+                         accidents=accidents,
+                         total_count=total_count,
+                         pagination=pagination,
+                         dynamic_columns=dynamic_columns,
+                         menu=MENU_CONFIG)
+
 @app.route("/safety-instruction")
 def safety_instruction_route():
     """환경안전 지시서 페이지 라우트"""
@@ -353,12 +758,12 @@ def safety_instruction_route():
         'business_number': request.args.get('business_number', '').strip()
     }
     
-    # partner_accident와 동일한 로직으로 데이터 조회
+    # safety_instruction 전용 로직으로 데이터 조회
     # Phase 1: 동적 컬럼 설정 가져오기
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     dynamic_columns_rows = conn.execute("""
-        SELECT * FROM accident_column_config 
+        SELECT * FROM safety_instruction_column_config 
         WHERE is_active = 1 
         ORDER BY column_order
     """).fetchall()
@@ -367,7 +772,7 @@ def safety_instruction_route():
     # 드롭다운 컬럼에 대해 코드-값 매핑 정보 추가
     for col in dynamic_columns:
         if col['column_type'] == 'dropdown':
-            col['code_mapping'] = get_dropdown_options_for_display(col['column_key'])
+            col['code_mapping'] = get_dropdown_options_for_display('safety_instruction', col['column_key'])
     
     # 환경안전 지시서 더미 데이터 생성
     all_accidents = []
@@ -496,12 +901,12 @@ def safety_instruction_register():
     """환경안전 지시서 등록 페이지"""
     logging.info("환경안전 지시서 등록 페이지 접근")
     
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     
-    # 동적 컬럼 설정 가져오기 (사고와 동일한 컬럼 구조 사용)
+    # 동적 컬럼 설정 가져오기 (safety_instruction 전용 테이블 사용)
     dynamic_columns_rows = conn.execute("""
-        SELECT * FROM accident_column_config 
+        SELECT * FROM safety_instruction_column_config 
         WHERE is_active = 1 
         ORDER BY column_order
     """).fetchall()
@@ -515,15 +920,13 @@ def safety_instruction_register():
     for col in dynamic_columns:
         if col['column_type'] == 'dropdown':
             # 코드-값 매핑 방식으로 옵션 가져오기
-            code_options = get_dropdown_options_for_display(col['column_key'])
+            code_options = get_dropdown_options_for_display('safety_instruction', col['column_key'])
+            # 코드-값 매핑 방식 사용 (DB dropdown_option_codes_v2 테이블)
+            col['dropdown_options_mapped'] = code_options if code_options else []
             if code_options:
-                # 새로운 방식의 옵션이 있으면 사용
-                col['dropdown_options_mapped'] = code_options
-                logging.info(f"  - {col['column_name']} ({col['column_key']}): 코드-값 매핑 {len(code_options)}개 옵션 = {code_options}")
+                logging.info(f"  - {col['column_name']} ({col['column_key']}): 코드-값 매핑 {len(code_options)}개 옵션")
             else:
-                # 기존 JSON 방식 유지 (하위 호환성)
-                col['dropdown_options_mapped'] = None
-                logging.info(f"  - {col['column_name']} ({col['column_key']}): 기존 JSON 방식 사용, dropdown_options = {col.get('dropdown_options')}")
+                logging.info(f"  - {col['column_name']} ({col['column_key']}): 드롭다운 옵션 없음")
     
     logging.info(f"동적 컬럼 {len(dynamic_columns)}개 로드됨")
     
@@ -538,9 +941,10 @@ def safety_instruction_register():
 @app.route("/safety-instruction-detail/<issue_number>")
 def safety_instruction_detail(issue_number):
     """환경안전 지시서 상세정보 페이지"""
+    # json already imported globally
     logging.info(f"환경안전 지시서 상세 정보 조회: {issue_number}")
     
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     
     # 실제 데이터베이스에서 조회 시도
@@ -624,50 +1028,61 @@ def safety_instruction_detail(issue_number):
     
     # 동적 컬럼 설정 가져오기
     dynamic_columns_rows = conn.execute("""
-        SELECT * FROM accident_column_config 
+        SELECT * FROM safety_instruction_column_config 
         WHERE is_active = 1 
         ORDER BY column_order
     """).fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
     
-    # 첨부파일 조회 (실제 DB에서)
-    attachments = []
-    try:
-        attachments = conn.execute("""
-            SELECT * FROM safety_instruction_attachments 
-            WHERE issue_number = ? 
-            ORDER BY upload_date DESC
-        """, (issue_number,)).fetchall()
-    except sqlite3.OperationalError:
-        # 테이블이 없는 경우 빈 배열 사용
-        logging.info("safety_instruction_attachments 테이블이 없음 - 빈 배열 사용")
-        attachments = []
+    # 탭별로 컬럼 분류
+    basic_info_columns = [col for col in dynamic_columns if col.get('tab') == 'basic_info']
+    violation_info_columns = [col for col in dynamic_columns if col.get('tab') == 'violation_info']
+    additional_columns = [col for col in dynamic_columns if not col.get('tab') or col.get('tab') == 'additional']
+    
+    # 첨부파일 조회 - AttachmentService 사용 (공통 모듈)
+    from board_services import AttachmentService
+    attachment_service = AttachmentService('safety_instruction', DB_PATH, conn)
+    attachments = attachment_service.list(issue_number)
+    logging.info(f"Safety instruction {issue_number}: {len(attachments)} attachments found")
     
     conn.close()
     
-    # custom_data 파싱
+    # DictAsAttr 클래스 정의
+    class DictAsAttr:
+        def __init__(self, d):
+            for k, v in d.items():
+                setattr(self, k, v)
+    
+    # custom_data 파싱 및 안전한 로깅을 위한 person_name 추출
     custom_data = {}
+    person_name = "알 수 없음"
+    
     if isinstance(instruction, dict):
         if instruction.get('custom_data'):
             try:
-                custom_data = json.loads(instruction['custom_data'])
+                custom_data = pyjson.loads(instruction['custom_data'])
             except:
                 custom_data = {}
+        person_name = instruction.get('disciplined_person', '알 수 없음')
         # 딕셔너리를 DictAsAttr로 변환
-        class DictAsAttr:
-            def __init__(self, d):
-                for k, v in d.items():
-                    setattr(self, k, v)
         instruction = DictAsAttr(instruction)
     else:
         # SQLite Row 객체인 경우
-        if hasattr(instruction, 'custom_data') and instruction.custom_data:
+        if 'custom_data' in instruction.keys() and instruction['custom_data']:
             try:
-                custom_data = json.loads(instruction.custom_data)
+                custom_data = pyjson.loads(instruction['custom_data'])
             except:
                 custom_data = {}
+        # SQLite Row에서 안전하게 person_name 추출
+        try:
+            if 'disciplined_person' in instruction.keys():
+                person_name = instruction['disciplined_person'] if instruction['disciplined_person'] else '알 수 없음'
+            else:
+                person_name = '알 수 없음'
+        except (KeyError, TypeError, AttributeError):
+            person_name = '알 수 없음'
     
-    logging.info(f"환경안전 지시서 {issue_number} ({instruction.disciplined_person}) 상세 페이지 로드")
+    logging.info(f"환경안전 지시서 {issue_number} ({person_name}) 상세 페이지 로드")
     
     # 팝업 모드인지 확인
     is_popup = request.args.get('popup') == '1'
@@ -676,14 +1091,144 @@ def safety_instruction_detail(issue_number):
                          instruction=instruction,
                          attachments=[dict(att) for att in attachments],
                          dynamic_columns=dynamic_columns,
+                         basic_info_columns=basic_info_columns,
+                         violation_info_columns=violation_info_columns,
+                         additional_columns=additional_columns,
                          custom_data=custom_data,
                          menu=MENU_CONFIG,
                          is_popup=is_popup)
 
+
+@app.route('/update-safety-instruction', methods=['POST'])
+def update_safety_instruction():
+    """환경안전 지시서 수정 API - AttachmentService 사용"""
+    from board_services import AttachmentService
+    conn = None
+    
+    try:
+        issue_number = request.form.get('issue_number')
+        # violation_content는 더 이상 사용하지 않음
+        detailed_content = request.form.get('detailed_content', '')
+        custom_data = request.form.get('custom_data', '{}')
+        
+        # deleted_attachments 파싱
+        deleted_attachments_str = request.form.get('deleted_attachments', '[]')
+        try:
+            deleted_attachments = pyjson.loads(deleted_attachments_str) if deleted_attachments_str else []
+        except:
+            deleted_attachments = []
+        
+        files = request.files.getlist('files')
+        
+        if not issue_number:
+            return jsonify({"success": False, "message": "발부번호가 필요합니다."}), 400
+        
+        # JSON 파싱
+        try:
+            custom_data_dict = pyjson.loads(custom_data) if custom_data != '{}' else {}
+        except ValueError:  # JSONDecodeError is a subclass of ValueError
+            return jsonify({"success": False, "message": "잘못된 데이터 형식입니다."}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # safety_instructions 테이블이 없으면 생성
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS safety_instructions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                issue_number TEXT UNIQUE,
+                violation_content TEXT,
+                detailed_content TEXT,
+                custom_data TEXT,
+                disciplined_person TEXT,
+                is_deleted INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # safety_instruction_details 테이블 생성 (상세내용용)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS safety_instruction_details (
+                issue_number TEXT PRIMARY KEY,
+                detailed_content TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # 테이블이 이미 있지만 필요한 컬럼이 없을 수 있으므로 추가
+        cursor.execute("PRAGMA table_info(safety_instructions)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if 'violation_content' not in columns:
+            cursor.execute("ALTER TABLE safety_instructions ADD COLUMN violation_content TEXT")
+        if 'custom_data' not in columns:
+            cursor.execute("ALTER TABLE safety_instructions ADD COLUMN custom_data TEXT")
+        if 'detailed_content' not in columns:
+            cursor.execute("ALTER TABLE safety_instructions ADD COLUMN detailed_content TEXT")
+        
+        # 기존 지시서가 있는지 확인
+        cursor.execute("SELECT id FROM safety_instructions WHERE issue_number = ?", (issue_number,))
+        existing = cursor.fetchone()
+        
+        if existing:
+            # 업데이트 - violation_content는 더 이상 업데이트하지 않음
+            cursor.execute("""
+                UPDATE safety_instructions 
+                SET custom_data = ?, detailed_content = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE issue_number = ?
+            """, (pyjson.dumps(custom_data_dict), detailed_content, issue_number))
+        else:
+            # 새로 생성 - violation_content 제외
+            cursor.execute("""
+                INSERT INTO safety_instructions (issue_number, custom_data, detailed_content)
+                VALUES (?, ?, ?)
+            """, (issue_number, pyjson.dumps(custom_data_dict), detailed_content))
+        
+        # 상세내용 업데이트
+        cursor.execute("""
+            INSERT OR REPLACE INTO safety_instruction_details (issue_number, detailed_content, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+        """, (issue_number, detailed_content))
+        
+        # AttachmentService 사용하여 첨부파일 처리 (기존 연결 전달)
+        attachment_service = AttachmentService('safety_instruction', DB_PATH, conn)
+        
+        # 삭제할 첨부파일 처리
+        if deleted_attachments:
+            attachment_service.delete(deleted_attachments)
+            logging.info(f"첨부파일 {len(deleted_attachments)}개 삭제")
+        
+        # 새 첨부파일 업로드
+        if files:
+            uploaded_ids = attachment_service.bulk_add(
+                issue_number, 
+                files,
+                {'uploaded_by': session.get('user_id', 'user')}
+            )
+            logging.info(f"첨부파일 {len(uploaded_ids)}개 업로드: {uploaded_ids}")
+        
+        conn.commit()
+        logging.info(f"Safety Instruction 업데이트 완료: {issue_number}")
+        
+        return jsonify({"success": True, "message": "수정이 완료되었습니다."})
+        
+    except Exception as e:
+        import traceback
+        logging.error(f"Safety Instruction 업데이트 오류: {e}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
+        if conn:
+            conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+
+
 @app.route("/data-recovery")
 def data_recovery():
     """데이터 복구 페이지"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     
     # 삭제된 사고 조회
@@ -725,6 +1270,26 @@ def partner_standards():
         'workers_min': request.args.get('workers_min', type=int),
         'workers_max': request.args.get('workers_max', type=int)
     }
+    
+    # 컬럼 설정 가져오기
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    
+    dynamic_columns_rows = conn.execute("""
+        SELECT * FROM partner_standards_column_config 
+        WHERE is_active = 1 
+        ORDER BY column_order
+    """).fetchall()
+    
+    dynamic_columns = []
+    for row in dynamic_columns_rows:
+        dynamic_columns.append({
+            'key': row['column_key'],
+            'name': row['column_name'],
+            'type': row['column_type'],
+            'order': row['column_order'],
+            'table_display': True  # partner_standards는 모든 컬럼 표시
+        })
     
     # 새로운 데이터 매니저를 통해 협력사 목록 조회
     partners, total_count = partner_manager.get_all_partners(
@@ -771,15 +1336,20 @@ def partner_standards():
     
     pagination = Pagination(page, per_page, total_count)
     
+    conn.close()
+    
     return render_template('partner-standards.html',
                          partners=partners,
                          total_count=total_count,
                          pagination=pagination,
+                         dynamic_columns=dynamic_columns,
                          menu=MENU_CONFIG)
 
 
 def partner_change_request():
     """기준정보 변경요청 페이지"""
+    from common_search import DynamicSearchBuilder, get_static_columns
+    
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
     
@@ -791,23 +1361,56 @@ def partner_change_request():
     
     # 실제 데이터베이스에서 조회
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # 검색 조건 적용
-        where_conditions = []
+        # DynamicSearchBuilder로 검색 조건 생성
+        base_query = "FROM partner_change_requests"
+        where_clause = ""
         params = []
         
-        if filters['requester_name']:
-            where_conditions.append("requester_name LIKE ?")
-            params.append(f"%{filters['requester_name']}%")
+        search_builder = DynamicSearchBuilder('sqlite')
+        static_cols = ['id', 'requester_name', 'requester_department', 'company_name', 
+                      'business_number', 'change_type', 'current_value', 'new_value', 
+                      'change_reason', 'created_at', 'status', 'request_number']
         
-        if filters['company_name']:
-            where_conditions.append("company_name LIKE ?")
-            params.append(f"%{filters['company_name']}%")
+        # is_deleted 컬럼 존재 여부 확인
+        cursor.execute("PRAGMA table_info(partner_change_requests)")
+        columns = [col[1] for col in cursor.fetchall()]
         
-        where_clause = ""
+        # 각 필터 적용
+        where_conditions = []
+        
+        # is_deleted 컬럼이 있으면 필터 적용
+        if 'is_deleted' in columns:
+            where_conditions.append("(is_deleted = 0 OR is_deleted IS NULL)")
+        # is_deleted 컬럼이 없으면 추가
+        else:
+            cursor.execute("""
+                ALTER TABLE partner_change_requests 
+                ADD COLUMN is_deleted INTEGER DEFAULT 0
+            """)
+            conn.commit()
+            # 컬럼 추가 후에도 필터 적용
+            where_conditions.append("(is_deleted = 0 OR is_deleted IS NULL)")
+        
+        for field_name, field_value in filters.items():
+            if not field_value:
+                continue
+            
+            # 동적 컬럼 여부 판단 (현재는 모두 정적 컬럼)
+            is_dynamic = field_name not in static_cols
+            
+            if is_dynamic:
+                # JSON 필드 검색
+                where_conditions.append(f"json_extract(custom_data, '$.{field_name}') LIKE ?")
+                params.append(f"%{field_value}%")
+            else:
+                # 일반 컬럼 검색
+                where_conditions.append(f"{field_name} LIKE ?")
+                params.append(f"%{field_value}%")
+        
         if where_conditions:
             where_clause = "WHERE " + " AND ".join(where_conditions)
         
@@ -821,7 +1424,7 @@ def partner_change_request():
         data_query = f"""
             SELECT id, requester_name, requester_department, company_name, business_number,
                    change_type, current_value, new_value, change_reason, 
-                   created_at, status, request_number
+                   created_at, status, request_number, custom_data
             FROM partner_change_requests 
             {where_clause}
             ORDER BY created_at DESC
@@ -829,6 +1432,18 @@ def partner_change_request():
         """
         cursor.execute(data_query, params + [per_page, offset])
         rows = cursor.fetchall()
+        
+        # 드롭다운 옵션 로드 (change_type 등을 위해)
+        from board_services import CodeService
+        code_service = CodeService('change_request', DB_PATH)
+        
+        # change_type 드롭다운 옵션 조회
+        change_type_codes = code_service.list('change_type')
+        change_type_map = {code['option_code']: code['option_value'] for code in change_type_codes}
+        
+        # status 드롭다운 옵션 조회
+        status_codes = code_service.list('status')
+        status_map = {code['option_code']: code['option_value'] for code in status_codes}
         
         # 데이터 변환
         change_requests = []
@@ -838,20 +1453,38 @@ def partner_change_request():
                 status = row['status'] if 'status' in row.keys() else 'pending'
             except:
                 status = 'pending'
+            
+            # custom_data 파싱
+            custom_data = {}
+            if row['custom_data']:
+                try:
+                    custom_data = pyjson.loads(row['custom_data'])
+                except:
+                    custom_data = {}
+                
+            # 드롭다운 값을 라벨로 변환
+            change_type_value = row['change_type']
+            change_type_label = change_type_map.get(change_type_value, change_type_value) if change_type_value else ''
+            
+            status_label = status_map.get(status, status) if status else 'pending'
                 
             change_request = type('obj', (object,), {
                 'id': row['id'],
                 'no': offset + i + 1,
+                'request_number': row['request_number'],  # request_number 추가
                 'requester_name': row['requester_name'],
                 'requester_department': row['requester_department'],
                 'company_name': row['company_name'],
                 'business_number': row['business_number'],
-                'change_type': row['change_type'],
+                'change_type': change_type_value,
+                'change_type_label': change_type_label,  # 라벨 추가
                 'current_value': row['current_value'],
                 'new_value': row['new_value'],
                 'change_reason': row['change_reason'],
                 'created_at': row['created_at'],
-                'status': status
+                'status': status,
+                'status_label': status_label,  # 라벨 추가
+                'custom_data': custom_data  # custom_data 추가
             })()
             change_requests.append(change_request)
             
@@ -894,26 +1527,44 @@ def change_request_detail(request_id):
     """변경요청 상세정보 페이지"""
     logging.info(f"변경요청 상세 정보 조회: {request_id}")
     
-    # 실제 데이터베이스에서 조회 (일단 더미데이터)
-    request_data = type('obj', (object,), {
-        'id': request_id,
-        'change_reason': f'변경사유{request_id}'
-    })()
+    # 실제 데이터베이스에서 조회
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # change_requests 테이블에서 데이터 가져오기 - ID로 직접 조회
+    cursor.execute("""
+        SELECT * FROM change_requests 
+        WHERE id = ?
+    """, (request_id,))
+    
+    request_row = cursor.fetchone()
+    
+    if request_row:
+        # 실제 DB 데이터 사용
+        request_data = type('obj', (object,), dict(request_row))()
+        logging.info(f"DB에서 변경요청 데이터 로드: ID={request_id}")
+    else:
+        # DB에 없으면 기본값
+        request_data = type('obj', (object,), {
+            'id': request_id,
+            'change_reason': '',
+            'approval_comments': '',
+            'custom_data': '{}'
+        })()
+        logging.info(f"변경요청 데이터 없음, 기본값 사용: ID={request_id}")
+    
+    conn.close()
     
     # Phase 1: 동적 컬럼 설정 가져오기  
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     
-    # safety_instruction_column_config 테이블이 있으면 사용, 없으면 accident_column_config 사용
-    table_name = 'safety_instruction_column_config'
+    # change_request_column_config 테이블 사용
     try:
         cursor = conn.cursor()
-        cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
-        if not cursor.fetchone():
-            table_name = 'accident_column_config'
-        
-        dynamic_columns_rows = conn.execute(f"""
-            SELECT * FROM {table_name} 
+        dynamic_columns_rows = conn.execute("""
+            SELECT * FROM change_request_column_config 
             WHERE is_active = 1 
             ORDER BY column_order
         """).fetchall()
@@ -933,18 +1584,34 @@ def change_request_detail(request_id):
         # dropdown 옵션 처리
         if col_dict['column_type'] == 'dropdown' and col_dict.get('dropdown_options'):
             try:
-                import json
-                options_list = json.loads(col_dict['dropdown_options'])
+                # json already imported globally
+                options_list = pyjson.loads(col_dict['dropdown_options'])
                 col_dict['dropdown_options_mapped'] = [{'code': opt, 'value': opt} for opt in options_list]
             except:
                 col_dict['dropdown_options_mapped'] = []
         
         dynamic_columns.append(type('Column', (), col_dict)())
     
-    # 빈 custom_data (실제로는 DB에서 조회)
+    # custom_data를 DB에서 가져온 데이터에서 파싱
     custom_data = {}
+    if hasattr(request_data, 'custom_data') and request_data.custom_data:
+        try:
+            # json already imported globally
+            custom_data = pyjson.loads(request_data.custom_data)
+            logging.info(f"custom_data 파싱 성공: {len(custom_data)}개 필드")
+        except Exception as e:
+            logging.error(f"custom_data 파싱 실패: {e}")
+            custom_data = {}
     
-    logging.info(f"변경요청 동적 컬럼 {len(dynamic_columns)}개 로드됨")
+    logging.info(f"변경요청 동적 컬럼 {len(dynamic_columns)}개 로드됨, custom_data {len(custom_data)}개 필드")
+    
+    # 첨부파일 조회 추가
+    from board_services import AttachmentService
+    attachment_service = AttachmentService('change_request', DB_PATH)
+    # 실제 request_number 사용 (DB에서 가져온 값)
+    actual_request_number = request_data.request_number if hasattr(request_data, 'request_number') and request_data.request_number else f"CR-{request_id}"
+    attachments = attachment_service.list(actual_request_number)
+    logging.info(f"변경요청 첨부파일 조회: {actual_request_number} → {len(attachments)}개 로드됨")
     
     # popup 파라미터 확인
     is_popup = request.args.get('popup', '0') == '1'
@@ -953,310 +1620,145 @@ def change_request_detail(request_id):
                          request_data=request_data,
                          dynamic_columns=dynamic_columns,
                          custom_data=custom_data,
-                         attachments=[],
+                         attachments=attachments,
                          is_popup=is_popup,
                          menu=MENU_CONFIG)
 
 
 @app.route('/update-change-request', methods=['POST'])
 def update_change_request():
-    """변경요청 수정 API"""
+    """변경요청 수정 API - AttachmentService 사용"""
+    from board_services import AttachmentService
+    conn = None
+    
     try:
-        request_id = request.form.get('request_id')
-        approval_comments = request.form.get('approval_comments', '')
+        request_id = request.form.get('request_id')  # ID 받기
+        request_number = request.form.get('request_number')  # 실제 request_number도 받기
+        change_content = request.form.get('change_content', '')
+        detailed_content = request.form.get('detailed_content', '')  # 추가
         custom_data = request.form.get('custom_data', '{}')
         
-        logging.info(f"변경요청 {request_id} 수정 완료")
+        # deleted_attachments 파싱
+        deleted_attachments_str = request.form.get('deleted_attachments', '[]')
+        try:
+            deleted_attachments = pyjson.loads(deleted_attachments_str) if deleted_attachments_str else []
+        except:
+            deleted_attachments = []
+            
+        files = request.files.getlist('files')
         
-        return jsonify({
-            "success": True, 
-            "message": "수정이 완료되었습니다."
-        })
+        if not request_number:
+            return jsonify({"success": False, "message": "요청번호가 필요합니다."}), 400
         
-    except Exception as e:
-        logging.error(f"변경요청 수정 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-
-def partner_accident():
-    """협력사 사고 페이지"""
-    
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 10, type=int)
-    
-    # 검색 조건
-    filters = {
-        'company_name': request.args.get('company_name', '').strip(),
-        'business_number': request.args.get('business_number', '').strip(),
-        'accident_date_start': request.args.get('accident_date_start', '').strip(),
-        'accident_date_end': request.args.get('accident_date_end', '').strip()
-    }
-    
-    # Phase 1: 동적 컬럼 설정 가져오기
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    dynamic_columns_rows = conn.execute("""
-        SELECT * FROM accident_column_config 
-        WHERE is_active = 1 
-        ORDER BY column_order
-    """).fetchall()
-    # Row 객체를 dict로 변환
-    dynamic_columns = [dict(row) for row in dynamic_columns_rows]
-    
-    # 드롭다운 컬럼에 대해 코드-값 매핑 정보 추가
-    for col in dynamic_columns:
-        if col['column_type'] == 'dropdown':
-            col['code_mapping'] = get_dropdown_options_for_display(col['column_key'])
-    
-    # 사고 데이터 조회 (운영 환경 고려)
-    import random
-    import datetime
-    
-    # 사고 데이터 조회 - 단순화
-    all_accidents = []
-    
-    
-    # 1. 항상 로컬 DB에서 먼저 조회 (등록된 사고)  
-    try:
-        # accident_datetime 컬럼이 없으면 추가
+        # JSON 파싱
+        try:
+            custom_data_dict = pyjson.loads(custom_data) if custom_data != '{}' else {}
+        except ValueError:  # JSONDecodeError is a subclass of ValueError
+            return jsonify({"success": False, "message": "잘못된 데이터 형식입니다."}), 400
+        
+        # 상태 값 검증 (수정 시에만 변경 허용)
+        if 'status' in custom_data_dict:
+            allowed_statuses = ['requested', 'rejected', 'applied']
+            if custom_data_dict['status'] not in allowed_statuses:
+                custom_data_dict['status'] = 'requested'  # 잘못된 값은 기본값으로
+            custom_data = pyjson.dumps(custom_data_dict, ensure_ascii=False)
+        
+        conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("PRAGMA table_info(accidents_cache)")
+        
+        # change_requests 테이블이 없으면 생성
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS change_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_number TEXT UNIQUE,
+                change_content TEXT,
+                detailed_content TEXT,
+                custom_data TEXT,
+                is_deleted INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # change_request_details 테이블 생성 (상세내용용)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS change_request_details (
+                request_number TEXT PRIMARY KEY,
+                detailed_content TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # 필요한 컬럼이 없으면 추가
+        cursor.execute("PRAGMA table_info(change_requests)")
         columns = [col[1] for col in cursor.fetchall()]
+        if 'change_content' not in columns:
+            cursor.execute("ALTER TABLE change_requests ADD COLUMN change_content TEXT")
+        if 'custom_data' not in columns:
+            cursor.execute("ALTER TABLE change_requests ADD COLUMN custom_data TEXT")
+        if 'detailed_content' not in columns:
+            cursor.execute("ALTER TABLE change_requests ADD COLUMN detailed_content TEXT")
         
-        if 'accident_datetime' not in columns:
-            cursor.execute("ALTER TABLE accidents_cache ADD COLUMN accident_datetime TEXT")
-            # 기존 데이터 업데이트 (날짜와 시간 조합)
+        # 기존 변경요청이 있는지 확인 - ID로 확인
+        cursor.execute("SELECT id, request_number FROM change_requests WHERE id = ?", (request_id,))
+        existing = cursor.fetchone()
+        
+        if existing:
+            # 실제 request_number 사용
+            actual_request_number = existing[1] if existing[1] else request_number
+            
+            # 업데이트 - ID 기준
             cursor.execute("""
-                UPDATE accidents_cache 
-                SET accident_datetime = 
-                    CASE 
-                        WHEN accident_date IS NOT NULL AND accident_time IS NOT NULL 
-                        THEN accident_date || ' ' || accident_time
-                        WHEN accident_date IS NOT NULL 
-                        THEN accident_date || ' 00:00'
-                        ELSE datetime('now', 'localtime')
-                    END
-                WHERE accident_datetime IS NULL
-            """)
-            conn.commit()
-            logging.info("accident_datetime 컬럼 추가 및 기존 데이터 업데이트 완료")
+                UPDATE change_requests 
+                SET change_content = ?, custom_data = ?, detailed_content = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (change_content, pyjson.dumps(custom_data_dict), detailed_content, request_id))
+        else:
+            # 새로 생성
+            cursor.execute("""
+                INSERT INTO change_requests (request_number, change_content, custom_data, detailed_content)
+                VALUES (?, ?, ?, ?)
+            """, (request_number, change_content, pyjson.dumps(custom_data_dict), detailed_content))
         
-        local_accidents_rows = conn.execute("""
-            SELECT * FROM accidents_cache 
-            WHERE is_deleted = 0 OR is_deleted IS NULL
-            ORDER BY 
-                CASE 
-                    WHEN accident_datetime IS NOT NULL AND accident_datetime != '' 
-                    THEN accident_datetime 
-                    ELSE COALESCE(accident_date, '1900-01-01') || ' 00:00' 
-                END DESC, 
-                accident_number DESC
-        """).fetchall()
+        # 상세내용 업데이트
+        cursor.execute("""
+            INSERT OR REPLACE INTO change_request_details (request_number, detailed_content, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+        """, (request_number, detailed_content))
         
-        logging.info(f"로컬 DB에서 {len(local_accidents_rows)}개 사고 조회됨")
+        # AttachmentService 사용하여 첨부파일 처리 (기존 연결 전달)
+        attachment_service = AttachmentService('change_request', DB_PATH, conn)
         
-        for row in local_accidents_rows:
-            accident = dict(row)
-            # ID 확인 및 설정
-            if 'id' not in accident or not accident['id']:
-                accident['id'] = len(all_accidents) + 1000  # 충돌 방지를 위해 1000부터 시작
-            # 필수 필드 채우기
-            accident['accident_name'] = accident.get('accident_name') or f"사고_{accident['accident_number']}"
-            accident['custom_data'] = accident.get('custom_data', '{}')
-            
-            # 웹 표시용 필수 필드들 채우기
-            accident['accident_grade'] = accident.get('accident_grade') or accident.get('injury_level', '일반')
-            accident['accident_type'] = accident.get('accident_type', '기타')
-            accident['disaster_type'] = accident.get('disaster_type', '일반사고')
-            accident['disaster_form'] = accident.get('disaster_form', '기타')
-            accident['workplace'] = accident.get('workplace', '미분류')
-            accident['building'] = accident.get('building', '미분류')
-            accident['floor'] = accident.get('floor', '미분류')
-            accident['detail_location'] = accident.get('detail_location', accident.get('accident_location', '미분류'))
-            accident['time'] = accident.get('time', '미분류')
-            accident['day_of_week'] = accident.get('day_of_week', '미분류')
-            accident['accident_content'] = accident.get('accident_content', accident.get('accident_description', '내용 없음'))
-            accident['responsible_company_1'] = accident.get('responsible_company_1', '직접등록')
-            accident['responsible_company_1_business_number'] = accident.get('responsible_company_1_business_number', accident.get('business_number', 'DIRECT-ENTRY'))
-            accident['responsible_company_2'] = accident.get('responsible_company_2')
-            accident['responsible_company_2_business_number'] = accident.get('responsible_company_2_business_number')
-            
-            all_accidents.append(accident)
+        # 삭제할 첨부파일 처리
+        if deleted_attachments:
+            attachment_service.delete(deleted_attachments)
+            logging.info(f"첨부파일 {len(deleted_attachments)}개 삭제")
         
-        logging.info(f"로컬 사고 추가 완료: {len(all_accidents)}개")
+        # 새 첨부파일 업로드 - 실제 request_number 사용
+        if files:
+            actual_request_number = existing[1] if existing and existing[1] else request_number
+            uploaded_ids = attachment_service.bulk_add(
+                actual_request_number, 
+                files,
+                {'uploaded_by': session.get('user_id', 'user')}
+            )
+            logging.info(f"첨부파일 {len(uploaded_ids)}개 업로드: {uploaded_ids}")
+        
+        conn.commit()
+        logging.info(f"Change Request 업데이트 완료: {request_number}")
+        
+        return jsonify({"success": True, "message": "수정이 완료되었습니다."})
+        
     except Exception as e:
-        logging.error(f"로컬 사고 데이터 조회 실패: {e}")
-        import traceback
-        logging.error(traceback.format_exc())
-    
-    
-    # 2. 개발 환경에서는 더미 데이터 추가 (로컬 사고 뒤에)
-    if not db_config.external_db_enabled:
-        import json
-        
-        # 더미 데이터를 임시 리스트에 저장
-        dummy_accidents = []
-        for i in range(50):  # 50개 더미 데이터
-            # 사고번호 생성: K + 연월일 + 순서(3자리)
-            months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-            days = [1, 5, 10, 15, 20, 25]
-            accident_date_fixed = f'2024-{months[i % 12]:02d}-{days[i % 6]:02d}'
-            accident_number = f'K{accident_date_fixed.replace("-", "")}{i+1:03d}'
-            
-            # 고정된 값들
-            grades = ['경미', '중대', '치명']
-            types = ['추락', '협착', '절단', '화재']
-            disaster_types = ['안전사고', '보건사고']
-            disaster_forms = ['낙하', '충돌', '전도']
-            days_of_week = ['월', '화', '수', '목', '금', '토', '일']
-            
-            dummy_accident = {
-                'id': i + 1,
-                'accident_number': accident_number,
-                'accident_name': f'사고사례{i+1:03d}',
-                'accident_date': accident_date_fixed,
-                'accident_grade': grades[i % 3],
-                'accident_type': types[i % 4],
-                'disaster_type': disaster_types[i % 2],
-                'disaster_form': disaster_forms[i % 3],
-                'workplace': f'사업장{(i % 5) + 1}',
-                'building': f'건물{(i % 10) + 1}',
-                'floor': f'{(i % 20) + 1}층',
-                'detail_location': f'상세위치{i+1:03d}',
-                'time': f'{9 + (i % 10):02d}:{(i * 5) % 60:02d}',
-                'day_of_week': days_of_week[i % 7],
-                'accident_content': f'사고내용{i+1}',
-                'responsible_company_1': f'협력사{(i % 20) + 1}',
-                'responsible_company_1_business_number': f'{1000000000 + i * 11111}',
-                'responsible_company_2': f'협력사{(i % 15) + 1}' if i % 3 == 0 else None,
-                'responsible_company_2_business_number': f'{2000000000 + i * 22222}' if i % 3 == 0 else None,
-            }
-            
-            # 동적 컬럼 데이터 추가
-            custom_data = {}
-            for col in dynamic_columns:
-                col_key = col['column_key']
-                col_type = col['column_type']
-                
-                if col_type == 'dropdown':
-                    options = json.loads(col['dropdown_options']) if col['dropdown_options'] else []
-                    custom_data[col_key] = options[i % len(options)] if options else f'{col_key}-값{i+1}'
-                elif col_type == 'date':
-                    custom_data[col_key] = f'2025-{(i % 12) + 1:02d}-{(i % 28) + 1:02d}'
-                elif col_type == 'popup_person':
-                    custom_data[col_key] = {'name': f'담당자{i+1}', 'department': f'부서{i % 5 + 1}'}
-                elif col_type == 'popup_company':
-                    custom_data[col_key] = {'name': f'업체{i+1}', 'business_number': f'{3000000000 + i * 33333}'}
-                else:
-                    custom_data[col_key] = f'{col["column_name"]}-값{i+1}'
-            
-            dummy_accident['custom_data'] = json.dumps(custom_data, ensure_ascii=False)
-            dummy_accidents.append(dummy_accident)
-        
-        # 로컬 사고 뒤에 더미 사고 추가
-        all_accidents.extend(dummy_accidents)
-        
-        logging.info(f"더미 데이터 50개 추가됨")
-    
-    print(f"[DEBUG] 전체 사고 개수: {len(all_accidents)}", flush=True)
-    logging.info(f"전체 사고 개수: {len(all_accidents)}")
-    
-    filtered_accidents = all_accidents
-    
-    if filters['company_name']:
-        filtered_accidents = [a for a in filtered_accidents if filters['company_name'].lower() in a['responsible_company_1'].lower()]
-    
-    if filters['business_number']:
-        filtered_accidents = [a for a in filtered_accidents if filters['business_number'] in str(a['responsible_company_1_business_number'])]
-    
-    if filters['accident_date_start']:
-        filtered_accidents = [a for a in filtered_accidents if a['accident_date'] >= filters['accident_date_start']]
-    
-    if filters['accident_date_end']:
-        filtered_accidents = [a for a in filtered_accidents if a['accident_date'] <= filters['accident_date_end']]
-    
-    total_count = len(filtered_accidents)
-    
-    # 페이지네이션
-    start = (page - 1) * per_page
-    end = start + per_page
-    accidents = filtered_accidents[start:end]
-    
-    
-    # 딕셔너리를 객체처럼 사용할 수 있도록 변환
-    class DictAsAttr:
-        def __init__(self, d):
-            for k, v in d.items():
-                setattr(self, k, v)
-    
-    accidents = [DictAsAttr(a) for a in accidents]
-    
-    # 페이지네이션 정보 (partner_standards와 동일한 클래스 사용)
-    class Pagination:
-        def __init__(self, page, per_page, total_count):
-            self.page = page
-            self.per_page = per_page
-            self.total_count = total_count
-            self.pages = math.ceil(total_count / per_page)
-            self.has_prev = page > 1
-            self.prev_num = page - 1 if self.has_prev else None
-            self.has_next = page < self.pages
-            self.next_num = page + 1 if self.has_next else None
-        
-        def iter_pages(self, window_size=10):
-            start = ((self.page - 1) // window_size) * window_size + 1
-            end = min(start + window_size - 1, self.pages)
-            for num in range(start, end + 1):
-                yield num
-        
-        def get_window_info(self, window_size=10):
-            start = ((self.page - 1) // window_size) * window_size + 1
-            end = min(start + window_size - 1, self.pages)
-            has_prev_window = start > 1
-            has_next_window = end < self.pages
-            prev_window_start = max(1, start - window_size)
-            next_window_start = min(end + 1, self.pages)
-            return {
-                'start': start,
-                'end': end,
-                'has_prev_window': has_prev_window,
-                'has_next_window': has_next_window,
-                'prev_window_start': prev_window_start,
-                'next_window_start': next_window_start
-            }
-    
-    pagination = Pagination(page, per_page, total_count)
-    
-    # DB 연결 닫기
-    conn.close()
-    
-    # 코드를 값으로 변환 (표시용)
-    for accident in accidents:
-        # DictAsAttr 객체 처리를 위해 hasattr 사용
-        if hasattr(accident, 'custom_data') and accident.custom_data:
-            try:
-                custom_data = json.loads(accident.custom_data)
-                for col in dynamic_columns:
-                    if col['column_type'] == 'dropdown' and col['column_key'] in custom_data:
-                        code = custom_data[col['column_key']]
-                        if code:
-                            # 코드를 값으로 변환
-                            custom_data[col['column_key']] = convert_code_to_value(col['column_key'], code)
-                accident.custom_data = json.dumps(custom_data, ensure_ascii=False)
-            except Exception as e:
-                logging.error(f"코드 변환 오류: {e}")
-    
-    # 디버깅 로그
-    logging.info(f"partner_accident: 전체 {len(all_accidents)}개, 필터링 {total_count}개, 표시 {len(accidents)}개")
-    
-    return render_template('partner-accident.html',
-                         accidents=accidents,
-                         total_count=total_count,
-                         pagination=pagination,
-                         dynamic_columns=dynamic_columns,  # Phase 1: 동적 컬럼 정보 전달
-                         menu=MENU_CONFIG)
+        logging.error(f"Change Request 업데이트 오류: {e}")
+        if conn:
+            conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
 
-# 편집 기능 완전 제거 - 심플함을 위해
+
 
 @app.route("/partner/<business_number>")
 @app.route("/partner-detail/<business_number>")
@@ -1410,12 +1912,11 @@ def accident_detail(accident_id):
         )
     """)
     
-    # 첨부파일 정보 가져오기
-    attachments = cursor.execute("""
-        SELECT * FROM accident_attachments 
-        WHERE accident_number = ? 
-        ORDER BY created_at DESC
-    """, (accident['accident_number'],)).fetchall()
+    # 첨부파일 정보 가져오기 - AttachmentService 사용 (공통 모듈)
+    from board_services import AttachmentService
+    attachment_service = AttachmentService('accident', DB_PATH, conn)
+    attachments = attachment_service.list(accident['accident_number'])
+    logging.info(f"Accident {accident['accident_number']}: {len(attachments)} attachments found")
     
     # Phase 2: 동적 컬럼 설정 가져오기 (추가정보 섹션용 - 기본정보 필드 제외)
     # 기본정보 섹션에 이미 표시되는 필드들은 제외
@@ -1442,14 +1943,11 @@ def accident_detail(accident_id):
     for col in dynamic_columns:
         if col['column_type'] == 'dropdown':
             # 코드-값 매핑 방식으로 옵션 가져오기
-            code_options = get_dropdown_options_for_display(col['column_key'])
+            code_options = get_dropdown_options_for_display('accident', col['column_key'])
+            # 코드-값 매핑 방식 사용 (DB dropdown_option_codes_v2 테이블)
+            col['dropdown_options_mapped'] = code_options if code_options else []
             if code_options:
-                # 새로운 방식의 옵션이 있으면 사용
-                col['dropdown_options_mapped'] = code_options
                 logging.info(f"  - {col['column_name']} ({col['column_key']}): 코드-값 매핑 {len(code_options)}개 옵션")
-            else:
-                # 기존 JSON 방식 유지 (하위 호환성)
-                col['dropdown_options_mapped'] = None
     
     # 딕셔너리를 객체처럼 사용할 수 있도록 변환 (None 값 처리 개선)
     class DictAsAttr:
@@ -1463,11 +1961,11 @@ def accident_detail(accident_id):
             return self._data.get(name, '')
     
     # custom_data 파싱
-    import json
+    # json already imported globally
     custom_data = {}
     if 'custom_data' in accident and accident['custom_data']:
         try:
-            custom_data = json.loads(accident['custom_data'])
+            custom_data = pyjson.loads(accident['custom_data'])
             logging.info(f"Loaded custom_data: {custom_data}")
         except Exception as e:
             logging.error(f"Error parsing custom_data: {e}")
@@ -1489,6 +1987,44 @@ def accident_detail(accident_id):
     # 팝업 모드인지 확인
     is_popup = request.args.get('popup') == '1'
     
+    # ACC로 시작하는 사고번호인지 확인 (직접 등록한 데이터)
+    accident_number = accident.accident_number if hasattr(accident, 'accident_number') else accident.get('accident_number', '')
+    is_direct_entry = str(accident_number).startswith('ACC')
+    logging.info(f"사고번호: {accident_number}, 직접등록여부: {is_direct_entry}")
+    
+    # 기본정보 드롭다운 옵션 로드 (ACC 사고용)
+    basic_options = {}
+    if is_direct_entry:
+        from board_services import CodeService
+        code_service = CodeService('accident', DB_PATH)
+        
+        # 기본정보 필드들의 드롭다운 옵션 로드
+        basic_fields = ['workplace', 'accident_grade', 'major_category', 
+                       'disaster_form', 'disaster_type', 'floor', 
+                       'location_category', 'building']
+        
+        for field in basic_fields:
+            codes = code_service.list(field)
+            basic_options[field] = codes
+            logging.info(f"드롭다운 옵션 로드: {field} -> {len(codes)}개")
+        
+        # 건물은 마스터 DB에서 우선 로드 (있다면)
+        try:
+            cursor.execute("""
+                SELECT DISTINCT building_code as option_code, 
+                       building_name as option_value
+                FROM building_master 
+                WHERE is_active = 1
+                ORDER BY building_name
+            """)
+            building_rows = cursor.fetchall()
+            if building_rows:
+                basic_options['building'] = [dict(row) for row in building_rows]
+                logging.info(f"건물 마스터에서 {len(building_rows)}개 로드")
+        except:
+            # 건물 마스터 테이블이 없으면 드롭다운 코드 사용
+            pass
+    
     # 템플릿 파일 경로 확인 (디버깅)
     import os
     template_path = os.path.join(app.template_folder, 'accident-detail.html')
@@ -1506,23 +2042,32 @@ def accident_detail(accident_id):
                          attachments=attachments,
                          dynamic_columns=dynamic_columns,  # 동적 컬럼 정보
                          custom_data=custom_data,  # 기존 데이터
+                         basic_options=basic_options,  # 기본정보 드롭다운 옵션
                          menu=MENU_CONFIG, 
                          is_popup=is_popup,
+                         is_direct_entry=is_direct_entry,  # ACC 여부 전달
                          board_type='accident')  # 게시판 타입 전달
 
-def get_dropdown_options_for_display(column_key):
-    """드롭다운 옵션을 코드-값 매핑 방식으로 가져오기"""
+def get_dropdown_options_for_display(board_type, column_key):
+    """보드별 드롭다운 옵션을 코드-값 매핑 방식으로 가져오기
+    
+    Args:
+        board_type: 보드 타입 ('accident', 'safety_instruction', 'change_request' 등)
+        column_key: 컬럼 키
+    """
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         conn.row_factory = sqlite3.Row
         
-        # 활성화된 코드 목록 조회
+        # v2 테이블 우선 확인 (board_type 포함)
         codes = conn.execute("""
             SELECT option_code, option_value 
-            FROM dropdown_option_codes
-            WHERE column_key = ? AND is_active = 1
+            FROM dropdown_option_codes_v2
+            WHERE board_type = ? AND column_key = ? AND is_active = 1
             ORDER BY display_order
-        """, (column_key,)).fetchall()
+        """, (board_type, column_key)).fetchall()
+        
+        # v2에서만 조회 (v1 폴백 제거)
         
         logging.info(f"[DEBUG] get_dropdown_options_for_display({column_key}): {len(codes) if codes else 0}개 행 조회됨")
         if codes:
@@ -1539,7 +2084,7 @@ def get_dropdown_options_for_display(column_key):
                     s = v.strip()
                     if s.startswith('[') and s.endswith(']'):
                         try:
-                            arr = json.loads(s)
+                            arr = pyjson.loads(s)
                             if isinstance(arr, list):
                                 # 경고를 디버그 레벨로 변경 (운영 환경에서는 표시되지 않음)
                                 logging.debug(
@@ -1560,36 +2105,35 @@ def get_dropdown_options_for_display(column_key):
     except:
         return None
 
-def convert_code_to_value(column_key, code):
-    """코드를 표시 값으로 변환"""
+def convert_code_to_value_scoped(board_type, column_key, code):
+    """보드 스코프에서 코드값을 표시값으로 변환 (v2 우선, v1 폴백)"""
     if not code:
         return code
-    
-    # DROPDOWN_MAPPINGS 사용
     if column_key in DROPDOWN_MAPPINGS:
         return DROPDOWN_MAPPINGS[column_key].get(code, code)
-    
-    # 매핑이 없으면 DB 조회 시도
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         cursor = conn.cursor()
-        
-        # 코드에 해당하는 값 조회 (비활성화된 것도 포함 - 기존 데이터 표시용)
-        result = cursor.execute("""
-            SELECT option_value 
-            FROM dropdown_option_codes
-            WHERE column_key = ? AND option_code = ?
-        """, (column_key, code)).fetchone()
-        
-        conn.close()
-        
+        # v2: board_type 포함 조회
+        result = cursor.execute(
+            """
+            SELECT option_value
+            FROM dropdown_option_codes_v2
+            WHERE board_type = ? AND column_key = ? AND option_code = ?
+            """,
+            (board_type, column_key, code),
+        ).fetchone()
         if result:
+            conn.close()
             return result[0]
-        else:
-            # 매핑이 없으면 원본 값 반환 (하위 호환성)
-            return code
-    except:
+        # v1 폴백 제거
+        conn.close()
         return code
+    except Exception:
+        return code
+
+# REMOVED: convert_code_to_value 레거시 함수 제거됨
+# 대신 convert_code_to_value_scoped(board_type, column_key, code) 사용
 
 def convert_accident_codes_to_values(accident_data, dynamic_columns):
     """사고 데이터의 코드를 표시 값으로 일괄 변환"""
@@ -1597,16 +2141,16 @@ def convert_accident_codes_to_values(accident_data, dynamic_columns):
         return accident_data
     
     try:
-        custom_data = json.loads(accident_data['custom_data'])
+        custom_data = pyjson.loads(accident_data['custom_data'])
         
         for col in dynamic_columns:
             if col['column_type'] == 'dropdown' and col['column_key'] in custom_data:
                 code = custom_data[col['column_key']]
                 if code:
                     # 코드를 값으로 변환
-                    custom_data[col['column_key']] = convert_code_to_value(col['column_key'], code)
+                    custom_data[col['column_key']] = convert_code_to_value_scoped('accident', col['column_key'], code)
         
-        accident_data['custom_data'] = json.dumps(custom_data, ensure_ascii=False)
+        accident_data['custom_data'] = pyjson.dumps(custom_data, ensure_ascii=False)
     except:
         pass
     
@@ -1617,7 +2161,7 @@ def accident_register():
     """사고 등록 페이지"""
     logging.info("사고 등록 페이지 접근")
     
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     conn.row_factory = sqlite3.Row  # Row 객체로 반환
     
     # 동적 컬럼 설정 가져오기
@@ -1636,15 +2180,13 @@ def accident_register():
     for col in dynamic_columns:
         if col['column_type'] == 'dropdown':
             # 코드-값 매핑 방식으로 옵션 가져오기
-            code_options = get_dropdown_options_for_display(col['column_key'])
+            code_options = get_dropdown_options_for_display('accident', col['column_key'])
+            # 코드-값 매핑 방식 사용 (DB dropdown_option_codes_v2 테이블)
+            col['dropdown_options_mapped'] = code_options if code_options else []
             if code_options:
-                # 새로운 방식의 옵션이 있으면 사용
-                col['dropdown_options_mapped'] = code_options
-                logging.info(f"  - {col['column_name']} ({col['column_key']}): 코드-값 매핑 {len(code_options)}개 옵션 = {code_options}")
+                logging.info(f"  - {col['column_name']} ({col['column_key']}): 코드-값 매핑 {len(code_options)}개 옵션")
             else:
-                # 기존 JSON 방식 유지 (하위 호환성)
-                col['dropdown_options_mapped'] = None
-                logging.info(f"  - {col['column_name']} ({col['column_key']}): 기존 JSON 방식 사용, dropdown_options = {col.get('dropdown_options')}")
+                logging.info(f"  - {col['column_name']} ({col['column_key']}): 드롭다운 옵션 없음")
     
     logging.info(f"동적 컬럼 {len(dynamic_columns)}개 로드됨")
     
@@ -1656,12 +2198,118 @@ def accident_register():
                          menu=MENU_CONFIG,
                          is_popup=is_popup)
 
+@app.route("/register-change-request", methods=["POST"])
+def register_change_request():
+    """새 변경요청 등록"""
+    conn = None
+    try:
+        import datetime
+        from board_services import AttachmentService
+        
+        # FormData로 전송된 데이터 파싱
+        data = pyjson.loads(request.form.get('data', '{}'))
+        attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
+        files = request.files.getlist('files')
+        
+        logging.info(f"변경요청 등록 요청 받음 - 데이터: {data}")
+        logging.info(f"첨부파일 개수: {len(files)}")
+        
+        # 변경요청 번호 생성 (CRQYYMMDD00 형식)
+        today = datetime.date.today()
+        date_part = today.strftime('%y%m%d')
+        request_number_prefix = f"CRQ{date_part}"
+        
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        conn.execute("PRAGMA journal_mode=WAL")
+        cursor = conn.cursor()
+        
+        # 오늘 날짜의 마지막 요청번호 찾기
+        cursor.execute("""
+            SELECT request_number FROM change_requests 
+            WHERE request_number LIKE ? 
+            ORDER BY request_number DESC 
+            LIMIT 1
+        """, (f"{request_number_prefix}%",))
+        
+        last_request = cursor.fetchone()
+        if last_request:
+            last_num = int(last_request[0][-2:])
+            new_num = str(last_num + 1).zfill(2)
+        else:
+            new_num = "01"
+        
+        request_number = f"{request_number_prefix}{new_num}"
+        
+        # 테이블이 없으면 생성
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS change_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_number TEXT UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # 동적 컬럼들을 위한 ALTER TABLE
+        for key, value in data.items():
+            try:
+                cursor.execute(f"ALTER TABLE change_requests ADD COLUMN {key} TEXT")
+            except:
+                pass  # 컬럼이 이미 존재하면 무시
+        
+        # 상태를 강제로 'STATUS_001' (요청)으로 설정
+        data['status'] = 'STATUS_001'
+        data['request_number'] = request_number
+        
+        # 데이터 삽입
+        columns = list(data.keys())
+        values = list(data.values())
+        placeholders = ', '.join(['?' for _ in values])
+        column_names = ', '.join(columns)
+        
+        cursor.execute(f"""
+            INSERT INTO change_requests ({column_names})
+            VALUES ({placeholders})
+        """, values)
+        
+        request_id = cursor.lastrowid
+        
+        # 첨부파일 처리 (AttachmentService 사용)
+        if files or attachment_data:
+            attachment_service = AttachmentService(conn)
+            attachment_result = attachment_service.save_attachments(
+                board_type='change_request',
+                board_id=request_id,
+                files=files,
+                attachment_data=attachment_data
+            )
+            logging.info(f"첨부파일 저장 결과: {attachment_result}")
+        
+        conn.commit()
+        conn.close()
+        
+        logging.info(f"변경요청 등록 완료 - 번호: {request_number}, ID: {request_id}")
+        
+        return jsonify({
+            "success": True,
+            "request_id": request_id,
+            "request_number": request_number,
+            "message": "변경요청이 성공적으로 등록되었습니다."
+        })
+        
+    except Exception as e:
+        logging.error(f"변경요청 등록 중 오류: {e}")
+        if conn:
+            conn.rollback()
+            conn.close()
+        return jsonify({"success": False, "message": str(e)}), 500
+
 @app.route("/register-accident", methods=["POST"])
 def register_accident():
     """새 사고 등록"""
     conn = None
     try:
-        import json
+        # json already imported globally
         import datetime
         
         # 기본정보 필드들 받기
@@ -1683,8 +2331,8 @@ def register_accident():
         responsible_company2_no = request.form.get('responsible_company2_no', '')
         
         detailed_content = request.form.get('detailed_content')
-        custom_data = json.loads(request.form.get('custom_data', '{}'))  # 동적 컬럼
-        attachment_data = json.loads(request.form.get('attachment_data', '[]'))
+        custom_data = pyjson.loads(request.form.get('custom_data', '{}'))  # 동적 컬럼
+        attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
         files = request.files.getlist('files')
         
         logging.info(f"등록 요청 받음 - 사고명: {accident_name}")
@@ -1758,7 +2406,7 @@ def register_accident():
         elif accident_date:
             accident_datetime = f"{accident_date} 00:00"
         else:
-            accident_datetime = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+            accident_datetime = get_korean_time().strftime('%Y-%m-%d %H:%M')
         
         cursor.execute("""
             INSERT INTO accidents_cache (
@@ -1802,7 +2450,7 @@ def register_accident():
             responsible_company1_no or '',
             responsible_company2 or '',
             responsible_company2_no or '',
-            json.dumps(custom_data),
+            pyjson.dumps(custom_data),
             responsible_company1_no or "DIRECT-ENTRY"  # 수기입력 표시
         ))
         
@@ -1821,7 +2469,7 @@ def register_accident():
             for i, file in enumerate(files):
                 if file and file.filename:
                     filename = secure_filename(file.filename)
-                    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+                    timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
                     unique_filename = f"{accident_number}_{timestamp}_{filename}"
                     file_path = os.path.join(upload_folder, unique_filename)
                     
@@ -1830,7 +2478,7 @@ def register_accident():
                     # 첨부파일 정보 저장
                     description = attachment_data[i]['description'] if i < len(attachment_data) else ''
                     cursor.execute("""
-                        INSERT INTO accident_attachments (accident_number, file_name, file_path, file_size, description)
+                        INSERT INTO accident_attachments (item_id, file_name, file_path, file_size, description)
                         VALUES (?, ?, ?, ?, ?)
                     """, (accident_number, filename, file_path, os.path.getsize(file_path), description))
         
@@ -1853,7 +2501,7 @@ def register_safety_instruction():
     """새 환경안전 지시서 등록"""
     conn = None
     try:
-        import json
+        # json already imported globally
         import datetime
         
         # 환경안전 지시서 31개 필드 받기
@@ -1879,7 +2527,8 @@ def register_safety_instruction():
         accident_grade = request.form.get('accident_grade', '')  # 사고등급
         safety_violation_grade = request.form.get('safety_violation_grade', '')  # 환경안전수칙 위반등급
         violation_type = request.form.get('violation_type', '')  # 위반유형
-        violation_content = request.form.get('violation_content', '')  # 위반내용
+        # violation_content는 더 이상 사용하지 않음, detailed_content 사용
+        detailed_content = request.form.get('detailed_content', '')  # 상세내용
         access_ban_start_date = request.form.get('access_ban_start_date', '')  # 출입정지 시작일
         access_ban_end_date = request.form.get('access_ban_end_date', '')  # 출입정지 종료일
         period = request.form.get('period', '')  # 기간
@@ -1888,8 +2537,8 @@ def register_safety_instruction():
         disciplined_person_id = request.form.get('disciplined_person_id', '')  # 징계자ID
         
         # 동적 컬럼 및 첨부파일
-        custom_data = json.loads(request.form.get('custom_data', '{}'))
-        attachment_data = json.loads(request.form.get('attachment_data', '[]'))
+        custom_data = pyjson.loads(request.form.get('custom_data', '{}'))
+        attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
         files = request.files.getlist('files')
         
         logging.info(f"환경안전 지시서 등록 요청 받음 - 징계자: {disciplined_person}")
@@ -1983,17 +2632,17 @@ def register_safety_instruction():
                 violation_date, discipline_date, discipline_department, discipline_type,
                 accident_type, accident_grade, safety_violation_grade, violation_type,
                 violation_content, access_ban_start_date, access_ban_end_date, period,
-                work_grade, penalty_points, disciplined_person_id, custom_data
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                work_grade, penalty_points, disciplined_person_id, custom_data, detailed_content
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             generated_issue_number, issuer, issuer_department, classification, employment_type,
             primary_company, primary_business_number, subcontractor, subcontractor_business_number,
             disciplined_person, gbm, business_division, team, department,
             violation_date, discipline_date, discipline_department, discipline_type,
             accident_type, accident_grade, safety_violation_grade, violation_type,
-            violation_content, access_ban_start_date, access_ban_end_date, period,
+            None, access_ban_start_date, access_ban_end_date, period,  # violation_content는 None으로 저장
             work_grade, int(penalty_points) if penalty_points else None, disciplined_person_id,
-            json.dumps(custom_data)
+            pyjson.dumps(custom_data), detailed_content
         ))
         
         # 첨부파일 처리
@@ -2018,7 +2667,7 @@ def register_safety_instruction():
             for i, file in enumerate(files):
                 if file and file.filename:
                     filename = secure_filename(file.filename)
-                    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+                    timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
                     unique_filename = f"{generated_issue_number}_{timestamp}_{filename}".replace('-', '_')
                     file_path = os.path.join(upload_folder, unique_filename)
                     
@@ -2027,7 +2676,7 @@ def register_safety_instruction():
                     # 첨부파일 정보 저장
                     description = attachment_data[i]['description'] if i < len(attachment_data) else ''
                     cursor.execute("""
-                        INSERT INTO safety_instruction_attachments (issue_number, file_name, file_path, file_size, description)
+                        INSERT INTO safety_instruction_attachments (item_id, file_name, file_path, file_size, description)
                         VALUES (?, ?, ?, ?, ?)
                     """, (generated_issue_number, filename, file_path, os.path.getsize(file_path), description))
         
@@ -2091,12 +2740,12 @@ def update_partner():
     """협력사 정보 업데이트"""
     conn = None
     try:
-        import json
+        # json already imported globally
         
         business_number = request.form.get('business_number')
         detailed_content = request.form.get('detailed_content')
-        deleted_attachments = json.loads(request.form.get('deleted_attachments', '[]'))
-        attachment_data = json.loads(request.form.get('attachment_data', '[]'))
+        deleted_attachments = pyjson.loads(request.form.get('deleted_attachments', '[]'))
+        attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
         files = request.files.getlist('files')
         
         print(f"Business Number: {business_number}")
@@ -2220,13 +2869,14 @@ def update_accident():
     """사고 정보 업데이트"""
     conn = None
     try:
-        import json
+        # json already imported globally
         
         accident_number = request.form.get('accident_number')
         detailed_content = request.form.get('detailed_content')
         custom_data = request.form.get('custom_data', '{}')  # Phase 2: 동적 컬럼 데이터
-        deleted_attachments = json.loads(request.form.get('deleted_attachments', '[]'))
-        attachment_data = json.loads(request.form.get('attachment_data', '[]'))
+        base_fields = request.form.get('base_fields', '{}')  # ACC 사고일 때 기본정보
+        deleted_attachments = pyjson.loads(request.form.get('deleted_attachments', '[]'))
+        attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
         files = request.files.getlist('files')
         
         print(f"Accident Number: {accident_number}")
@@ -2267,26 +2917,44 @@ def update_accident():
         logging.info("상세내용 업데이트 완료")
         
         # Phase 2: 동적 컬럼 데이터 저장 (accidents_cache 테이블에 custom_data 업데이트)
-        # accidents_cache 테이블에 accident_number 컬럼 추가 (없으면)
-        cursor.execute("""
-            PRAGMA table_info(accidents_cache)
-        """)
-        columns = [col[1] for col in cursor.fetchall()]
+        # accidents_cache는 'accident_number' 컬럼을 사용
         
-        if 'accident_number' not in columns:
-            cursor.execute("""
-                ALTER TABLE accidents_cache ADD COLUMN accident_number TEXT
-            """)
-            logging.info("accident_number 컬럼 추가됨")
-        
-        if 'accident_name' not in columns:
-            cursor.execute("""
-                ALTER TABLE accidents_cache ADD COLUMN accident_name TEXT
-            """)
-            logging.info("accident_name 컬럼 추가됨")
+        # ACC 사고일 때만 기본정보 업데이트
+        is_direct_entry = accident_number.startswith('ACC')
+        if is_direct_entry and base_fields != '{}':
+            try:
+                base_data = pyjson.loads(base_fields)
+                logging.info(f"ACC 사고 기본정보 업데이트: {base_data}")
+                
+                # 허용된 필드만 업데이트 (SQL injection 방지)
+                allowed_fields = [
+                    'accident_name', 'accident_date', 'workplace', 'accident_grade',
+                    'major_category', 'injury_form', 'injury_type', 'building', 'floor',
+                    'location_category', 'location_detail', 'report_date', 'day_of_week'
+                ]
+                
+                # 업데이트할 필드와 값 준비
+                update_fields = []
+                update_values = []
+                for field in allowed_fields:
+                    if field in base_data:
+                        update_fields.append(f"{field} = ?")
+                        update_values.append(base_data[field])
+                
+                if update_fields:
+                    update_values.append(accident_number)  # WHERE 절용
+                    update_query = f"""
+                        UPDATE accidents_cache 
+                        SET {', '.join(update_fields)}
+                        WHERE accident_number = ?
+                    """
+                    cursor.execute(update_query, update_values)
+                    logging.info(f"ACC 사고 기본정보 업데이트 완료: {len(update_fields)}개 필드")
+            except Exception as e:
+                logging.error(f"ACC 사고 기본정보 업데이트 중 오류: {e}")
         
         # 먼저 해당 사고가 accidents_cache에 있는지 확인
-        cursor.execute("SELECT id FROM accidents_cache WHERE accident_number = ?", (accident_number,))
+        cursor.execute("SELECT id, business_number FROM accidents_cache WHERE accident_number = ?", (accident_number,))
         accident_row = cursor.fetchone()
         
         if accident_row:
@@ -2306,18 +2974,7 @@ def update_accident():
             """, ('DIRECT-ENTRY', accident_number, f"사고_{accident_number}", custom_data))
             logging.info(f"새 사고 레코드 생성 (직접등록) 및 동적 컬럼 데이터 저장: {accident_number}")
         
-        # 2. 사고 첨부파일 테이블 생성 (없으면 생성)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS accident_attachments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                accident_number TEXT,
-                file_name TEXT NOT NULL,
-                file_path TEXT NOT NULL,
-                file_size INTEGER,
-                description TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+        # 2. 사고 첨부파일 처리 - item_id 사용
         
         # 3. 삭제된 첨부파일 처리
         for attachment_id in deleted_attachments:
@@ -2358,10 +3015,10 @@ def update_accident():
                 attachment_info = new_attachments[i]
                 cursor.execute("""
                     INSERT INTO accident_attachments 
-                    (accident_number, file_name, file_path, file_size, description)
+                    (item_id, file_name, file_path, file_size, description)
                     VALUES (?, ?, ?, ?, ?)
                 """, (
-                    accident_number,
+                    accident_number,  # item_id에 accident_number 저장
                     filename,  # 원본 파일명으로 저장
                     file_path,
                     os.path.getsize(file_path),
@@ -2370,7 +3027,7 @@ def update_accident():
                 logging.info(f"첨부파일 추가: {filename} - {attachment_info['description']}")
         
         # 커밋 전 확인
-        check_result = cursor.execute("SELECT COUNT(*) FROM accident_attachments WHERE accident_number = ?", (accident_number,)).fetchone()
+        check_result = cursor.execute("SELECT COUNT(*) FROM accident_attachments WHERE item_id = ?", (accident_number,)).fetchone()
         logging.info(f"커밋 전 {accident_number} 사고 첨부파일 개수: {check_result[0]}개")
         
         try:
@@ -2378,7 +3035,7 @@ def update_accident():
             logging.info("데이터베이스 커밋 성공")
             
             # 커밋 후 다시 확인
-            check_result2 = cursor.execute("SELECT COUNT(*) FROM accident_attachments WHERE accident_number = ?", (accident_number,)).fetchone()
+            check_result2 = cursor.execute("SELECT COUNT(*) FROM accident_attachments WHERE item_id = ?", (accident_number,)).fetchone()
             logging.info(f"커밋 후 {accident_number} 사고 첨부파일 개수: {check_result2[0]}개")
             
             conn.close()
@@ -2386,7 +3043,7 @@ def update_accident():
             # 새로운 연결로 다시 확인
             logging.info("새 연결로 데이터 지속성 확인...")
             verify_conn = sqlite3.connect(DB_PATH)
-            verify_result = verify_conn.execute("SELECT COUNT(*) FROM accident_attachments WHERE accident_number = ?", (accident_number,)).fetchone()
+            verify_result = verify_conn.execute("SELECT COUNT(*) FROM accident_attachments WHERE item_id = ?", (accident_number,)).fetchone()
             logging.info(f"새 연결 확인: {accident_number} 사고 첨부파일 개수: {verify_result[0]}개")
             verify_conn.close()
             
@@ -2410,10 +3067,12 @@ def update_accident():
         logging.error(f"사고 업데이트 중 오류 발생: {str(e)}")
         return jsonify({"success": False, "message": str(e)}), 500
 
+
+
 @app.route("/download/<int:attachment_id>")
 def download_attachment(attachment_id):
     """첨부파일 다운로드 (협력사 및 사고 통합)"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     
     # 먼저 partner_attachments에서 찾기
@@ -2466,7 +3125,7 @@ def download_attachment(attachment_id):
 @app.route("/partner-attachments/<business_number>")
 def get_partner_attachments(business_number):
     """협력사 첨부파일 목록 가져오기"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     attachments = conn.execute("""
         SELECT * FROM partner_attachments 
@@ -2480,22 +3139,64 @@ def get_partner_attachments(business_number):
 
 # ===== Phase 1: 동적 컬럼 관리 API =====
 
+# 테스트용 간단한 라우트
+@app.route("/api/test-route")
+def test_route():
+    return jsonify({"message": "Test route works!"})
+
 @app.route("/api/accident-columns", methods=["GET"])
 def get_accident_columns():
     """사고 페이지 동적 컬럼 설정 조회"""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        columns = conn.execute("""
-            SELECT * FROM accident_column_config 
-            ORDER BY column_order
-        """).fetchall()
-        conn.close()
-        
-        # 관리 페이지에서는 모든 컬럼 반환 (활성/비활성 모두)
-        return jsonify([dict(col) for col in columns])
+        column_service = ColumnConfigService('accident', DB_PATH)
+        columns = column_service.list_columns()
+        return jsonify(columns)
     except Exception as e:
         logging.error(f"컬럼 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/accident-columns", methods=["POST"])
+def add_accident_column():
+    """사고 페이지 동적 컬럼 추가"""
+    try:
+        column_service = ColumnConfigService('accident', DB_PATH)
+        result = column_service.add_column(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"컬럼 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/accident-columns/<int:column_id>", methods=["PUT"])
+def update_accident_column(column_id):
+    """사고 페이지 동적 컬럼 수정"""
+    try:
+        column_service = ColumnConfigService('accident', DB_PATH)
+        result = column_service.update_column(column_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"컬럼 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/accident-columns/<int:column_id>", methods=["DELETE"])
+def delete_accident_column(column_id):
+    """사고 페이지 동적 컬럼 삭제 (비활성화)"""
+    try:
+        column_service = ColumnConfigService('accident', DB_PATH)
+        result = column_service.delete_column(column_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"컬럼 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/accident-columns/order", methods=["PUT"])
+def update_accident_columns_order():
+    """사고 페이지 동적 컬럼 순서 변경"""
+    try:
+        column_service = ColumnConfigService('accident', DB_PATH)
+        result = column_service.update_columns_order(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"컬럼 순서 변경 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
 # 관리자 인증 라우트
@@ -2528,29 +3229,17 @@ def admin_accident_columns():
     """사고 컬럼 관리 페이지"""
     return render_template('admin-accident-columns.html', menu=MENU_CONFIG)
 
-@app.route("/admin/accident-columns-v2")
-@require_admin_auth
-def admin_accident_columns_v2():
-    """사고 컬럼 관리 페이지 V2 - 코드 매핑 방식"""
-    return render_template('admin-accident-columns-v2.html', menu=MENU_CONFIG)
-
-@app.route("/admin/accident-columns-v3")
-@require_admin_auth
-def admin_accident_columns_v3():
-    """사고 컬럼 관리 페이지 V3 - 완전한 코드 매핑 시스템"""
-    return render_template('admin-accident-columns-v3.html', menu=MENU_CONFIG)
-
-@app.route("/admin/accident-columns-enhanced")
-@require_admin_auth
-def admin_accident_columns_enhanced():
-    """사고 컬럼 관리 페이지 Enhanced - Phase 2 고급 기능"""
-    return render_template('admin-accident-columns-enhanced.html', menu=MENU_CONFIG)
-
 @app.route("/admin/accident-columns-simplified")
 @require_admin_auth
 def admin_accident_columns_simplified():
     """사고 컬럼 관리 페이지 Simplified - 간소화 버전"""
     return render_template('admin-accident-columns-simplified.html', menu=MENU_CONFIG)
+
+@app.route("/admin/accident-basic-codes")
+@require_admin_auth
+def admin_accident_basic_codes():
+    """사고 기본정보 코드 관리 페이지"""
+    return render_template('admin-accident-basic-codes.html', menu=MENU_CONFIG)
 
 @app.route("/admin/person-master")
 @require_admin_auth
@@ -2563,6 +3252,12 @@ def admin_person_master():
 def admin_safety_instruction_columns():
     """환경안전 지시서 컬럼 관리 페이지"""
     return render_template('admin-safety-instruction-columns.html', menu=MENU_CONFIG)
+
+@app.route("/admin/safety-instruction-columns-simplified")
+@require_admin_auth
+def admin_safety_instruction_columns_simplified():
+    """환경안전 지시서 컬럼 관리 페이지 Simplified - 간소화 버전"""
+    return render_template('admin-safety-instruction-columns-simplified.html', menu=MENU_CONFIG)
 
 @app.route("/admin/change-request-columns")
 @require_admin_auth
@@ -2578,239 +3273,76 @@ def admin_change_request_columns_simplified():
 
 # ===== 기준정보 변경요청 컬럼 관리 API =====
 
-@app.route("/api/change-request-columns", methods=["GET"])
+@app.route("/api/change-request/columns", methods=["GET"])
 def get_change_request_columns():
     """기준정보 변경요청 페이지 동적 컬럼 설정 조회"""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        
-        # 테이블이 없으면 생성
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS change_request_column_config (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                column_key TEXT UNIQUE NOT NULL,
-                column_name TEXT NOT NULL,
-                column_type TEXT DEFAULT 'text',
-                column_order INTEGER DEFAULT 0,
-                is_active INTEGER DEFAULT 1,
-                dropdown_options TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.commit()
-        
-        columns = conn.execute("""
-            SELECT * FROM change_request_column_config 
-            ORDER BY column_order
-        """).fetchall()
-        conn.close()
-        
-        return jsonify([dict(col) for col in columns])
+        column_service = ColumnConfigService('change_request', DB_PATH)
+        columns = column_service.list_columns()
+        return jsonify(columns)
     except Exception as e:
         logging.error(f"변경요청 컬럼 조회 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/change-request-columns", methods=["POST"])
+@app.route("/api/change-request/columns", methods=["POST"])
 def add_change_request_column():
     """기준정보 변경요청 페이지 동적 컬럼 추가"""
     try:
-        data = request.json
-        
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
-        cursor = conn.cursor()
-        
-        # 테이블이 없으면 생성
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS change_request_column_config (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                column_key TEXT UNIQUE NOT NULL,
-                column_name TEXT NOT NULL,
-                column_type TEXT DEFAULT 'text',
-                column_order INTEGER DEFAULT 0,
-                is_active INTEGER DEFAULT 1,
-                dropdown_options TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # 컬럼 키 사용 (사용자가 직접 입력하거나 자동 생성)
-        column_key = data.get('column_key')
-        if not column_key:
-            # 새 컬럼 키 자동 생성
-            cursor.execute("SELECT MAX(CAST(SUBSTR(column_key, 7) AS INTEGER)) FROM change_request_column_config WHERE column_key LIKE 'column%'")
-            result = cursor.fetchone()
-            max_num = result[0] if result and result[0] else 0
-            column_key = f"column{max_num + 1}"
-        
-        # 최대 순서 번호 조회
-        cursor.execute("SELECT MAX(column_order) FROM change_request_column_config")
-        max_order_result = cursor.fetchone()
-        max_order = max_order_result[0] if max_order_result and max_order_result[0] else 0
-        
-        import json
-        dropdown_options = None
-        if data.get('column_type') == 'dropdown' and 'dropdown_options' in data:
-            dropdown_options = json.dumps(data['dropdown_options'], ensure_ascii=False)
-        
-        cursor.execute("""
-            INSERT INTO change_request_column_config 
-            (column_key, column_name, column_type, column_order, is_active, dropdown_options)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            column_key,
-            data['column_name'],
-            data.get('column_type', 'text'),
-            max_order + 1,
-            data.get('is_active', 1),
-            dropdown_options
-        ))
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({
-            "success": True, 
-            "message": "컬럼이 추가되었습니다.",
-            "column_key": column_key
-        })
+        column_service = ColumnConfigService('change_request', DB_PATH)
+        result = column_service.add_column(request.json)
+        return jsonify(result)
     except Exception as e:
         logging.error(f"변경요청 컬럼 추가 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/change-request-columns/<int:column_id>", methods=["PUT"])
+@app.route("/api/change-request/columns/<int:column_id>", methods=["PUT"])
 def update_change_request_column(column_id):
     """기준정보 변경요청 페이지 동적 컬럼 수정"""
     try:
-        data = request.json
-        
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
-        cursor = conn.cursor()
-        
-        # 현재 컬럼 정보 조회
-        cursor.execute("SELECT column_key, column_type FROM change_request_column_config WHERE id = ?", (column_id,))
-        column_info = cursor.fetchone()
-        if not column_info:
-            return jsonify({"success": False, "message": "컬럼을 찾을 수 없습니다."}), 404
-        
-        current_column_key, current_column_type = column_info
-        
-        # 업데이트할 필드 준비
-        update_fields = []
-        params = []
-        
-        if 'column_name' in data:
-            update_fields.append("column_name = ?")
-            params.append(data['column_name'])
-        
-        if 'column_type' in data:
-            update_fields.append("column_type = ?")
-            params.append(data['column_type'])
-        
-        if 'is_active' in data:
-            update_fields.append("is_active = ?")
-            params.append(1 if data['is_active'] else 0)
-        
-        if 'dropdown_options' in data:
-            import json
-            dropdown_options = json.dumps(data['dropdown_options'], ensure_ascii=False) if data['dropdown_options'] else None
-            update_fields.append("dropdown_options = ?")
-            params.append(dropdown_options)
-        
-        if update_fields:
-            update_fields.append("updated_at = CURRENT_TIMESTAMP")
-            params.append(column_id)
-            
-            query = f"UPDATE change_request_column_config SET {', '.join(update_fields)} WHERE id = ?"
-            cursor.execute(query, params)
-            conn.commit()
-        
-        conn.close()
-        
-        return jsonify({"success": True, "message": "컬럼이 수정되었습니다."})
+        column_service = ColumnConfigService('change_request', DB_PATH)
+        result = column_service.update_column(column_id, request.json)
+        return jsonify(result)
     except Exception as e:
         logging.error(f"변경요청 컬럼 수정 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/change-request-columns/<int:column_id>", methods=["DELETE"])
+@app.route("/api/change-request/columns/<int:column_id>", methods=["DELETE"])
 def delete_change_request_column(column_id):
-    """기준정보 변경요청 페이지 동적 컬럼 삭제 (실제로는 비활성화)"""
+    """기준정보 변경요청 페이지 동적 컬럼 삭제 (비활성화)"""
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
-        cursor = conn.cursor()
-        
-        # 컬럼을 실제로 삭제하지 않고 비활성화
-        cursor.execute("""
-            UPDATE change_request_column_config 
-            SET is_active = 0, updated_at = CURRENT_TIMESTAMP 
-            WHERE id = ?
-        """, (column_id,))
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({"success": True, "message": "컬럼이 삭제되었습니다."})
+        column_service = ColumnConfigService('change_request', DB_PATH)
+        result = column_service.delete_column(column_id)
+        return jsonify(result)
     except Exception as e:
         logging.error(f"변경요청 컬럼 삭제 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/change-request-columns/order", methods=["PUT"])
+@app.route("/api/change-request/columns/order", methods=["PUT"])
 def update_change_request_columns_order():
-    """기준정보 변경요청 페이지 동적 컬럼 순서 변경"""
+    """변경요청 페이지 동적 컬럼 순서 변경"""
     try:
-        data = request.json  # [{id: 1, column_order: 0}, {id: 2, column_order: 1}, ...]
-        
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
-        cursor = conn.cursor()
-        
-        for item in data:
-            cursor.execute("""
-                UPDATE change_request_column_config 
-                SET column_order = ?, updated_at = CURRENT_TIMESTAMP 
-                WHERE id = ?
-            """, (item['column_order'], item['id']))
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({"success": True, "message": "순서가 변경되었습니다."})
+        column_service = ColumnConfigService('change_request', DB_PATH)
+        result = column_service.update_columns_order(request.json)
+        return jsonify(result)
     except Exception as e:
-        logging.error(f"변경요청 컬럼 순서 변경 중 오류: {e}")
+        logging.error(f"컬럼 순서 변경 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-# ===== 기준정보 변경요청 드롭다운 코드 관리 API =====
-
-@app.route("/api/change-request-dropdown-codes/<column_key>", methods=["GET"])
-def get_change_request_dropdown_codes(column_key):
-    """특정 컬럼의 드롭다운 코드 조회"""
+@app.route("/api/change-request/dropdown-codes", methods=["GET"])
+def get_change_request_dropdown_codes():
+    column_key = request.args.get('column_key')
+    if not column_key:
+        return jsonify({"success": False, "message": "column_key is required"}), 400
+    """특정 컬럼의 드롭다운 코드 조회 (v2 통일)"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         conn.row_factory = sqlite3.Row
         
-        # 테이블이 없으면 생성
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS change_request_dropdown_codes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                column_key TEXT NOT NULL,
-                code TEXT NOT NULL,
-                value TEXT NOT NULL,
-                display_order INTEGER DEFAULT 0,
-                is_active INTEGER DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(column_key, code)
-            )
-        """)
-        conn.commit()
-        
-        # 해당 컬럼의 코드 조회
+        # v2 테이블 사용
         codes = conn.execute("""
-            SELECT * FROM change_request_dropdown_codes 
-            WHERE column_key = ? AND is_active = 1
+            SELECT option_code as code, option_value as value, display_order, is_active
+            FROM dropdown_option_codes_v2
+            WHERE board_type = 'change_request' AND column_key = ? AND is_active = 1
             ORDER BY display_order, id
         """, (column_key,)).fetchall()
         
@@ -2825,50 +3357,37 @@ def get_change_request_dropdown_codes(column_key):
         logging.error(f"변경요청 드롭다운 코드 조회 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/change-request-dropdown-codes", methods=["POST"])
+@app.route("/api/change-request/dropdown-codes", methods=["POST"])
 def save_change_request_dropdown_codes():
     """드롭다운 코드 일괄 저장"""
     try:
-        data = request.json
-        column_key = data.get('column_key')
-        codes = data.get('codes', [])
+        column_key = request.args.get('column_key')
+        codes = request.json  # 바디는 배열만
         
         if not column_key:
-            return jsonify({"success": False, "message": "컬럼 키가 필요합니다."}), 400
+            return jsonify({"success": False, "message": "column_key is required"}), 400
         
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        if not isinstance(codes, list):
+            return jsonify({"success": False, "message": "Body must be an array"}), 400
+        
+        conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 테이블이 없으면 생성
+        # 기존 코드 비활성화 (v2 테이블)
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS change_request_dropdown_codes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                column_key TEXT NOT NULL,
-                code TEXT NOT NULL,
-                value TEXT NOT NULL,
-                display_order INTEGER DEFAULT 0,
-                is_active INTEGER DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(column_key, code)
-            )
-        """)
-        
-        # 기존 코드 비활성화
-        cursor.execute("""
-            UPDATE change_request_dropdown_codes 
+            UPDATE dropdown_option_codes_v2
             SET is_active = 0, updated_at = CURRENT_TIMESTAMP
-            WHERE column_key = ?
+            WHERE board_type = 'change_request' AND column_key = ?
         """, (column_key,))
         
-        # 새 코드 삽입 또는 업데이트
+        # 새 코드 삽입 또는 업데이트 (v2 테이블)
         for idx, code_data in enumerate(codes):
             cursor.execute("""
-                INSERT INTO change_request_dropdown_codes 
-                (column_key, code, value, display_order, is_active)
-                VALUES (?, ?, ?, ?, 1)
-                ON CONFLICT(column_key, code) DO UPDATE SET
-                    value = excluded.value,
+                INSERT INTO dropdown_option_codes_v2
+                (board_type, column_key, option_code, option_value, display_order, is_active)
+                VALUES ('change_request', ?, ?, ?, ?, 1)
+                ON CONFLICT(board_type, column_key, option_code) DO UPDATE SET
+                    option_value = excluded.option_value,
                     display_order = excluded.display_order,
                     is_active = 1,
                     updated_at = CURRENT_TIMESTAMP
@@ -2884,13 +3403,13 @@ def save_change_request_dropdown_codes():
 
 @app.route("/api/change-request-dropdown-codes/<int:code_id>", methods=["DELETE"])
 def delete_change_request_dropdown_code(code_id):
-    """드롭다운 코드 삭제"""
+    """드롭다운 코드 삭제 (v2 통일)"""
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         cursor.execute("""
-            UPDATE change_request_dropdown_codes 
+            UPDATE dropdown_option_codes_v2
             SET is_active = 0, updated_at = CURRENT_TIMESTAMP 
             WHERE id = ?
         """, (code_id,))
@@ -2910,7 +3429,7 @@ def save_change_request():
         data = request.json
         request_number = data.get('request_number')
         
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         # 테이블이 없으면 생성
@@ -2930,6 +3449,10 @@ def save_change_request():
                     cursor.execute(f"ALTER TABLE change_requests ADD COLUMN {key} TEXT")
                 except:
                     pass  # 컬럼이 이미 존재하면 무시
+        
+        # 상태를 강제로 'requested'로 설정
+        if 'status' in data:
+            data['status'] = 'requested'  # 등록 시에는 항상 '요청' 상태
         
         # 데이터 삽입
         columns = list(data.keys())
@@ -2959,9 +3482,10 @@ def change_request_register():
     today = datetime.date.today()
     base_number = f"CMR{today.strftime('%y%m%d')}"
     
+    conn = None
     try:
         # 오늘 날짜의 마지막 번호 찾기
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         # 테이블이 없으면 생성
@@ -3007,30 +3531,27 @@ def change_request_register():
         # Row 객체를 딕셔너리로 변환
         dynamic_columns = [dict(row) for row in dynamic_columns_rows]
         
-        conn.close()
     except Exception as e:
         logging.error(f"요청번호 생성 중 오류: {e}")
         request_number = f"{base_number}01"  # 오류 시 기본값
         dynamic_columns = []
+    finally:
+        if conn:
+            conn.close()
     
-    # 드롭다운 컬럼에 대해 코드-값 매핑 적용
+    # 드롭다운 컬럼에 대해 코드-값 매핑 적용 (v2 통일)
     for col in dynamic_columns:
         if col['column_type'] == 'dropdown':
-            # 코드-값 매핑 방식으로 옵션 가져오기
-            conn = sqlite3.connect(DB_PATH)
-            conn.row_factory = sqlite3.Row
-            codes = conn.execute("""
-                SELECT code, value FROM change_request_dropdown_codes 
-                WHERE column_key = ? AND is_active = 1
-                ORDER BY display_order, id
-            """, (col['column_key'],)).fetchall()
-            conn.close()
+            # v2 공통 헬퍼 사용
+            code_options = get_dropdown_options_for_display('change_request', col['column_key'])
             
-            if codes:
-                col['dropdown_options_mapped'] = [{"code": c["code"], "value": c["value"]} for c in codes]
-                logging.info(f"  - {col['column_name']} ({col['column_key']}): {len(codes)}개 옵션")
+            # 프런트엔드 호환성을 위해 형식 변환
+            if code_options:
+                col['dropdown_options_mapped'] = [{"code": opt["code"], "value": opt["value"]} for opt in code_options]
+                logging.info(f"  - {col['column_name']} ({col['column_key']}): {len(code_options)}개 옵션")
             else:
-                col['dropdown_options_mapped'] = None
+                col['dropdown_options_mapped'] = []
+                logging.info(f"  - {col['column_name']} ({col['column_key']}): 드롭다운 옵션 없음")
     
     logging.info(f"변경요청 동적 컬럼 {len(dynamic_columns)}개 로드됨")
     
@@ -3065,7 +3586,7 @@ def admin_data_management():
 @app.route("/api/accidents/deleted")
 def get_deleted_accidents():
     """삭제된 사고 목록 API"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     
     # 삭제된 사고만 조회
@@ -3083,7 +3604,7 @@ def get_deleted_accidents():
 @app.route("/api/partners/deleted")
 def get_deleted_partners():
     """삭제된 협력사 목록 API"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     
     # 삭제된 협력사만 조회
@@ -3108,7 +3629,7 @@ def delete_accidents():
         if not ids:
             return jsonify({"success": False, "message": "삭제할 항목이 없습니다."}), 400
         
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         # 모든 사고 삭제 가능 (ACC, K 모두)
@@ -3142,7 +3663,7 @@ def restore_accidents():
         if not ids:
             return jsonify({"success": False, "message": "복구할 항목이 없습니다."}), 400
         
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         # 선택한 사고들을 복구 (is_deleted = 0)
@@ -3176,7 +3697,7 @@ def restore_partners():
         if not business_numbers:
             return jsonify({"success": False, "message": "복구할 항목이 없습니다."}), 400
         
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         # 선택한 협력사들을 복구 (is_deleted = 0)
@@ -3206,7 +3727,7 @@ def search_buildings():
     try:
         search_term = request.args.get('q', '').strip()
         
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         if search_term:
@@ -3244,7 +3765,7 @@ def search_departments():
     try:
         search_term = request.args.get('q', '').strip()
         
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         if search_term:
@@ -3290,7 +3811,7 @@ def api_search():
         search_value = request.args.get('value', 'person')
         search_term = request.args.get('q', '').strip()
         
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         results = []
@@ -3546,7 +4067,7 @@ def permanent_delete_accidents():
         if not ids:
             return jsonify({"success": False, "message": "삭제할 항목이 없습니다."}), 400
         
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         # 선택한 사고들을 영구 삭제
@@ -3569,984 +4090,55 @@ def permanent_delete_accidents():
         logging.error(f"사고 영구 삭제 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/accident-columns", methods=["POST"])
-def add_accident_column():
-    """사고 페이지 동적 컬럼 추가"""
-    try:
-        data = request.json
-        
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)  # timeout 추가
-        cursor = conn.cursor()
-        
-        # 컬럼 키 사용 (사용자가 직접 입력하거나 자동 생성)
-        column_key = data.get('column_key')
-        if not column_key:
-            # 새 컬럼 키 자동 생성
-            cursor.execute("SELECT MAX(CAST(SUBSTR(column_key, 7) AS INTEGER)) FROM accident_column_config WHERE column_key LIKE 'column%'")
-            max_num = cursor.fetchone()[0] or 10
-            column_key = f"column{max_num + 1}"
-        
-        # 최대 순서 번호 조회
-        cursor.execute("SELECT MAX(column_order) FROM accident_column_config")
-        max_order = cursor.fetchone()[0] or 0
-        
-        import json
-        dropdown_options = None
-        if data.get('column_type') == 'dropdown' and 'dropdown_options' in data:
-            dropdown_options = json.dumps(data['dropdown_options'], ensure_ascii=False)
-        
-        cursor.execute("""
-            INSERT INTO accident_column_config 
-            (column_key, column_name, column_type, column_order, is_active, dropdown_options)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            column_key,
-            data['column_name'],
-            data.get('column_type', 'text'),
-            max_order + 1,
-            data.get('is_active', 1),
-            dropdown_options
-        ))
-        
-        # 드롭다운 타입일 경우 자동으로 코드 생성
-        if data.get('column_type') == 'dropdown' and dropdown_options:
-            try:
-                options_list = json.loads(dropdown_options) if isinstance(dropdown_options, str) else dropdown_options
-                if isinstance(options_list, list):
-                    for idx, value in enumerate(options_list, 1):
-                        code = f"{column_key.upper()}_{str(idx).zfill(3)}"
-                        cursor.execute("""
-                            INSERT OR IGNORE INTO dropdown_option_codes
-                            (column_key, option_code, option_value, display_order, is_active)
-                            VALUES (?, ?, ?, ?, 1)
-                        """, (column_key, code, value, idx))
-                    logging.info(f"드롭다운 컬럼 {column_key}에 대한 코드 {len(options_list)}개 자동 생성")
-            except Exception as e:
-                logging.error(f"드롭다운 코드 자동 생성 실패: {e}")
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({
-            "success": True, 
-            "message": "컬럼이 추가되었습니다.",
-            "column_key": column_key
-        })
-    except Exception as e:
-        logging.error(f"컬럼 추가 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/accident-columns/<int:column_id>", methods=["PUT"])
-def update_accident_column(column_id):
-    """사고 페이지 동적 컬럼 수정"""
-    try:
-        data = request.json
-        
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)  # timeout 추가
-        cursor = conn.cursor()
-        
-        # 현재 컬럼 정보 조회
-        cursor.execute("SELECT column_key, column_type FROM accident_column_config WHERE id = ?", (column_id,))
-        column_info = cursor.fetchone()
-        if not column_info:
-            return jsonify({"success": False, "message": "컬럼을 찾을 수 없습니다."}), 404
-        
-        current_column_key, current_column_type = column_info
-        
-        # 업데이트할 필드 준비
-        update_fields = []
-        params = []
-        
-        if 'column_name' in data:
-            update_fields.append("column_name = ?")
-            params.append(data['column_name'])
-        
-        # 타입 변경 처리
-        if 'column_type' in data:
-            new_type = data['column_type']
-            update_fields.append("column_type = ?")
-            params.append(new_type)
-            
-            # 드롭다운에서 다른 타입으로 변경 시 코드 비활성화
-            if current_column_type == 'dropdown' and new_type != 'dropdown':
-                cursor.execute("""
-                    UPDATE dropdown_option_codes 
-                    SET is_active = 0 
-                    WHERE column_key = ?
-                """, (current_column_key,))
-                logging.info(f"타입 변경으로 {current_column_key}의 드롭다운 코드 비활성화")
-        
-        if 'is_active' in data:
-            update_fields.append("is_active = ?")
-            params.append(1 if data['is_active'] else 0)
-        
-        if 'dropdown_options' in data:
-            import json
-            dropdown_options = json.dumps(data['dropdown_options'], ensure_ascii=False) if data['dropdown_options'] else None
-            update_fields.append("dropdown_options = ?")
-            params.append(dropdown_options)
-            
-            # 새로운 드롭다운 옵션에 대한 코드 생성
-            if data.get('column_type') == 'dropdown' and dropdown_options:
-                try:
-                    options_list = json.loads(dropdown_options) if isinstance(dropdown_options, str) else data['dropdown_options']
-                    if isinstance(options_list, list):
-                        # 기존 코드 비활성화
-                        cursor.execute("""
-                            UPDATE dropdown_option_codes 
-                            SET is_active = 0 
-                            WHERE column_key = ?
-                        """, (current_column_key,))
-                        
-                        # 새 코드 생성
-                        for idx, value in enumerate(options_list, 1):
-                            code = f"{current_column_key.upper()}_{str(idx).zfill(3)}"
-                            cursor.execute("""
-                                INSERT OR REPLACE INTO dropdown_option_codes
-                                (column_key, option_code, option_value, display_order, is_active)
-                                VALUES (?, ?, ?, ?, 1)
-                            """, (current_column_key, code, value, idx))
-                        logging.info(f"드롭다운 옵션 업데이트: {current_column_key}에 코드 {len(options_list)}개 재생성")
-                except Exception as e:
-                    logging.error(f"드롭다운 코드 업데이트 실패: {e}")
-        
-        if update_fields:
-            update_fields.append("updated_at = CURRENT_TIMESTAMP")
-            params.append(column_id)
-            
-            query = f"UPDATE accident_column_config SET {', '.join(update_fields)} WHERE id = ?"
-            cursor.execute(query, params)
-            conn.commit()
-        
-        conn.close()
-        
-        return jsonify({"success": True, "message": "컬럼이 수정되었습니다."})
-    except Exception as e:
-        logging.error(f"컬럼 수정 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/dropdown-codes/<column_key>", methods=["GET"])
-def get_dropdown_codes(column_key):
-    """특정 컬럼의 드롭다운 코드 목록 조회"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        
-        # 먼저 dropdown_code_mapping 테이블에서 조회 (새로운 방식)
-        codes = conn.execute("""
-            SELECT code as option_code, option_value, display_order 
-            FROM dropdown_code_mapping
-            WHERE column_key = ? AND is_active = 1
-            ORDER BY display_order
-        """, (column_key,)).fetchall()
-        
-        # 데이터가 없으면 dropdown_option_codes에서 조회 (구식 방식)
-        if not codes:
-            codes = conn.execute("""
-                SELECT * FROM dropdown_option_codes
-                WHERE column_key = ? AND is_active = 1
-                ORDER BY display_order
-            """, (column_key,)).fetchall()
-        
-        conn.close()
-        
-        # 응답 형식 통일
-        return jsonify({
-            "success": True,
-            "codes": [
-                {
-                    "code": code['option_code'],
-                    "value": code['option_value'],
-                    "order": code['display_order']
-                } for code in codes
-            ]
-        })
-    except Exception as e:
-        logging.error(f"드롭다운 코드 조회 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/dropdown-codes", methods=["POST"])
-def save_dropdown_codes():
-    """드롭다운 코드 저장/업데이트 (변경 이력 추적 포함)"""
-    conn = None
-    try:
-        data = request.json
-        column_key = data.get('column_key')
-        codes = data.get('codes', [])
-        
-        logging.info(f"[dropdown-codes] v3 handler called: column_key={column_key}, codes count={len(codes)}")
-        logging.info(f"[dropdown-codes] raw codes: {codes}")
-        
-        # === 유틸: JSON 배열 문자열인지 판별
-        def _looks_like_json_array_text(s):
-            return isinstance(s, str) and s.strip().startswith('[') and s.strip().endswith(']')
-        
-        # === 유틸: 어떤 형태로 와도 재귀적으로 평탄화
-        def _deep_flatten_values(value):
-            import json
-            out = []
-            stack = [value]
-            while stack:
-                v = stack.pop()
-                if isinstance(v, list):
-                    # 리스트면 항목을 뒤에서 앞으로 스택에
-                    for i in range(len(v) - 1, -1, -1):
-                        stack.append(v[i])
-                elif isinstance(v, str) and _looks_like_json_array_text(v):
-                    # 문자열이더라도 [ ... ] 꼴이면 다시 파싱해서 반복
-                    try:
-                        parsed = json.loads(v)
-                        stack.append(parsed)
-                    except Exception:
-                        sv = v.strip()
-                        if sv:
-                            out.append(sv)
-                else:
-                    sv = (str(v)).strip()
-                    if sv:
-                        out.append(sv)
-            return out
-        
-        # 들어온 codes를 재귀 평탄화해서 완전한 리스트로 만들기
-        flattened = []
-        for c in codes:  # codes는 [{code: "...", value: "..."} ...] 형태
-            vals = _deep_flatten_values(c.get('value'))
-            for v in vals:
-                flattened.append({'value': v})
-        
-        # flattened가 비어있으면 빈 값 하나라도 넣기
-        if not flattened:
-            flattened = [{'value': ''}]
-        
-        logging.info(f"[dropdown-codes] flattened to {len(flattened)} values: {[f['value'] for f in flattened]}")
-        
-        # 요청 정보 수집 (감사 로그용)
-        ip_address = request.remote_addr
-        user_agent = request.headers.get('User-Agent', '')
-        
-        conn = sqlite3.connect(DB_PATH, timeout=30.0)
-        conn.execute("PRAGMA journal_mode=WAL")
-        cursor = conn.cursor()
-        
-        # 트랜잭션 시작
-        cursor.execute("BEGIN TRANSACTION")
-        
-        # 기존 활성 코드 조회 (변경 전 상태 기록용)
-        existing_codes = cursor.execute("""
-            SELECT option_code, option_value, display_order 
-            FROM dropdown_option_codes
-            WHERE column_key = ? AND is_active = 1
-        """, (column_key,)).fetchall()
-        
-        existing_dict = {row[0]: {'value': row[1], 'order': row[2]} for row in existing_codes}
-        
-        # 기존 코드 비활성화
-        cursor.execute("""
-            UPDATE dropdown_option_codes 
-            SET is_active = 0, updated_at = CURRENT_TIMESTAMP
-            WHERE column_key = ?
-        """, (column_key,))
-        
-        # dropdown_code_mapping 테이블 초기화
-        cursor.execute("""
-            DELETE FROM dropdown_code_mapping 
-            WHERE column_key = ?
-        """, (column_key,))
-        
-        # 새 코드 재생성 (순번 부여)
-        for idx, item in enumerate(flattened, 1):
-            new_code = f"{column_key.upper()}_{str(idx).zfill(3)}"
-            option_value = item['value']
-            
-            # dropdown_code_mapping 테이블에 삽입
-            cursor.execute("""
-                INSERT INTO dropdown_code_mapping 
-                (column_key, code, option_value, display_order, is_active)
-                VALUES (?, ?, ?, ?, 1)
-            """, (column_key, new_code, option_value, idx))
-            
-            # 기존 코드가 있는지 확인 (dropdown_option_codes)
-            existing = cursor.execute("""
-                SELECT id, option_value, display_order FROM dropdown_option_codes
-                WHERE column_key = ? AND option_code = ?
-            """, (column_key, new_code)).fetchone()
-            
-            if existing:
-                old_value = existing[1]
-                old_order = existing[2]
-                
-                # 업데이트
-                cursor.execute("""
-                    UPDATE dropdown_option_codes 
-                    SET option_value = ?, display_order = ?, is_active = 1,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE column_key = ? AND option_code = ?
-                """, (option_value, idx, column_key, new_code))
-                
-                # 변경 이력 기록 (값이나 순서가 변경된 경우만)
-                if old_value != option_value or old_order != idx:
-                    cursor.execute("""
-                        INSERT INTO dropdown_code_audit 
-                        (column_key, option_code, action_type, old_value, new_value, 
-                         old_order, new_order, ip_address, user_agent)
-                        VALUES (?, ?, 'UPDATE', ?, ?, ?, ?, ?, ?)
-                    """, (column_key, new_code, old_value, option_value, 
-                          old_order, idx, ip_address, user_agent))
-            else:
-                # 새로 삽입
-                cursor.execute("""
-                    INSERT OR REPLACE INTO dropdown_option_codes 
-                    (column_key, option_code, option_value, display_order, is_active)
-                    VALUES (?, ?, ?, ?, 1)
-                """, (column_key, new_code, option_value, idx))
-                
-                # 생성 이력 기록
-                cursor.execute("""
-                    INSERT INTO dropdown_code_audit 
-                    (column_key, option_code, action_type, new_value, new_order, 
-                     ip_address, user_agent)
-                    VALUES (?, ?, 'CREATE', ?, ?, ?, ?)
-                """, (column_key, new_code, option_value, idx, ip_address, user_agent))
-        
-        # 삭제된 코드 확인 및 기록 (재생성된 코드 기준)
-        new_codes = {f"{column_key.upper()}_{str(i+1).zfill(3)}" for i in range(len(flattened))}
-        for old_code, old_data in existing_dict.items():
-            if old_code not in new_codes:
-                cursor.execute("""
-                    INSERT INTO dropdown_code_audit 
-                    (column_key, option_code, action_type, old_value, old_order, 
-                     ip_address, user_agent)
-                    VALUES (?, ?, 'DELETE', ?, ?, ?, ?)
-                """, (column_key, old_code, old_data['value'], old_data['order'], 
-                      ip_address, user_agent))
-        
-        cursor.execute("COMMIT")
-        conn.close()
-        
-        return jsonify({"success": True, "message": "드롭다운 코드가 저장되었습니다."})
-    except Exception as e:
-        if conn:
-            conn.rollback()
-            conn.close()
-        logging.error(f"드롭다운 코드 저장 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/dropdown-codes/<column_key>/history", methods=["GET"])
-def get_dropdown_history(column_key):
-    """특정 컬럼의 변경 이력 조회"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        
-        # 최근 100개 변경 이력 조회
-        history = conn.execute("""
-            SELECT * FROM dropdown_code_audit
-            WHERE column_key = ?
-            ORDER BY changed_at DESC
-            LIMIT 100
-        """, (column_key,)).fetchall()
-        
-        # 통계 정보 조회
-        stats = conn.execute("""
-            SELECT * FROM dropdown_code_stats
-            WHERE column_key = ?
-        """, (column_key,)).fetchone()
-        
-        conn.close()
-        
-        return jsonify({
-            "history": [dict(row) for row in history],
-            "stats": dict(stats) if stats else None
-        })
-    except Exception as e:
-        logging.error(f"변경 이력 조회 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/dropdown-codes/audit-summary", methods=["GET"])
-def get_audit_summary():
-    """전체 변경 이력 요약"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        
-        # 최근 7일간 변경 통계
-        recent_changes = conn.execute("""
-            SELECT 
-                DATE(changed_at) as date,
-                COUNT(*) as total_changes,
-                COUNT(DISTINCT column_key) as columns_changed
-            FROM dropdown_code_audit
-            WHERE changed_at >= datetime('now', '-7 days')
-            GROUP BY DATE(changed_at)
-            ORDER BY date DESC
-        """).fetchall()
-        
-        # 가장 많이 변경된 컬럼 TOP 5
-        most_changed = conn.execute("""
-            SELECT 
-                column_key,
-                COUNT(*) as change_count,
-                MAX(changed_at) as last_changed
-            FROM dropdown_code_audit
-            GROUP BY column_key
-            ORDER BY change_count DESC
-            LIMIT 5
-        """).fetchall()
-        
-        conn.close()
-        
-        return jsonify({
-            "recent_changes": [dict(row) for row in recent_changes],
-            "most_changed_columns": [dict(row) for row in most_changed]
-        })
-    except Exception as e:
-        logging.error(f"감사 요약 조회 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/accident-columns/<int:column_id>", methods=["DELETE"])
-def delete_accident_column(column_id):
-    """사고 페이지 동적 컬럼 삭제 (실제로는 비활성화)"""
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)  # timeout 추가
-        cursor = conn.cursor()
-        
-        # 먼저 컬럼 정보 조회
-        cursor.execute("SELECT column_key, column_type FROM accident_column_config WHERE id = ?", (column_id,))
-        column_info = cursor.fetchone()
-        
-        if column_info:
-            column_key, column_type = column_info
-            
-            # 드롭다운 타입이면 관련 코드도 비활성화
-            if column_type == 'dropdown':
-                cursor.execute("""
-                    UPDATE dropdown_option_codes 
-                    SET is_active = 0 
-                    WHERE column_key = ?
-                """, (column_key,))
-                logging.info(f"드롭다운 컬럼 {column_key}의 코드도 비활성화")
-        
-        # 컬럼을 실제로 삭제하지 않고 비활성화
-        cursor.execute("""
-            UPDATE accident_column_config 
-            SET is_active = 0, updated_at = CURRENT_TIMESTAMP 
-            WHERE id = ?
-        """, (column_id,))
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({"success": True, "message": "컬럼이 삭제되었습니다."})
-    except Exception as e:
-        logging.error(f"컬럼 삭제 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/accident-columns/order", methods=["PUT"])
-def update_accident_columns_order():
-    """사고 페이지 동적 컬럼 순서 변경"""
-    try:
-        data = request.json  # [{id: 1, column_order: 0}, {id: 2, column_order: 1}, ...]
-        
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)  # timeout 추가
-        cursor = conn.cursor()
-        
-        for item in data:
-            cursor.execute("""
-                UPDATE accident_column_config 
-                SET column_order = ?, updated_at = CURRENT_TIMESTAMP 
-                WHERE id = ?
-            """, (item['column_order'], item['id']))
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({"success": True, "message": "순서가 변경되었습니다."})
-    except Exception as e:
-        logging.error(f"컬럼 순서 변경 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-# ==================== 환경안전 지시서 컬럼 관리 API ====================
 
 @app.route("/api/safety-instruction-columns", methods=["GET"])
 def get_safety_instruction_columns():
     """환경안전 지시서 페이지 동적 컬럼 설정 조회"""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        
-        # safety_instruction_column_config 테이블이 없으면 accident_column_config 사용
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='safety_instruction_column_config'")
-        table_exists = cursor.fetchone()
-        
-        if table_exists:
-            columns = conn.execute("""
-                SELECT * FROM safety_instruction_column_config 
-                ORDER BY column_order
-            """).fetchall()
-        else:
-            # 테이블이 없으면 accident_column_config 사용 (호환성)
-            columns = conn.execute("""
-                SELECT * FROM accident_column_config 
-                ORDER BY column_order
-            """).fetchall()
-        
-        conn.close()
-        
-        return jsonify([dict(col) for col in columns])
+        column_service = ColumnConfigService('safety_instruction', DB_PATH)
+        columns = column_service.list_columns()
+        return jsonify(columns)
     except Exception as e:
-        logging.error(f"지시서 컬럼 조회 중 오류: {e}")
+        logging.error(f"환경안전 지시서 컬럼 조회 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route("/api/safety-instruction-columns", methods=["POST"])
 def add_safety_instruction_column():
     """환경안전 지시서 페이지 동적 컬럼 추가"""
     try:
-        data = request.json
-        
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
-        cursor = conn.cursor()
-        
-        # safety_instruction_column_config 테이블이 없으면 accident_column_config 사용
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='safety_instruction_column_config'")
-        table_exists = cursor.fetchone()
-        
-        table_name = 'safety_instruction_column_config' if table_exists else 'accident_column_config'
-        
-        # 컬럼 키 사용
-        column_key = data.get('column_key')
-        if not column_key:
-            cursor.execute(f"SELECT MAX(CAST(SUBSTR(column_key, 7) AS INTEGER)) FROM {table_name} WHERE column_key LIKE 'column%'")
-            max_num = cursor.fetchone()[0] or 10
-            column_key = f"column{max_num + 1}"
-        
-        # 최대 순서 번호 조회
-        cursor.execute(f"SELECT MAX(column_order) FROM {table_name}")
-        max_order = cursor.fetchone()[0] or 0
-        
-        # 새 컬럼 추가
-        cursor.execute(f"""
-            INSERT INTO {table_name} (
-                column_key, column_name, column_type, 
-                dropdown_options, is_active, column_order,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        """, (
-            column_key,
-            data['column_name'],
-            data['column_type'],
-            json.dumps(data.get('dropdown_options', [])) if data['column_type'] == 'dropdown' else None,
-            1,  # 기본 활성화
-            max_order + 1
-        ))
-        
-        conn.commit()
-        column_id = cursor.lastrowid
-        conn.close()
-        
-        return jsonify({"success": True, "id": column_id, "column_key": column_key})
+        column_service = ColumnConfigService('safety_instruction', DB_PATH)
+        result = column_service.add_column(request.json)
+        return jsonify(result)
     except Exception as e:
-        logging.error(f"지시서 컬럼 추가 중 오류: {e}")
+        logging.error(f"환경안전 지시서 컬럼 추가 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route("/api/safety-instruction-columns/<int:column_id>", methods=["PUT"])
 def update_safety_instruction_column(column_id):
     """환경안전 지시서 페이지 동적 컬럼 수정"""
     try:
-        data = request.json
-        
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
-        cursor = conn.cursor()
-        
-        # safety_instruction_column_config 테이블이 없으면 accident_column_config 사용
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='safety_instruction_column_config'")
-        table_exists = cursor.fetchone()
-        
-        table_name = 'safety_instruction_column_config' if table_exists else 'accident_column_config'
-        
-        # 업데이트 필드 준비
-        update_fields = []
-        params = []
-        
-        if 'column_name' in data:
-            update_fields.append("column_name = ?")
-            params.append(data['column_name'])
-        
-        if 'column_type' in data:
-            update_fields.append("column_type = ?")
-            params.append(data['column_type'])
-        
-        if 'dropdown_options' in data:
-            update_fields.append("dropdown_options = ?")
-            params.append(json.dumps(data['dropdown_options']))
-        
-        if 'is_active' in data:
-            update_fields.append("is_active = ?")
-            params.append(1 if data['is_active'] else 0)
-        
-        if 'column_order' in data:
-            update_fields.append("column_order = ?")
-            params.append(data['column_order'])
-        
-        if update_fields:
-            update_fields.append("updated_at = CURRENT_TIMESTAMP")
-            params.append(column_id)
-            
-            query = f"UPDATE {table_name} SET {', '.join(update_fields)} WHERE id = ?"
-            cursor.execute(query, params)
-            conn.commit()
-        
-        conn.close()
-        
-        return jsonify({"success": True})
+        column_service = ColumnConfigService('safety_instruction', DB_PATH)
+        result = column_service.update_column(column_id, request.json)
+        return jsonify(result)
     except Exception as e:
-        logging.error(f"지시서 컬럼 수정 중 오류: {e}")
+        logging.error(f"환경안전 지시서 컬럼 수정 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route("/api/safety-instruction-columns/<int:column_id>", methods=["DELETE"])
 def delete_safety_instruction_column(column_id):
     """환경안전 지시서 페이지 동적 컬럼 삭제 (비활성화)"""
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
-        cursor = conn.cursor()
-        
-        # safety_instruction_column_config 테이블이 없으면 accident_column_config 사용
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='safety_instruction_column_config'")
-        table_exists = cursor.fetchone()
-        
-        table_name = 'safety_instruction_column_config' if table_exists else 'accident_column_config'
-        
-        # 비활성화
-        cursor.execute(f"""
-            UPDATE {table_name} 
-            SET is_active = 0, updated_at = CURRENT_TIMESTAMP 
-            WHERE id = ?
-        """, (column_id,))
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({"success": True})
+        column_service = ColumnConfigService('safety_instruction', DB_PATH)
+        result = column_service.delete_column(column_id)
+        return jsonify(result)
     except Exception as e:
-        logging.error(f"지시서 컬럼 삭제 중 오류: {e}")
+        logging.error(f"환경안전 지시서 컬럼 삭제 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/safety-instruction-columns/order", methods=["PUT"])
-def update_safety_instruction_columns_order():
-    """환경안전 지시서 페이지 동적 컬럼 순서 변경"""
-    try:
-        data = request.json
-        
-        conn = sqlite3.connect(DB_PATH, timeout=10.0)
-        cursor = conn.cursor()
-        
-        # safety_instruction_column_config 테이블이 없으면 accident_column_config 사용
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='safety_instruction_column_config'")
-        table_exists = cursor.fetchone()
-        
-        table_name = 'safety_instruction_column_config' if table_exists else 'accident_column_config'
-        
-        for item in data:
-            cursor.execute(f"""
-                UPDATE {table_name}
-                SET column_order = ?, updated_at = CURRENT_TIMESTAMP 
-                WHERE id = ?
-            """, (item['column_order'], item['id']))
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({"success": True, "message": "순서가 변경되었습니다."})
-    except Exception as e:
-        logging.error(f"지시서 컬럼 순서 변경 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/person-master", methods=["GET"])
-def get_person_master():
-    """담당자 마스터 목록 조회 (팝업용)"""
-    try:
-        search = request.args.get('search', '')
-        
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        
-        query = """
-            SELECT * FROM person_master 
-            WHERE is_active = 1
-        """
-        params = []
-        
-        if search:
-            query += " AND (name LIKE ? OR department LIKE ? OR company_name LIKE ?)"
-            search_param = f"%{search}%"
-            params.extend([search_param, search_param, search_param])
-        
-        query += " ORDER BY name"
-        
-        persons = conn.execute(query, params).fetchall()
-        conn.close()
-        
-        return jsonify({
-            "success": True,
-            "persons": [dict(p) for p in persons]
-        })
-    except Exception as e:
-        logging.error(f"담당자 조회 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/search/autocomplete", methods=["GET"])
-def search_autocomplete():
-    """범용 자동완성 API"""
-    try:
-        search_type = request.args.get('type', 'person')
-        query = request.args.get('query', '').strip()
-        
-        if not query:
-            return jsonify({"success": True, "items": []})
-        
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        
-        items = []
-        
-        if search_type == 'person':
-            # 먼저 emp_table에서 검색 시도
-            try:
-                results = conn.execute("""
-                    SELECT DISTINCT emp_name as name, emp_dept as department, emp_company as company_name 
-                    FROM emp_table 
-                    WHERE enabled = 1 
-                    AND (emp_name LIKE ? OR emp_id LIKE ?)
-                    LIMIT 10
-                """, (f'%{query}%', f'%{query}%')).fetchall()
-            except:
-                # emp_table이 없으면 person_master에서 검색
-                try:
-                    results = conn.execute("""
-                        SELECT DISTINCT name, department, company_name 
-                        FROM person_master 
-                        WHERE is_active = 1 
-                        AND (name LIKE ? OR employee_id LIKE ?)
-                        LIMIT 10
-                    """, (f'%{query}%', f'%{query}%')).fetchall()
-                except:
-                    # 둘 다 없으면 더미 데이터 사용
-                    dummy_data = [
-                        {'name': '홍길동', 'department': '안전관리팀', 'company_name': '삼성전자'},
-                        {'name': '김철수', 'department': '시설관리팀', 'company_name': '삼성전자'},
-                        {'name': '이영희', 'department': '품질관리팀', 'company_name': '삼성전자'},
-                        {'name': '박민수', 'department': '생산관리팀', 'company_name': '협력사A'},
-                        {'name': '정수진', 'department': '환경안전팀', 'company_name': '협력사B'}
-                    ]
-                    results = [d for d in dummy_data if query.lower() in d['name'].lower() or query in d['department']]
-            
-            for row in results:
-                if isinstance(row, dict):
-                    dept = row.get('department', '')
-                    items.append({
-                        'main': row.get('name', ''),
-                        'sub': dept if dept else '부서 정보 없음'
-                    })
-                else:
-                    dept = row['department'] if row['department'] else '부서 정보 없음'
-                    items.append({
-                        'main': row['name'],
-                        'sub': dept
-                    })
-                
-        elif search_type == 'employee_id':
-            # ID로 검색
-            try:
-                results = conn.execute("""
-                    SELECT DISTINCT emp_id as employee_id, emp_name as name, emp_dept as department 
-                    FROM emp_table 
-                    WHERE enabled = 1 
-                    AND emp_id LIKE ?
-                    LIMIT 10
-                """, (f'%{query}%',)).fetchall()
-            except:
-                try:
-                    results = conn.execute("""
-                        SELECT DISTINCT employee_id, name, department 
-                        FROM person_master 
-                        WHERE is_active = 1 
-                        AND employee_id LIKE ?
-                        LIMIT 10
-                    """, (f'%{query}%',)).fetchall()
-                except:
-                    # 더미 데이터
-                    dummy_data = [
-                        {'employee_id': 'E001', 'name': '홍길동', 'department': '안전관리팀'},
-                        {'employee_id': 'E002', 'name': '김철수', 'department': '시설관리팀'},
-                        {'employee_id': 'E003', 'name': '이영희', 'department': '품질관리팀'},
-                        {'employee_id': 'E004', 'name': '박민수', 'department': '생산관리팀'},
-                        {'employee_id': 'E005', 'name': '정수진', 'department': '환경안전팀'}
-                    ]
-                    results = [d for d in dummy_data if query.upper() in d['employee_id']]
-            
-            for row in results:
-                if isinstance(row, dict):
-                    items.append({
-                        'main': row['employee_id'],
-                        'sub': f"{row['name']} / {row['department']}"
-                    })
-                else:
-                    items.append({
-                        'main': row['employee_id'],
-                        'sub': f"{row['name']} / {row['department']}"
-                    })
-                
-        elif search_type == 'company':
-            # 업체명 검색 - partners_cache 테이블 사용
-            try:
-                results = conn.execute("""
-                    SELECT DISTINCT company_name, business_number 
-                    FROM partners_cache 
-                    WHERE company_name LIKE ?
-                    LIMIT 10
-                """, (f'%{query}%',)).fetchall()
-            except:
-                # partners_cache 테이블이 없으면 빈 결과 반환
-                results = []
-            
-            for row in results:
-                items.append({
-                    'main': row['company_name'],
-                    'sub': row['business_number']
-                })
-                
-        elif search_type == 'business_number':
-            # 사업자번호 검색 - partners_cache 테이블 사용
-            try:
-                results = conn.execute("""
-                    SELECT DISTINCT business_number, company_name 
-                    FROM partners_cache 
-                    WHERE business_number LIKE ?
-                    LIMIT 10
-                """, (f'%{query}%',)).fetchall()
-            except:
-                # partners_cache 테이블이 없으면 빈 결과 반환
-                results = []
-            
-            for row in results:
-                items.append({
-                    'main': row['business_number'],
-                    'sub': row['company_name']
-                })
-        
-        conn.close()
-        
-        return jsonify({
-            "success": True,
-            "items": items
-        })
-        
-    except Exception as e:
-        logging.error(f"자동완성 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-
-@app.route("/search-popup")
-def search_popup():
-    """범용 검색 팝업 페이지"""
-    search_type = request.args.get('type', 'person')
-    callback = request.args.get('callback', 'handleSearchResult')
-    
-    # 검색 타입별 설정
-    configs = {
-        'person': {
-            'title': '담당자 검색',
-            'search_title': '담당자 검색',
-            'placeholder': '이름 또는 부서를 입력하세요',
-            'search_options': [
-                {'value': 'person', 'label': '이름'},
-                {'value': 'employee_id', 'label': 'ID'}
-            ],
-            'columns': [
-                {'field': 'employee_id', 'label': 'ID'},
-                {'field': 'name', 'label': '이름'},
-                {'field': 'department', 'label': '부서'}
-            ]
-        },
-        'company': {
-            'title': '업체 검색',
-            'search_title': '업체 검색',
-            'placeholder': '업체명 또는 사업자번호를 입력하세요',
-            'search_options': [
-                {'value': 'company', 'label': '업체명'},
-                {'value': 'business_number', 'label': '사업자번호'}
-            ],
-            'columns': [
-                {'field': 'company_business_number', 'label': '사업자번호'},
-                {'field': 'company_name', 'label': '업체명'},
-                {'field': 'representative_name', 'label': '대표자'},
-                {'field': 'business_type', 'label': '업종'},
-                {'field': 'company_phone', 'label': '연락처'}
-            ]
-        },
-        'building': {
-            'title': '건물 검색',
-            'search_title': '건물 검색',
-            'placeholder': '건물명 또는 건물코드를 입력하세요',
-            'search_options': [
-                {'value': 'building', 'label': '건물명'},
-                {'value': 'building_code', 'label': '건물코드'}
-            ],
-            'columns': [
-                {'field': 'building_code', 'label': '건물코드'},
-                {'field': 'building_name', 'label': '건물명'}
-            ]
-        },
-        'department': {
-            'title': '부서 검색',
-            'search_title': '부서 검색',
-            'placeholder': '부서명 또는 부서코드를 입력하세요',
-            'search_options': [
-                {'value': 'department', 'label': '부서명'},
-                {'value': 'dept_code', 'label': '부서코드'}
-            ],
-            'columns': [
-                {'field': 'dept_code', 'label': '부서코드'},
-                {'field': 'dept_name', 'label': '부서명'},
-                {'field': 'parent_name', 'label': '상위부서'},
-                {'field': 'dept_level', 'label': '레벨'}
-            ]
-        },
-        'contractor': {
-            'title': '협력사 근로자 검색',
-            'search_title': '협력사 근로자 검색',
-            'placeholder': '이름 또는 ID를 입력하세요',
-            'search_options': [
-                {'value': 'name', 'label': '이름'},
-                {'value': 'worker_id', 'label': 'ID'}
-            ],
-            'columns': [
-                {'field': 'worker_id', 'label': 'ID'},
-                {'field': 'worker_name', 'label': '성함'},
-                {'field': 'company_name', 'label': '소속업체'},
-                {'field': 'business_number', 'label': '사업자번호'}
-            ]
-        }
-    }
-    
-    config = configs.get(search_type, configs['person'])
-    config['searchUrl'] = '/api/search'
-    config['autocompleteUrl'] = '/api/search/autocomplete'
-    config['callback'] = callback
-    
-    return render_template('search-popup.html', 
-                         config=config,
-                         title=config['title'],
-                         search_title=config['search_title'],
-                         placeholder=config['placeholder'],
-                         search_options=config['search_options'],
-                         is_popup=True)
-
-# Catch-all 라우트는 맨 마지막에 위치 (다른 모든 라우트 다음)
 @app.route("/<path:url>")
 def page_view(url):
     """일반 페이지 체크 (catch-all 라우트)"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     page = conn.execute("SELECT * FROM pages WHERE url = ?", (url,)).fetchone()
     conn.close()
     
@@ -4574,7 +4166,7 @@ def export_accidents_excel():
         accident_date_end = request.args.get('accident_date_end', '')
         
         # DB 연결
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         conn.row_factory = sqlite3.Row
         
         # 동적 컬럼 정보 가져오기
@@ -4673,12 +4265,12 @@ def export_accidents_excel():
             ws.cell(row=row_idx, column=16, value=accident.get('responsible_company2_no', ''))
             
             # 동적 컬럼 데이터 쓰기
-            import json
+            # json already imported globally
             custom_data = {}
             # DictAsAttr 객체 처리를 위해 hasattr 사용
             if hasattr(accident, 'custom_data') and accident.custom_data:
                 try:
-                    custom_data = json.loads(accident.custom_data)
+                    custom_data = pyjson.loads(accident.custom_data)
                 except:
                     custom_data = {}
             
@@ -4713,7 +4305,7 @@ def export_accidents_excel():
         conn.close()
         
         # 파일명 생성
-        filename = f"accident_list_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        filename = f"accident_list_{get_korean_time().strftime('%Y%m%d_%H%M%S')}.xlsx"
         
         # 다운로드 응답
         return send_file(
@@ -4734,7 +4326,7 @@ def export_accidents_excel():
 def import_accidents():
     try:
         import openpyxl
-        import json
+        # json already imported globally
         from datetime import datetime
         import re
         
@@ -4758,14 +4350,14 @@ def import_accidents():
         ws = wb.active
         
         # DB 연결
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
         # accident_columns 테이블 확인 및 생성
         cursor.execute("""
             SELECT name FROM sqlite_master 
-            WHERE type='table' AND name='accident_columns'
+            WHERE type='table' AND name='accident_column_config'
         """)
         if not cursor.fetchone():
             # 테이블이 없으면 빈 리스트로 처리
@@ -4775,7 +4367,7 @@ def import_accidents():
             # 동적 컬럼 조회
             cursor.execute("""
                 SELECT column_key, column_name, column_type, dropdown_options
-                FROM accident_columns 
+                FROM accident_column_config 
                 WHERE is_active = 1 
                 ORDER BY column_order
             """)
@@ -4886,7 +4478,7 @@ def import_accidents():
                                     continue
                             else:
                                 # 파싱 실패시 현재 날짜 사용
-                                dt = datetime.now()
+                                dt = get_korean_time()
                         else:
                             dt = datetime.now()
                         
@@ -4924,7 +4516,7 @@ def import_accidents():
                         data['accident_date'] = date_str
                     else:
                         # 날짜가 없으면 오늘 날짜로 설정
-                        data['accident_date'] = datetime.now().strftime('%Y-%m-%d')
+                        data['accident_date'] = get_korean_time().strftime('%Y-%m-%d')
                 
                 logging.info(f"매핑된 데이터: {data}")
                 logging.info(f"동적 컬럼 데이터: {custom_data}")
@@ -4945,8 +4537,8 @@ def import_accidents():
                     values = [
                         data['accident_number'],
                         data.get('accident_name', ''),
-                        data.get('accident_date', datetime.now().strftime('%Y-%m-%d')),
-                        datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        data.get('accident_date', get_korean_time().strftime('%Y-%m-%d')),
+                        get_korean_time().strftime('%Y-%m-%d %H:%M:%S')
                     ]
                     
                     logging.info(f"실행할 SQL: {insert_sql}")
@@ -5005,7 +4597,7 @@ def export_partners_to_excel():
         
         # 협력사 데이터 조회 (partner_standards 함수와 동일한 로직)
         try:
-            conn = sqlite3.connect(DB_PATH)
+            conn = get_db_connection()
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
@@ -5128,7 +4720,7 @@ def export_partners_to_excel():
             conn.close()
             
             # 파일명 생성
-            filename = f"partners_list_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            filename = f"partners_list_{get_korean_time().strftime('%Y%m%d_%H%M%S')}.xlsx"
             
             # 다운로드 응답
             return send_file(
@@ -5187,7 +4779,7 @@ def export_partners_to_excel():
             wb.save(output)
             output.seek(0)
             
-            filename = f"partners_list_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            filename = f"partners_list_{get_korean_time().strftime('%Y%m%d_%H%M%S')}.xlsx"
             
             return send_file(
                 output,
@@ -5213,7 +4805,7 @@ def delete_partners():
             return jsonify({"success": False, "message": "삭제할 협력사가 선택되지 않았습니다."}), 400
         
         # DB 연결
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         # Soft delete (is_deleted = 1로 설정)
@@ -5284,13 +4876,14 @@ def create_partner_change_request():
                 return jsonify({"success": False, "message": f"{field} 필드가 필요합니다."}), 400
         
         # DB 연결 및 테이블 생성
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         # 변경요청 테이블 생성 (없을 경우)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS partner_change_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_number TEXT UNIQUE,
                 requester_name TEXT NOT NULL,
                 requester_department TEXT NOT NULL,
                 company_name TEXT NOT NULL,
@@ -5301,17 +4894,51 @@ def create_partner_change_request():
                 change_reason TEXT NOT NULL,
                 status TEXT DEFAULT 'pending',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                custom_data TEXT,
+                is_deleted INTEGER DEFAULT 0
             )
         """)
         
-        # 변경요청 데이터 삽입
+        # 기존 테이블에 request_number 컬럼이 없으면 추가
+        cursor.execute("PRAGMA table_info(partner_change_requests)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if 'request_number' not in columns:
+            cursor.execute("ALTER TABLE partner_change_requests ADD COLUMN request_number TEXT UNIQUE")
+            logging.info("request_number 컬럼 추가됨")
+        if 'custom_data' not in columns:
+            cursor.execute("ALTER TABLE partner_change_requests ADD COLUMN custom_data TEXT")
+            logging.info("custom_data 컬럼 추가됨")
+        if 'is_deleted' not in columns:
+            cursor.execute("ALTER TABLE partner_change_requests ADD COLUMN is_deleted INTEGER DEFAULT 0")
+            logging.info("is_deleted 컬럼 추가됨")
+        
+        # request_number 생성 (CR-YYYYMM-SEQ 형식)
+        current_month = get_korean_time().strftime('%Y%m')
+        
+        # 이번 달 최대 시퀀스 번호 조회
+        cursor.execute("""
+            SELECT MAX(CAST(SUBSTR(request_number, -2) AS INTEGER)) as max_seq
+            FROM partner_change_requests
+            WHERE request_number LIKE ?
+        """, (f'CR-{current_month}-%',))
+        
+        result = cursor.fetchone()
+        max_seq = result[0] if result[0] else 0
+        new_seq = max_seq + 1
+        request_number = f'CR-{current_month}-{new_seq:02d}'
+        
+        # status 값 결정 (requested로 설정)
+        status = data.get('status', 'requested')
+        
+        # 변경요청 데이터 삽입 (request_number, custom_data, status 포함)
         cursor.execute("""
             INSERT INTO partner_change_requests 
-            (requester_name, requester_department, company_name, business_number, 
-             change_type, current_value, new_value, change_reason)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (request_number, requester_name, requester_department, company_name, business_number, 
+             change_type, current_value, new_value, change_reason, custom_data, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
+            request_number,  # 자동 생성된 request_number
             data['requester_name'],
             data['requester_department'],
             data['company_name'],
@@ -5319,7 +4946,9 @@ def create_partner_change_request():
             data['change_type'],
             data['current_value'],
             data['new_value'],
-            data['change_reason']
+            data['change_reason'],
+            pyjson.dumps(data.get('custom_data', {})),  # custom_data 추가
+            status  # status 추가
         ))
         
         request_id = cursor.lastrowid
@@ -5338,11 +4967,61 @@ def create_partner_change_request():
         return jsonify({"success": False, "message": str(e)}), 500
 
 
+@app.route('/api/change-requests/delete', methods=['POST'])
+def delete_change_requests():
+    """선택한 변경요청들을 소프트 삭제 (공통 서비스 활용)"""
+    try:
+        from board_services import ItemService
+        
+        data = request.json
+        ids = data.get('ids', [])
+        
+        if not ids:
+            return jsonify({"success": False, "message": "삭제할 항목이 없습니다."}), 400
+        
+        # partner_change_requests 테이블에 is_deleted 컬럼 추가 (없으면)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            PRAGMA table_info(partner_change_requests)
+        """)
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if 'is_deleted' not in columns:
+            cursor.execute("""
+                ALTER TABLE partner_change_requests 
+                ADD COLUMN is_deleted INTEGER DEFAULT 0
+            """)
+            conn.commit()
+        
+        # 소프트 삭제 실행
+        placeholders = ','.join('?' * len(ids))
+        cursor.execute(f"""
+            UPDATE partner_change_requests 
+            SET is_deleted = 1 
+            WHERE id IN ({placeholders})
+        """, ids)
+        
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "deleted_count": deleted_count,
+            "message": f"{deleted_count}건이 삭제되었습니다."
+        })
+    except Exception as e:
+        logging.error(f"변경요청 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
 @app.route('/api/partner-change-requests', methods=['GET'])
 def get_partner_change_requests():
     """기준정보 변경요청 목록 조회 API"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         cursor.execute("""
@@ -5377,306 +5056,12 @@ def get_partner_change_requests():
 
 
 # 변경요청 컬럼 관리 API
-@app.route('/api/change-request-columns', methods=['GET'])
-def api_get_change_request_columns():
-    """변경요청 컬럼 설정 목록 조회"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # 테이블이 없으면 생성
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS change_request_column_config (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                column_key VARCHAR(50) UNIQUE NOT NULL,
-                column_name VARCHAR(100) NOT NULL,
-                column_type VARCHAR(20) DEFAULT 'text',
-                column_order INTEGER DEFAULT 0,
-                is_active BOOLEAN DEFAULT 1,
-                dropdown_options TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # 기본 컬럼들이 없으면 초기 데이터 삽입
-        cursor.execute("SELECT COUNT(*) FROM change_request_column_config")
-        if cursor.fetchone()[0] == 0:
-            default_columns = [
-                ('id', '요청번호', 'text', 1, 1, None),
-                ('created_at', '요청일', 'date', 2, 1, None),  # 요청번호 바로 옆으로 이동
-                ('requester_name', '요청자', 'text', 3, 1, None),
-                ('requester_department', '소속부서', 'text', 4, 1, None),
-                ('company_name', '대상협력사', 'text', 5, 1, None),
-                ('business_number', '사업자번호', 'text', 6, 1, None),
-                ('change_type', '변경유형', 'dropdown', 7, 1, '기본정보,업종정보,대표자정보,연락처정보,근로자정보,재무정보,인증정보,기타'),
-                ('current_value', '기존값', 'textarea', 8, 1, None),
-                ('new_value', '변경값', 'textarea', 9, 1, None),
-                ('change_reason', '변경사유', 'textarea', 10, 1, None),
-                ('status', '상태', 'dropdown', 11, 1, '대기,승인,반려,완료')
-            ]
-            
-            for col_key, col_name, col_type, col_order, is_active, dropdown_opts in default_columns:
-                cursor.execute("""
-                    INSERT INTO change_request_column_config 
-                    (column_key, column_name, column_type, column_order, is_active, dropdown_options)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (col_key, col_name, col_type, col_order, is_active, dropdown_opts))
-        
-        # 요청일 컬럼 순서 조정 (요청번호 바로 옆으로)
-        cursor.execute("""
-            UPDATE change_request_column_config 
-            SET column_order = 2 
-            WHERE column_key = 'created_at'
-        """)
-        
-        # 다른 컬럼들 순서 재정렬
-        cursor.execute("""
-            UPDATE change_request_column_config 
-            SET column_order = CASE column_key
-                WHEN 'id' THEN 1
-                WHEN 'created_at' THEN 2
-                WHEN 'requester_name' THEN 3
-                WHEN 'requester_department' THEN 4
-                WHEN 'company_name' THEN 5
-                WHEN 'business_number' THEN 6
-                WHEN 'change_type' THEN 7
-                WHEN 'current_value' THEN 8
-                WHEN 'new_value' THEN 9
-                WHEN 'change_reason' THEN 10
-                WHEN 'status' THEN 11
-                ELSE column_order
-            END
-            WHERE column_key IN ('id', 'created_at', 'requester_name', 'requester_department', 
-                                'company_name', 'business_number', 'change_type', 'current_value', 
-                                'new_value', 'change_reason', 'status')
-        """)
-        
-        # 컬럼 설정 조회
-        cursor.execute("""
-            SELECT id, column_key, column_name, column_type, column_order, is_active, dropdown_options
-            FROM change_request_column_config
-            ORDER BY column_order, id
-        """)
-        
-        columns = []
-        for row in cursor.fetchall():
-            columns.append({
-                'id': row[0],
-                'column_key': row[1],
-                'column_name': row[2],
-                'column_type': row[3],
-                'column_order': row[4],
-                'is_active': bool(row[5]),
-                'dropdown_options': row[6]
-            })
-        
-        conn.commit()
-        conn.close()
-        return jsonify({'success': True, 'columns': columns})
-        
-    except Exception as e:
-        logging.error(f"변경요청 컬럼 조회 오류: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
 
-
-@app.route('/api/change-request-columns/<int:column_id>', methods=['GET'])
-def api_get_change_request_column_detail(column_id):
-    """변경요청 컬럼 상세 정보 조회"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT id, column_key, column_name, column_type, column_order, is_active, dropdown_options
-            FROM change_request_column_config
-            WHERE id = ?
-        """, (column_id,))
-        
-        row = cursor.fetchone()
-        conn.close()
-        
-        if row:
-            column = {
-                'id': row[0],
-                'column_key': row[1],
-                'column_name': row[2],
-                'column_type': row[3],
-                'column_order': row[4],
-                'is_active': bool(row[5]),
-                'dropdown_options': row[6]
-            }
-            return jsonify({'success': True, 'column': column})
-        else:
-            return jsonify({'success': False, 'message': '컬럼을 찾을 수 없습니다.'}), 404
-            
-    except Exception as e:
-        logging.error(f"변경요청 컬럼 상세 조회 오류: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-
-@app.route('/api/change-request-columns', methods=['POST'])
-@require_admin_auth
-def api_create_change_request_column():
-    """변경요청 컬럼 추가"""
-    try:
-        data = request.get_json()
-        
-        if not data.get('column_key') or not data.get('column_name'):
-            return jsonify({'success': False, 'message': '컬럼 키와 컬럼명은 필수 입력 항목입니다.'}), 400
-        
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # 중복 체크
-        cursor.execute("SELECT id FROM change_request_column_config WHERE column_key = ?", (data['column_key'],))
-        if cursor.fetchone():
-            conn.close()
-            return jsonify({'success': False, 'message': '이미 존재하는 컬럼 키입니다.'}), 400
-        
-        cursor.execute("""
-            INSERT INTO change_request_column_config 
-            (column_key, column_name, column_type, column_order, dropdown_options)
-            VALUES (?, ?, ?, ?, ?)
-        """, (
-            data.get('column_key'),
-            data.get('column_name'),
-            data.get('column_type', 'text'),
-            data.get('column_order', 0),
-            data.get('dropdown_options', '')
-        ))
-        
-        column_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        
-        return jsonify({'success': True, 'column_id': column_id, 'message': '컬럼이 추가되었습니다.'})
-        
-    except sqlite3.IntegrityError as e:
-        return jsonify({'success': False, 'message': '컬럼 키가 중복됩니다.'}), 400
-    except Exception as e:
-        logging.error(f"변경요청 컬럼 추가 오류: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-
-@app.route('/api/change-request-columns/<int:column_id>', methods=['PUT'])
-@require_admin_auth
-def api_update_change_request_column(column_id):
-    """변경요청 컬럼 수정"""
-    try:
-        data = request.get_json()
-        
-        if not data.get('column_key') or not data.get('column_name'):
-            return jsonify({'success': False, 'message': '컬럼 키와 컬럼명은 필수 입력 항목입니다.'}), 400
-        
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # 다른 컬럼에서 같은 키 사용하는지 체크
-        cursor.execute("SELECT id FROM change_request_column_config WHERE column_key = ? AND id != ?", (data['column_key'], column_id))
-        if cursor.fetchone():
-            conn.close()
-            return jsonify({'success': False, 'message': '이미 존재하는 컬럼 키입니다.'}), 400
-        
-        cursor.execute("""
-            UPDATE change_request_column_config 
-            SET column_key = ?, column_name = ?, column_type = ?, column_order = ?, 
-                dropdown_options = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        """, (
-            data.get('column_key'),
-            data.get('column_name'),
-            data.get('column_type', 'text'),
-            data.get('column_order', 0),
-            data.get('dropdown_options', ''),
-            column_id
-        ))
-        
-        if cursor.rowcount == 0:
-            conn.close()
-            return jsonify({'success': False, 'message': '컬럼을 찾을 수 없습니다.'}), 404
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({'success': True, 'message': '컬럼이 수정되었습니다.'})
-        
-    except sqlite3.IntegrityError as e:
-        return jsonify({'success': False, 'message': '컬럼 키가 중복됩니다.'}), 400
-    except Exception as e:
-        logging.error(f"변경요청 컬럼 수정 오류: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-
-@app.route('/api/change-request-columns/<int:column_id>/toggle', methods=['POST'])
-@require_admin_auth
-def api_toggle_change_request_column(column_id):
-    """변경요청 컬럼 활성화/비활성화 토글"""
-    try:
-        data = request.get_json()
-        is_active = bool(data.get('is_active', False))
-        
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            UPDATE change_request_column_config 
-            SET is_active = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        """, (is_active, column_id))
-        
-        if cursor.rowcount == 0:
-            conn.close()
-            return jsonify({'success': False, 'message': '컬럼을 찾을 수 없습니다.'}), 404
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({'success': True, 'message': f'컬럼이 {"활성화" if is_active else "비활성화"}되었습니다.'})
-        
-    except Exception as e:
-        logging.error(f"변경요청 컬럼 토글 오류: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-
-@app.route('/api/change-request-columns/<int:column_id>', methods=['DELETE'])
-@require_admin_auth
-def api_delete_change_request_column(column_id):
-    """변경요청 컬럼 삭제"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # 기본 컬럼들은 삭제 방지 (필요시)
-        cursor.execute("SELECT column_key FROM change_request_column_config WHERE id = ?", (column_id,))
-        row = cursor.fetchone()
-        if not row:
-            conn.close()
-            return jsonify({'success': False, 'message': '컬럼을 찾을 수 없습니다.'}), 404
-        
-        # 실제 삭제 (소프트 삭제 대신 하드 삭제)
-        cursor.execute("DELETE FROM change_request_column_config WHERE id = ?", (column_id,))
-        
-        if cursor.rowcount == 0:
-            conn.close()
-            return jsonify({'success': False, 'message': '컬럼을 찾을 수 없습니다.'}), 404
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({'success': True, 'message': '컬럼이 삭제되었습니다.'})
-        
-    except Exception as e:
-        logging.error(f"변경요청 컬럼 삭제 오류: {e}")
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-
-# 담당자 마스터 관리 API
 @app.route('/api/person-master', methods=['GET'])
 def api_get_person_master():
     """담당자 마스터 목록 조회"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         cursor.execute("""
@@ -5711,7 +5096,7 @@ def api_get_person_master():
 def api_get_person_detail(person_id):
     """담당자 상세 정보 조회"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         cursor.execute("""
@@ -5752,7 +5137,7 @@ def api_create_person():
         if not data.get('name'):
             return jsonify({'success': False, 'message': '이름은 필수 입력 항목입니다.'}), 400
         
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         cursor.execute("""
@@ -5788,7 +5173,7 @@ def api_update_person(person_id):
         if not data.get('name'):
             return jsonify({'success': False, 'message': '이름은 필수 입력 항목입니다.'}), 400
         
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         cursor.execute("""
@@ -5825,7 +5210,7 @@ def api_update_person(person_id):
 def api_delete_person(person_id):
     """담당자 삭제 (소프트 삭제)"""
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         cursor.execute("""
@@ -5848,7 +5233,338 @@ def api_delete_person(person_id):
         return jsonify({'success': False, 'message': str(e)}), 500
 
 
+# ============================================================================
+# 표준화된 API 엔드포인트 (/api/<board>/...)
+# ============================================================================
+
+@app.route("/api/<board>/columns", methods=["GET", "POST"])
+def board_columns_api(board):
+    """보드별 컬럼 관리 API"""
+    board_type = board.replace('-', '_')
+    
+    try:
+        service = ColumnService(board_type, DB_PATH)
+        
+        if request.method == "GET":
+            columns = service.list()
+            return jsonify(columns)
+        
+        elif request.method == "POST":
+            data = request.json
+            column_id = service.add(data)
+            return jsonify({"success": True, "id": column_id})
+            
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        logging.error(f"Board columns API error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/<board>/columns/<int:column_id>", methods=["PUT", "DELETE"])
+def board_column_api(board, column_id):
+    """보드별 개별 컬럼 관리 API"""
+    board_type = board.replace('-', '_')
+    
+    try:
+        service = ColumnService(board_type, DB_PATH)
+        
+        if request.method == "PUT":
+            data = request.json
+            service.update(column_id, data)
+            return jsonify({"success": True})
+        
+        elif request.method == "DELETE":
+            service.delete(column_id)
+            return jsonify({"success": True})
+            
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        logging.error(f"Board column API error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/<board>/columns/order", methods=["PUT"])
+def board_columns_order_api(board):
+    """보드별 컬럼 순서 변경 API"""
+    board_type = board.replace('-', '_')
+    
+    try:
+        service = ColumnService(board_type, DB_PATH)
+        items = request.json
+        service.reorder(items)
+        return jsonify({"success": True})
+        
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        logging.error(f"Board columns order API error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/<board>/dropdown-codes", methods=["GET", "POST"])
+def board_dropdown_codes_api(board):
+    """보드별 드롭다운 코드 관리 API"""
+    board_type = board.replace('-', '_')
+    column_key = request.args.get('column_key')
+    
+    if not column_key:
+        return jsonify({"error": "column_key is required"}), 400
+    
+    try:
+        service = CodeService(board_type, DB_PATH)
+        
+        if request.method == "GET":
+            codes = service.list(column_key)
+            return jsonify(codes)
+        
+        elif request.method == "POST":
+            codes = request.json
+            service.save(column_key, codes)
+            return jsonify({"success": True})
+            
+    except Exception as e:
+        logging.error(f"Board dropdown codes API error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/<board>/dropdown-codes/<int:code_id>", methods=["DELETE"])
+def board_dropdown_code_api(board, code_id):
+    """보드별 개별 드롭다운 코드 삭제 API"""
+    board_type = board.replace('-', '_')
+    
+    try:
+        service = CodeService(board_type, DB_PATH)
+        service.delete(code_id)
+        return jsonify({"success": True})
+        
+    except Exception as e:
+        logging.error(f"Board dropdown code API error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/<board>/dropdown-codes/history", methods=["GET"])
+def board_dropdown_history(board):
+    """보드별 드롭다운 코드 변경 이력 (컬럼 기준)"""
+    board_type = board.replace('-', '_')
+    column_key = request.args.get('column_key')
+    if not column_key:
+        return jsonify({"error": "column_key is required"}), 400
+    try:
+        conn = get_db_connection()
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        # board_type 컬럼 존재 여부 확인
+        cur.execute("PRAGMA table_info(dropdown_code_audit)")
+        cols = [r[1] for r in cur.fetchall()]
+        if 'board_type' in cols:
+            history = conn.execute(
+                """
+                SELECT * FROM dropdown_code_audit
+                WHERE board_type = ? AND column_key = ?
+                ORDER BY changed_at DESC, id DESC
+                """,
+                (board_type, column_key),
+            ).fetchall()
+        else:
+            history = conn.execute(
+                """
+                SELECT * FROM dropdown_code_audit
+                WHERE column_key = ?
+                ORDER BY changed_at DESC, id DESC
+                """,
+                (column_key,),
+            ).fetchall()
+        conn.close()
+        return jsonify({"history": [dict(h) for h in history]})
+    except Exception as e:
+        logging.error(f"Board dropdown history error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/<board>/dropdown-codes/audit-summary", methods=["GET"])
+def board_dropdown_audit_summary(board):
+    """보드별 드롭다운 감사 요약"""
+    board_type = board.replace('-', '_')
+    try:
+        conn = get_db_connection()
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(dropdown_code_audit)")
+        cols = [r[1] for r in cur.fetchall()]
+        if 'board_type' in cols:
+            recent = conn.execute(
+                """
+                SELECT DATE(changed_at) as date,
+                       COUNT(*) as total_changes,
+                       COUNT(DISTINCT column_key) as columns_changed
+                FROM dropdown_code_audit
+                WHERE board_type = ? AND changed_at >= datetime('now','-7 days')
+                GROUP BY DATE(changed_at)
+                ORDER BY date DESC
+                """,
+                (board_type,),
+            ).fetchall()
+            most = conn.execute(
+                """
+                SELECT column_key, COUNT(*) as change_count, MAX(changed_at) as last_changed
+                FROM dropdown_code_audit
+                WHERE board_type = ?
+                GROUP BY column_key
+                ORDER BY change_count DESC
+                LIMIT 5
+                """,
+                (board_type,),
+            ).fetchall()
+        else:
+            # board_type 미도입 환경: 전역 기준 요약
+            recent = conn.execute(
+                """
+                SELECT DATE(changed_at) as date,
+                       COUNT(*) as total_changes,
+                       COUNT(DISTINCT column_key) as columns_changed
+                FROM dropdown_code_audit
+                WHERE changed_at >= datetime('now','-7 days')
+                GROUP BY DATE(changed_at)
+                ORDER BY date DESC
+                """,
+            ).fetchall()
+            most = conn.execute(
+                """
+                SELECT column_key, COUNT(*) as change_count, MAX(changed_at) as last_changed
+                FROM dropdown_code_audit
+                GROUP BY column_key
+                ORDER BY change_count DESC
+                LIMIT 5
+                """,
+            ).fetchall()
+        conn.close()
+        return jsonify({
+            "recent_changes": [dict(r) for r in recent],
+            "most_changed_columns": [dict(m) for m in most],
+        })
+    except Exception as e:
+        logging.error(f"Board audit summary error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/<board>/items", methods=["GET"])
+def board_items_api(board):
+    """보드별 아이템 목록 API"""
+    board_type = board.replace('-', '_')
+    
+    try:
+        service = ItemService(board_type, DB_PATH)
+        
+        filters = {
+            'company_name': request.args.get('company_name'),
+            'business_number': request.args.get('business_number'),
+            'date_start': request.args.get('date_start'),
+            'date_end': request.args.get('date_end'),
+        }
+        
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+        
+        result = service.list(filters, page, per_page)
+        return jsonify(result)
+        
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        logging.error(f"Board items API error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/<board>/items/<int:item_id>", methods=["GET"])
+def board_item_detail_api(board, item_id):
+    """보드별 아이템 상세 API"""
+    board_type = board.replace('-', '_')
+    
+    try:
+        service = ItemService(board_type, DB_PATH)
+        item = service.detail(item_id)
+        
+        if item:
+            return jsonify(item)
+        else:
+            return jsonify({"error": "Item not found"}), 404
+            
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        logging.error(f"Board item detail API error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/<board>/items/register", methods=["POST"])
+def board_item_register_api(board):
+    """보드별 아이템 등록 API"""
+    board_type = board.replace('-', '_')
+    
+    try:
+        service = ItemService(board_type, DB_PATH)
+        data = request.json
+        result = service.register(data)
+        return jsonify({"success": True, **result})
+        
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        logging.error(f"Board item register API error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/<board>/items/update/<int:item_id>", methods=["POST"])
+def board_item_update_api(board, item_id):
+    """보드별 아이템 수정 API"""
+    board_type = board.replace('-', '_')
+    
+    try:
+        service = ItemService(board_type, DB_PATH)
+        data = request.json
+        service.update(item_id, data)
+        return jsonify({"success": True})
+        
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        logging.error(f"Board item update API error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/<board>/items/delete", methods=["POST"])
+def board_items_delete_api(board):
+    """보드별 아이템 삭제 API"""
+    board_type = board.replace('-', '_')
+    
+    try:
+        service = ItemService(board_type, DB_PATH)
+        item_ids = request.json.get('ids', [])
+        hard_delete = request.json.get('hard_delete', False)
+        service.delete(item_ids, hard_delete)
+        return jsonify({"success": True})
+        
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+    except Exception as e:
+        logging.error(f"Board items delete API error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     print("Flask 앱 시작 중...", flush=True)
+    
+    # JSON 컬럼 설정 동기화 (조건부 - GPT 제안대로 단순화)
+    if db_config.config.getboolean('COLUMNS', 'SYNC_ON_STARTUP', fallback=False):
+        try:
+            print("JSON 컬럼 설정 동기화 시작... (config: SYNC_ON_STARTUP=true)", flush=True)
+            sync_service = ColumnSyncService(DB_PATH, 'columns')
+            sync_results = sync_service.sync_all_boards()
+            
+            for board, count in sync_results.items():
+                if count >= 0:
+                    print(f"  - {board}: {count}개 컬럼 동기화 완료", flush=True)
+                else:
+                    print(f"  - {board}: 동기화 실패", flush=True)
+                    
+            print("JSON 컬럼 설정 동기화 완료!", flush=True)
+        except Exception as e:
+            print(f"컬럼 동기화 중 오류 발생: {e}", flush=True)
+            # 동기화 실패해도 앱은 실행되도록 함
+    else:
+        print("JSON 동기화 건너뜀 (config: SYNC_ON_STARTUP=false)", flush=True)
+        print("DB의 컬럼 설정을 그대로 사용합니다.", flush=True)
+    
     print(f"partner-accident 라우트 등록됨: {'/partner-accident' in [rule.rule for rule in app.url_map.iter_rules()]}", flush=True)
     app.run(host="0.0.0.0", port=5000, debug=True)

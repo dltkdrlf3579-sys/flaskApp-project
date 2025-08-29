@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 {% block title %}기준정보 변경요청{% endblock %}
+
+{% from 'includes/table_controls.html' import render_table_controls %}
+{% from 'includes/search_controls.html' import render_search_section, render_search_buttons %}
+
 {% block content %}
 <style>
 /* 전체 페이지 레이아웃 */
@@ -47,15 +51,6 @@
     font-size: 13px;
 }
 
-.btn-excel-download {
-    background: white;
-    color: #333;
-    border: 1px solid #d1d5db;
-}
-.btn-excel-download:hover {
-    background: #f3f4f6;
-    color: #333;
-}
 
 /* 검색 영역 */
 .search-section {
@@ -135,30 +130,7 @@
     justify-content: flex-end;
     gap: 8px;
 }
-.btn-reset, .btn-search {
-    padding: 8px 16px;
-    border-radius: 4px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    border: none;
-    transition: all 0.2s;
-    white-space: nowrap;
-}
-.btn-reset {
-    background: #6b7280;
-    color: white;
-}
-.btn-reset:hover {
-    background: #4b5563;
-}
-.btn-search {
-    background: #2f5fd3;
-    color: white;
-}
-.btn-search:hover {
-    background: #1d4ed8;
-}
+/* btn-reset, btn-search styles are in common component */
 
 /* 테이블 영역 */
 .table-section {
@@ -167,19 +139,7 @@
     overflow: hidden;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
-.table-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 20px;
-    background: #f8f9fa;
-    border-bottom: 1px solid #e5e7eb;
-}
-.total-count {
-    font-weight: 600;
-    color: #333;
-    font-size: 14px;
-}
+/* table-header styles are in common component */
 .header-actions {
     display: flex;
     align-items: center;
@@ -350,38 +310,12 @@
 
 <!-- 검색 버튼을 검색 영역 밖으로 이동 (사고 페이지와 동일) -->
 <div class="search-buttons-section">
-    <div class="search-buttons">
-        <button type="button" onclick="resetForm()" class="btn-reset">초기화</button>
-        <button type="button" onclick="document.querySelector('.search-form').submit()" class="btn-search">검색</button>
-    </div>
+    {{ render_search_buttons() }}
 </div>
 
 <!-- 액션 버튼과 테이블 헤더 통합 -->
 <div class="table-section">
-    <div class="table-header">
-        <div class="left-controls">
-            <span class="total-count">총 {{ total_count }}건</span>
-            <div class="per-page-selector">
-                <select onchange="changePerPage(this.value)">
-                    <option value="10" {% if request.args.get('per_page', '10') == '10' %}selected{% endif %}>10개씩</option>
-                    <option value="25" {% if request.args.get('per_page', '10') == '25' %}selected{% endif %}>25개씩</option>
-                    <option value="50" {% if request.args.get('per_page', '10') == '50' %}selected{% endif %}>50개씩</option>
-                </select>
-            </div>
-        </div>
-        <div class="action-buttons">
-            <button class="btn btn-sm btn-delete" onclick="deleteSelected()" style="display:none; background-color: #dc3545; color: white;">
-                삭제
-            </button>
-            <button class="btn btn-sm btn-excel-download" onclick="exportToExcel()">
-                <img src="/static/icons/excel-icon.png" style="vertical-align: middle; margin-right: 4px;" width="16" height="16">
-                엑셀 다운로드
-            </button>
-            <button class="btn btn-sm btn-register" onclick="showRegisterModal()" style="background-color: #28a745; color: white;">
-                등록
-            </button>
-        </div>
-    </div>
+    {{ render_table_controls(total_count, show_excel=True, show_register=True) }}
     <div class="table-wrapper">
         <table class="data-table">
             <thead>
@@ -390,6 +324,13 @@
                     <th class="fixed-col">No</th>
                     <th>요청번호</th>
                     <th>등록일</th>
+                    <th>변경유형</th>
+                    <th>현재값</th>
+                    <th>변경값</th>
+                    <th>변경사유</th>
+                    <th>상태</th>
+                    <th>의뢰인</th>
+                    <th>의뢰인 부서</th>
                 </tr>
             </thead>
             <tbody>
@@ -402,13 +343,30 @@
                         {{ item.no }}
                     </td>
                     <td>
-                        <a href="javascript:void(0)" class="company-link" onclick="openChangeRequestModal('{{ item.id }}')">CR-{{ item.id or '-' }}</a>
+                        <a href="javascript:void(0)" class="company-link" onclick="openChangeRequestModal('{{ item.id }}')">
+                            {% if item.request_number %}
+                                {{ item.request_number }}
+                            {% else %}
+                                CR-{{ item.id or '-' }}
+                            {% endif %}
+                        </a>
                     </td>
                     <td>{{ item.created_at or '-' }}</td>
+                    <td>{{ item.change_type_label or item.change_type or '-' }}</td>
+                    <td>{{ item.current_value or '-' }}</td>
+                    <td>{{ item.new_value or '-' }}</td>
+                    <td>{{ item.change_reason or '-' }}</td>
+                    <td>
+                        <span class="status-badge status-{{ item.status }}">
+                            {{ item.status_label or item.status or '-' }}
+                        </span>
+                    </td>
+                    <td>{{ item.requester_name or '-' }}</td>
+                    <td>{{ item.requester_department or '-' }}</td>
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="4" class="no-data">검색 결과가 없습니다.</td>
+                    <td colspan="11" class="no-data">검색 결과가 없습니다.</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -1261,6 +1219,19 @@ function updateDeleteButton() {
     } else {
         deleteBtn.style.display = 'none';
     }
+}
+
+// 비밀번호 확인 후 선택한 항목 삭제
+function deleteSelectedWithPassword() {
+    const password = prompt('삭제 비밀번호를 입력하세요:');
+    if (password === null) return;
+    
+    if (password !== 'admin123') {
+        alert('비밀번호가 틀렸습니다.');
+        return;
+    }
+    
+    deleteSelected();
 }
 
 // 선택한 항목 삭제

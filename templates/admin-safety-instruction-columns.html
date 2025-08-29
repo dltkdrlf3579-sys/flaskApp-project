@@ -134,33 +134,24 @@
             color: white;
         }
         
-        .preview-section {
-            background: #f8f9fa;
-            border-radius: 8px;
-            padding: 20px;
-            margin-top: 30px;
-        }
-        
-        .preview-title {
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 15px;
-            color: #333;
-        }
-        
-        .preview-form {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        }
         
         .inactive-column {
-            opacity: 0.5;
+            opacity: 0.6;
+            background: #f5f5f5;
+        }
+        
+        .inactive-column .column-name {
+            text-decoration: line-through;
+            color: #999;
         }
         
         .toggle-active {
             cursor: pointer;
+        }
+        
+        .to-delete {
+            background: #ffe8e8 !important;
+            border: 2px dashed #d32f2f;
         }
     </style>
 
@@ -174,7 +165,7 @@
     
     <div class="container">
         <div class="row">
-            <div class="col-lg-8">
+            <div class="col-lg-12">
                 <div class="d-flex justify-content-between align-items-center mb-3">
                     <h5>컬럼 목록</h5>
                     <span class="text-muted">드래그하여 순서 변경 가능</span>
@@ -195,15 +186,6 @@
                     <button class="btn btn-success" onclick="saveAllChanges()">
                         <i class="bi bi-check-circle"></i> 전체 변경사항 저장
                     </button>
-                </div>
-            </div>
-            
-            <div class="col-lg-4">
-                <div class="preview-section">
-                    <div class="preview-title">미리보기</div>
-                    <div class="preview-form" id="previewForm">
-                        <!-- 동적으로 생성됨 -->
-                    </div>
                 </div>
             </div>
         </div>
@@ -437,13 +419,13 @@ let editingId = null;
             fetch('/api/safety-instruction-columns')
                 .then(response => response.json())
                 .then(data => {
-                    // is_active = 1인 컬럼만 필터링 (이미 삭제된 것 제외)
-                    const activeData = data.filter(col => col.is_active === 1 || col.is_active === true);
+                    // 모든 컬럼을 표시 (비활성 포함)
+                    const allData = data;
                     
                     // 원본 저장
-                    columns = activeData;
+                    columns = allData;
                     // 작업용 복사본 생성 (플래그 초기화)
-                    pendingColumns = activeData.map(col => {
+                    pendingColumns = allData.map(col => {
                         // 테이블 정보 복원 (DB에 저장된 경우)
                         const column = {
                             ...col,
@@ -460,9 +442,10 @@ let editingId = null;
                         return column;
                     });
                     
-                    console.log('로드된 활성 컬럼:', pendingColumns.length, '개');
+                    console.log('로드된 전체 컬럼:', pendingColumns.length, '개');
+                    console.log('활성 컬럼:', pendingColumns.filter(c => c.is_active).length, '개');
+                    console.log('비활성 컬럼:', pendingColumns.filter(c => !c.is_active).length, '개');
                     renderColumns();
-                    updatePreview();
                 })
                 .catch(error => {
                     console.error('컬럼 로드 오류:', error);
@@ -478,7 +461,10 @@ let editingId = null;
                 if (column._deleted) return;
                 
                 const card = document.createElement('div');
-                card.className = `column-card d-flex align-items-center ${!column.is_active ? 'inactive-column' : ''}`;
+                // 비활성 컬럼에 투명도 추가
+                const inactiveClass = !column.is_active ? 'inactive-column' : '';
+                const deletedClass = column._toDelete ? 'to-delete' : '';
+                card.className = `column-card d-flex align-items-center ${inactiveClass} ${deletedClass}`;
                 card.dataset.id = column.id;
                 
                 // 상태 배지 결정 (삭제예정은 배지 표시 안함)
@@ -497,6 +483,7 @@ let editingId = null;
                         <div class="column-name">
                             ${column.column_name}
                             ${statusBadge}
+                            ${!column.is_active ? '<span class="badge bg-secondary ms-2">비활성</span>' : ''}
                         </div>
                         <div class="column-meta">
                             <span class="column-type type-${column.column_type}">${getTypeLabel(column.column_type)}</span>
@@ -1028,7 +1015,6 @@ let editingId = null;
             
             forceCloseModal();
             renderColumns();
-            updatePreview();
         }
         
         function forceCloseModal() {
@@ -1089,7 +1075,6 @@ let editingId = null;
             }
             
             renderColumns();
-            updatePreview();
         }
         
         function toggleActive(id, isActive) {
@@ -1099,8 +1084,9 @@ let editingId = null;
                 if (!pendingColumns[index]._isNew) {
                     pendingColumns[index]._modified = true;
                 }
+                // 비활성화는 삭제가 아님을 명확히 함
+                console.log(`컬럼 ${id} ${isActive ? '활성화' : '비활성화'} 처리`);
                 renderColumns();
-                updatePreview();
             }
         }
         
@@ -1246,63 +1232,7 @@ let editingId = null;
         }
         
         function updatePreview() {
-            const preview = document.getElementById('previewForm');
-            
-            // 활성화되고 삭제되지 않은 컬럼들만 필터링
-            const activeColumns = pendingColumns.filter(c => c.is_active && !c._toDelete && !c._deleted);
-            
-            if (activeColumns.length === 0) {
-                preview.innerHTML = '<p class="text-muted text-center">활성화된 컬럼이 없습니다</p>';
-                return;
-            }
-            
-            let html = '<div class="row">';
-            activeColumns.forEach((column, index) => {
-                if (index > 0 && index % 2 === 0) {
-                    html += '</div><div class="row mt-3">';
-                }
-                
-                html += '<div class="col-md-6">';
-                html += `<label class="form-label">${column.column_name}</label>`;
-                
-                switch(column.column_type) {
-                    case 'text':
-                        html += '<input type="text" class="form-control" disabled>';
-                        break;
-                    case 'dropdown':
-                        html += '<select class="form-select" disabled>';
-                        if (column.dropdown_options) {
-                            const options = typeof column.dropdown_options === 'string'
-                                ? JSON.parse(column.dropdown_options)
-                                : column.dropdown_options;
-                            options.forEach(opt => {
-                                html += `<option>${opt}</option>`;
-                            });
-                        }
-                        html += '</select>';
-                        break;
-                    case 'date':
-                        html += '<input type="date" class="form-control" disabled>';
-                        break;
-                    case 'popup_person':
-                        html += '<div class="input-group">';
-                        html += '<input type="text" class="form-control" disabled placeholder="담당자 선택">';
-                        html += '<button class="btn btn-outline-secondary" disabled><i class="bi bi-search"></i></button>';
-                        html += '</div>';
-                        break;
-                    case 'popup_company':
-                        html += '<div class="input-group">';
-                        html += '<input type="text" class="form-control" disabled placeholder="업체 선택">';
-                        html += '<button class="btn btn-outline-secondary" disabled><i class="bi bi-search"></i></button>';
-                        html += '</div>';
-                        break;
-                }
-                
-                html += '</div>';
-            });
-            html += '</div>';
-            
-            preview.innerHTML = html;
+            // 미리보기 기능이 제거되었습니다
         }
         
         // 코드 편집기 관련 함수들
@@ -1350,7 +1280,7 @@ let editingId = null;
             const top = (window.screen.height - height) / 2;
             
             const codeEditorWindow = window.open(
-                `/admin/accident-columns-simplified?column_key=${columnKey}&embedded=true`,
+                `/admin/safety-instruction-columns-simplified?column_key=${columnKey}&embedded=true`,
                 'codeEditor',
                 `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
             );
