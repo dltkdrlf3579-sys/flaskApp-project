@@ -220,17 +220,22 @@ class PartnerDataManager:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS accidents_cache (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                business_number TEXT NOT NULL,
+                accident_number TEXT,
+                accident_name TEXT,
+                accident_time TEXT,
+                workplace TEXT,
+                accident_grade TEXT,
+                major_category TEXT,
+                injury_form TEXT,
+                injury_type TEXT,
                 accident_date TEXT,
-                accident_type TEXT,
-                accident_location TEXT,
-                accident_description TEXT,
-                injury_level TEXT,
-                injured_count INTEGER,
-                cause_analysis TEXT,
-                preventive_measures TEXT,
+                day_of_week TEXT,
                 report_date TEXT,
-                reporter_name TEXT,
+                building TEXT,
+                floor TEXT,
+                location_category TEXT,
+                location_detail TEXT,
+                is_deleted INTEGER DEFAULT 0,
                 synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
