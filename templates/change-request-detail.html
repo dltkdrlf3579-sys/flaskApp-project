@@ -8,7 +8,7 @@
 {% endblock %}
 
 {% block title %}변경요청 상세정보{% endblock %}
-{% block popup_title %}{{ request_data.id }} - 변경요청 상세정보{% endblock %}
+{% block popup_title %}{{ request_data.request_number or request_data.id }} - 변경요청 상세정보{% endblock %}
 {% block content %}
 
 {% if not is_popup %}
@@ -17,7 +17,7 @@
     <div class="breadcrumb">
         <a href="{{ url_for('page_view', url='partner-change-request') }}">기준정보 변경요청</a>
         <span class="separator">></span>
-        <span class="current">CR-{{ request_data.id }}</span>
+        <span class="current">{{ request_data.request_number or request_data.id }}</span>
     </div>
 </div>
 {% endif %}
@@ -36,7 +36,7 @@
                 <div class="info-row">
                     <div class="info-cell">
                         <label>요청번호</label>
-                        <div class="value">CR-{{ request_data.id }}</div>
+                        <div class="value">{{ request_data.request_number or request_data.id }}</div>
                     </div>
                 </div>
             </div>

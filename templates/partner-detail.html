@@ -76,7 +76,7 @@
                     </div>
                     <div class="info-cell">
                         <label>매출액</label>
-                        <div class="value">{{ "{:,}".format(partner.annual_revenue // 100000000) if partner.annual_revenue else '-' }}억원</div>
+                        <div class="value">{{ "{:,}".format(partner.annual_revenue // 100000) if partner.annual_revenue else '-' }}억원</div>
                     </div>
                     <div class="info-cell">
                         <label>거래차수</label>

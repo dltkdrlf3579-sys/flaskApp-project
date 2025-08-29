@@ -8,7 +8,7 @@ gpt/
 
 # Markdown 파일들 제외
 *.md
-
+nul
 # Claude 설정 폴더 제외
 .claude/
 

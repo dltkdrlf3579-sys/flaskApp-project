@@ -1532,13 +1532,21 @@ def change_request_detail(request_id):
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
-    # change_requests 테이블에서 데이터 가져오기 - ID로 직접 조회
+    # 먼저 partner_change_requests 테이블에서 조회 (주 테이블)
     cursor.execute("""
-        SELECT * FROM change_requests 
+        SELECT * FROM partner_change_requests 
         WHERE id = ?
     """, (request_id,))
     
     request_row = cursor.fetchone()
+    
+    # partner_change_requests에 없으면 change_requests 테이블에서 조회 (호환성)
+    if not request_row:
+        cursor.execute("""
+            SELECT * FROM change_requests 
+            WHERE id = ?
+        """, (request_id,))
+        request_row = cursor.fetchone()
     
     if request_row:
         # 실제 DB 데이터 사용
@@ -1576,20 +1584,19 @@ def change_request_detail(request_id):
         dynamic_columns_rows = []
         conn.close()
     
-    # Phase 2: 동적 컬럼 처리
+    # Phase 2: 동적 컬럼 처리 - 코드 테이블 기반으로 옵션 구성(등록 화면과 동일)
     dynamic_columns = []
     for row in dynamic_columns_rows:
         col_dict = dict(row)
-        
-        # dropdown 옵션 처리
-        if col_dict['column_type'] == 'dropdown' and col_dict.get('dropdown_options'):
+        if col_dict.get('column_type') == 'dropdown':
             try:
-                # json already imported globally
-                options_list = pyjson.loads(col_dict['dropdown_options'])
-                col_dict['dropdown_options_mapped'] = [{'code': opt, 'value': opt} for opt in options_list]
-            except:
+                code_options = get_dropdown_options_for_display('change_request', col_dict['column_key'])
+                col_dict['dropdown_options_mapped'] = (
+                    [{"code": opt["code"], "value": opt["value"]} for opt in code_options]
+                    if code_options else []
+                )
+            except Exception:
                 col_dict['dropdown_options_mapped'] = []
-        
         dynamic_columns.append(type('Column', (), col_dict)())
     
     # custom_data를 DB에서 가져온 데이터에서 파싱
@@ -1610,6 +1617,20 @@ def change_request_detail(request_id):
     attachment_service = AttachmentService('change_request', DB_PATH)
     # 실제 request_number 사용 (DB에서 가져온 값)
     actual_request_number = request_data.request_number if hasattr(request_data, 'request_number') and request_data.request_number else f"CR-{request_id}"
+    # custom_data가 비어있다면(초기 등록이 컬럼 단위 저장인 경우) 컬럼 값에서 복원
+    if not custom_data:
+        try:
+            rebuilt = {}
+            for row in dynamic_columns_rows:
+                key = row['column_key'] if isinstance(row, sqlite3.Row) else row.get('column_key')
+                if key and hasattr(request_data, key):
+                    rebuilt[key] = getattr(request_data, key)
+            if rebuilt:
+                custom_data = rebuilt
+                logging.info(f"custom_data 재구성: {len(custom_data)}개 필드")
+        except Exception as e:
+            logging.error(f"custom_data 재구성 실패: {e}")
+
     attachments = attachment_service.list(actual_request_number)
     logging.info(f"변경요청 첨부파일 조회: {actual_request_number} → {len(attachments)}개 로드됨")
     
@@ -1658,29 +1679,15 @@ def update_change_request():
         
         # 상태 값 검증 (수정 시에만 변경 허용)
         if 'status' in custom_data_dict:
-            allowed_statuses = ['requested', 'rejected', 'applied']
+            allowed_statuses = ['requested', 'approved', 'rejected']  # applied -> approved로 수정
             if custom_data_dict['status'] not in allowed_statuses:
                 custom_data_dict['status'] = 'requested'  # 잘못된 값은 기본값으로
-            custom_data = pyjson.dumps(custom_data_dict, ensure_ascii=False)
         
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # change_requests 테이블이 없으면 생성
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS change_requests (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                request_number TEXT UNIQUE,
-                change_content TEXT,
-                detailed_content TEXT,
-                custom_data TEXT,
-                is_deleted INTEGER DEFAULT 0,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # change_request_details 테이블 생성 (상세내용용)
+        # partner_change_requests 테이블 업데이트 (올바른 테이블)
+        # change_request_details 테이블 생성 (상세내용용) - 필요한 경우
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS change_request_details (
                 request_number TEXT PRIMARY KEY,
@@ -1689,18 +1696,8 @@ def update_change_request():
             )
         """)
         
-        # 필요한 컬럼이 없으면 추가
-        cursor.execute("PRAGMA table_info(change_requests)")
-        columns = [col[1] for col in cursor.fetchall()]
-        if 'change_content' not in columns:
-            cursor.execute("ALTER TABLE change_requests ADD COLUMN change_content TEXT")
-        if 'custom_data' not in columns:
-            cursor.execute("ALTER TABLE change_requests ADD COLUMN custom_data TEXT")
-        if 'detailed_content' not in columns:
-            cursor.execute("ALTER TABLE change_requests ADD COLUMN detailed_content TEXT")
-        
         # 기존 변경요청이 있는지 확인 - ID로 확인
-        cursor.execute("SELECT id, request_number FROM change_requests WHERE id = ?", (request_id,))
+        cursor.execute("SELECT id, request_number, status FROM partner_change_requests WHERE id = ?", (request_id,))
         existing = cursor.fetchone()
         
         if existing:
@@ -1708,17 +1705,19 @@ def update_change_request():
             actual_request_number = existing[1] if existing[1] else request_number
             
             # 업데이트 - ID 기준
+            # custom_data에서 status 추출
+            status_value = custom_data_dict.get('status', existing[2])  # 기존 상태 유지
+            
             cursor.execute("""
-                UPDATE change_requests 
-                SET change_content = ?, custom_data = ?, detailed_content = ?, updated_at = CURRENT_TIMESTAMP
+                UPDATE partner_change_requests 
+                SET status = ?, custom_data = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-            """, (change_content, pyjson.dumps(custom_data_dict), detailed_content, request_id))
+            """, (status_value, pyjson.dumps(custom_data_dict), request_id))
+            
+            logging.info(f"partner_change_requests 업데이트: ID={request_id}, status={status_value}")
         else:
-            # 새로 생성
-            cursor.execute("""
-                INSERT INTO change_requests (request_number, change_content, custom_data, detailed_content)
-                VALUES (?, ?, ?, ?)
-            """, (request_number, change_content, pyjson.dumps(custom_data_dict), detailed_content))
+            logging.error(f"변경요청을 찾을 수 없습니다: ID={request_id}")
+            return jsonify({"success": False, "message": "변경요청을 찾을 수 없습니다."}), 404
         
         # 상세내용 업데이트
         cursor.execute("""
@@ -2203,8 +2202,8 @@ def register_change_request():
     """새 변경요청 등록"""
     conn = None
     try:
-        import datetime
         from board_services import AttachmentService
+        from timezone_config import get_korean_time, get_korean_time_str
         
         # FormData로 전송된 데이터 파싱
         data = pyjson.loads(request.form.get('data', '{}'))
@@ -2214,18 +2213,18 @@ def register_change_request():
         logging.info(f"변경요청 등록 요청 받음 - 데이터: {data}")
         logging.info(f"첨부파일 개수: {len(files)}")
         
-        # 변경요청 번호 생성 (CRQYYMMDD00 형식)
-        today = datetime.date.today()
-        date_part = today.strftime('%y%m%d')
-        request_number_prefix = f"CRQ{date_part}"
+        # 변경요청 번호 생성 (CR-YYYYMM-NN 형식으로 통일)
+        today = get_korean_time()
+        year_month = today.strftime('%Y%m')
+        request_number_prefix = f"CR-{year_month}-"
         
         conn = sqlite3.connect(DB_PATH, timeout=30.0)
         conn.execute("PRAGMA journal_mode=WAL")
         cursor = conn.cursor()
         
-        # 오늘 날짜의 마지막 요청번호 찾기
+        # 오늘 날짜의 마지막 요청번호 찾기 - partner_change_requests 테이블에서
         cursor.execute("""
-            SELECT request_number FROM change_requests 
+            SELECT request_number FROM partner_change_requests 
             WHERE request_number LIKE ? 
             ORDER BY request_number DESC 
             LIMIT 1
@@ -2240,42 +2239,72 @@ def register_change_request():
         
         request_number = f"{request_number_prefix}{new_num}"
         
-        # 테이블이 없으면 생성
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS change_requests (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                request_number TEXT UNIQUE NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # 동적 컬럼들을 위한 ALTER TABLE
-        for key, value in data.items():
-            try:
-                cursor.execute(f"ALTER TABLE change_requests ADD COLUMN {key} TEXT")
-            except:
-                pass  # 컬럼이 이미 존재하면 무시
-        
-        # 상태를 강제로 'STATUS_001' (요청)으로 설정
-        data['status'] = 'STATUS_001'
-        data['request_number'] = request_number
-        
-        # 데이터 삽입
-        columns = list(data.keys())
-        values = list(data.values())
-        placeholders = ', '.join(['?' for _ in values])
-        column_names = ', '.join(columns)
-        
-        cursor.execute(f"""
-            INSERT INTO change_requests ({column_names})
-            VALUES ({placeholders})
-        """, values)
-        
-        request_id = cursor.lastrowid
+        # partner_change_requests 테이블에 저장 (메인 테이블)
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS partner_change_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_number TEXT UNIQUE,
+                    requester_name TEXT,
+                    requester_department TEXT,
+                    company_name TEXT,
+                    business_number TEXT,
+                    change_type TEXT,
+                    current_value TEXT,
+                    new_value TEXT,
+                    change_reason TEXT,
+                    status TEXT DEFAULT 'requested',
+                    created_at TIMESTAMP,
+                    updated_at TIMESTAMP,
+                    custom_data TEXT,
+                    is_deleted INTEGER DEFAULT 0
+                )
+            """)
+            
+            # 상태를 강제로 'requested' (요청)으로 설정
+            data['status'] = 'requested'
+            
+            cursor.execute("""
+                INSERT INTO partner_change_requests 
+                (request_number, requester_name, requester_department, company_name, 
+                 business_number, change_reason, status, created_at, updated_at, custom_data,
+                 change_type, current_value, new_value)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                request_number,
+                data.get('requester_name', data.get('req_name', '')),
+                data.get('requester_department', data.get('req_name_dept', '')),
+                data.get('company_name', data.get('compname', '')),
+                data.get('business_number', data.get('compname_bizno', '')),
+                data.get('change_reason', ''),
+                'requested',
+                get_korean_time_str(),
+                get_korean_time_str(),
+                pyjson.dumps(data),
+                data.get('change_type', ''),
+                data.get('current_value', ''),
+                data.get('new_value', '')
+            ))
+            request_id = cursor.lastrowid
+            logging.info(f"partner_change_requests 테이블에 저장 완료: ID={request_id}")
+        except Exception as e:
+            logging.error(f"partner_change_requests 테이블 저장 실패: {e}")
+
+        # 첨부파일 저장: request_number 를 item_id로 사용
+        try:
+            if files:
+                from board_services import AttachmentService as _AS
+                _asvc = _AS('change_request', DB_PATH, conn)
+                for idx, _f in enumerate(files):
+                    _desc = ''
+                    if idx < len(attachment_data) and isinstance(attachment_data[idx], dict):
+                        _desc = attachment_data[idx].get('description', '')
+                    _asvc.add(request_number, _f, {'description': _desc, 'uploaded_by': session.get('user_id', 'user')})
+        except Exception as _e:
+            logging.error(f"첨부파일 저장 실패: {_e}")
         
         # 첨부파일 처리 (AttachmentService 사용)
-        if files or attachment_data:
+        if False and (files or attachment_data):
             attachment_service = AttachmentService(conn)
             attachment_result = attachment_service.save_attachments(
                 board_type='change_request',
@@ -3476,11 +3505,11 @@ def save_change_request():
 @app.route("/change-request-register")
 def change_request_register():
     """변경요청 등록 팝업 페이지"""
-    import datetime
+    from timezone_config import get_korean_time
     
-    # 요청번호 자동 생성 (CMRyymmdd00)
-    today = datetime.date.today()
-    base_number = f"CMR{today.strftime('%y%m%d')}"
+    # 요청번호 자동 생성 (CR-YYYYMM-NN 형식으로 통일)
+    today = get_korean_time()
+    base_number = f"CR-{today.strftime('%Y%m')}-"
     
     conn = None
     try:
@@ -3488,28 +3517,19 @@ def change_request_register():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 테이블이 없으면 생성
+        # 변경요청 캐시 테이블이 없으면 생성 (미니멀 필드)
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS partner_change_requests (
+            CREATE TABLE IF NOT EXISTS change_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 request_number TEXT UNIQUE,
-                requester_name TEXT NOT NULL,
-                requester_department TEXT NOT NULL,
-                company_name TEXT NOT NULL,
-                business_number TEXT NOT NULL,
-                change_type TEXT NOT NULL,
-                current_value TEXT NOT NULL,
-                new_value TEXT NOT NULL,
-                change_reason TEXT NOT NULL,
-                status TEXT DEFAULT 'pending',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         
         cursor.execute("""
-            SELECT MAX(CAST(SUBSTR(request_number, 10, 2) AS INTEGER))
-            FROM partner_change_requests
+            SELECT MAX(CAST(SUBSTR(request_number, -2) AS INTEGER))
+            FROM change_requests
             WHERE request_number LIKE ?
         """, (f"{base_number}%",))
         

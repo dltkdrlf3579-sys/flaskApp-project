@@ -1,14 +1,25 @@
 """
 검색 팝업 공통 서비스
 모든 보드에서 사용하는 검색 팝업 통합 관리
+실시간 외부 DB 연계 지원
 """
 import sqlite3
 import logging
+import configparser
+import os
+import sys
 from typing import List, Dict, Any, Optional
 from db_connection import get_db_connection
+from datetime import datetime, timedelta
+import hashlib
+import json
 
 class SearchPopupService:
-    """검색 팝업 서비스"""
+    """검색 팝업 서비스 - 실시간 외부 DB 연계"""
+    
+    # 캐시 저장소 (메모리 캐시)
+    _cache = {}
+    _cache_ttl = 300  # 5분 캐시 TTL
     
     def __init__(self, db_path: str, board_type: str = None):
         """
@@ -18,11 +29,13 @@ class SearchPopupService:
         """
         self.db_path = db_path
         self.board_type = board_type
+        self.config = self._load_config()
+        self.external_conn = None
         
-        # 기본 검색 타입별 설정
+        # 기본 검색 타입별 설정 (실시간 쿼리 매핑)
         self.search_configs = {
             'company': {
-                'table': 'partners_cache',
+                'query_key': 'PARTNERS_QUERY',  # config.ini의 쿼리 키
                 'search_fields': [
                     {'field': 'company_name', 'label': '협력사명'},
                     {'field': 'business_number', 'label': '사업자번호'}
@@ -33,53 +46,219 @@ class SearchPopupService:
                 'id_field': 'business_number',
                 'title': '협력사 검색',
                 'placeholder': '검색어를 입력하세요',
-                'order_by': 'company_name'
+                'order_by': 'company_name',
+                'use_cache': True  # 캐시 사용 (partners_cache 테이블)
             },
             'person': {
-                'table': 'person_master',
+                'query_key': 'EMPLOYEE_QUERY',  # 임직원 쿼리
                 'search_fields': [
-                    {'field': 'name', 'label': '이름'},
-                    {'field': 'employee_id', 'label': 'ID'}
+                    {'field': 'employee_name', 'label': '이름'},
+                    {'field': 'employee_id', 'label': 'ID'},
+                    {'field': 'department_name', 'label': '부서'}
                 ],
-                'default_search_field': 'name',
-                'display_fields': ['name', 'employee_id', 'department'],
-                'display_labels': {'name': '이름', 'employee_id': 'ID', 'department': '부서'},
+                'default_search_field': 'employee_name',
+                'display_fields': ['employee_name', 'employee_id', 'department_name', 'position'],
+                'display_labels': {'employee_name': '이름', 'employee_id': 'ID', 'department_name': '부서', 'position': '직급'},
                 'id_field': 'employee_id',
                 'title': '담당자 검색',
                 'placeholder': '검색어를 입력하세요',
-                'order_by': 'name'
+                'order_by': 'employee_name',
+                'use_cache': False  # 실시간 쿼리
             },
             'department': {
-                'table': 'department_master',
+                'query_key': 'DEPARTMENT_QUERY',  # 부서 쿼리
                 'search_fields': [
-                    {'field': 'department_name', 'label': '부서명'},
-                    {'field': 'department_code', 'label': '부서코드'}
+                    {'field': 'dept_name', 'label': '부서명'},
+                    {'field': 'dept_code', 'label': '부서코드'}
                 ],
-                'default_search_field': 'department_name',
-                'display_fields': ['department_name', 'department_code', 'parent_department'],
-                'id_field': 'department_code',
+                'default_search_field': 'dept_name',
+                'display_fields': ['dept_name', 'dept_code', 'parent_dept_code'],
+                'display_labels': {'dept_name': '부서명', 'dept_code': '부서코드', 'parent_dept_code': '상위부서'},
+                'id_field': 'dept_code',
                 'title': '부서 검색',
                 'placeholder': '검색어를 입력하세요',
-                'order_by': 'department_name'
+                'order_by': 'dept_name',
+                'use_cache': False  # 실시간 쿼리
             },
             'building': {
-                'table': 'building_master',
+                'query_key': 'BUILDING_QUERY',  # 건물 쿼리
                 'search_fields': [
                     {'field': 'building_name', 'label': '건물명'},
                     {'field': 'building_code', 'label': '건물코드'}
                 ],
                 'default_search_field': 'building_name',
-                'display_fields': ['building_name', 'building_code', 'location'],
+                'display_fields': ['building_name', 'building_code', 'building_address'],
+                'display_labels': {'building_name': '건물명', 'building_code': '건물코드', 'building_address': '주소'},
                 'id_field': 'building_code',
                 'title': '건물 검색',
                 'placeholder': '검색어를 입력하세요',
-                'order_by': 'building_name'
+                'order_by': 'building_name',
+                'use_cache': False  # 실시간 쿼리
+            },
+            'contractor': {
+                'query_key': 'CONTRACTOR_QUERY',  # 협력사 근로자 쿼리
+                'search_fields': [
+                    {'field': 'worker_name', 'label': '근로자명'},
+                    {'field': 'worker_id', 'label': '근로자ID'},
+                    {'field': 'company_name', 'label': '소속회사'}
+                ],
+                'default_search_field': 'worker_name',
+                'display_fields': ['worker_name', 'worker_id', 'company_name', 'business_number'],
+                'display_labels': {'worker_name': '근로자명', 'worker_id': '근로자ID', 'company_name': '소속회사', 'business_number': '사업자번호'},
+                'id_field': 'worker_id',
+                'title': '협력사 근로자 검색',
+                'placeholder': '검색어를 입력하세요',
+                'order_by': 'worker_name',
+                'use_cache': False  # 실시간 쿼리
             }
         }
         
         # 보드 타입이 있으면 동적 컬럼 로드
         if board_type:
             self._load_dynamic_columns()
+    
+    def _load_config(self):
+        """config.ini 파일 로드"""
+        config = configparser.ConfigParser()
+        config_path = 'config.ini'
+        
+        if os.path.exists(config_path):
+            config.read(config_path, encoding='utf-8')
+        
+        return config
+    
+    def _get_cache_key(self, search_type: str, query: str, search_field: str = None) -> str:
+        """캐시 키 생성"""
+        key_str = f"{search_type}:{query}:{search_field or 'default'}"
+        return hashlib.md5(key_str.encode()).hexdigest()
+    
+    def _is_cache_valid(self, cache_entry: Dict) -> bool:
+        """캐시 유효성 검사"""
+        if not cache_entry:
+            return False
+        
+        cached_time = cache_entry.get('timestamp')
+        if not cached_time:
+            return False
+        
+        # TTL 체크
+        elapsed = (datetime.now() - cached_time).total_seconds()
+        return elapsed < self._cache_ttl
+    
+    def _get_external_connection(self):
+        """외부 DB 연결 가져오기 (연결 풀링)"""
+        try:
+            if self.external_conn:
+                return self.external_conn
+            
+            # 외부 DB 활성화 확인
+            if not self.config.getboolean('DATABASE', 'EXTERNAL_DB_ENABLED', fallback=False):
+                return None
+            
+            # IQADB 모듈 경로 설정
+            module_path = self.config.get('DATABASE', 'IQADB_MODULE_PATH', fallback=None)
+            if module_path and os.path.exists(module_path):
+                if module_path not in sys.path:
+                    sys.path.insert(0, module_path)
+            
+            # IQADB_CONNECT310 임포트
+            from IQADB_CONNECT310 import iqaconn
+            
+            # DB 연결
+            self.external_conn = iqaconn()
+            return self.external_conn
+            
+        except ImportError as e:
+            logging.warning(f"IQADB 모듈을 찾을 수 없습니다: {e}")
+            return None
+        except Exception as e:
+            logging.error(f"외부 DB 연결 실패: {e}")
+            return None
+    
+    def _execute_realtime_query(self, query_key: str, search_condition: str = None, params: List = None) -> List[Dict]:
+        """실시간 외부 DB 쿼리 실행"""
+        results = []
+        
+        try:
+            # 외부 DB 연결
+            conn = self._get_external_connection()
+            if not conn:
+                logging.info("외부 DB 미연결 - 샘플 데이터 사용")
+                return self._get_sample_data(query_key)
+            
+            cursor = conn.cursor()
+            
+            # config.ini에서 쿼리 가져오기
+            if query_key in ['EMPLOYEE_QUERY', 'BUILDING_QUERY', 'DEPARTMENT_QUERY', 'CONTRACTOR_QUERY']:
+                base_query = self.config.get('MASTER_DATA_QUERIES', query_key)
+            else:
+                base_query = self.config.get('SQL_QUERIES', query_key)
+            
+            # 검색 조건 추가
+            if search_condition:
+                # WHERE 1=1이 있으면 AND로 추가
+                if 'WHERE 1=1' in base_query:
+                    query = base_query.replace('WHERE 1=1', f'WHERE 1=1 AND {search_condition}')
+                # WHERE가 있으면 AND로 추가
+                elif 'WHERE' in base_query.upper():
+                    # ORDER BY 전에 추가
+                    if 'ORDER BY' in base_query.upper():
+                        parts = base_query.split('ORDER BY')
+                        query = f"{parts[0]} AND {search_condition} ORDER BY {parts[1]}"
+                    else:
+                        query = f"{base_query} AND {search_condition}"
+                else:
+                    # WHERE 절 추가
+                    if 'ORDER BY' in base_query.upper():
+                        parts = base_query.split('ORDER BY')
+                        query = f"{parts[0]} WHERE {search_condition} ORDER BY {parts[1]}"
+                    else:
+                        query = f"{base_query} WHERE {search_condition}"
+            else:
+                query = base_query
+            
+            # 쿼리 실행
+            if params:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+            
+            # 결과 가져오기
+            columns = [desc[0].lower() for desc in cursor.description]
+            for row in cursor.fetchall():
+                results.append(dict(zip(columns, row)))
+            
+            cursor.close()
+            
+        except Exception as e:
+            logging.error(f"실시간 쿼리 실행 실패 ({query_key}): {e}")
+            return self._get_sample_data(query_key)
+        
+        return results
+    
+    def _get_sample_data(self, query_key: str) -> List[Dict]:
+        """테스트용 샘플 데이터 반환"""
+        sample_data = {
+            'EMPLOYEE_QUERY': [
+                {'employee_id': 'E001', 'employee_name': '김철수', 'department_name': '안전환경팀', 'position': '팀장'},
+                {'employee_id': 'E002', 'employee_name': '이영희', 'department_name': '안전환경팀', 'position': '과장'},
+                {'employee_id': 'E003', 'employee_name': '박민수', 'department_name': '시설관리팀', 'position': '대리'}
+            ],
+            'BUILDING_QUERY': [
+                {'building_code': 'BLD001', 'building_name': '본관', 'building_address': '서울특별시 강남구'},
+                {'building_code': 'BLD002', 'building_name': '연구동', 'building_address': '서울특별시 강남구'}
+            ],
+            'DEPARTMENT_QUERY': [
+                {'dept_code': 'DEPT001', 'dept_name': '안전관리팀', 'parent_dept_code': '안전환경본부'},
+                {'dept_code': 'DEPT002', 'dept_name': '환경관리팀', 'parent_dept_code': '안전환경본부'}
+            ],
+            'CONTRACTOR_QUERY': [
+                {'worker_id': 'W001', 'worker_name': '홍길동', 'company_name': '(주)안전건설', 'business_number': '123-45-67890'},
+                {'worker_id': 'W002', 'worker_name': '김영수', 'company_name': '(주)환경기술', 'business_number': '234-56-78901'}
+            ]
+        }
+        
+        return sample_data.get(query_key, [])
     
     def _load_dynamic_columns(self):
         """보드별 동적 컬럼을 검색 설정에 추가"""
@@ -162,26 +341,33 @@ class SearchPopupService:
         results = []
         
         try:
-            conn = get_db_connection(self.db_path, row_factory=True)
-            cursor = conn.cursor()
+            # 캐시 확인 (person, department, building, contractor는 메모리 캐시 사용)
+            if search_type != 'company' and query:
+                cache_key = self._get_cache_key(search_type, query, search_field)
+                cache_entry = self._cache.get(cache_key)
+                
+                if self._is_cache_valid(cache_entry):
+                    logging.info(f"캐시 히트: {search_type} - {query}")
+                    return cache_entry['data']
             
-            # 테이블이 존재하는지 확인
-            cursor.execute("""
-                SELECT COUNT(*) FROM sqlite_master 
-                WHERE type='table' AND name=?
-            """, (config['table'],))
-            
-            if cursor.fetchone()[0] == 0:
-                # 테이블이 없으면 생성
-                self._create_default_table(cursor, search_type, config)
-                conn.commit()
+            # 검색어가 없으면 빈 결과 반환
+            if not query:
+                return {
+                    'results': [],
+                    'config': config,
+                    'total': 0,
+                    'message': '검색어를 입력해주세요.'
+                }
             
             # 검색 필드 결정
             if not search_field:
                 search_field = config.get('default_search_field')
             
-            # 검색 쿼리 구성
-            if query:
+            # 협력사는 기존 캐시 테이블 사용
+            if search_type == 'company' and config.get('use_cache'):
+                conn = get_db_connection(self.db_path, row_factory=True)
+                cursor = conn.cursor()
+                
                 # 특정 필드로 검색
                 if search_field:
                     # 선택된 필드가 동적 컬럼인지 확인
@@ -194,17 +380,17 @@ class SearchPopupService:
                     if is_dynamic:
                         # 동적 컬럼(JSON) 검색
                         sql = f"""
-                            SELECT * FROM {config['table']}
+                            SELECT * FROM partners_cache
                             WHERE json_extract(custom_data, '$.{search_field}') LIKE ?
-                            ORDER BY {config.get('order_by', 'id')}
+                            ORDER BY {config.get('order_by', 'company_name')}
                             LIMIT ?
                         """
                     else:
                         # 일반 컬럼 검색
                         sql = f"""
-                            SELECT * FROM {config['table']}
+                            SELECT * FROM partners_cache
                             WHERE {search_field} LIKE ?
-                            ORDER BY {config.get('order_by', 'id')}
+                            ORDER BY {config.get('order_by', 'company_name')}
                             LIMIT ?
                         """
                     params = [f"%{query}%", limit]
@@ -232,26 +418,66 @@ class SearchPopupService:
                     where_sql = " OR ".join(where_clauses)
                     
                     sql = f"""
-                        SELECT * FROM {config['table']}
+                        SELECT * FROM partners_cache
                         WHERE {where_sql}
-                        ORDER BY {config.get('order_by', 'id')}
+                        ORDER BY {config.get('order_by', 'company_name')}
                         LIMIT ?
                     """
                     params.append(limit)
+                
+                cursor.execute(sql, params)
+                rows = cursor.fetchall()
+                results = [dict(row) for row in rows]
+                conn.close()
             else:
-                # 검색어가 없으면 빈 결과 반환 (성능상 이유로 전체 데이터 반환 방지)
-                return {
-                    'results': [],
-                    'config': config,
-                    'total': 0,
-                    'message': '검색어를 입력해주세요.'
-                }
-            
-            cursor.execute(sql, params)
-            rows = cursor.fetchall()
-            
-            results = [dict(row) for row in rows]
-            conn.close()
+                # 실시간 쿼리 실행 (person, department, building, contractor)
+                query_key = config.get('query_key')
+                if not query_key:
+                    raise ValueError(f"query_key not found for {search_type}")
+                
+                # 검색 조건 구성
+                search_conditions = []
+                params = []
+                
+                if search_field:
+                    # 특정 필드 검색
+                    search_conditions.append(f"{search_field} LIKE ?")
+                    params.append(f"%{query}%")
+                else:
+                    # 모든 검색 필드에서 검색
+                    field_conditions = []
+                    for field_info in config['search_fields']:
+                        if isinstance(field_info, dict):
+                            field = field_info['field']
+                        else:
+                            field = field_info
+                        field_conditions.append(f"{field} LIKE ?")
+                        params.append(f"%{query}%")
+                    
+                    if field_conditions:
+                        search_conditions.append(f"({' OR '.join(field_conditions)})")
+                
+                # LIMIT 추가
+                search_condition = ' AND '.join(search_conditions) if search_conditions else '1=1'
+                
+                # 실시간 쿼리 실행
+                all_results = self._execute_realtime_query(query_key, search_condition, params)
+                
+                # LIMIT 적용
+                results = all_results[:limit]
+                
+                # 캐시 저장 (company 제외)
+                if search_type != 'company':
+                    cache_key = self._get_cache_key(search_type, query, search_field)
+                    cache_data = {
+                        'results': results,
+                        'config': config,
+                        'total': len(results)
+                    }
+                    self._cache[cache_key] = {
+                        'data': cache_data,
+                        'timestamp': datetime.now()
+                    }
             
         except Exception as e:
             logging.error(f"Search error for {search_type}: {e}")
@@ -267,66 +493,20 @@ class SearchPopupService:
             'total': len(results)
         }
     
-    def _create_default_table(self, cursor, search_type: str, config: Dict[str, Any]):
-        """
-        기본 테이블 생성 (없는 경우)
+    def cleanup_cache(self):
+        """만료된 캐시 정리"""
+        now = datetime.now()
+        expired_keys = []
         
-        Args:
-            cursor: DB 커서
-            search_type: 검색 타입
-            config: 검색 설정
-        """
-        if search_type == 'company':
-            # partners_cache 테이블은 이미 존재하므로 생성 불필요
-            pass
-            
-        elif search_type == 'person':
-            # person_master 테이블은 이미 존재하므로 생성 불필요
-            pass
-            
-        elif search_type == 'department':
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS department_master (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    department_code TEXT UNIQUE NOT NULL,
-                    department_name TEXT NOT NULL,
-                    parent_department TEXT,
-                    manager TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # 샘플 데이터 추가
-            cursor.execute("""
-                INSERT OR IGNORE INTO department_master 
-                (department_code, department_name, parent_department) 
-                VALUES 
-                ('DEPT001', '안전관리팀', '안전환경본부'),
-                ('DEPT002', '환경관리팀', '안전환경본부'),
-                ('DEPT003', '품질관리팀', '품질본부')
-            """)
-            
-        elif search_type == 'building':
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS building_master (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    building_code TEXT UNIQUE NOT NULL,
-                    building_name TEXT NOT NULL,
-                    location TEXT,
-                    floors INTEGER,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # 샘플 데이터 추가
-            cursor.execute("""
-                INSERT OR IGNORE INTO building_master 
-                (building_code, building_name, location) 
-                VALUES 
-                ('BLD001', '본관', '서울특별시 강남구'),
-                ('BLD002', '연구동', '서울특별시 강남구'),
-                ('BLD003', '생산동', '경기도 화성시')
-            """)
+        for key, entry in self._cache.items():
+            if not self._is_cache_valid(entry):
+                expired_keys.append(key)
+        
+        for key in expired_keys:
+            del self._cache[key]
+        
+        if expired_keys:
+            logging.info(f"캐시 정리 완료: {len(expired_keys)}개 항목 삭제")
     
     def get_item(self, search_type: str, item_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -345,21 +525,40 @@ class SearchPopupService:
         config = self.search_configs[search_type]
         
         try:
-            conn = get_db_connection(self.db_path, row_factory=True)
-            cursor = conn.cursor()
-            
-            cursor.execute(f"""
-                SELECT * FROM {config['table']}
-                WHERE {config['id_field']} = ?
-            """, (item_id,))
-            
-            row = cursor.fetchone()
-            conn.close()
-            
-            if row:
-                return dict(row)
+            # 협력사는 캐시 테이블에서 조회
+            if search_type == 'company' and config.get('use_cache'):
+                conn = get_db_connection(self.db_path, row_factory=True)
+                cursor = conn.cursor()
+                
+                cursor.execute(f"""
+                    SELECT * FROM partners_cache
+                    WHERE {config['id_field']} = ?
+                """, (item_id,))
+                
+                row = cursor.fetchone()
+                conn.close()
+                
+                if row:
+                    return dict(row)
+            else:
+                # 실시간 쿼리로 특정 항목 조회
+                query_key = config.get('query_key')
+                if query_key:
+                    search_condition = f"{config['id_field']} = ?"
+                    results = self._execute_realtime_query(query_key, search_condition, [item_id])
+                    
+                    if results:
+                        return results[0]
             
         except Exception as e:
             logging.error(f"Get item error for {search_type}: {e}")
         
         return None
+    
+    def __del__(self):
+        """소멸자 - 외부 DB 연결 종료"""
+        if self.external_conn:
+            try:
+                self.external_conn.close()
+            except:
+                pass

@@ -342,7 +342,7 @@
 
 <!-- 액션 버튼과 테이블 헤더 통합 -->
 <div class="table-section">
-    {{ render_table_controls(total_count, show_excel=True, show_register=False) }}
+    {{ render_table_controls(total_count, show_excel=False, show_register=False) }}
     <div class="table-wrapper">
         <table class="data-table">
             <thead>
@@ -371,7 +371,7 @@
                                 {% elif column.key == 'hazard_work_flag' %}
                                     {{ 'O' if partner[column.key] == 'O' else 'X' }}
                                 {% elif column.key == 'annual_revenue' %}
-                                    {{ "{:,}".format(partner[column.key] // 100000000) if partner[column.key] else '-' }}억원
+                                    {{ "{:,}".format(partner[column.key] // 100000) if partner[column.key] else '-' }}억원
                                 {% elif column.key == 'permanent_workers' %}
                                     {{ partner[column.key] if partner[column.key] else '-' }}명
                                 {% elif column.key == 'average_age' %}

@@ -76,9 +76,9 @@
                             {% if col.column_key == 'status' %}
                                 {# 상태 컬럼은 "요청"으로 고정하고 readonly 처리 #}
                                 <select class="dynamic-input" data-column-key="{{ col.column_key }}" disabled style="background-color: #f5f5f5;">
-                                    <option value="STATUS_001" selected>요청</option>
+                                    <option value="requested" selected>요청</option>
                                 </select>
-                                <input type="hidden" class="dynamic-input-hidden" data-column-key="{{ col.column_key }}" value="STATUS_001">
+                                <input type="hidden" class="dynamic-input-hidden" data-column-key="{{ col.column_key }}" value="requested">
                             {% else %}
                                 <select class="dynamic-input" data-column-key="{{ col.column_key }}">
                                     <option value="">선택하세요</option>
@@ -723,8 +723,8 @@ function saveChangeRequest() {
     const changeReasonElement = document.getElementById('change-reason-detail');
     const changeReasonText = changeReasonElement ? changeReasonElement.innerText.trim() : '';
     
-    // 상태는 항상 'STATUS_001' (요청)으로 고정 - 등록 페이지이므로
-    dynamicData['status'] = 'STATUS_001';
+    // 상태는 항상 'requested' (요청)으로 고정 - 등록 페이지이므로
+    dynamicData['status'] = 'requested';
     dynamicData['change_reason'] = changeReasonText || '변경사유';
     
     // 첨부파일 설명 수집
