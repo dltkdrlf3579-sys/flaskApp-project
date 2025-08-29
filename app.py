@@ -13,6 +13,9 @@ from board_services import ColumnService, CodeService, ItemService
 from column_service import ColumnConfigService
 from search_popup_service import SearchPopupService
 from column_sync_service import ColumnSyncService
+import schedule
+import threading
+import time
 
 def get_db_connection(timeout=10.0):
     """
@@ -270,6 +273,50 @@ def init_db():
         except Exception as e:
             logging.warning(f"사고 동기화 중 오류: {e} - 더미 데이터 사용")
         
+        # 3. 임직원 데이터 동기화
+        try:
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'EMPLOYEE_QUERY'):
+                logging.info("임직원 데이터 동기화 시작...")
+                if partner_manager.sync_employees_from_external_db():
+                    logging.info("임직원 데이터 동기화 완료")
+                else:
+                    logging.warning("임직원 데이터 동기화 실패")
+        except Exception as e:
+            logging.warning(f"임직원 동기화 중 오류: {e}")
+        
+        # 4. 부서 데이터 동기화
+        try:
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'DEPARTMENT_QUERY'):
+                logging.info("부서 데이터 동기화 시작...")
+                if partner_manager.sync_departments_from_external_db():
+                    logging.info("부서 데이터 동기화 완료")
+                else:
+                    logging.warning("부서 데이터 동기화 실패")
+        except Exception as e:
+            logging.warning(f"부서 동기화 중 오류: {e}")
+        
+        # 5. 건물 데이터 동기화
+        try:
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'BUILDING_QUERY'):
+                logging.info("건물 데이터 동기화 시작...")
+                if partner_manager.sync_buildings_from_external_db():
+                    logging.info("건물 데이터 동기화 완료")
+                else:
+                    logging.warning("건물 데이터 동기화 실패")
+        except Exception as e:
+            logging.warning(f"건물 동기화 중 오류: {e}")
+        
+        # 6. 협력사 근로자 데이터 동기화
+        try:
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'CONTRACTOR_QUERY'):
+                logging.info("협력사 근로자 데이터 동기화 시작...")
+                if partner_manager.sync_contractors_from_external_db():
+                    logging.info("협력사 근로자 데이터 동기화 완료")
+                else:
+                    logging.warning("협력사 근로자 데이터 동기화 실패")
+        except Exception as e:
+            logging.warning(f"협력사 근로자 동기화 중 오류: {e}")
+        
         # 동기화 실패 시 샘플 데이터 사용
         if not sync_success:
             logging.info("일부 동기화 실패 - 샘플 데이터로 대체")
@@ -277,6 +324,109 @@ def init_db():
     else:
         # 외부 DB가 비활성화된 경우 샘플 데이터 생성
         init_sample_data()
+
+def sync_all_master_data():
+    """모든 마스터 데이터 동기화 함수 (스케줄러용)"""
+    logging.info("=" * 50)
+    logging.info(f"스케줄 동기화 시작: {get_korean_time_str()}")
+    logging.info("=" * 50)
+    
+    try:
+        # 외부 DB 활성화 확인
+        external_db_enabled = partner_manager.config.getboolean('DATABASE', 'EXTERNAL_DB_ENABLED', fallback=False)
+        
+        if not external_db_enabled:
+            logging.info("외부 DB가 비활성화되어 있어 동기화를 건너뜁니다.")
+            return
+        
+        # 각 데이터 동기화
+        sync_results = {
+            '협력사': False,
+            '사고': False,
+            '임직원': False,
+            '부서': False,
+            '건물': False,
+            '협력사 근로자': False
+        }
+        
+        # 1. 협력사 데이터 동기화
+        try:
+            logging.info("협력사 데이터 동기화 중...")
+            sync_results['협력사'] = partner_manager.sync_partners_from_external_db()
+        except Exception as e:
+            logging.error(f"협력사 동기화 오류: {e}")
+        
+        # 2. 사고 데이터 동기화
+        try:
+            if partner_manager.config.has_option('SQL_QUERIES', 'ACCIDENTS_QUERY'):
+                logging.info("사고 데이터 동기화 중...")
+                sync_results['사고'] = partner_manager.sync_accidents_from_external_db()
+        except Exception as e:
+            logging.error(f"사고 동기화 오류: {e}")
+        
+        # 3. 임직원 데이터 동기화
+        try:
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'EMPLOYEE_QUERY'):
+                logging.info("임직원 데이터 동기화 중...")
+                sync_results['임직원'] = partner_manager.sync_employees_from_external_db()
+        except Exception as e:
+            logging.error(f"임직원 동기화 오류: {e}")
+        
+        # 4. 부서 데이터 동기화
+        try:
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'DEPARTMENT_QUERY'):
+                logging.info("부서 데이터 동기화 중...")
+                sync_results['부서'] = partner_manager.sync_departments_from_external_db()
+        except Exception as e:
+            logging.error(f"부서 동기화 오류: {e}")
+        
+        # 5. 건물 데이터 동기화
+        try:
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'BUILDING_QUERY'):
+                logging.info("건물 데이터 동기화 중...")
+                sync_results['건물'] = partner_manager.sync_buildings_from_external_db()
+        except Exception as e:
+            logging.error(f"건물 동기화 오류: {e}")
+        
+        # 6. 협력사 근로자 데이터 동기화
+        try:
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'CONTRACTOR_QUERY'):
+                logging.info("협력사 근로자 데이터 동기화 중...")
+                sync_results['협력사 근로자'] = partner_manager.sync_contractors_from_external_db()
+        except Exception as e:
+            logging.error(f"협력사 근로자 동기화 오류: {e}")
+        
+        # 결과 로깅
+        logging.info("=" * 50)
+        logging.info("동기화 결과:")
+        for name, result in sync_results.items():
+            status = "✅ 성공" if result else "❌ 실패"
+            logging.info(f"  {name}: {status}")
+        logging.info("=" * 50)
+        logging.info(f"스케줄 동기화 완료: {get_korean_time_str()}")
+        logging.info("=" * 50)
+        
+    except Exception as e:
+        logging.error(f"스케줄 동기화 중 전체 오류: {e}")
+
+def run_scheduler():
+    """스케줄러 실행 함수"""
+    while True:
+        schedule.run_pending()
+        time.sleep(60)  # 1분마다 스케줄 체크
+
+# 스케줄 설정 (매일 오전 7시)
+schedule.every().day.at("07:00").do(sync_all_master_data)
+
+# 스케줄러를 별도 스레드에서 실행
+scheduler_thread = threading.Thread(target=run_scheduler)
+scheduler_thread.daemon = True  # 메인 프로그램 종료 시 함께 종료
+scheduler_thread.start()
+
+logging.info("=" * 50)
+logging.info("자동 동기화 스케줄러 시작")
+logging.info("매일 오전 7시에 자동으로 데이터를 동기화합니다.")
+logging.info("=" * 50)
 
 def init_sample_data():
     """외부 DB 없을 때 샘플 데이터 생성"""
@@ -690,6 +840,12 @@ def partner_accident():
     query += f" LIMIT {per_page} OFFSET {(page - 1) * per_page}"
     accidents = conn.execute(query, params).fetchall()
     accidents = [dict(row) for row in accidents]
+    
+    # 디버그: 첫 번째 사고 데이터 확인
+    if accidents:
+        print(f"[DEBUG] 첫 번째 사고 데이터 키: {list(accidents[0].keys())[:10]}")
+        print(f"[DEBUG] accident_number: {accidents[0].get('accident_number')}")
+        print(f"[DEBUG] accident_name: {accidents[0].get('accident_name')}")
     
     # 동적 컬럼 설정 가져오기
     dynamic_columns_rows = conn.execute("""

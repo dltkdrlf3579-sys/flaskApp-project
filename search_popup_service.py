@@ -50,23 +50,23 @@ class SearchPopupService:
                 'use_cache': True  # 캐시 사용 (partners_cache 테이블)
             },
             'person': {
-                'query_key': 'EMPLOYEE_QUERY',  # 임직원 쿼리
+                'table': 'employees_cache',  # 로컬 캐시 테이블 사용
                 'search_fields': [
                     {'field': 'employee_name', 'label': '이름'},
                     {'field': 'employee_id', 'label': 'ID'},
                     {'field': 'department_name', 'label': '부서'}
                 ],
                 'default_search_field': 'employee_name',
-                'display_fields': ['employee_name', 'employee_id', 'department_name', 'position'],
-                'display_labels': {'employee_name': '이름', 'employee_id': 'ID', 'department_name': '부서', 'position': '직급'},
+                'display_fields': ['employee_name', 'employee_id', 'department_name'],
+                'display_labels': {'employee_name': '이름', 'employee_id': 'ID', 'department_name': '부서'},
                 'id_field': 'employee_id',
                 'title': '담당자 검색',
                 'placeholder': '검색어를 입력하세요',
                 'order_by': 'employee_name',
-                'use_cache': False  # 실시간 쿼리
+                'use_cache': True  # 로컬 테이블 사용
             },
             'department': {
-                'query_key': 'DEPARTMENT_QUERY',  # 부서 쿼리
+                'table': 'departments_cache',  # 로컬 캐시 테이블 사용
                 'search_fields': [
                     {'field': 'dept_name', 'label': '부서명'},
                     {'field': 'dept_code', 'label': '부서코드'}
@@ -78,38 +78,39 @@ class SearchPopupService:
                 'title': '부서 검색',
                 'placeholder': '검색어를 입력하세요',
                 'order_by': 'dept_name',
-                'use_cache': False  # 실시간 쿼리
+                'use_cache': True  # 로컬 테이블 사용
             },
             'building': {
-                'query_key': 'BUILDING_QUERY',  # 건물 쿼리
+                'table': 'buildings_cache',  # 로컬 캐시 테이블 사용
                 'search_fields': [
                     {'field': 'building_name', 'label': '건물명'},
                     {'field': 'building_code', 'label': '건물코드'}
                 ],
                 'default_search_field': 'building_name',
-                'display_fields': ['building_name', 'building_code', 'building_address'],
-                'display_labels': {'building_name': '건물명', 'building_code': '건물코드', 'building_address': '주소'},
+                'display_fields': ['building_name', 'building_code', 'SITE', 'SITE_TYPE'],
+                'display_labels': {'building_name': '건물명', 'building_code': '건물코드', 'SITE': '사이트', 'SITE_TYPE': '사이트유형'},
                 'id_field': 'building_code',
                 'title': '건물 검색',
                 'placeholder': '검색어를 입력하세요',
                 'order_by': 'building_name',
-                'use_cache': False  # 실시간 쿼리
+                'use_cache': True  # 로컬 테이블 사용
             },
             'contractor': {
-                'query_key': 'CONTRACTOR_QUERY',  # 협력사 근로자 쿼리
+                'table': 'contractors_cache',  # 로컬 캐시 테이블 사용
                 'search_fields': [
                     {'field': 'worker_name', 'label': '근로자명'},
                     {'field': 'worker_id', 'label': '근로자ID'},
-                    {'field': 'company_name', 'label': '소속회사'}
+                    {'field': 'company_name', 'label': '소속회사'},
+                    {'field': 'birth_date', 'label': '생년월일'}
                 ],
                 'default_search_field': 'worker_name',
-                'display_fields': ['worker_name', 'worker_id', 'company_name', 'business_number'],
-                'display_labels': {'worker_name': '근로자명', 'worker_id': '근로자ID', 'company_name': '소속회사', 'business_number': '사업자번호'},
+                'display_fields': ['worker_name', 'worker_id', 'company_name', 'business_number', 'access_status', 'birth_date'],
+                'display_labels': {'worker_name': '근로자명', 'worker_id': '근로자ID', 'company_name': '소속회사', 'business_number': '사업자번호', 'access_status': '출입여부', 'birth_date': '생년월일'},
                 'id_field': 'worker_id',
                 'title': '협력사 근로자 검색',
                 'placeholder': '검색어를 입력하세요',
                 'order_by': 'worker_name',
-                'use_cache': False  # 실시간 쿼리
+                'use_cache': True  # 로컬 테이블 사용
             }
         }
         
@@ -240,21 +241,21 @@ class SearchPopupService:
         """테스트용 샘플 데이터 반환"""
         sample_data = {
             'EMPLOYEE_QUERY': [
-                {'employee_id': 'E001', 'employee_name': '김철수', 'department_name': '안전환경팀', 'position': '팀장'},
-                {'employee_id': 'E002', 'employee_name': '이영희', 'department_name': '안전환경팀', 'position': '과장'},
-                {'employee_id': 'E003', 'employee_name': '박민수', 'department_name': '시설관리팀', 'position': '대리'}
+                {'employee_id': 'E001', 'employee_name': '김철수', 'department_name': '안전환경팀'},
+                {'employee_id': 'E002', 'employee_name': '이영희', 'department_name': '안전환경팀'},
+                {'employee_id': 'E003', 'employee_name': '박민수', 'department_name': '시설관리팀'}
             ],
             'BUILDING_QUERY': [
-                {'building_code': 'BLD001', 'building_name': '본관', 'building_address': '서울특별시 강남구'},
-                {'building_code': 'BLD002', 'building_name': '연구동', 'building_address': '서울특별시 강남구'}
+                {'building_code': 'BLD001', 'building_name': '본관', 'SITE': '서울특별시 강남구', 'SITE_TYPE': '본사'},
+                {'building_code': 'BLD002', 'building_name': '연구동', 'SITE': '서울특별시 강남구', 'SITE_TYPE': '연구소'}
             ],
             'DEPARTMENT_QUERY': [
                 {'dept_code': 'DEPT001', 'dept_name': '안전관리팀', 'parent_dept_code': '안전환경본부'},
                 {'dept_code': 'DEPT002', 'dept_name': '환경관리팀', 'parent_dept_code': '안전환경본부'}
             ],
             'CONTRACTOR_QUERY': [
-                {'worker_id': 'W001', 'worker_name': '홍길동', 'company_name': '(주)안전건설', 'business_number': '123-45-67890'},
-                {'worker_id': 'W002', 'worker_name': '김영수', 'company_name': '(주)환경기술', 'business_number': '234-56-78901'}
+                {'worker_id': 'W001', 'worker_name': '홍길동', 'company_name': '(주)안전건설', 'business_number': '123-45-67890', 'access_status': '허가', 'birth_date': '1980-05-15'},
+                {'worker_id': 'W002', 'worker_name': '김영수', 'company_name': '(주)환경기술', 'business_number': '234-56-78901', 'access_status': '차단', 'birth_date': '1985-08-22'}
             ]
         }
         
@@ -363,10 +364,12 @@ class SearchPopupService:
             if not search_field:
                 search_field = config.get('default_search_field')
             
-            # 협력사는 기존 캐시 테이블 사용
-            if search_type == 'company' and config.get('use_cache'):
+            # 모든 타입이 로컬 캐시 테이블 사용
+            if config.get('use_cache') and config.get('table'):
                 conn = get_db_connection(self.db_path, row_factory=True)
                 cursor = conn.cursor()
+                
+                table_name = config['table']
                 
                 # 특정 필드로 검색
                 if search_field:
@@ -378,19 +381,19 @@ class SearchPopupService:
                             break
                     
                     if is_dynamic:
-                        # 동적 컬럼(JSON) 검색
+                        # 동적 컬럼(JSON) 검색 (partners_cache만 해당)
                         sql = f"""
-                            SELECT * FROM partners_cache
+                            SELECT * FROM {table_name}
                             WHERE json_extract(custom_data, '$.{search_field}') LIKE ?
-                            ORDER BY {config.get('order_by', 'company_name')}
+                            ORDER BY {config.get('order_by', config.get('id_field', 'id'))}
                             LIMIT ?
                         """
                     else:
                         # 일반 컬럼 검색
                         sql = f"""
-                            SELECT * FROM partners_cache
+                            SELECT * FROM {table_name}
                             WHERE {search_field} LIKE ?
-                            ORDER BY {config.get('order_by', 'company_name')}
+                            ORDER BY {config.get('order_by', config.get('id_field', 'id'))}
                             LIMIT ?
                         """
                     params = [f"%{query}%", limit]
@@ -418,9 +421,9 @@ class SearchPopupService:
                     where_sql = " OR ".join(where_clauses)
                     
                     sql = f"""
-                        SELECT * FROM partners_cache
+                        SELECT * FROM {table_name}
                         WHERE {where_sql}
-                        ORDER BY {config.get('order_by', 'company_name')}
+                        ORDER BY {config.get('order_by', config.get('id_field', 'id'))}
                         LIMIT ?
                     """
                     params.append(limit)
@@ -525,13 +528,14 @@ class SearchPopupService:
         config = self.search_configs[search_type]
         
         try:
-            # 협력사는 캐시 테이블에서 조회
-            if search_type == 'company' and config.get('use_cache'):
+            # 모든 타입이 로컬 캐시 테이블에서 조회
+            if config.get('use_cache') and config.get('table'):
                 conn = get_db_connection(self.db_path, row_factory=True)
                 cursor = conn.cursor()
                 
+                table_name = config['table']
                 cursor.execute(f"""
-                    SELECT * FROM partners_cache
+                    SELECT * FROM {table_name}
                     WHERE {config['id_field']} = ?
                 """, (item_id,))
                 
@@ -541,7 +545,7 @@ class SearchPopupService:
                 if row:
                     return dict(row)
             else:
-                # 실시간 쿼리로 특정 항목 조회
+                # 실시간 쿼리로 특정 항목 조회 (현재는 사용 안함)
                 query_key = config.get('query_key')
                 if query_key:
                     search_condition = f"{config['id_field']} = ?"

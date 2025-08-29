@@ -176,18 +176,43 @@ class PartnerDataManager:
             )
         ''')
         
-        # Phase 1: 표준 담당자 마스터 테이블 (팝업 선택용)
+        # 임직원 캐시 테이블 (기존 person_master 대체)
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS person_master (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name VARCHAR(50) NOT NULL,
-                department VARCHAR(100),
-                position VARCHAR(50),
-                company_name VARCHAR(100),
-                phone VARCHAR(20),
-                email VARCHAR(100),
-                is_active BOOLEAN DEFAULT 1,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            CREATE TABLE IF NOT EXISTS employees_cache (
+                employee_id TEXT PRIMARY KEY,
+                employee_name TEXT,
+                department_name TEXT
+            )
+        ''')
+        
+        # 부서 캐시 테이블
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS departments_cache (
+                dept_code TEXT PRIMARY KEY,
+                dept_name TEXT,
+                parent_dept_code TEXT
+            )
+        ''')
+        
+        # 건물 캐시 테이블
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS buildings_cache (
+                building_code TEXT PRIMARY KEY,
+                building_name TEXT,
+                SITE TEXT,
+                SITE_TYPE TEXT
+            )
+        ''')
+        
+        # 협력사 근로자 캐시 테이블
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS contractors_cache (
+                worker_id TEXT PRIMARY KEY,
+                worker_name TEXT,
+                company_name TEXT,
+                business_number TEXT,
+                access_status TEXT,
+                birth_date TEXT
             )
         ''')
         
@@ -225,8 +250,8 @@ class PartnerDataManager:
             CREATE TABLE IF NOT EXISTS building_master (
                 building_code TEXT PRIMARY KEY,
                 building_name TEXT NOT NULL,
-                building_address TEXT,
-                building_type TEXT
+                SITE TEXT,
+                SITE_TYPE TEXT
             )
         ''')
         
@@ -381,6 +406,19 @@ class PartnerDataManager:
             conn = sqlite3.connect(self.local_db_path)
             cursor = conn.cursor()
             
+            # 디버그: DataFrame의 실제 컬럼명 확인
+            print(f"[DEBUG] DataFrame 컬럼명: {list(df.columns)}")
+            if not df.empty:
+                print(f"[DEBUG] 첫 번째 행 전체 데이터:")
+                first_row = df.iloc[0]
+                for col in df.columns:
+                    print(f"  - {col}: {first_row[col]}")
+                print(f"\n[DEBUG] row.get으로 접근 테스트:")
+                row_dict = first_row.to_dict()
+                print(f"  - accident_number: {row_dict.get('accident_number', 'NOT FOUND')}")
+                print(f"  - accident_name: {row_dict.get('accident_name', 'NOT FOUND')}")
+                print(f"  - accident_date: {row_dict.get('accident_date', 'NOT FOUND')}")
+            
             # 기존 사고 캐시 데이터 삭제
             cursor.execute("DELETE FROM accidents_cache")
             
@@ -420,6 +458,211 @@ class PartnerDataManager:
             
         except Exception as e:
             print(f"[ERROR] ❌ 사고 데이터 동기화 실패: {e}")
+            traceback.print_exc()
+            return False
+    
+    def sync_employees_from_external_db(self):
+        """외부 DB에서 임직원 데이터 동기화"""
+        if not IQADB_AVAILABLE:
+            print("[ERROR] IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
+            return False
+        
+        try:
+            # config.ini에서 EMPLOYEE_QUERY 가져오기
+            query = self.config.get('MASTER_DATA_QUERIES', 'EMPLOYEE_QUERY')
+            print(f"[INFO] 실행할 임직원 쿼리: {query[:100]}...")
+            
+            # 외부 DB에서 데이터 조회
+            print("[INFO] IQADB_CONNECT310을 사용하여 임직원 데이터 조회 시작...")
+            df = execute_SQL(query)
+            print(f"[INFO] 임직원 데이터 조회 완료: {len(df)} 건")
+            
+            if df.empty:
+                print("[WARNING] 조회된 임직원 데이터가 없습니다.")
+                return False
+            
+            # SQLite에 저장
+            conn = sqlite3.connect(self.local_db_path)
+            cursor = conn.cursor()
+            
+            # 기존 캐시 데이터 삭제
+            cursor.execute("DELETE FROM employees_cache")
+            
+            # DataFrame을 레코드 배열로 변환하여 SQLite에 삽입
+            for _, row in df.iterrows():
+                cursor.execute('''
+                    INSERT INTO employees_cache (
+                        employee_id, employee_name, department_name
+                    ) VALUES (?, ?, ?)
+                ''', (
+                    row.get('employee_id', ''),
+                    row.get('employee_name', ''),
+                    row.get('department_name', '')
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            print(f"[SUCCESS] ✅ 임직원 데이터 {len(df)}건 동기화 완료")
+            return True
+            
+        except Exception as e:
+            print(f"[ERROR] ❌ 임직원 데이터 동기화 실패: {e}")
+            traceback.print_exc()
+            return False
+    
+    def sync_departments_from_external_db(self):
+        """외부 DB에서 부서 데이터 동기화"""
+        if not IQADB_AVAILABLE:
+            print("[ERROR] IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
+            return False
+        
+        try:
+            # config.ini에서 DEPARTMENT_QUERY 가져오기
+            query = self.config.get('MASTER_DATA_QUERIES', 'DEPARTMENT_QUERY')
+            print(f"[INFO] 실행할 부서 쿼리: {query[:100]}...")
+            
+            # 외부 DB에서 데이터 조회
+            print("[INFO] IQADB_CONNECT310을 사용하여 부서 데이터 조회 시작...")
+            df = execute_SQL(query)
+            print(f"[INFO] 부서 데이터 조회 완료: {len(df)} 건")
+            
+            if df.empty:
+                print("[WARNING] 조회된 부서 데이터가 없습니다.")
+                return False
+            
+            # SQLite에 저장
+            conn = sqlite3.connect(self.local_db_path)
+            cursor = conn.cursor()
+            
+            # 기존 캐시 데이터 삭제
+            cursor.execute("DELETE FROM departments_cache")
+            
+            # DataFrame을 레코드 배열로 변환하여 SQLite에 삽입
+            for _, row in df.iterrows():
+                cursor.execute('''
+                    INSERT INTO departments_cache (
+                        dept_code, dept_name, parent_dept_code
+                    ) VALUES (?, ?, ?)
+                ''', (
+                    row.get('dept_code', ''),
+                    row.get('dept_name', ''),
+                    row.get('parent_dept_code', '')
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            print(f"[SUCCESS] ✅ 부서 데이터 {len(df)}건 동기화 완료")
+            return True
+            
+        except Exception as e:
+            print(f"[ERROR] ❌ 부서 데이터 동기화 실패: {e}")
+            traceback.print_exc()
+            return False
+    
+    def sync_buildings_from_external_db(self):
+        """외부 DB에서 건물 데이터 동기화"""
+        if not IQADB_AVAILABLE:
+            print("[ERROR] IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
+            return False
+        
+        try:
+            # config.ini에서 BUILDING_QUERY 가져오기
+            query = self.config.get('MASTER_DATA_QUERIES', 'BUILDING_QUERY')
+            print(f"[INFO] 실행할 건물 쿼리: {query[:100]}...")
+            
+            # 외부 DB에서 데이터 조회
+            print("[INFO] IQADB_CONNECT310을 사용하여 건물 데이터 조회 시작...")
+            df = execute_SQL(query)
+            print(f"[INFO] 건물 데이터 조회 완료: {len(df)} 건")
+            
+            if df.empty:
+                print("[WARNING] 조회된 건물 데이터가 없습니다.")
+                return False
+            
+            # SQLite에 저장
+            conn = sqlite3.connect(self.local_db_path)
+            cursor = conn.cursor()
+            
+            # 기존 캐시 데이터 삭제
+            cursor.execute("DELETE FROM buildings_cache")
+            
+            # DataFrame을 레코드 배열로 변환하여 SQLite에 삽입
+            for _, row in df.iterrows():
+                cursor.execute('''
+                    INSERT INTO buildings_cache (
+                        building_code, building_name, SITE, SITE_TYPE
+                    ) VALUES (?, ?, ?, ?)
+                ''', (
+                    row.get('building_code', ''),
+                    row.get('building_name', ''),
+                    row.get('site', row.get('SITE', '')),  # 대소문자 모두 처리
+                    row.get('site_type', row.get('SITE_TYPE', ''))  # 대소문자 모두 처리
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            print(f"[SUCCESS] ✅ 건물 데이터 {len(df)}건 동기화 완료")
+            return True
+            
+        except Exception as e:
+            print(f"[ERROR] ❌ 건물 데이터 동기화 실패: {e}")
+            traceback.print_exc()
+            return False
+    
+    def sync_contractors_from_external_db(self):
+        """외부 DB에서 협력사 근로자 데이터 동기화"""
+        if not IQADB_AVAILABLE:
+            print("[ERROR] IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
+            return False
+        
+        try:
+            # config.ini에서 CONTRACTOR_QUERY 가져오기
+            query = self.config.get('MASTER_DATA_QUERIES', 'CONTRACTOR_QUERY')
+            print(f"[INFO] 실행할 협력사 근로자 쿼리: {query[:100]}...")
+            
+            # 외부 DB에서 데이터 조회
+            print("[INFO] IQADB_CONNECT310을 사용하여 협력사 근로자 데이터 조회 시작...")
+            df = execute_SQL(query)
+            print(f"[INFO] 협력사 근로자 데이터 조회 완료: {len(df)} 건")
+            
+            if df.empty:
+                print("[WARNING] 조회된 협력사 근로자 데이터가 없습니다.")
+                return False
+            
+            # SQLite에 저장
+            conn = sqlite3.connect(self.local_db_path)
+            cursor = conn.cursor()
+            
+            # 기존 캐시 데이터 삭제
+            cursor.execute("DELETE FROM contractors_cache")
+            
+            # DataFrame을 레코드 배열로 변환하여 SQLite에 삽입
+            for _, row in df.iterrows():
+                cursor.execute('''
+                    INSERT INTO contractors_cache (
+                        worker_id, worker_name, company_name, business_number,
+                        access_status, birth_date
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                ''', (
+                    row.get('worker_id', ''),
+                    row.get('worker_name', ''),
+                    row.get('company_name', ''),
+                    row.get('business_number', ''),
+                    row.get('access_status', ''),
+                    row.get('birth_date', '')
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+            print(f"[SUCCESS] ✅ 협력사 근로자 데이터 {len(df)}건 동기화 완료")
+            return True
+            
+        except Exception as e:
+            print(f"[ERROR] ❌ 협력사 근로자 데이터 동기화 실패: {e}")
             traceback.print_exc()
             return False
     

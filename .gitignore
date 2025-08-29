@@ -5,6 +5,7 @@ __pycache__/
 venv/
 uploads/
 gpt/
+static/
 
 # Markdown 파일들 제외
 *.md
