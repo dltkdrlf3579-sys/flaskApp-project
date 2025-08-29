@@ -5721,6 +5721,10 @@ def board_items_delete_api(board):
 if __name__ == "__main__":
     print("Flask 앱 시작 중...", flush=True)
     
+    # 데이터베이스 초기화 및 동기화 (서버 시작 시 한 번만 실행)
+    print("데이터베이스 초기화 중...", flush=True)
+    init_db()
+    
     # JSON 컬럼 설정 동기화 (조건부 - GPT 제안대로 단순화)
     if db_config.config.getboolean('COLUMNS', 'SYNC_ON_STARTUP', fallback=False):
         try:

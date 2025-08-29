@@ -210,9 +210,7 @@ class PartnerDataManager:
                 worker_id TEXT PRIMARY KEY,
                 worker_name TEXT,
                 company_name TEXT,
-                business_number TEXT,
-                access_status TEXT,
-                birth_date TEXT
+                business_number TEXT
             )
         ''')
         
@@ -648,16 +646,13 @@ class PartnerDataManager:
             for _, row in df.iterrows():
                 cursor.execute('''
                     INSERT INTO contractors_cache (
-                        worker_id, worker_name, company_name, business_number,
-                        access_status, birth_date
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        worker_id, worker_name, company_name, business_number
+                    ) VALUES (?, ?, ?, ?)
                 ''', (
                     row.get('worker_id', ''),
                     row.get('worker_name', ''),
                     row.get('company_name', ''),
-                    row.get('business_number', ''),
-                    row.get('access_status', ''),
-                    row.get('birth_date', '')
+                    row.get('business_number', '')
                 ))
             
             conn.commit()
