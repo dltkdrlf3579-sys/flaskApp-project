@@ -385,25 +385,31 @@ class PartnerDataManager:
             cursor.execute("DELETE FROM accidents_cache")
             
             # DataFrame을 레코드 배열로 변환하여 SQLite에 삽입
+            # config.ini의 ACCIDENTS_QUERY 컬럼에 맞게 매핑
             for _, row in df.iterrows():
                 cursor.execute('''
                     INSERT INTO accidents_cache (
-                        business_number, accident_date, accident_type, accident_location,
-                        accident_description, injury_level, injured_count, cause_analysis,
-                        preventive_measures, report_date, reporter_name
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        accident_number, accident_name, accident_time, workplace,
+                        accident_grade, major_category, injury_form, injury_type,
+                        accident_date, day_of_week, report_date, building, floor,
+                        location_category, location_detail
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
-                    row.get('business_number', ''),
+                    row.get('accident_number', ''),
+                    row.get('accident_name', ''),
+                    row.get('accident_time', ''),
+                    row.get('workplace', ''),
+                    row.get('accident_grade', ''),
+                    row.get('major_category', ''),
+                    row.get('injury_form', ''),
+                    row.get('injury_type', ''),
                     row.get('accident_date', ''),
-                    row.get('accident_type', ''),
-                    row.get('accident_location', ''),
-                    row.get('accident_description', ''),
-                    row.get('injury_level', ''),
-                    row.get('injured_count', None),
-                    row.get('cause_analysis', ''),
-                    row.get('preventive_measures', ''),
+                    row.get('day_of_week', ''),
                     row.get('report_date', ''),
-                    row.get('reporter_name', '')
+                    row.get('building', ''),
+                    row.get('floor', ''),
+                    row.get('location_category', ''),
+                    row.get('location_detail', '')
                 ))
             
             conn.commit()
