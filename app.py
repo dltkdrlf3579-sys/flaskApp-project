@@ -239,6 +239,17 @@ def init_db():
                 ('safety_instruction', 'additional', '추가기입정보', 3)
             ''')
         
+        # 사고게시판용 섹션 데이터 삽입 (없는 경우에만)
+        cursor.execute("SELECT COUNT(*) FROM section_config WHERE board_type = 'accident'")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute('''
+                INSERT INTO section_config (board_type, section_key, section_name, section_order) VALUES
+                ('accident', 'basic_info', '기본정보', 1),
+                ('accident', 'accident_info', '사고정보', 2),
+                ('accident', 'location_info', '장소정보', 3),
+                ('accident', 'additional', '추가정보', 4)
+            ''')
+        
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS partner_standards_column_config (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -795,7 +806,8 @@ def partner_accident_route():
 
 def partner_accident():
     """협력사 사고 목록 페이지"""
-    from common_search import DynamicSearchBuilder, get_static_columns
+    from common_mapping import smart_apply_mappings
+    import math
     
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
@@ -811,45 +823,59 @@ def partner_accident():
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     
-    # 사고 목록 조회 - 공통 검색 모듈 사용
+    # 섹션 정보 가져오기
+    sections = conn.execute("""
+        SELECT * FROM section_config 
+        WHERE board_type = 'accident' AND is_active = 1 
+        ORDER BY section_order
+    """).fetchall()
+    sections = [dict(row) for row in sections]
+    
+    # 동적 컬럼 설정 가져오기 (활성화되고 삭제되지 않은 것만)
+    dynamic_columns_rows = conn.execute("""
+        SELECT * FROM accident_column_config 
+        WHERE is_active = 1
+        ORDER BY column_order
+    """).fetchall()
+    dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    
+    # 섹션별로 컬럼 그룹핑 (detailed_content 제외)
+    section_columns = {}
+    for section in sections:
+        section_columns[section['section_key']] = [
+            col for col in dynamic_columns 
+            if col.get('tab') == section['section_key'] 
+            and col['column_key'] not in ['detailed_content']
+        ]
+    
+    # 드롭다운 컬럼에 대해 코드-값 매핑 정보 추가
+    for col in dynamic_columns:
+        if col['column_type'] == 'dropdown':
+            col['code_mapping'] = get_dropdown_options_for_display('accident', col['column_key'])
+    
+    # 사고 목록 조회
     query = """
         SELECT * FROM accidents_cache 
         WHERE is_deleted = 0
     """
     params = []
     
-    # DynamicSearchBuilder로 검색 조건 생성
-    search_builder = DynamicSearchBuilder('sqlite')
-    static_cols = get_static_columns('accident')
+    # 필터링 적용
+    if filters['company_name']:
+        query += " AND (workplace LIKE ? OR company_name LIKE ?)"
+        params.extend([f"%{filters['company_name']}%", f"%{filters['company_name']}%"])
     
-    # 각 필터 적용
-    for field_name, field_value in filters.items():
-        if not field_value:
-            continue
-            
-        # 날짜 필드 처리
-        if field_name == 'accident_date_from':
-            query, params = search_builder.add_search_condition(
-                query, params, 'accident_date', field_value,
-                search_type='gte', is_dynamic=False
-            )
-        elif field_name == 'accident_date_to':
-            query, params = search_builder.add_search_condition(
-                query, params, 'accident_date', field_value,
-                search_type='lte', is_dynamic=False
-            )
-        else:
-            # 동적 컬럼 여부 자동 판단
-            is_dynamic = field_name not in static_cols
-            
-            # 폴백 컬럼 설정
-            fallback = None
-                
-            query, params = search_builder.add_search_condition(
-                query, params, field_name, field_value,
-                search_type='like', is_dynamic=is_dynamic,
-                fallback_column=fallback
-            )
+    if filters['business_number']:
+        query += " AND business_number LIKE ?"
+        params.append(f"%{filters['business_number']}%")
+    
+    if filters['accident_date_from']:
+        query += " AND accident_date >= ?"
+        params.append(filters['accident_date_from'])
+    
+    if filters['accident_date_to']:
+        query += " AND accident_date <= ?"
+        params.append(filters['accident_date_to'])
     
     query += " ORDER BY accident_date DESC, accident_number DESC"
     
@@ -866,25 +892,15 @@ def partner_accident():
     offset = (page - 1) * per_page
     for i, accident in enumerate(accidents):
         accident['no'] = total_count - offset - i
-    
-    # 디버그: 첫 번째 사고 데이터 확인
-    if accidents:
-        print(f"[DEBUG] 첫 번째 사고 데이터 키: {list(accidents[0].keys())[:10]}")
-        print(f"[DEBUG] accident_number: {accidents[0].get('accident_number')}")
-        print(f"[DEBUG] accident_name: {accidents[0].get('accident_name')}")
-    
-    # 동적 컬럼 설정 가져오기
-    dynamic_columns_rows = conn.execute("""
-        SELECT * FROM accident_column_config 
-        WHERE is_active = 1 
-        ORDER BY column_order
-    """).fetchall()
-    dynamic_columns = [dict(row) for row in dynamic_columns_rows]
-    
-    # 드롭다운 컬럼에 대해 코드-값 매핑 정보 추가
-    for col in dynamic_columns:
-        if col['column_type'] == 'dropdown':
-            col['code_mapping'] = get_dropdown_options_for_display('accident', col['column_key'])
+        
+        # custom_data 파싱 및 플래튼
+        if accident.get('custom_data'):
+            try:
+                import json as pyjson
+                custom_data = pyjson.loads(accident['custom_data'])
+                accident.update(custom_data)  # 최상위 레벨에 병합
+            except Exception as e:
+                logging.error(f"custom_data 파싱 오류: {e}")
     
     conn.close()
     
@@ -934,6 +950,8 @@ def partner_accident():
                          accidents=accidents,
                          total_count=total_count,
                          pagination=pagination,
+                         sections=sections,
+                         section_columns=section_columns,
                          dynamic_columns=dynamic_columns,
                          menu=MENU_CONFIG)
 
@@ -2121,11 +2139,22 @@ def partner_detail(business_number):
                          is_popup=is_popup,
                          board_type='partner')  # 게시판 타입 전달
 
-@app.route("/accident-detail/<int:accident_id>")
+@app.route("/accident-detail/<accident_id>")
 def accident_detail(accident_id):
     """사고 상세정보 페이지"""
     print(f"[DEBUG] accident_detail 함수 호출됨: ID={accident_id}", flush=True)
     logging.info(f"사고 상세 정보 조회: {accident_id}")
+    
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    
+    # 섹션 정보 가져오기
+    sections = conn.execute("""
+        SELECT * FROM section_config 
+        WHERE board_type = 'accident' AND is_active = 1 
+        ORDER BY section_order
+    """).fetchall()
+    sections = [dict(row) for row in sections]
     
     # 더미 데이터에서 해당 사고 찾기 (실제로는 DB에서 조회)
     import random
@@ -2178,11 +2207,20 @@ def accident_detail(accident_id):
     cursor = conn.cursor()
     
     # accidents_cache에서 먼저 찾기
-    cursor.execute("""
-        SELECT * FROM accidents_cache 
-        WHERE id = ? OR accident_number = ?
-        LIMIT 1
-    """, (accident_id, f'K{accident_id}'))
+    # accident_id가 숫자인지 문자열인지 확인
+    if str(accident_id).isdigit():
+        cursor.execute("""
+            SELECT * FROM accidents_cache 
+            WHERE id = ?
+            LIMIT 1
+        """, (accident_id,))
+    else:
+        # 문자열 ID인 경우 (ACC로 시작하는 경우 등)
+        cursor.execute("""
+            SELECT * FROM accidents_cache 
+            WHERE accident_number = ?
+            LIMIT 1
+        """, (accident_id,))
     
     accident = cursor.fetchone()
     
@@ -2259,6 +2297,14 @@ def accident_detail(accident_id):
     
     # Row 객체를 딕셔너리로 변환
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    
+    # 섹션별로 컬럼 그룹핑
+    section_columns = {}
+    for section in sections:
+        section_columns[section['section_key']] = [
+            col for col in dynamic_columns 
+            if col.get('tab') == section['section_key']
+        ]
     
     conn.close()
     
@@ -2362,8 +2408,11 @@ def accident_detail(accident_id):
                     print(f"[DEBUG] 템플릿 라인 {i+1}: {line.strip()}", flush=True)
     
     return render_template('accident-detail.html', 
+                         instruction=accident,  # accident를 instruction으로도 전달 (템플릿 호환성)
                          accident=accident,
                          attachments=attachments,
+                         sections=sections,
+                         section_columns=section_columns,
                          dynamic_columns=dynamic_columns,  # 동적 컬럼 정보
                          custom_data=custom_data,  # 기존 데이터
                          basic_options=basic_options,  # 기본정보 드롭다운 옵션
@@ -2488,6 +2537,14 @@ def accident_register():
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row  # Row 객체로 반환
     
+    # 섹션 정보 가져오기
+    sections = conn.execute("""
+        SELECT * FROM section_config 
+        WHERE board_type = 'accident' AND is_active = 1 
+        ORDER BY section_order
+    """).fetchall()
+    sections = [dict(row) for row in sections]
+    
     # 동적 컬럼 설정 가져오기
     dynamic_columns_rows = conn.execute("""
         SELECT * FROM accident_column_config 
@@ -2556,8 +2613,17 @@ def accident_register():
         # 건물 마스터 테이블이 없으면 드롭다운 코드 사용
         pass
     
+    # 섹션별로 컬럼 그룹핑
+    section_columns = {}
+    for section in sections:
+        section_columns[section['section_key']] = [
+            col for col in dynamic_columns 
+            if col.get('tab') == section['section_key']
+        ]
+    
     conn.close()
     
+    logging.info(f"섹션 {len(sections)}개 로드됨")
     logging.info(f"동적 컬럼 {len(dynamic_columns)}개 로드됨")
     logging.info(f"기본 옵션 {len(basic_options)}개 필드 로드됨")
     
@@ -2565,6 +2631,8 @@ def accident_register():
     is_popup = request.args.get('popup') == '1'
     
     return render_template('accident-register.html',
+                         sections=sections,
+                         section_columns=section_columns,
                          dynamic_columns=dynamic_columns,
                          basic_options=basic_options,  # basic_options 추가
                          menu=MENU_CONFIG,
@@ -2742,8 +2810,9 @@ def register_accident():
         logging.info(f"첨부파일 개수: {len(files)}")
         
         # 새 사고번호 생성 (수기입력: ACCYYMMDD00 형식)
-        today = datetime.date.today()
-        date_part = today.strftime('%y%m%d')  # YYMMDD 형식
+        # 한국 시간 기준으로 생성
+        korean_now = get_korean_time()
+        date_part = korean_now.strftime('%y%m%d')  # YYMMDD 형식
         accident_number_prefix = f"ACC{date_part}"
         
         conn = sqlite3.connect(DB_PATH, timeout=30.0)
@@ -2831,9 +2900,9 @@ def register_accident():
             major_category or '',
             injury_form or '',
             injury_type or '',
-            accident_date or today.strftime('%Y-%m-%d'),
+            accident_date or korean_now.strftime('%Y-%m-%d'),
             day_of_week or '',
-            report_date or today.strftime('%Y-%m-%d'),
+            report_date or korean_now.strftime('%Y-%m-%d'),
             building or '',
             floor or '',
             location_category or '',
@@ -2951,13 +3020,13 @@ def register_safety_instruction():
                 date_obj = datetime.datetime.strptime(violation_date, '%Y-%m-%d')
                 year_month = f"{date_obj.year}-{date_obj.month:02d}"
             except ValueError:
-                # 파싱 실패시 현재 날짜 사용
-                today = datetime.date.today()
-                year_month = f"{today.year}-{today.month:02d}"
+                # 파싱 실패시 한국 시간 기준 현재 날짜 사용
+                korean_now = get_korean_time()
+                year_month = f"{korean_now.year}-{korean_now.month:02d}"
         else:
-            # 위반일자가 없으면 현재 날짜 사용
-            today = datetime.date.today()
-            year_month = f"{today.year}-{today.month:02d}"
+            # 위반일자가 없으면 한국 시간 기준 현재 날짜 사용
+            korean_now = get_korean_time()
+            year_month = f"{korean_now.year}-{korean_now.month:02d}"
         
         # 환경안전 지시서 테이블이 없으면 생성
         cursor.execute("""
@@ -3266,17 +3335,31 @@ def update_accident():
         # json already imported globally
         
         accident_number = request.form.get('accident_number')
-        detailed_content = request.form.get('detailed_content')
+        detailed_content = request.form.get('detailed_content', '')
         custom_data = request.form.get('custom_data', '{}')  # Phase 2: 동적 컬럼 데이터
         base_fields = request.form.get('base_fields', '{}')  # ACC 사고일 때 기본정보
-        deleted_attachments = pyjson.loads(request.form.get('deleted_attachments', '[]'))
-        attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
+        
+        # 안전하게 JSON 파싱
+        try:
+            deleted_attachments = pyjson.loads(request.form.get('deleted_attachments', '[]'))
+        except:
+            deleted_attachments = []
+        
+        try:
+            attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
+        except:
+            attachment_data = []
         files = request.files.getlist('files')
         
         print(f"Accident Number: {accident_number}")
         print(f"Custom Data received: {custom_data}")  # 디버깅용 추가
         print(f"Files count: {len(files)}")
         print(f"Attachment data: {attachment_data}")
+        
+        print(f"Connecting to database: {DB_PATH}")
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)  # timeout 추가
+        conn.execute("PRAGMA journal_mode=WAL")  # WAL 모드로 변경 (동시성 개선)
+        cursor = conn.cursor()
         
         # 사고번호가 없으면 자동 생성 (수기입력용)
         if not accident_number:
@@ -3287,11 +3370,6 @@ def update_accident():
         if not (accident_number.startswith('K') or accident_number.startswith('ACC')):
             from flask import jsonify
             return jsonify({"success": False, "message": "잘못된 사고번호 형식입니다."})
-        
-        print(f"Connecting to database: {DB_PATH}")
-        conn = sqlite3.connect(DB_PATH, timeout=30.0)  # timeout 추가
-        conn.execute("PRAGMA journal_mode=WAL")  # WAL 모드로 변경 (동시성 개선)
-        cursor = conn.cursor()
         
         logging.info(f"업데이트 대상 사고: {accident_number}")
         
@@ -3362,10 +3440,15 @@ def update_accident():
         else:
             # 새 레코드 생성 (업체 정보는 선택적)
             # 비공식/직접등록 사고
+            korean_date = get_korean_time().strftime('%Y-%m-%d')
             cursor.execute("""
-                INSERT INTO accidents_cache (accident_number, accident_name, custom_data, accident_date)
-                VALUES (?, ?, ?, date('now'))
-            """, (accident_number, f"사고_{accident_number}", custom_data))
+                INSERT INTO accidents_cache (
+                    accident_number, accident_name, custom_data, accident_date,
+                    workplace, accident_grade, major_category, injury_form, 
+                    injury_type, report_date
+                )
+                VALUES (?, ?, ?, ?, '', '', '', '', '', ?)
+            """, (accident_number, f"사고_{accident_number}", custom_data, korean_date, korean_date))
             logging.info(f"새 사고 레코드 생성 (직접등록) 및 동적 컬럼 데이터 저장: {accident_number}")
         
         # 2. 사고 첨부파일 처리 - item_id 사용
@@ -3627,13 +3710,40 @@ def admin_accident_columns():
 @require_admin_auth
 def admin_accident_columns_simplified():
     """사고 컬럼 관리 페이지 Simplified - 간소화 버전"""
-    return render_template('admin-accident-columns-simplified.html', menu=MENU_CONFIG)
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row  # Row 객체로 반환하도록 설정
+    
+    # 섹션 정보 가져오기
+    sections = conn.execute("""
+        SELECT * FROM section_config 
+        WHERE board_type = 'accident' AND is_active = 1
+        ORDER BY section_order
+    """).fetchall()
+    sections = [dict(row) for row in sections]
+    
+    conn.close()
+    
+    return render_template('admin-accident-columns-simplified.html', 
+                         sections=sections,
+                         menu=MENU_CONFIG)
 
 @app.route("/admin/accident-basic-codes")
 @require_admin_auth
 def admin_accident_basic_codes():
     """사고 기본정보 코드 관리 페이지"""
     return render_template('admin-accident-basic-codes.html', menu=MENU_CONFIG)
+
+@app.route("/admin/accident-codes")
+@require_admin_auth
+def admin_accident_codes():
+    """사고 코드 관리 임베디드 페이지"""
+    column_key = request.args.get('column_key', '')
+    embedded = request.args.get('embedded', 'false') == 'true'
+    
+    return render_template('admin-accident-codes.html', 
+                         column_key=column_key,
+                         embedded=embedded,
+                         menu=MENU_CONFIG)
 
 @app.route("/admin/safety-instruction-codes")
 @require_admin_auth
@@ -4641,6 +4751,67 @@ def reorder_safety_instruction_sections():
         return jsonify(result)
     except Exception as e:
         logging.error(f"섹션 순서 변경 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+# ============= 사고게시판 섹션 관리 API =============
+@app.route("/api/accident-sections", methods=["GET"])
+def get_accident_sections():
+    """사고게시판 섹션 목록 조회"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('accident', DB_PATH)
+        sections = section_service.get_sections()
+        return jsonify({"success": True, "sections": sections})
+    except Exception as e:
+        logging.error(f"사고 섹션 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/accident-sections", methods=["POST"])
+def add_accident_section():
+    """사고게시판 섹션 추가"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('accident', DB_PATH)
+        result = section_service.add_section(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"사고 섹션 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/accident-sections/<int:section_id>", methods=["PUT"])
+def update_accident_section(section_id):
+    """사고게시판 섹션 수정"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('accident', DB_PATH)
+        result = section_service.update_section(section_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"사고 섹션 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/accident-sections/<int:section_id>", methods=["DELETE"])
+def delete_accident_section(section_id):
+    """사고게시판 섹션 삭제"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('accident', DB_PATH)
+        result = section_service.delete_section(section_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"사고 섹션 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/accident-sections/reorder", methods=["POST"])
+def reorder_accident_sections():
+    """사고게시판 섹션 순서 변경"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('accident', DB_PATH)
+        result = section_service.reorder_sections(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"사고 섹션 순서 변경 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route("/<path:url>")

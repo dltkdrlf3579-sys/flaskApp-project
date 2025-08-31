@@ -196,50 +196,9 @@
         </div>
     </div>
 
-    <!-- 4. 첨부파일 영역 -->
-    <div class="section attachments-section">
-        <div class="section-header">
-            <h3 class="section-title">첨부파일</h3>
-            <button class="btn-add-file" onclick="document.getElementById('file-input').click();">추가</button>
-            <span class="file-count">총 <span id="file-count">{{ attachments|length if attachments else 0 }}</span>개</span>
-            <span class="file-size"><span id="file-size">0</span> MB / 50 MB</span>
-        </div>
-        <div class="section-content">
-            <input type="file" id="file-input" multiple style="display: none;" onchange="handleFileUpload(this.files)">
-            <div class="attachments-table">
-                <div class="table-header">
-                    <div class="col-no">No.</div>
-                    <div class="col-file">파일명</div>
-                    <div class="col-desc">설명</div>
-                    <div class="col-action">상태</div>
-                </div>
-                <div class="table-body" id="attachments-tbody">
-                    {% if attachments %}
-                        {% for attachment in attachments %}
-                        <div class="table-row" data-id="{{ attachment.id }}">
-                            <div class="col-no">{{ loop.index }}</div>
-                            <div class="col-file">
-                                <span class="file-icon">📄</span>
-                                <a href="/download-attachment/change_request/{{ attachment.id }}" class="file-link" download>{{ attachment.file_name }}</a>
-                                <span class="file-size">({{ (attachment.file_size / 1024) | round(2) }} KB)</span>
-                            </div>
-                            <div class="col-desc">
-                                <input type="text" class="attachment-desc" value="{{ attachment.description or '' }}" placeholder="설명을 입력하세요">
-                            </div>
-                            <div class="col-action">
-                                <button class="btn-delete" onclick="deleteAttachment(this)">삭제</button>
-                            </div>
-                        </div>
-                        {% endfor %}
-                    {% else %}
-                        <div class="table-row no-data" id="no-data-row">
-                            <div class="col-full">등록된 첨부파일이 없습니다.</div>
-                        </div>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-    </div>
+    <!-- 4. 첨부파일 영역 (공통 컴포넌트) -->
+    {% from 'includes/attachment_section.html' import render_attachment_section %}
+    {{ render_attachment_section(attachments, 'change_request') }}
 
     <!-- 저장 버튼 영역 -->
     <div class="save-section">
@@ -599,57 +558,7 @@
     color: #666;
 }
 
-.attachments-table {
-    border: 1px solid #e1e5e9;
-}
-
-.table-header {
-    display: grid;
-    grid-template-columns: 60px 30% 1fr 100px;
-    background: #f8f9fa;
-    border-bottom: 1px solid #e1e5e9;
-    font-weight: 600;
-    font-size: 14px;
-}
-
-.table-header > div {
-    padding: 12px 10px;
-    border-right: 1px solid #e1e5e9;
-    display: flex;
-    align-items: center;
-}
-
-.table-header > div:last-child {
-    border-right: none;
-}
-
-.table-body {
-    max-height: 300px;
-    overflow-y: auto;
-}
-
-.table-row {
-    display: grid;
-    grid-template-columns: 60px 30% 1fr 100px;
-    border-bottom: 1px solid #f1f1f1;
-    font-size: 14px;
-}
-
-.table-row > div {
-    padding: 12px 10px;
-    border-right: 1px solid #f1f1f1;
-    display: flex;
-    align-items: center;
-    word-break: break-word;
-}
-
-.table-row > div:last-child {
-    border-right: none;
-}
-
-.table-row:hover {
-    background: #f8f9fa;
-}
+/* 첨부파일 테이블 스타일은 attachment_section.html에서 제공됨 */
 
 .no-data .col-full {
     grid-column: 1 / -1;
@@ -692,19 +601,7 @@
     border-color: #2f5fd3;
 }
 
-.btn-delete {
-    padding: 4px 12px;
-    background: #dc3545;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: 12px;
-    cursor: pointer;
-}
-
-.btn-delete:hover {
-    background: #c82333;
-}
+/* btn-delete 스타일은 공통 컴포넌트에서 제공됨 */
 
 /* 저장 섹션 */
 .save-section {
@@ -904,9 +801,7 @@
 </style>
 
 <script>
-// 전역 변수
-let pendingFiles = [];
-let deletedAttachments = [];
+// 전역 변수는 공통 컴포넌트에서 제공됨
 
 function toggleSection(sectionId) {
     const content = document.getElementById(sectionId + '-content');
@@ -921,103 +816,9 @@ function toggleSection(sectionId) {
     }
 }
 
-// 첨부파일 처리 함수
-function handleFileUpload(files) {
-    const tbody = document.getElementById('attachments-tbody');
-    const noDataRow = document.getElementById('no-data-row');
-    
-    if (noDataRow) {
-        noDataRow.remove();
-    }
-    
-    Array.from(files).forEach((file, index) => {
-        const fileSize = (file.size / 1024).toFixed(2);
-        const newRow = document.createElement('div');
-        newRow.className = 'table-row';
-        newRow.dataset.isNew = 'true';
-        
-        const rowCount = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)').length + 1;
-        
-        newRow.innerHTML = `
-            <div class="col-no">${rowCount}</div>
-            <div class="col-file">
-                <span class="file-icon">📄</span>
-                <span class="file-link">${file.name}</span>
-                <span class="file-size">(${fileSize} KB)</span>
-            </div>
-            <div class="col-desc">
-                <input type="text" placeholder="설명을 입력하세요" class="attachment-desc">
-            </div>
-            <div class="col-action">
-                <button class="btn-delete" onclick="deleteAttachment(this)">삭제</button>
-            </div>
-        `;
-        
-        tbody.appendChild(newRow);
-        pendingFiles.push(file);
-    });
-    
-    updateFileCount();
-}
+// 첨부파일 관련 함수는 모두 공통 컴포넌트에서 제공됨
 
-function deleteAttachment(btn) {
-    const row = btn.closest('.table-row');
-    const attachmentId = row.dataset.id;
-    
-    if (attachmentId) {
-        deletedAttachments.push(attachmentId);
-    }
-    
-    row.remove();
-    updateFileCount();
-    updateRowNumbers();
-    
-    // 파일이 모두 삭제된 경우 "등록된 첨부파일이 없습니다" 표시
-    const tbody = document.getElementById('attachments-tbody');
-    if (tbody.children.length === 0) {
-        tbody.innerHTML = '<div class="table-row no-data" id="no-data-row"><div class="col-full">등록된 첨부파일이 없습니다.</div></div>';
-    }
-}
-
-function updateFileCount() {
-    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
-    document.getElementById('file-count').textContent = rows.length;
-}
-
-function updateRowNumbers() {
-    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
-    rows.forEach((row, index) => {
-        const noCell = row.querySelector('.col-no');
-        if (noCell) {
-            noCell.textContent = index + 1;
-        }
-    });
-}
-
-// 페이지 로드시 첨부파일 정보 초기화
-document.addEventListener('DOMContentLoaded', function() {
-    updateFileInfo();
-});
-
-function updateFileInfo() {
-    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
-    const fileCount = rows.length;
-    
-    // 기존 파일 크기 계산
-    let totalSize = 0;
-    rows.forEach(row => {
-        const sizeText = row.querySelector('.file-size');
-        if (sizeText) {
-            const sizeMatch = sizeText.textContent.match(/\(([\d.]+)\s*KB\)/);
-            if (sizeMatch) {
-                totalSize += parseFloat(sizeMatch[1]) / 1024; // KB를 MB로 변환
-            }
-        }
-    });
-    
-    document.getElementById('file-count').textContent = fileCount;
-    document.getElementById('file-size').textContent = totalSize.toFixed(2);
-}
+// 페이지 로드시 첨부파일 정보 초기화는 공통 컴포넌트에서 처리됨
 
 function showPasswordModal() {
     document.getElementById('password-modal').style.display = 'block';
@@ -1157,30 +958,7 @@ function saveChanges() {
     });
 }
 
-// 페이지 로드시 첨부파일 정보 초기화
-document.addEventListener('DOMContentLoaded', function() {
-    updateFileInfo();
-});
-
-function updateFileInfo() {
-    const rows = document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)');
-    const fileCount = rows.length;
-    
-    // 기존 파일 크기 계산
-    let totalSize = 0;
-    rows.forEach(row => {
-        const sizeText = row.querySelector('.file-size');
-        if (sizeText) {
-            const sizeMatch = sizeText.textContent.match(/\(([\d.]+)\s*KB\)/);
-            if (sizeMatch) {
-                totalSize += parseFloat(sizeMatch[1]) / 1024; // KB를 MB로 변환
-            }
-        }
-    });
-    
-    document.getElementById('file-count').textContent = fileCount;
-    document.getElementById('file-size').textContent = totalSize.toFixed(2);
-}
+// 페이지 로드시 첨부파일 정보 초기화는 공통 컴포넌트에서 처리됨
 
 // 담당자 검색 팝업 열기
 function openPersonPopup(columnKey) {

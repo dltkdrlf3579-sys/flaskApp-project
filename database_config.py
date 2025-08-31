@@ -171,6 +171,9 @@ class PartnerDataManager:
                 column_order INTEGER DEFAULT 0,
                 is_active BOOLEAN DEFAULT 1,
                 dropdown_options TEXT,
+                tab TEXT,
+                column_span INTEGER DEFAULT 1,
+                linked_columns TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )

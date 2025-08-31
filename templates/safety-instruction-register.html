@@ -163,31 +163,9 @@
         </div>
     </div>
 
-    <!-- 첨부파일 영역 -->
-    <div class="section attachments-section">
-        <div class="section-header">
-            <h3 class="section-title">첨부파일</h3>
-            <button class="btn-add-file" onclick="document.getElementById('file-input').click();">추가</button>
-            <span class="file-count">총 <span id="file-count">0</span>개</span>
-            <span class="file-size"><span id="file-size">0</span> MB / 50 MB</span>
-        </div>
-        <div class="section-content">
-            <input type="file" id="file-input" multiple style="display: none;" onchange="handleFileUpload(this.files)">
-            <div class="attachments-table">
-                <div class="table-header">
-                    <div class="col-no">No.</div>
-                    <div class="col-file">파일명</div>
-                    <div class="col-desc">설명</div>
-                    <div class="col-action">상태</div>
-                </div>
-                <div class="table-body" id="attachments-tbody">
-                    <div class="table-row no-data" id="no-data-row">
-                        <div class="col-full">등록된 첨부파일이 없습니다.</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+    <!-- 첨부파일 영역 (공통 컴포넌트) -->
+    {% from 'includes/attachment_section.html' import render_attachment_section %}
+    {{ render_attachment_section([], 'safety_instruction') }}
 
     <!-- 저장 버튼 영역 -->
     <div class="save-section">
@@ -217,10 +195,7 @@ function toggleSection(sectionId) {
     }
 }
 
-// 첨부파일 관련 변수
-let uploadedFiles = [];
-let totalFileSize = 0;
-const maxFileSize = 50 * 1024 * 1024; // 50MB
+// 첨부파일 관련 변수와 함수는 공통 컴포넌트에서 제공됨
 
 // 첨부파일 업로드 처리
 function handleFileUpload(files) {
@@ -375,12 +350,15 @@ function registerSafetyInstruction() {
         });
     });
     
-    uploadedFiles.forEach((file, index) => {
-        formData.append('files', file);
-        if (attachmentData[index]) {
-            formData.append(`file_desc_${index}`, attachmentData[index].description);
-        }
-    });
+    // 새 첨부파일 처리 (공통 컴포넌트 변수 사용)
+    if (typeof pendingFiles !== 'undefined') {
+        pendingFiles.forEach((file, index) => {
+            formData.append('files', file);
+            if (attachmentData[index]) {
+                formData.append(`file_desc_${index}`, attachmentData[index].description);
+            }
+        });
+    }
     
     // 서버로 전송
     fetch('/register-safety-instruction', {
@@ -612,59 +590,7 @@ function openPopup(fieldKey) {
     color: #666;
 }
 
-.attachments-table {
-    border: 1px solid #e1e5e9;
-}
-
-.table-header {
-    display: grid;
-    grid-template-columns: 60px 1fr 200px 100px;
-    background: #f8f9fa;
-    border-bottom: 1px solid #e1e5e9;
-    font-weight: 600;
-    font-size: 14px;
-}
-
-.table-header > div {
-    padding: 12px 10px;
-    border-right: 1px solid #e1e5e9;
-}
-
-.table-header > div:last-child {
-    border-right: none;
-}
-
-.table-body {
-    max-height: 300px;
-    overflow-y: auto;
-}
-
-.table-row {
-    display: grid;
-    grid-template-columns: 60px 1fr 200px 100px;
-    border-bottom: 1px solid #f1f1f1;
-    font-size: 14px;
-}
-
-.table-row > div {
-    padding: 12px 10px;
-    border-right: 1px solid #f1f1f1;
-}
-
-.table-row > div:last-child {
-    border-right: none;
-}
-
-.table-row.no-data {
-    grid-template-columns: 1fr;
-}
-
-.table-row.no-data .col-full {
-    text-align: center;
-    color: #999;
-    padding: 20px;
-    border: none;
-}
+/* 첨부파일 테이블 스타일은 attachment_section.html에서 제공됨 */
 
 .btn-delete {
     padding: 4px 8px;
@@ -709,5 +635,10 @@ function openPopup(fieldKey) {
     background: #2563eb;
 }
 </style>
+
+<!-- 공통 첨부파일 스크립트와 스타일 import -->
+{% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
+{{ attachment_styles() }}
+{{ attachment_scripts() }}
 
 {% endblock %}
