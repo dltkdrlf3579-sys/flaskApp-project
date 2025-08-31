@@ -162,12 +162,8 @@ class DynamicSearchBuilder:
                 # 일반 필드
                 is_dynamic = field_name not in static_columns
                 
-                # 폴백 컬럼 매핑 (필요시)
-                fallback_map = {
-                    'company_name': 'responsible_company1',
-                    'business_number': 'responsible_company1_no'
-                }
-                fallback = fallback_map.get(field_name)
+                # 폴백 컬럼 매핑 (필요시) - 현재는 사용하지 않음
+                fallback = None
                 
                 query, params = self.add_search_condition(
                     query, params, field_name, field_value,
@@ -231,13 +227,10 @@ def get_static_columns(board_type: str) -> List[str]:
     # 보드별 고정 컬럼 정의
     static_columns_map = {
         'accident': [
-            'id', 'accident_number', 'accident_date', 'accident_type',
-            'accident_location', 'accident_name', 'accident_time',
-            'accident_grade', 'injury_type', 'injury_form', 'workplace',
-            'building', 'floor', 'location_detail', 'day_of_week',
-            'responsible_company1', 'responsible_company1_no',
-            'responsible_company2', 'responsible_company2_no',
-            'is_deleted', 'major_category', 'location_category'
+            'id', 'accident_number', 'accident_name', 'workplace',
+            'accident_grade', 'major_category', 'injury_form', 'injury_type',
+            'accident_date', 'day_of_week', 'report_date', 'building',
+            'floor', 'location_category', 'location_detail', 'is_deleted'
         ],
         'safety_instruction': [
             'id', 'issue_number', 'violation_date', 'discipline_date',

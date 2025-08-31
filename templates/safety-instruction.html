@@ -53,102 +53,60 @@
         <table class="data-table">
             <thead>
                 <tr>
-                    <th style="width: 40px;"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
+                    <th class="checkbox-column"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
                     <th class="fixed-col">No</th>
-                    <th>발부번호</th>
-                    <th>발행인</th>
-                    <th>발행부서</th>
-                    <th>분류</th>
-                    <th>고용형태</th>
-                    <th>1차사명</th>
-                    <th>1차사_사업자번호</th>
-                    <th>하도사명</th>
-                    <th>하도사_사업자번호</th>
-                    <th>징계자</th>
-                    <th>GBM</th>
-                    <th>사업부</th>
-                    <th>팀</th>
-                    <th>소속부서</th>
-                    <th>위반일자</th>
-                    <th>징계일자</th>
-                    <th>징계발의부서</th>
-                    <th>징계유형</th>
-                    <th>사고유형</th>
-                    <th>사고등급</th>
-                    <th>환경안전수칙 위반등급</th>
-                    <th>위반유형</th>
-                    <th>위반내용</th>
-                    <th>출입정지 시작일</th>
-                    <th>출입정지 종료일</th>
-                    <th>기간</th>
-                    <th>작업등급</th>
-                    <th>감점</th>
-                    <th>징계자ID</th>
-                    {% for col in dynamic_columns %}
-                    <th>{{ col.column_name }}</th>
+                    {% for section in sections %}
+                        {% for col in section_columns[section['section_key']] %}
+                            {% if col['column_key'] not in ['detailed_content', 'violation_content'] %}
+                            <th>{{ col['column_name'] }}</th>
+                            {% endif %}
+                        {% endfor %}
                     {% endfor %}
                 </tr>
             </thead>
             <tbody>
                 {% for item in accidents %}
                 <tr>
-                    <td style="width: 40px;">
+                    <td class="checkbox-column">
                         <input type="checkbox" class="accident-checkbox" value="{{ item.id }}" onchange="updateDeleteButton()">
                     </td>
-                    <td class="fixed-col" style="width: 60px;">
+                    <td class="fixed-col">
                         {{ item.no }}
                     </td>
-                    <td>
-                        <a href="javascript:void(0)" class="company-link" onclick="openSafetyInstructionModal('{{ item.issue_number }}')">{{ item.issue_number or '-' }}</a>
-                    </td>
-                    <td>{{ item.issuer or '-' }}</td>
-                    <td>{{ item.issuer_department or '-' }}</td>
-                    <td>{{ item.classification or '-' }}</td>
-                    <td>{{ item.employment_type or '-' }}</td>
-                    <td>{{ item.primary_company or '-' }}</td>
-                    <td>{{ item.primary_business_number or '-' }}</td>
-                    <td>{{ item.subcontractor or '-' }}</td>
-                    <td>{{ item.subcontractor_business_number or '-' }}</td>
-                    <td>{{ item.disciplined_person or '-' }}</td>
-                    <td>{{ item.gbm or '-' }}</td>
-                    <td>{{ item.business_division or '-' }}</td>
-                    <td>{{ item.team or '-' }}</td>
-                    <td>{{ item.department or '-' }}</td>
-                    <td>{{ item.violation_date or '-' }}</td>
-                    <td>{{ item.discipline_date or '-' }}</td>
-                    <td>{{ item.discipline_department or '-' }}</td>
-                    <td>{{ item.discipline_type or '-' }}</td>
-                    <td>{{ item.accident_type or '-' }}</td>
-                    <td>{{ item.accident_grade or '-' }}</td>
-                    <td>{{ item.safety_violation_grade or '-' }}</td>
-                    <td>{{ item.violation_type or '-' }}</td>
-                    <td>{{ item.violation_content or '-' }}</td>
-                    <td>{{ item.access_ban_start_date or '-' }}</td>
-                    <td>{{ item.access_ban_end_date or '-' }}</td>
-                    <td>{{ item.period or '-' }}</td>
-                    <td>{{ item.work_grade or '-' }}</td>
-                    <td>{{ item.penalty_points or '-' }}</td>
-                    <td>{{ item.disciplined_person_id or '-' }}</td>
-                    {% if item.custom_data %}
-                        {% set custom = item.custom_data | from_json %}
-                        {% for col in dynamic_columns %}
-                        <td>
-                            {% if custom and col.column_key in custom %}
-                                {{ custom[col.column_key] or '-' }}
-                            {% else %}
-                                -
+                    {% for section in sections %}
+                        {% for col in section_columns[section['section_key']] %}
+                            {% if col['column_key'] not in ['detailed_content', 'violation_content'] %}
+                            <td>
+                                {% if col['column_key'] == 'issue_number' %}
+                                    <a href="javascript:void(0)" class="company-link" onclick="openSafetyInstructionModal('{{ item.issue_number }}')">{{ item.issue_number or '-' }}</a>
+                                {% elif col['column_type'] == 'dropdown' %}
+                                    {% set field_label = col['column_key'] + '_label' %}
+                                    {% if item.custom_mapped and col['column_key'] in item.custom_mapped %}
+                                        {{ item.custom_mapped[col['column_key']] or '-' }}
+                                    {% elif field_label in item and item[field_label] %}
+                                        {{ item[field_label] }}
+                                    {% elif col['column_key'] in item and item[col['column_key']] %}
+                                        {{ item[col['column_key']] }}
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                {% else %}
+                                    {% if item.custom_mapped and col['column_key'] in item.custom_mapped %}
+                                        {{ item.custom_mapped[col['column_key']] or '-' }}
+                                    {% elif col['column_key'] in item %}
+                                        {{ item[col['column_key']] or '-' }}
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                {% endif %}
+                            </td>
                             {% endif %}
-                        </td>
                         {% endfor %}
-                    {% else %}
-                        {% for col in dynamic_columns %}
-                        <td>-</td>
-                        {% endfor %}
-                    {% endif %}
+                    {% endfor %}
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="{{ 31 + dynamic_columns|length }}" class="no-data">검색 결과가 없습니다.</td>
+                    <td colspan="100" class="no-data">검색 결과가 없습니다.</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -528,6 +486,15 @@
     .data-table td {
         padding: 8px 12px;
     }
+}
+
+/* 체크박스 컬럼 전용 스타일 */
+.checkbox-column {
+    width: 30px !important;
+    min-width: 30px !important;
+    max-width: 30px !important;
+    padding: 4px !important;
+    text-align: center !important;
 }
 </style>
 

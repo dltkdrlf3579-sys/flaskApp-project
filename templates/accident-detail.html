@@ -38,6 +38,10 @@
                         <label>사고번호</label>
                         <div class="value">{{ accident.accident_number }}</div>
                     </div>
+                    <div class="info-cell">
+                        <label>등록일</label>
+                        <div class="value">{{ accident.report_date or '' }}</div>
+                    </div>
                     <div class="info-cell info-cell-double">
                         <label>사고명</label>
                         {% if is_direct_entry %}
@@ -46,6 +50,8 @@
                         <div class="value">{{ accident.accident_name }}</div>
                         {% endif %}
                     </div>
+                </div>
+                <div class="info-row">
                     <div class="info-cell">
                         <label>사업장</label>
                         {% if is_direct_entry %}
@@ -92,7 +98,7 @@
                         {% if is_direct_entry %}
                         <select id="injury_form" class="basic-input">
                             <option value="">선택하세요</option>
-                            {% for opt in basic_options.get('disaster_form', []) %}
+                            {% for opt in basic_options.get('injury_form', []) %}
                             <option value="{{ opt.option_code }}" {% if (accident.injury_form or accident.disaster_form) == opt.option_code %}selected{% endif %}>{{ opt.option_value }}</option>
                             {% endfor %}
                         </select>
@@ -105,7 +111,7 @@
                         {% if is_direct_entry %}
                         <select id="injury_type" class="basic-input">
                             <option value="">선택하세요</option>
-                            {% for opt in basic_options.get('disaster_type', []) %}
+                            {% for opt in basic_options.get('injury_type', []) %}
                             <option value="{{ opt.option_code }}" {% if (accident.injury_type or accident.disaster_type) == opt.option_code %}selected{% endif %}>{{ opt.option_value }}</option>
                             {% endfor %}
                         </select>
@@ -129,14 +135,6 @@
                         <input type="text" id="day_of_week" class="basic-input" value="{{ accident.day_of_week or '' }}" readonly style="background-color: #f8f9fa;">
                         {% else %}
                         <div class="value">{{ accident.day_of_week or '-' }}</div>
-                        {% endif %}
-                    </div>
-                    <div class="info-cell">
-                        <label>등록일</label>
-                        {% if is_direct_entry %}
-                        <input type="date" id="report_date" class="basic-input" value="{{ accident.report_date or '' }}">
-                        {% else %}
-                        <div class="value">{{ accident.report_date or '-' }}</div>
                         {% endif %}
                     </div>
                     <div class="info-cell">
@@ -183,9 +181,9 @@
                     <div class="info-cell info-cell-double">
                         <label>세부장소</label>
                         {% if is_direct_entry %}
-                        <input type="text" id="location_detail" class="basic-input" value="{{ accident.location_detail or accident.detail_location or '' }}">
+                        <input type="text" id="location_detail" class="basic-input" value="{{ accident.location_detail or '' }}">
                         {% else %}
-                        <div class="value">{{ accident.location_detail or accident.detail_location or '-' }}</div>
+                        <div class="value">{{ accident.location_detail or '-' }}</div>
                         {% endif %}
                     </div>
                 </div>
@@ -1163,7 +1161,6 @@ function saveChanges() {
         baseFields.floor = document.getElementById('floor')?.value || '';
         baseFields.location_category = document.getElementById('location_category')?.value || '';
         baseFields.location_detail = document.getElementById('location_detail')?.value || '';
-        baseFields.report_date = document.getElementById('report_date')?.value || '';
         baseFields.day_of_week = document.getElementById('day_of_week')?.value || '';
         console.log('ACC 사고 기본정보:', baseFields);
     }

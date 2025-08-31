@@ -244,6 +244,15 @@
     font-style: italic;
 }
 
+/* 체크박스 컬럼 전용 스타일 */
+.checkbox-column {
+    width: 30px !important;
+    min-width: 30px !important;
+    max-width: 30px !important;
+    padding: 4px !important;
+    text-align: center !important;
+}
+
 /* 페이지네이션 */
 .pagination-section {
     display: flex;
@@ -347,7 +356,7 @@
         <table class="data-table">
             <thead>
                 <tr>
-                    <th style="width: 40px;">
+                    <th class="checkbox-column">
                         <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
                     </th>
                     {% for column in dynamic_columns %}
@@ -360,7 +369,7 @@
             <tbody>
                 {% for partner in partners %}
                 <tr>
-                    <td>
+                    <td class="checkbox-column">
                         <input type="checkbox" class="row-checkbox" value="{{ partner.business_number }}" onchange="updateDeleteButton()">
                     </td>
                     {% for column in dynamic_columns %}

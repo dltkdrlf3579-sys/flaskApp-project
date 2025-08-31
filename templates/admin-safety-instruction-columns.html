@@ -129,6 +129,46 @@
             background: #f8f9ff;
         }
         
+        .add-section-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 10px;
+            margin: 20px auto;
+            text-align: center;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+            max-width: 300px;
+            font-weight: 600;
+        }
+        
+        .add-section-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+        }
+        
+        .section-title {
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: all 0.2s;
+            display: inline-block;
+            font-weight: 600;
+        }
+        
+        .section-title:hover {
+            background-color: rgba(102, 126, 234, 0.1);
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+        }
+        
+        .tab-section-header input {
+            font-weight: 600;
+            padding: 4px 8px;
+            border: 2px solid #667eea;
+            border-radius: 4px;
+        }
+        
         .modal-header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -164,15 +204,148 @@
     </div>
     
     <div class="container">
+        <style>
+            .tab-section {
+                margin-bottom: 30px;
+                background: white;
+                border-radius: 8px;
+                padding: 20px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            }
+            
+            .tab-section-header {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 15px 20px;
+                margin: -20px -20px 20px -20px;
+                border-radius: 8px 8px 0 0;
+                font-size: 18px;
+                font-weight: 600;
+            }
+            
+            .tab-section-header.basic-info {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            }
+            
+            .tab-section-header.violation-info {
+                background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            }
+            
+            .tab-section-header.additional-info {
+                background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            }
+            
+            .columns-grid {
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 15px;
+            }
+            
+            .column-card-small {
+                background: #f8f9fa;
+                border-radius: 6px;
+                padding: 12px;
+                border: 2px solid transparent;
+                /* transition 제거 - Sortable.js 성능 문제 해결 */
+                cursor: move;
+                position: relative;
+                /* 드래그 시 텍스트 선택 방지 */
+                user-select: none;
+                -webkit-user-select: none;
+                -moz-user-select: none;
+                -ms-user-select: none;
+                grid-column: span 1; /* 기본 1칸 */
+            }
+            
+            /* span 클래스들 */
+            .column-card-small.span-2 {
+                grid-column: span 2;
+                background: linear-gradient(90deg, #f8f9fa 0%, #e9ecef 100%);
+            }
+            
+            .column-card-small.span-3 {
+                grid-column: span 3;
+                background: linear-gradient(90deg, #f8f9fa 0%, #dee2e6 100%);
+            }
+            
+            .column-card-small.span-4 {
+                grid-column: span 4;
+                background: linear-gradient(90deg, #f8f9fa 0%, #ced4da 100%);
+            }
+            
+            .column-card-small:hover {
+                border-color: #2f5fd3;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            }
+            
+            .column-card-small.dragging {
+                opacity: 0.5;
+            }
+            
+            .column-card-small .column-number {
+                position: absolute;
+                top: 5px;
+                left: 5px;
+                width: 24px;
+                height: 24px;
+                background: #6c757d;
+                color: white;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            
+            .column-card-small .column-content {
+                margin-left: 30px;
+            }
+            
+            .column-card-small .column-name {
+                font-weight: 600;
+                font-size: 14px;
+                margin-bottom: 4px;
+            }
+            
+            .column-card-small .column-key {
+                font-size: 11px;
+                color: #6c757d;
+                font-family: monospace;
+            }
+            
+            .column-card-small .column-controls {
+                display: flex;
+                gap: 5px;
+                margin-top: 8px;
+                justify-content: space-between;
+                align-items: center;
+            }
+            
+            .column-card-small .column-type-badge {
+                font-size: 10px;
+                padding: 2px 6px;
+                border-radius: 10px;
+                background: #e9ecef;
+                color: #495057;
+            }
+            
+            .column-card-small.inactive {
+                opacity: 0.5;
+                background: #e9ecef;
+            }
+        </style>
+        
         <div class="row">
             <div class="col-lg-12">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h5>컬럼 목록</h5>
-                    <span class="text-muted">드래그하여 순서 변경 가능</span>
+                <!-- 동적 섹션 렌더링 -->
+                <div id="sections-container">
+                    <!-- 섹션들이 JavaScript로 동적 생성됨 -->
                 </div>
                 
-                <div id="columnList">
-                    <!-- 동적으로 로드됨 -->
+                <!-- 새 섹션 추가 버튼 -->
+                <div class="add-section-btn" onclick="showAddSectionModal()">
+                    <i class="bi bi-plus-square"></i> 새 섹션 추가
                 </div>
                 
                 <div class="add-column-btn" onclick="showAddModal()">
@@ -225,8 +398,19 @@
                         </div>
                         
                         <div class="mb-3">
+                            <label class="form-label">섹션 선택 <span class="text-danger">*</span></label>
+                            <select class="form-select" id="columnSection" required>
+                                <option value="">섹션을 선택하세요</option>
+                                <option value="basic_info">기본정보</option>
+                                <option value="violation_info">위반정보</option>
+                                <option value="additional">추가기입정보</option>
+                            </select>
+                            <small class="text-muted">컬럼이 표시될 섹션을 선택하세요</small>
+                        </div>
+                        
+                        <div class="mb-3">
                             <label class="form-label">입력 타입 <span class="text-danger">*</span></label>
-                            <select class="form-select" id="columnType" onchange="toggleOptionsField(); toggleTableField(); checkTypeChange();">
+                            <select class="form-select" id="columnType" onchange="toggleOptionsField(); toggleTableField(); toggleSpanField(); checkTypeChange();">
                                 <option value="" disabled selected>타입을 선택하세요</option>
                                 <option value="text">텍스트</option>
                                 <option value="dropdown">드롭다운</option>
@@ -236,6 +420,33 @@
                             <div id="typeChangeWarning" class="alert alert-warning mt-2" style="display: none; font-size: 13px; padding: 8px 12px;">
                                 <i class="bi bi-exclamation-triangle"></i> 타입 변경 시 기존 데이터가 삭제될 수 있습니다.
                             </div>
+                        </div>
+                        
+                        <!-- 텍스트 타입일 때 span 설정 -->
+                        <div class="mb-3" id="spanField" style="display: none;">
+                            <label class="form-label">차지할 칸 수</label>
+                            <div class="btn-group w-100" role="group">
+                                <input type="radio" class="btn-check" name="columnSpan" id="span1" value="1" checked>
+                                <label class="btn btn-outline-primary" for="span1">
+                                    <i class="bi bi-square"></i> 1칸
+                                </label>
+                                
+                                <input type="radio" class="btn-check" name="columnSpan" id="span2" value="2">
+                                <label class="btn btn-outline-primary" for="span2">
+                                    <i class="bi bi-square"></i><i class="bi bi-square"></i> 2칸
+                                </label>
+                                
+                                <input type="radio" class="btn-check" name="columnSpan" id="span3" value="3">
+                                <label class="btn btn-outline-primary" for="span3">
+                                    <i class="bi bi-square"></i><i class="bi bi-square"></i><i class="bi bi-square"></i> 3칸
+                                </label>
+                                
+                                <input type="radio" class="btn-check" name="columnSpan" id="span4" value="4">
+                                <label class="btn btn-outline-primary" for="span4">
+                                    <i class="bi bi-square-fill"></i> 전체 너비 (4칸)
+                                </label>
+                            </div>
+                            <small class="text-muted">텍스트 필드가 차지할 너비를 선택하세요</small>
                         </div>
                         
                         <!-- 테이블 설정 영역 -->
@@ -358,6 +569,9 @@
 <script>
 let columns = [];
 let pendingColumns = []; // 모든 변경사항을 담는 단순 배열
+let sections = {{ sections | tojson | safe }};  // 섹션 정보
+let originalSections = JSON.parse(JSON.stringify({{ sections | tojson | safe }}));  // 원본 섹션 정보 보관
+let sectionChanges = {};  // 섹션 변경사항 추적
 let editingId = null;
         
         // 컬럼명 실시간 유효성 검사
@@ -411,9 +625,208 @@ let editingId = null;
             document.body.style.removeProperty('overflow');
             document.body.style.removeProperty('padding-right');
             
+            // 섹션 렌더링
+            renderSections();
+            
             // 컬럼 목록 로드
             loadColumns();
         };
+        
+        // 섹션 렌더링 함수
+        function renderSections() {
+            const container = document.getElementById('sections-container');
+            container.innerHTML = '';
+            
+            sections.forEach(section => {
+                const sectionDiv = document.createElement('div');
+                sectionDiv.className = 'tab-section';
+                sectionDiv.dataset.sectionKey = section.section_key;
+                sectionDiv.innerHTML = `
+                    <div class="tab-section-header ${section.section_key}">
+                        <span class="section-title" ondblclick="enableSectionEdit(${section.id}, this)">
+                            ${section.section_name}
+                        </span>
+                        <small style="margin-left: 10px; color: #999;">(더블클릭으로 이름 변경)</small>
+                    </div>
+                    <div class="columns-grid" id="${section.section_key}-columns">
+                        <!-- 동적으로 로드됨 -->
+                    </div>
+                `;
+                container.appendChild(sectionDiv);
+            });
+        }
+        
+        // 섹션명 편집 활성화
+        function enableSectionEdit(sectionId, element) {
+            // 이미 편집 중인 경우 무시
+            if (element.tagName === 'INPUT') {
+                return;
+            }
+            
+            const currentName = element.textContent.trim();
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'form-control form-control-sm d-inline-block w-auto';
+            input.value = currentName;
+            input.dataset.sectionId = sectionId;
+            input.dataset.originalName = currentName;
+            
+            // blur 이벤트로 저장
+            input.onblur = function() {
+                saveSectionName(sectionId, this.value, this);
+            };
+            
+            // 키보드 이벤트
+            input.onkeydown = function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.blur();
+                } else if (e.key === 'Escape') {
+                    // ESC 키로 취소
+                    this.value = this.dataset.originalName;
+                    this.blur();
+                }
+            };
+            
+            element.parentNode.replaceChild(input, element);
+            input.focus();
+            input.select();
+        }
+        
+        // 섹션명 저장
+        function saveSectionName(sectionId, newName, inputElement) {
+            // 트림된 이름
+            newName = newName.trim();
+            const originalName = inputElement.dataset.originalName;
+            
+            // 비어있거나 변경사항이 없으면 원래대로
+            if (!newName || newName === originalName) {
+                const span = document.createElement('span');
+                span.className = 'section-title';
+                span.ondblclick = function() { enableSectionEdit(sectionId, this); };
+                span.textContent = originalName || '이름없음';
+                inputElement.parentNode.replaceChild(span, inputElement);
+                return;
+            }
+            
+            // 섹션 변경사항 추적
+            const originalSection = originalSections.find(s => s.id === sectionId);
+            if (originalSection && originalSection.section_name !== newName) {
+                sectionChanges[sectionId] = {
+                    id: sectionId,
+                    section_name: newName,
+                    original_name: originalSection.section_name
+                };
+            } else if (!originalSection) {
+                // 새로 추가된 섹션
+                sectionChanges[sectionId] = {
+                    id: sectionId,
+                    section_name: newName,
+                    is_new: true
+                };
+            }
+            
+            // 로컬 섹션 정보 업데이트
+            const section = sections.find(s => s.id === sectionId);
+            if (section) {
+                section.section_name = newName;
+            }
+            
+            // UI 업데이트 - span으로 교체
+            const span = document.createElement('span');
+            span.className = 'section-title';
+            span.ondblclick = function() { enableSectionEdit(sectionId, this); };
+            span.textContent = newName;
+            
+            inputElement.parentNode.replaceChild(span, inputElement);
+            
+            // 성공 메시지
+            console.log(`섹션명이 '${newName}'으로 변경되었습니다. (저장 대기중)`);
+        }
+        
+        // 새 섹션 추가 모달 표시
+        function showAddSectionModal() {
+            const modalHtml = `
+                <div class="modal fade" id="sectionModal" tabindex="-1">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">새 섹션 추가</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="mb-3">
+                                    <label class="form-label">섹션명 <span class="text-danger">*</span></label>
+                                    <input type="text" class="form-control" id="newSectionName" placeholder="예: 안전조치사항">
+                                    <small class="text-muted">이 섹션의 제목을 입력하세요</small>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                                <button type="button" class="btn btn-primary" onclick="addNewSection()">추가</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // 기존 모달 제거
+            const existingModal = document.getElementById('sectionModal');
+            if (existingModal) {
+                existingModal.remove();
+            }
+            
+            // 모달 추가
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            const modal = new bootstrap.Modal(document.getElementById('sectionModal'));
+            modal.show();
+        }
+        
+        // 새 섹션 추가
+        function addNewSection() {
+            const sectionName = document.getElementById('newSectionName').value.trim();
+            
+            if (!sectionName) {
+                alert('섹션명을 입력해주세요.');
+                return;
+            }
+            
+            fetch('/api/safety-instruction-sections', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ section_name: sectionName })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // 새 섹션 정보 추가
+                    sections.push({
+                        id: data.section_id,
+                        section_key: data.section_key,
+                        section_name: sectionName,
+                        section_order: sections.length + 1
+                    });
+                    
+                    // UI 다시 렌더링
+                    renderSections();
+                    loadColumns();
+                    
+                    // 모달 닫기
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('sectionModal'));
+                    modal.hide();
+                    
+                    alert('새 섹션이 추가되었습니다.');
+                } else {
+                    alert('섹션 추가 실패: ' + (data.error || '알 수 없는 오류'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('섹션 추가 중 오류가 발생했습니다.');
+            });
+        }
         
         function loadColumns() {
             fetch('/api/safety-instruction-columns')
@@ -439,6 +852,11 @@ let editingId = null;
                         if (col.table_type) column._tableType = col.table_type;
                         if (col.table_name) column._tableName = col.table_name;
                         
+                        // column_span이 없으면 기본값 1 설정
+                        if (!column.column_span && column.column_type === 'text') {
+                            column.column_span = 1;
+                        }
+                        
                         return column;
                     });
                     
@@ -452,20 +870,43 @@ let editingId = null;
                 });
         }
         
+        // Sortable 인스턴스를 저장할 객체
+        let sortableInstances = {};
+        
         function renderColumns() {
-            const container = document.getElementById('columnList');
+            // 기존 Sortable 인스턴스 정리
+            Object.values(sortableInstances).forEach(instance => {
+                if (instance && instance.destroy) {
+                    instance.destroy();
+                }
+            });
+            sortableInstances = {};
+            
+            // 각 섹션별로 컬럼 렌더링
+            sections.forEach(section => {
+                const sectionColumns = pendingColumns
+                    .filter(c => !c._deleted && c.tab === section.section_key)
+                    .sort((a, b) => a.column_order - b.column_order);
+                
+                // 섹션 컨테이너 ID 생성
+                const containerId = `${section.section_key}-columns`;
+                renderSection(containerId, sectionColumns);
+            });
+        }
+        
+        function renderSection(containerId, columns) {
+            const container = document.getElementById(containerId);
             container.innerHTML = '';
             
-            pendingColumns.forEach((column, index) => {
-                // 삭제된 컬럼은 표시하지 않음
-                if (column._deleted) return;
-                
+            columns.forEach((column, index) => {
                 const card = document.createElement('div');
-                // 비활성 컬럼에 투명도 추가
-                const inactiveClass = !column.is_active ? 'inactive-column' : '';
+                const inactiveClass = !column.is_active ? 'inactive' : '';
                 const deletedClass = column._toDelete ? 'to-delete' : '';
-                card.className = `column-card d-flex align-items-center ${inactiveClass} ${deletedClass}`;
+                // span 클래스 추가 (텍스트 타입일 때만)
+                const spanClass = (column.column_type === 'text' && column.column_span) ? `span-${column.column_span}` : '';
+                card.className = `column-card-small ${inactiveClass} ${deletedClass} ${spanClass}`;
                 card.dataset.id = column.id;
+                card.dataset.tab = column.tab || 'additional';
                 
                 // 상태 배지 결정 (삭제예정은 배지 표시 안함)
                 let statusBadge = '';
@@ -477,47 +918,34 @@ let editingId = null;
                     }
                 }
                 
+                // 섹션 내에서의 순서 번호
+                const sectionColumns = columns;
+                const orderInSection = sectionColumns.indexOf(column) + 1;
+                
                 card.innerHTML = `
-                    <span class="column-order">${index + 1}</span>
-                    <div class="column-info">
+                    <div class="column-number">${orderInSection}</div>
+                    <div class="column-content">
                         <div class="column-name">
                             ${column.column_name}
                             ${statusBadge}
-                            ${!column.is_active ? '<span class="badge bg-secondary ms-2">비활성</span>' : ''}
                         </div>
-                        <div class="column-meta">
-                            <span class="column-type type-${column.column_type}">${getTypeLabel(column.column_type)}</span>
-                            <span class="text-muted">키: ${column.column_key}</span>
-                            ${column.dropdown_options ? (() => {
-                                try {
-                                    let optCount = 0;
-                                    if (typeof column.dropdown_options === 'string') {
-                                        try {
-                                            const parsed = JSON.parse(column.dropdown_options);
-                                            optCount = Array.isArray(parsed) ? parsed.length : 1;
-                                        } catch (e) {
-                                            optCount = 1;
-                                        }
-                                    } else if (Array.isArray(column.dropdown_options)) {
-                                        optCount = column.dropdown_options.length;
-                                    }
-                                    return ``;
-                                } catch (e) {
-                                    return '';
-                                }
-                            })() : ''}
-                        </div>
-                    </div>
-                    <div class="column-actions">
-                        <button class="btn-icon btn-edit" onclick="editColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''}>
-                            <i class="bi bi-pencil"></i>
-                        </button>
-                        <button class="btn-icon btn-delete" onclick="deleteColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''}>
-                            <i class="bi bi-trash"></i>
-                        </button>
-                        <div class="form-check form-switch toggle-active">
-                            <input class="form-check-input" type="checkbox" ${column.is_active ? 'checked' : ''} 
-                                onchange="toggleActive('${column.id}', this.checked)" ${column._toDelete ? 'disabled' : ''}>
+                        <div class="column-key">${column.column_key}</div>
+                        <div class="column-controls">
+                            <span class="column-type-badge">${getTypeLabel(column.column_type)}</span>
+                            <div style="display: flex; gap: 5px;">
+                                <button class="btn btn-sm btn-link p-0" onclick="editColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''}>
+                                    <i class="bi bi-pencil" style="font-size: 14px;"></i>
+                                </button>
+                                <button class="btn btn-sm btn-link p-0 text-danger" onclick="deleteColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''}>
+                                    <i class="bi bi-trash" style="font-size: 14px;"></i>
+                                </button>
+                                <div class="form-check form-switch" style="margin: 0;">
+                                    <input class="form-check-input" type="checkbox" style="width: 30px; height: 16px;" 
+                                           ${column.is_active ? 'checked' : ''} 
+                                           onchange="toggleActive('${column.id}', this.checked)" 
+                                           ${column._toDelete ? 'disabled' : ''}>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 `;
@@ -549,14 +977,66 @@ let editingId = null;
                 container.appendChild(card);
             });
             
-            // Sortable 초기화
-            new Sortable(container, {
-                animation: 150,
-                ghostClass: 'dragging',
-                onEnd: function(evt) {
-                    updateOrder();
-                }
-            });
+            // Sortable 초기화 (섹션 간 이동 및 섹션 내 순서 변경 가능)
+            if (window.Sortable) {
+                sortableInstances[containerId] = new Sortable(container, {
+                    group: 'shared', // 모든 섹션이 같은 그룹
+                    animation: 150,
+                    ghostClass: 'dragging',
+                    forceFallback: true,
+                    fallbackOnBody: true, // 성능 개선
+                    swapThreshold: 0.65, // 그리드 레이아웃 성능 개선
+                    filter: '.btn, .form-check-input', // 버튼과 스위치는 드래그 제외
+                    preventOnFilter: false, // 필터된 요소 클릭 허용
+                    onEnd: function(evt) {
+                        const movedId = evt.item.dataset.id;
+                        
+                        // 탭 이름 정규화 함수
+                        const normalizeTab = (containerId) => {
+                            const tab = containerId.replace('-columns', '').replace('-', '_');
+                            return tab === 'additional_info' ? 'additional' : tab;
+                        };
+                        
+                        const oldTab = normalizeTab(evt.from.id);
+                        const newTab = normalizeTab(evt.to.id);
+                        
+                        const column = pendingColumns.find(c => String(c.id) === String(movedId));
+                        if (column) {
+                            // 탭이 변경된 경우
+                            if (oldTab !== newTab) {
+                                column.tab = newTab;
+                                if (!column._isNew) {
+                                    column._modified = true;
+                                }
+                                console.log(`드래그로 ${column.column_name}을(를) ${newTab} 탭으로 이동`);
+                            }
+                            
+                            // 같은 섹션 내에서 순서 변경 - 개선된 로직
+                            const allCards = evt.to.querySelectorAll('.column-card-small');
+                            
+                            // 해당 탭의 모든 컬럼들의 순서를 DOM 순서대로 업데이트
+                            let newOrder = 0;
+                            allCards.forEach((card) => {
+                                const cardId = card.dataset.id;
+                                const cardColumn = pendingColumns.find(c => String(c.id) === String(cardId));
+                                if (cardColumn) {
+                                    // DOM 순서대로 column_order 재할당
+                                    if (cardColumn.column_order !== newOrder) {
+                                        cardColumn.column_order = newOrder;
+                                        if (!cardColumn._isNew) {
+                                            cardColumn._modified = true;
+                                        }
+                                    }
+                                    newOrder++;
+                                }
+                            });
+                            
+                            console.log('순서 업데이트 완료');
+                            renderColumns(); // 다시 렌더링
+                        }
+                    }
+                });
+            }
         }
         
         function getTypeLabel(type) {
@@ -577,7 +1057,7 @@ let editingId = null;
             return labels[type] || type;
         }
         
-        function showAddModal() {
+        function showAddModal(defaultSection = '') {
             editingId = null;
             document.getElementById('modalTitle').textContent = '컬럼 추가';
             document.getElementById('columnForm').reset();
@@ -587,6 +1067,10 @@ let editingId = null;
             const typeSelect = document.getElementById('columnType');
             typeSelect.value = '';  // placeholder 옵션으로 설정
             typeSelect.dataset.originalType = '';
+            
+            // 섹션 선택 초기화
+            const sectionSelect = document.getElementById('columnSection');
+            sectionSelect.value = defaultSection;
             
             // 테이블 설정 초기화
             document.getElementById('selectedTableDisplay').value = '';
@@ -598,8 +1082,11 @@ let editingId = null;
             document.getElementById('isActive').checked = true;
             document.getElementById('typeChangeWarning').style.display = 'none';
             document.getElementById('dropdownOptions').value = '';  // 드롭다운 옵션 초기화
+            // span 초기화
+            document.getElementById('span1').checked = true;
             toggleOptionsField();
             toggleTableField();
+            toggleSpanField();
             
             // 기존 모달 인스턴스가 있으면 재사용, 없으면 새로 생성
             const modalElement = document.getElementById('columnModal');
@@ -703,6 +1190,17 @@ let editingId = null;
             document.getElementById('columnType').dataset.originalType = column.column_type;
             document.getElementById('isActive').checked = column.is_active;
             
+            // 섹션 값 설정
+            document.getElementById('columnSection').value = column.tab || 'additional';
+            
+            // 텍스트 타입이고 span 값이 있으면 설정
+            if (column.column_type === 'text' && column.column_span) {
+                const spanRadio = document.getElementById(`span${column.column_span}`);
+                if (spanRadio) {
+                    spanRadio.checked = true;
+                }
+            }
+            
             // 드롭다운 타입일 때 옵션 처리
             if (column.column_type === 'dropdown') {
                 // 미리보기 로드
@@ -740,6 +1238,7 @@ let editingId = null;
             }
             
             toggleOptionsField();
+            toggleSpanField();
             
             // linked 타입이 아닌 경우에만 toggleTableField 호출
             if (column.column_type !== 'linked_text' && column.column_type !== 'linked_dept') {
@@ -766,6 +1265,12 @@ let editingId = null;
             const type = document.getElementById('columnType').value;
             document.getElementById('tableConfigField').style.display = 
                 type === 'table' ? 'block' : 'none';
+        }
+        
+        function toggleSpanField() {
+            const type = document.getElementById('columnType').value;
+            document.getElementById('spanField').style.display = 
+                type === 'text' ? 'block' : 'none';
         }
         
         function updateMappingFields() {
@@ -868,12 +1373,28 @@ let editingId = null;
             const columnType = columnTypeElement.value;
             const originalType = columnTypeElement.dataset.originalType;
             const isActive = document.getElementById('isActive').checked;
+            const selectedSection = document.getElementById('columnSection').value;
+            
+            // 텍스트 타입일 때 span 값 가져오기
+            let columnSpan = 1;
+            if (columnType === 'text') {
+                const selectedSpan = document.querySelector('input[name="columnSpan"]:checked');
+                if (selectedSpan) {
+                    columnSpan = parseInt(selectedSpan.value);
+                }
+            }
             
             // 디버깅: disabled 상태에서도 값이 제대로 읽히는지 확인
             console.log('Column Type:', columnType, 'Disabled:', columnTypeElement.disabled);
             
             if (!columnName || !columnKey) {
                 alert('컬럼명과 컬럼 키는 필수 입력 항목입니다.');
+                return;
+            }
+            
+            if (!selectedSection) {
+                alert('섹션을 선택해주세요.');
+                document.getElementById('columnSection').focus();
                 return;
             }
             
@@ -937,6 +1458,8 @@ let editingId = null;
                         column_name: columnName,
                         column_key: columnKey,
                         column_type: columnType,
+                        column_span: columnSpan, // span 정보 추가
+                        tab: selectedSection, // 섹션 정보 추가
                         is_active: isActive,
                         dropdown_options: dropdownOptions,
                         _modified: !existingColumn._isNew, // 새 컬럼이 아니면 수정됨 표시
@@ -963,7 +1486,9 @@ let editingId = null;
                     }
                     
                     // 여러 개의 컬럼 생성
-                    const baseOrder = pendingColumns.length;
+                    // 선택된 섹션의 마지막 순서 계산
+                    const sectionColumns = pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete);
+                    const baseOrder = sectionColumns.length > 0 ? Math.max(...sectionColumns.map(c => c.column_order)) + 1 : 0;
                     const createdColumns = [];
                     
                     config.columns.forEach((col, index) => {
@@ -976,9 +1501,10 @@ let editingId = null;
                             column_name: colName,
                             column_key: colKey,
                             column_type: col.type,
+                            tab: selectedSection, // 섹션 정보 추가
                             is_active: isActive,
                             dropdown_options: col.type === 'dropdown' ? ['옵션1', '옵션2', '옵션3'] : null,
-                            column_order: baseOrder + index,
+                            column_order: baseOrder + index, // 섹션 내 순서로 설정
                             _isNew: true,
                             _tableGroup: columnKey, // 그룹 표시용
                             _tableType: selectedTable, // 테이블 타입 저장
@@ -996,14 +1522,21 @@ let editingId = null;
                 } else {
                     // 일반 타입
                     const newId = Date.now();
+                    
+                    // 선택된 섹션의 마지막 순서 계산
+                    const sectionColumns = pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete);
+                    const maxOrderInSection = sectionColumns.length > 0 ? Math.max(...sectionColumns.map(c => c.column_order)) : -1;
+                    
                     const newColumn = {
                         id: newId,
                         column_name: columnName,
                         column_key: columnKey,
                         column_type: columnType,
+                        column_span: columnSpan, // span 정보 추가
+                        tab: selectedSection, // 섹션 정보 추가
                         is_active: isActive,
                         dropdown_options: dropdownOptions,
-                        column_order: pendingColumns.length,
+                        column_order: maxOrderInSection + 1, // 섹션 내 순서로 설정
                         _isNew: true
                     };
                     pendingColumns.push(newColumn);
@@ -1090,6 +1623,17 @@ let editingId = null;
             }
         }
         
+        function changeTab(id, newTab) {
+            const index = pendingColumns.findIndex(c => String(c.id) === String(id));
+            if (index !== -1 && !pendingColumns[index]._toDelete) {
+                pendingColumns[index].tab = newTab;
+                if (!pendingColumns[index]._isNew) {
+                    pendingColumns[index]._modified = true;
+                }
+                console.log(`컬럼 ${pendingColumns[index].column_name}의 탭을 ${newTab}로 변경`);
+            }
+        }
+        
         function updateOrder() {
             const cards = document.querySelectorAll('.column-card');
             const newOrder = [];
@@ -1118,9 +1662,10 @@ let editingId = null;
         
         async function saveAllChanges() {
             // 변경사항이 있는지 확인
-            const hasChanges = pendingColumns.some(c => c._isNew || c._modified || c._toDelete);
+            const hasColumnChanges = pendingColumns.some(c => c._isNew || c._modified || c._toDelete);
+            const hasSectionChanges = Object.keys(sectionChanges).length > 0;
             
-            if (!hasChanges) {
+            if (!hasColumnChanges && !hasSectionChanges) {
                 alert('변경사항이 없습니다.');
                 return;
             }
@@ -1133,6 +1678,35 @@ let editingId = null;
                 let successCount = 0;
                 let errorCount = 0;
                 
+                // 먼저 섹션 변경사항 저장
+                for (const [sectionId, change] of Object.entries(sectionChanges)) {
+                    if (!change.is_new) {
+                        // 기존 섹션 이름 변경
+                        const response = await fetch(`/api/safety-instruction-sections/${sectionId}`, {
+                            method: 'PUT',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ section_name: change.section_name })
+                        });
+                        
+                        if (response.ok) {
+                            successCount++;
+                            console.log(`섹션 '${change.section_name}' 저장 성공`);
+                            // 원본 섹션 정보 업데이트
+                            const originalSection = originalSections.find(s => s.id === parseInt(sectionId));
+                            if (originalSection) {
+                                originalSection.section_name = change.section_name;
+                            }
+                        } else {
+                            errorCount++;
+                            console.error(`섹션 '${change.section_name}' 저장 실패`);
+                        }
+                    }
+                }
+                
+                // 섹션 변경사항 초기화
+                sectionChanges = {};
+                
+                // 컬럼 변경사항 처리
                 for (const column of pendingColumns) {
                     if (column._toDelete && !column._isNew) {
                         // 기존 컬럼 삭제 처리
@@ -1156,9 +1730,11 @@ let editingId = null;
                             column_name: column.column_name,
                             column_key: column.column_key,
                             column_type: column.column_type,
+                            column_span: column.column_span || 1, // span 정보 추가
                             is_active: column.is_active ? 1 : 0,
                             dropdown_options: column.dropdown_options,
                             column_order: column.column_order,
+                            tab: column.tab || 'additional',  // 탭 정보 추가 (기본값: additional)
                             // 테이블 정보도 저장 (메타데이터로)
                             table_group: column._tableGroup || null,
                             table_type: column._tableType || null,
@@ -1182,9 +1758,11 @@ let editingId = null;
                             column_name: column.column_name,
                             column_key: column.column_key,
                             column_type: column.column_type,
+                            column_span: column.column_span || 1, // span 정보 추가
                             is_active: column.is_active ? 1 : 0,
                             dropdown_options: column.dropdown_options,
                             column_order: column.column_order,
+                            tab: column.tab || 'additional',  // 탭 정보 추가 (기본값: additional)
                             // 테이블 정보도 저장 (메타데이터로)
                             table_group: column._tableGroup || null,
                             table_type: column._tableType || null,
@@ -1280,7 +1858,7 @@ let editingId = null;
             const top = (window.screen.height - height) / 2;
             
             const codeEditorWindow = window.open(
-                `/admin/safety-instruction-columns-simplified?column_key=${columnKey}&embedded=true`,
+                `/admin/safety-instruction-codes?column_key=${columnKey}&embedded=true`,
                 'codeEditor',
                 `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
             );
@@ -1535,4 +2113,8 @@ let editingId = null;
             }
         });
 </script>
+
+<!-- Sortable.js CDN 추가 -->
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+
 {% endblock %}

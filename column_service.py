@@ -70,6 +70,18 @@ class ColumnConfigService:
                 ADD COLUMN custom_data TEXT DEFAULT '{{}}'
             """)
         
+        # column_span 컬럼 추가 (없으면)
+        cursor.execute(f"""
+            SELECT COUNT(*) FROM pragma_table_info('{self.table_name}') 
+            WHERE name='column_span'
+        """)
+        
+        if cursor.fetchone()[0] == 0:
+            cursor.execute(f"""
+                ALTER TABLE {self.table_name} 
+                ADD COLUMN column_span INTEGER DEFAULT 1
+            """)
+        
         conn.commit()
         conn.close()
     
@@ -85,9 +97,14 @@ class ColumnConfigService:
         """
         conn = get_db_connection(self.db_path, row_factory=True)
         
+        # 쿼리 구성 - is_deleted 컬럼이 이제 모든 테이블에 존재
         query = f"SELECT * FROM {self.table_name}"
+        conditions = ["(is_deleted = 0 OR is_deleted IS NULL)"]  # 삭제되지 않은 것만
+        
         if active_only:
-            query += " WHERE is_active = 1"
+            conditions.append("is_active = 1")
+        
+        query += " WHERE " + " AND ".join(conditions)
         query += " ORDER BY column_order, id"
         
         columns = conn.execute(query).fetchall()
@@ -161,6 +178,38 @@ class ColumnConfigService:
                 max_num = cursor.fetchone()[0] or 10
                 column_key = f"column{max_num + 1}"
             
+            # 같은 column_key의 삭제된 컬럼이 있는지 확인 (복구 가능)
+            cursor.execute(
+                f"SELECT id FROM {self.table_name} WHERE column_key = ? AND is_deleted = 1",
+                (column_key,)
+            )
+            deleted_column = cursor.fetchone()
+            
+            if deleted_column:
+                # 삭제된 컬럼 복구
+                column_id = deleted_column[0]
+                cursor.execute(f"""
+                    UPDATE {self.table_name}
+                    SET column_name = ?, column_type = ?, is_active = 1, is_deleted = 0,
+                        dropdown_values = ?, column_span = ?, tab = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (
+                    column_data['column_name'],
+                    column_data.get('column_type', 'text'),
+                    json.dumps(column_data.get('dropdown_values', []), ensure_ascii=False) if column_data.get('dropdown_values') else None,
+                    column_data.get('column_span', 1),
+                    column_data.get('tab', 'additional'),
+                    column_id
+                ))
+                
+                conn.commit()
+                logging.info(f"삭제된 컬럼 복구: {column_key}")
+                return {
+                    'success': True, 
+                    'message': '이전에 삭제된 컬럼이 복구되었습니다.',
+                    'id': column_id
+                }
+            
             # 최대 순서 조회
             cursor.execute(f"SELECT MAX(column_order) FROM {self.table_name}")
             max_order = cursor.fetchone()[0] or 0
@@ -174,8 +223,8 @@ class ColumnConfigService:
             cursor.execute(f"""
                 INSERT INTO {self.table_name} 
                 (column_key, column_name, column_type, column_order, is_active, 
-                 is_required, dropdown_values)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                 is_required, dropdown_values, column_span, tab)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 column_key,
                 column_data['column_name'],
@@ -183,7 +232,9 @@ class ColumnConfigService:
                 max_order + 1,
                 column_data.get('is_active', 1),
                 column_data.get('is_required', 0),
-                dropdown_values
+                dropdown_values,
+                column_data.get('column_span', 1),  # column_span 추가
+                column_data.get('tab', 'additional')  # tab 필드 추가 (기본값: additional)
             ))
             
             column_id = cursor.lastrowid
@@ -232,6 +283,19 @@ class ColumnConfigService:
                 conn.rollback()
                 return {'success': False, 'message': '컬럼을 찾을 수 없습니다.'}
             
+            # is_deleted 플래그만 업데이트하는 경우 (soft delete/복구)
+            if 'is_deleted' in column_data and len(column_data) == 1:
+                cursor.execute(f"""
+                    UPDATE {self.table_name}
+                    SET is_deleted = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (column_data['is_deleted'], column_id))
+                
+                conn.commit()
+                action = "삭제" if column_data['is_deleted'] == 1 else "복구"
+                logging.info(f"컬럼 {action} 처리: {column_id}, is_deleted={column_data['is_deleted']}")
+                return {'success': True, 'message': f'컬럼이 {action} 처리되었습니다.'}
+            
             # dropdown_values JSON 변환
             if 'dropdown_values' in column_data:
                 dropdown_values = column_data['dropdown_values']
@@ -243,7 +307,7 @@ class ColumnConfigService:
             update_values = []
             
             allowed_fields = ['column_name', 'column_type', 'is_active', 
-                             'is_required', 'dropdown_values', 'column_order']
+                             'is_required', 'dropdown_values', 'column_order', 'column_span', 'tab']
             
             for field in allowed_fields:
                 if field in column_data:
@@ -274,7 +338,7 @@ class ColumnConfigService:
     
     def delete_column(self, column_id: int) -> Dict[str, Any]:
         """
-        컬럼 삭제 (비활성화)
+        컬럼 삭제 (소프트 삭제)
         
         Args:
             column_id: 컬럼 ID
@@ -289,10 +353,10 @@ class ColumnConfigService:
             # 트랜잭션 시작
             conn.execute("BEGIN IMMEDIATE")
             
-            # 소프트 삭제 (비활성화)
+            # 소프트 삭제 (is_deleted = 1로 설정)
             cursor.execute(f"""
                 UPDATE {self.table_name} 
-                SET is_active = 0, updated_at = CURRENT_TIMESTAMP 
+                SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP 
                 WHERE id = ?
             """, (column_id,))
             
@@ -309,9 +373,9 @@ class ColumnConfigService:
         finally:
             conn.close()
         
-        logging.info(f"컬럼 비활성화됨: ID {column_id}")
+        logging.info(f"컬럼 삭제됨 (soft delete): ID {column_id}")
         
-        return {'success': True, 'message': '컬럼이 비활성화되었습니다.'}
+        return {'success': True, 'message': '컬럼이 삭제되었습니다.'}
     
     def update_columns_order(self, order_data: List[Dict[str, int]]) -> Dict[str, Any]:
         """

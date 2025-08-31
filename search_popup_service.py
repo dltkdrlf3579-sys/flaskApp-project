@@ -35,6 +35,7 @@ class SearchPopupService:
         # 기본 검색 타입별 설정 (실시간 쿼리 매핑)
         self.search_configs = {
             'company': {
+                'table': 'partners_cache',  # 로컬 캐시 테이블 사용
                 'query_key': 'PARTNERS_QUERY',  # config.ini의 쿼리 키
                 'search_fields': [
                     {'field': 'company_name', 'label': '협력사명'},
@@ -489,6 +490,16 @@ class SearchPopupService:
                 'config': config,
                 'error': str(e)
             }
+        
+        # person 타입의 경우 필드명 매핑 (기존 페이지들과의 호환성을 위해)
+        if search_type == 'person':
+            for result in results:
+                # employee_name -> name 매핑
+                if 'employee_name' in result:
+                    result['name'] = result['employee_name']
+                # department_name -> department 매핑
+                if 'department_name' in result:
+                    result['department'] = result['department_name']
         
         return {
             'results': results,

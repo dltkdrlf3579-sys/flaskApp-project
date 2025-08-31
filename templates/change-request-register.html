@@ -708,9 +708,10 @@ function saveChangeRequest() {
     // 동적 필드에서 데이터 수집
     const dynamicData = {};
     const dynamicInputs = document.querySelectorAll('.dynamic-input[data-column-key], .dynamic-input-hidden[data-column-key]');
+    
     dynamicInputs.forEach(input => {
         const key = input.dataset.columnKey;
-        // change_reason은 별도 탭에서 처리하므로 제외
+        // change_reason은 별도 탭에서 처리하므로 제외하지만, 필수 필드는 포함
         if (key && key !== 'change_reason') {
             // disabled select의 경우 hidden input 값 사용
             if (input.classList.contains('dynamic-input-hidden') || !input.disabled) {
@@ -722,6 +723,10 @@ function saveChangeRequest() {
     // 변경사유 텍스트 가져오기
     const changeReasonElement = document.getElementById('change-reason-detail');
     const changeReasonText = changeReasonElement ? changeReasonElement.innerText.trim() : '';
+    
+    // 필수 필드 추가 (동적 컬럼에서 수집)
+    // requester_name, requester_department, company_name, business_number 등은
+    // 이미 동적 컬럼으로 처리되므로 dynamicData에 포함되어 있음
     
     // 상태는 항상 'requested' (요청)으로 고정 - 등록 페이지이므로
     dynamicData['status'] = 'requested';
@@ -740,6 +745,7 @@ function saveChangeRequest() {
     
     // FormData 생성
     const formData = new FormData();
+    console.log('전송할 데이터:', dynamicData);  // 디버깅용
     formData.append('data', JSON.stringify(dynamicData));
     formData.append('attachment_data', JSON.stringify(attachments));
     
@@ -807,7 +813,6 @@ function handlePersonSelection(selectedItem) {
     
     // 해당 컬럼의 input 찾기
     const input = document.querySelector(`input[data-column-key="${window.currentColumnKey}"]`);
-    console.log('Found input:', input); // 디버깅용
     
     if (input) {
         // 담당자 정보 표시
@@ -846,8 +851,6 @@ function handlePersonSelection(selectedItem) {
             deptInput.dataset.value = department;
         }
         
-        console.log('Person name set to:', name); // 디버깅용
-        console.log('Department set to:', department); // 디버깅용
         
         // 연관된 부서 필드 자동 채우기
         // 의뢰자를 선택하면 의뢰자 부서를 자동으로 채움
@@ -913,15 +916,18 @@ function handleCompanySelection(selectedItem) {
     
     // 해당 컬럼의 input 찾기
     const input = document.querySelector(`input[data-column-key="${window.currentColumnKey}"]`);
-    console.log('Found input:', input); // 디버깅용
+    console.log('🔍 찾은 input:', input, 'columnKey:', window.currentColumnKey);
     
     if (input) {
         // 업체 정보 표시
         const companyName = selectedItem.company_name || selectedItem.업체명 || '';
         const businessNumber = selectedItem.company_business_number || selectedItem.business_number || selectedItem.사업자번호 || '';
         
+        console.log('🏢 선택된 업체:', {companyName, businessNumber});
+        
         // 협력사명 필드에는 협력사명만 표시
         input.value = companyName;
+        console.log('✅ input.value 설정 완료:', companyName);
         
         // 실제 저장할 데이터
         input.dataset.companyData = JSON.stringify(selectedItem);

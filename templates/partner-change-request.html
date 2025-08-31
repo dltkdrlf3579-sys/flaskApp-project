@@ -223,11 +223,20 @@
     font-style: italic;
 }
 
+/* 체크박스 컬럼 전용 스타일 */
+.checkbox-column {
+    width: 30px !important;
+    min-width: 30px !important;
+    max-width: 30px !important;
+    padding: 4px !important;
+    text-align: center !important;
+}
+
 /* 상태 뱃지 스타일 */
 .status-badge {
-    padding: 4px 8px;
+    padding: 6px 12px;
     border-radius: 12px;
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 600;
     white-space: nowrap;
 }
@@ -320,10 +329,12 @@
         <table class="data-table">
             <thead>
                 <tr>
-                    <th style="width: 40px;"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
-                    <th class="fixed-col">No</th>
+                    <th class="checkbox-column"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
+                    <th class="fixed-col" style="width: 45px;">No</th>
                     <th>요청번호</th>
                     <th>등록일</th>
+                    <th>협력사명</th>
+                    <th>사업자번호</th>
                     <th>변경유형</th>
                     <th>현재값</th>
                     <th>변경값</th>
@@ -336,10 +347,10 @@
             <tbody>
                 {% for item in change_requests %}
                 <tr>
-                    <td style="width: 40px;">
+                    <td class="checkbox-column">
                         <input type="checkbox" class="request-checkbox" value="{{ item.id }}" onchange="updateDeleteButton()">
                     </td>
-                    <td class="fixed-col" style="width: 60px;">
+                    <td class="fixed-col" style="width: 45px;">
                         {{ item.no }}
                     </td>
                     <td>
@@ -352,6 +363,8 @@
                         </a>
                     </td>
                     <td>{{ item.created_at or '-' }}</td>
+                    <td>{{ item.company_name or '-' }}</td>
+                    <td>{{ item.business_number or '-' }}</td>
                     <td>{{ item.change_type_label or item.change_type or '-' }}</td>
                     <td>{{ item.current_value or '-' }}</td>
                     <td>{{ item.new_value or '-' }}</td>
@@ -366,7 +379,7 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="11" class="no-data">검색 결과가 없습니다.</td>
+                    <td colspan="14" class="no-data">검색 결과가 없습니다.</td>
                 </tr>
                 {% endfor %}
             </tbody>

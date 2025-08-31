@@ -39,55 +39,95 @@
                         <div class="value">자동 생성됩니다</div>
                     </div>
                     <div class="info-cell">
+                        <label>등록일</label>
+                        <div class="value" id="report_date_display">자동 설정됩니다</div>
+                        <input type="hidden" id="report_date" value="">
+                    </div>
+                    <div class="info-cell info-cell-double">
                         <label>사고명</label>
                         <input type="text" id="accident_name" class="basic-input" placeholder="사고명 입력">
                     </div>
+                </div>
+                <div class="info-row">
                     <div class="info-cell">
                         <label>재해날짜</label>
                         <input type="date" id="accident_date" class="basic-input">
                     </div>
                     <div class="info-cell">
-                        <label>시간</label>
-                        <input type="time" id="accident_time" class="basic-input">
-                    </div>
-                    <div class="info-cell">
                         <label>사고등급</label>
                         <select id="accident_grade" class="basic-input">
                             <option value="">선택하세요</option>
-                            <option value="A급">A급</option>
-                            <option value="B급">B급</option>
-                            <option value="C급">C급</option>
-                            <option value="D급">D급</option>
-                            <option value="경미">경미</option>
+                            {% for opt in basic_options.get('accident_grade', []) %}
+                            <option value="{{ opt.option_code }}">{{ opt.option_value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="info-cell">
+                        <label>사고분류</label>
+                        <select id="major_category" class="basic-input">
+                            <option value="">선택하세요</option>
+                            {% for opt in basic_options.get('major_category', []) %}
+                            <option value="{{ opt.option_code }}">{{ opt.option_value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="info-cell">
+                        <label>재해유형</label>
+                        <select id="injury_type" class="basic-input">
+                            <option value="">선택하세요</option>
+                            {% for opt in basic_options.get('injury_type', []) %}
+                            <option value="{{ opt.option_code }}">{{ opt.option_value }}</option>
+                            {% endfor %}
                         </select>
                     </div>
                 </div>
                 <div class="info-row">
                     <div class="info-cell">
-                        <label>사고분류</label>
-                        <input type="text" id="accident_type" class="basic-input" placeholder="사고분류 입력">
-                    </div>
-                    <div class="info-cell">
-                        <label>재해유형</label>
-                        <input type="text" id="injury_type" class="basic-input" placeholder="재해유형 입력">
-                    </div>
-                    <div class="info-cell">
                         <label>재해형태</label>
-                        <input type="text" id="injury_form" class="basic-input" placeholder="재해형태 입력">
+                        <select id="injury_form" class="basic-input">
+                            <option value="">선택하세요</option>
+                            {% for opt in basic_options.get('injury_form', []) %}
+                            <option value="{{ opt.option_code }}">{{ opt.option_value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                     <div class="info-cell">
                         <label>사업장</label>
-                        <input type="text" id="workplace" class="basic-input" placeholder="사업장 입력">
+                        <select id="workplace" class="basic-input">
+                            <option value="">선택하세요</option>
+                            {% for opt in basic_options.get('workplace', []) %}
+                            <option value="{{ opt.option_code }}">{{ opt.option_value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="info-cell">
+                        <label>건물</label>
+                        <select id="building" class="basic-input">
+                            <option value="">선택하세요</option>
+                            {% for opt in basic_options.get('building', []) %}
+                            <option value="{{ opt.option_code }}">{{ opt.option_value }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="info-cell">
+                        <label>층</label>
+                        <select id="floor" class="basic-input">
+                            <option value="">선택하세요</option>
+                            {% for opt in basic_options.get('floor', []) %}
+                            <option value="{{ opt.option_code }}">{{ opt.option_value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                 </div>
                 <div class="info-row">
                     <div class="info-cell">
-                        <label>건물</label>
-                        <input type="text" id="building" class="basic-input" placeholder="건물 입력">
-                    </div>
-                    <div class="info-cell">
-                        <label>층</label>
-                        <input type="text" id="floor" class="basic-input" placeholder="층 입력">
+                        <label>상세위치</label>
+                        <select id="location_category" class="basic-input">
+                            <option value="">선택하세요</option>
+                            {% for opt in basic_options.get('location_category', []) %}
+                            <option value="{{ opt.option_code }}">{{ opt.option_value }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                     <div class="info-cell">
                         <label>세부위치</label>
@@ -105,24 +145,6 @@
                             <option value="토요일">토요일</option>
                             <option value="일요일">일요일</option>
                         </select>
-                    </div>
-                </div>
-                <div class="info-row">
-                    <div class="info-cell">
-                        <label>귀책협력사(1차)</label>
-                        <input type="text" id="responsible_company1" class="basic-input" placeholder="협력사명 입력">
-                    </div>
-                    <div class="info-cell">
-                        <label>귀책협력사(1차)사업자번호</label>
-                        <input type="text" id="responsible_company1_no" class="basic-input" placeholder="사업자번호 입력">
-                    </div>
-                    <div class="info-cell">
-                        <label>귀책협력사(2차)</label>
-                        <input type="text" id="responsible_company2" class="basic-input" placeholder="협력사명 입력">
-                    </div>
-                    <div class="info-cell">
-                        <label>귀책협력사(2차)사업자번호</label>
-                        <input type="text" id="responsible_company2_no" class="basic-input" placeholder="사업자번호 입력">
                     </div>
                 </div>
             </div>
@@ -861,20 +883,17 @@ function registerAccident() {
     const basicInfo = {
         accident_name: document.getElementById('accident_name')?.value || '',
         accident_date: document.getElementById('accident_date')?.value || '',
-        accident_time: document.getElementById('accident_time')?.value || '',
         accident_grade: document.getElementById('accident_grade')?.value || '',
-        accident_type: document.getElementById('accident_type')?.value || '',
+        major_category: document.getElementById('major_category')?.value || '',
         injury_type: document.getElementById('injury_type')?.value || '',
         injury_form: document.getElementById('injury_form')?.value || '',
         workplace: document.getElementById('workplace')?.value || '',
         building: document.getElementById('building')?.value || '',
         floor: document.getElementById('floor')?.value || '',
+        location_category: document.getElementById('location_category')?.value || '',
         location_detail: document.getElementById('location_detail')?.value || '',
         day_of_week: document.getElementById('day_of_week')?.value || '',
-        responsible_company1: document.getElementById('responsible_company1')?.value || '',
-        responsible_company1_no: document.getElementById('responsible_company1_no')?.value || '',
-        responsible_company2: document.getElementById('responsible_company2')?.value || '',
-        responsible_company2_no: document.getElementById('responsible_company2_no')?.value || ''
+        report_date: document.getElementById('report_date')?.value || ''
     };
     console.log('기본정보:', basicInfo);
     
@@ -1084,6 +1103,16 @@ function insertAtCursor(element) {
 
 // 페이지 로드시 초기화
 document.addEventListener('DOMContentLoaded', function() {
+    // 등록일을 오늘 날짜로 자동 설정 (한국 시간 기준)
+    const today = new Date();
+    const koreaOffset = 9 * 60; // 한국은 UTC+9
+    const utcTime = today.getTime() + (today.getTimezoneOffset() * 60000);
+    const koreaTime = new Date(utcTime + (koreaOffset * 60000));
+    const todayStr = koreaTime.toISOString().split('T')[0];
+    
+    document.getElementById('report_date').value = todayStr;
+    document.getElementById('report_date_display').textContent = todayStr;
+    
     updateFileCount();
 });
 </script>

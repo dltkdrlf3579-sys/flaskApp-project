@@ -50,7 +50,9 @@
 </div>
 
 <!-- 검색 버튼 영역 -->
-{{ render_search_buttons() }}
+<div class="search-buttons-section">
+    {{ render_search_buttons() }}
+</div>
 
 <!-- 목록 테이블 -->
 <div class="table-section">
@@ -59,8 +61,9 @@
         <table class="data-table">
             <thead>
                 <tr>
-                    <th style="width: 40px;"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
-                    <th class="fixed-col">사고명</th>
+                    <th class="checkbox-column"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
+                    <th class="fixed-col" style="width: 45px;">No</th>
+                    <th>사고명</th>
                     <th>사고번호</th>
                     <th>재해날짜</th>
                     <th>사고등급</th>
@@ -70,14 +73,10 @@
                     <th>사업장</th>
                     <th>건물</th>
                     <th>층</th>
-                    <th>세부위치</th>
-                    <th>시간</th>
+                    <th>상세위치</th>
+                    <th>건물타입</th>
                     <th>요일</th>
                     <th>사고내용</th>
-                    <th>귀책협력사(1차)</th>
-                    <th>귀책협력사(1차)사업자번호</th>
-                    <th>귀책협력사(2차)</th>
-                    <th>귀책협력사(2차)사업자번호</th>
                     {% for col in dynamic_columns %}
                     <th>{{ col.column_name }}</th>
                     {% endfor %}
@@ -86,39 +85,31 @@
             <tbody>
                 {% for accident in accidents %}
                 <tr>
-                    <td style="width: 40px;">
+                    <td class="checkbox-column">
                         <input type="checkbox" class="accident-checkbox" value="{{ accident.id }}" onchange="updateDeleteButton()">
                     </td>
-                    <td class="fixed-col">
+                    <td class="fixed-col" style="width: 45px;">
+                        {{ accident.no }}
+                    </td>
+                    <td>
                         <a href="javascript:void(0)" class="company-link" onclick="openAccidentModal('{{ accident.id }}')">{{ accident.accident_name }}</a>
                     </td>
                     <td>{{ accident.accident_number }}</td>
                     <td>{{ accident.accident_date }}</td>
-                    <td>{{ accident.accident_grade or '-' }}</td>
-                    <td>{{ accident.accident_type or '-' }}</td>
-                    <td>{{ accident.disaster_type or '-' }}</td>
-                    <td>{{ accident.disaster_form or '-' }}</td>
-                    <td>{{ accident.workplace or '-' }}</td>
-                    <td>{{ accident.building or '-' }}</td>
-                    <td>{{ accident.floor or '-' }}</td>
-                    <td>{{ accident.detail_location or '-' }}</td>
-                    <td>{{ accident.time or '-' }}</td>
+                    <td>{{ accident.accident_grade_label or accident.accident_grade or '-' }}</td>
+                    <td>{{ accident.major_category_label or accident.major_category or accident.accident_type or '-' }}</td>
+                    <td>{{ accident.injury_type_label or accident.injury_type or accident.disaster_type or '-' }}</td>
+                    <td>{{ accident.injury_form_label or accident.injury_form or accident.disaster_form or '-' }}</td>
+                    <td>{{ accident.workplace_label or accident.workplace or '-' }}</td>
+                    <td>{{ accident.building_label or accident.building or '-' }}</td>
+                    <td>{{ accident.floor_label or accident.floor or '-' }}</td>
+                    <td>{{ accident.location_detail or '-' }}</td>
+                    <td>{{ accident.location_category_label or accident.location_category or '-' }}</td>
                     <td>{{ accident.day_of_week or '-' }}</td>
                     <td>{{ accident.accident_content or '-' }}</td>
-                    <td>{{ accident.responsible_company_1 or '-' }}</td>
-                    <td>{{ accident.responsible_company_1_business_number or '-' }}</td>
-                    <td>{{ accident.responsible_company_2 or '-' }}</td>
-                    <td>{{ accident.responsible_company_2_business_number or '-' }}</td>
-                    {% if accident.custom_data %}
-                        {% set custom = accident.custom_data | from_json %}
+                    {% if accident.custom_mapped %}
                         {% for col in dynamic_columns %}
-                        <td>
-                            {% if custom and col.column_key in custom %}
-                                {{ custom[col.column_key] or '-' }}
-                            {% else %}
-                                -
-                            {% endif %}
-                        </td>
+                        <td>{{ accident.custom_mapped.get(col.column_key, '-') }}</td>
                         {% endfor %}
                     {% else %}
                         {% for col in dynamic_columns %}
@@ -128,7 +119,7 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="{{ 19 + dynamic_columns|length }}" class="no-data">검색 결과가 없습니다.</td>
+                    <td colspan="{{ 16 + dynamic_columns|length }}" class="no-data">검색 결과가 없습니다.</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -281,7 +272,7 @@
 .action-buttons {
     display: flex;
     align-items: center;
-    gap: 0;
+    gap: 8px;
 }
 
 .action-buttons .btn {
@@ -369,6 +360,15 @@
     background: #94a3b8;
 }
 
+/* 체크박스 컬럼 전용 스타일 */
+.checkbox-column {
+    width: 30px !important;
+    min-width: 30px !important;
+    max-width: 30px !important;
+    padding: 4px !important;
+    text-align: center !important;
+}
+
 .data-table {
     width: max-content;
     min-width: 100%;
@@ -392,6 +392,11 @@
     box-shadow: 2px 0 4px rgba(0,0,0,0.05);
     min-width: 200px;
 }
+/* No 컬럼 전용 스타일 */
+.data-table th.fixed-col[style*="45px"] {
+    min-width: 45px !important;
+    width: 45px !important;
+}
 .data-table td {
     padding: 12px 16px;
     border-bottom: 1px solid #f1f5f9;
@@ -406,6 +411,11 @@
     background: white;
     box-shadow: 2px 0 4px rgba(0,0,0,0.05);
     min-width: 200px;
+}
+/* No 컬럼 td 전용 스타일 */
+.data-table td.fixed-col[style*="45px"] {
+    min-width: 45px !important;
+    width: 45px !important;
 }
 .data-table tbody tr:hover {
     background: #f9fafb;

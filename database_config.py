@@ -220,7 +220,6 @@ class PartnerDataManager:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 accident_number TEXT,
                 accident_name TEXT,
-                accident_time TEXT,
                 workplace TEXT,
                 accident_grade TEXT,
                 major_category TEXT,
@@ -233,6 +232,7 @@ class PartnerDataManager:
                 floor TEXT,
                 location_category TEXT,
                 location_detail TEXT,
+                custom_data TEXT DEFAULT '{}',
                 is_deleted INTEGER DEFAULT 0,
                 synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
@@ -426,19 +426,18 @@ class PartnerDataManager:
             cursor.execute("DELETE FROM accidents_cache")
             
             # DataFrame을 레코드 배열로 변환하여 SQLite에 삽입
-            # config.ini의 ACCIDENTS_QUERY 컬럼에 맞게 매핑
+            # config.ini의 ACCIDENTS_QUERY 컬럼에 맞게 매핑 (14개 필드)
             for _, row in df.iterrows():
                 cursor.execute('''
                     INSERT INTO accidents_cache (
-                        accident_number, accident_name, accident_time, workplace,
+                        accident_number, accident_name, workplace,
                         accident_grade, major_category, injury_form, injury_type,
                         accident_date, day_of_week, report_date, building, floor,
                         location_category, location_detail
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     row.get('accident_number', ''),
                     row.get('accident_name', ''),
-                    row.get('accident_time', ''),
                     row.get('workplace', ''),
                     row.get('accident_grade', ''),
                     row.get('major_category', ''),

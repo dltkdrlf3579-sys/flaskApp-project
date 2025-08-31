@@ -29,55 +29,42 @@
 
 .menu-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 15px;
     margin-bottom: 30px;
 }
 
 .menu-card {
     background: white;
-    border-radius: 12px;
-    padding: 25px;
-    text-align: center;
-    transition: all 0.3s ease;
+    border-radius: 8px;
+    padding: 15px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all 0.2s ease;
     cursor: pointer;
-    border: 2px solid transparent;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    border: 1px solid #e0e0e0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 
 .menu-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     border-color: #667eea;
 }
 
-.menu-icon {
-    font-size: 48px;
-    margin-bottom: 15px;
-    background: linear-gradient(135deg, #667eea, #764ba2);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-}
-
 .menu-title {
-    font-size: 18px;
-    font-weight: 600;
+    font-size: 15px;
+    font-weight: 500;
     color: #333;
-    margin-bottom: 8px;
-}
-
-.menu-desc {
-    font-size: 13px;
-    color: #666;
-    margin-bottom: 15px;
 }
 
 .menu-status {
     display: inline-block;
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 15px;
+    font-size: 11px;
     font-weight: 500;
+    white-space: nowrap;
 }
 
 .status-active {
@@ -94,6 +81,16 @@
     background: #f8d7da;
     color: #721c24;
 }
+
+.section-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #495057;
+    margin-bottom: 15px;
+    margin-top: 30px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #e9ecef;
+}
 </style>
 
 <div class="admin-container">
@@ -105,131 +102,89 @@
     </div>
     
     <div class="container">
-        <h5 class="mb-4">컬럼 설정</h5>
+        <div class="section-title">컬럼 설정</div>
         <div class="menu-grid">
             <!-- 협력사 기준정보 -->
             <div class="menu-card" onclick="alert('준비중입니다')">
-                <div class="menu-icon">
-                    <i class="bi bi-building"></i>
-                </div>
                 <div class="menu-title">협력사 기준정보 컬럼 설정</div>
-                <div class="menu-desc">협력사 마스터 정보 필드 관리</div>
                 <span class="menu-status status-planned">준비중</span>
             </div>
             
             <!-- 협력사 사고 -->
             <div class="menu-card" onclick="location.href='/admin/accident-columns-simplified'">
-                <div class="menu-icon">
-                    <i class="bi bi-exclamation-triangle"></i>
-                </div>
                 <div class="menu-title">협력사 사고 컬럼 설정</div>
-                <div class="menu-desc">사고 상세정보 추가 필드 관리</div>
                 <span class="menu-status status-active">운영중</span>
             </div>
             
             <!-- 사고 기본정보 코드 -->
             <div class="menu-card" onclick="location.href='/admin/accident-basic-codes'">
-                <div class="menu-icon">
-                    <i class="bi bi-code-square"></i>
-                </div>
                 <div class="menu-title">사고 기본정보 코드 관리</div>
-                <div class="menu-desc">ACC 사고 기본정보 드롭다운 설정</div>
+                <span class="menu-status status-active">운영중</span>
+            </div>
+            
+            <!-- 환경안전 지시서 코드 -->
+            <div class="menu-card" onclick="location.href='/admin/safety-instruction-codes'">
+                <div class="menu-title">환경안전 지시서 코드 관리</div>
                 <span class="menu-status status-active">운영중</span>
             </div>
             
             <!-- 환경안전 지시서 -->
             <div class="menu-card" onclick="location.href='/admin/safety-instruction-columns'">
-                <div class="menu-icon">
-                    <i class="bi bi-clipboard-check"></i>
-                </div>
                 <div class="menu-title">환경안전 지시서 컬럼 설정</div>
-                <div class="menu-desc">지시서 상세정보 추가 필드 관리</div>
                 <span class="menu-status status-active">운영중</span>
             </div>
             
             <!-- 기준정보 변경요청 -->
             <div class="menu-card" onclick="location.href='/admin/change-request-columns-simplified'">
-                <div class="menu-icon">
-                    <i class="bi bi-pencil-square"></i>
-                </div>
                 <div class="menu-title">기준정보 변경요청 컬럼 설정</div>
-                <div class="menu-desc">변경요청 양식 필드 관리</div>
                 <span class="menu-status status-active">운영중</span>
             </div>
             
             <!-- 대시보드 설정 -->
             <div class="menu-card" onclick="alert('준비중입니다')">
-                <div class="menu-icon">
-                    <i class="bi bi-graph-up"></i>
-                </div>
                 <div class="menu-title">대시보드 설정</div>
-                <div class="menu-desc">대시보드 위젯 및 레이아웃 관리</div>
                 <span class="menu-status status-planned">준비중</span>
             </div>
             
             <!-- 게시판 설정 -->
             <div class="menu-card" onclick="alert('준비중입니다')">
-                <div class="menu-icon">
-                    <i class="bi bi-clipboard-data"></i>
-                </div>
                 <div class="menu-title">게시판 설정</div>
-                <div class="menu-desc">게시판별 필드 및 권한 설정</div>
                 <span class="menu-status status-planned">준비중</span>
             </div>
         </div>
         
-        <h5 class="mb-4 mt-5">데이터 관리</h5>
+        <div class="section-title">데이터 관리</div>
         <div class="menu-grid">
             <!-- 담당자 관리 -->
             <div class="menu-card" onclick="alert('준비중입니다')">
-                <div class="menu-icon">
-                    <i class="bi bi-people"></i>
-                </div>
                 <div class="menu-title">담당자 관리</div>
-                <div class="menu-desc">직원 정보 및 권한 관리</div>
-                <span class="menu-status status-dev">개발중</span>
+                <span class="menu-status status-planned">준비중</span>
             </div>
             
             <!-- 업체 관리 -->
             <div class="menu-card" onclick="alert('준비중입니다')">
-                <div class="menu-icon">
-                    <i class="bi bi-buildings"></i>
-                </div>
                 <div class="menu-title">업체 관리</div>
-                <div class="menu-desc">협력업체 마스터 데이터 관리</div>
-                <span class="menu-status status-dev">개발중</span>
+                <span class="menu-status status-planned">준비중</span>
             </div>
             
             <!-- 코드 관리 -->
             <div class="menu-card" onclick="alert('준비중입니다')">
-                <div class="menu-icon">
-                    <i class="bi bi-list-ul"></i>
-                </div>
                 <div class="menu-title">공통 코드 관리</div>
-                <div class="menu-desc">드롭다운 옵션 및 코드 관리</div>
                 <span class="menu-status status-planned">준비중</span>
             </div>
         </div>
         
-        <h5 class="mb-4 mt-5">시스템 설정</h5>
+        <div class="section-title">시스템 설정</div>
         <div class="menu-grid">
             <!-- 메뉴 순서 관리 -->
             <div class="menu-card" onclick="alert('준비중입니다')">
-                <div class="menu-icon">
-                    <i class="bi bi-menu-button-wide"></i>
-                </div>
                 <div class="menu-title">메뉴 순서 관리</div>
-                <div class="menu-desc">상단 메뉴 구조 및 순서 설정</div>
                 <span class="menu-status status-planned">준비중</span>
             </div>
             
             <!-- 백업/복원 -->
             <div class="menu-card" onclick="alert('준비중입니다')">
-                <div class="menu-icon">
-                    <i class="bi bi-arrow-repeat"></i>
-                </div>
                 <div class="menu-title">백업/복원</div>
-                <div class="menu-desc">데이터 백업 및 복원 관리</div>
                 <span class="menu-status status-planned">준비중</span>
             </div>
         </div>

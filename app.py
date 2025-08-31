@@ -214,6 +214,31 @@ def init_db():
             )
         ''')
         
+        # 동적 섹션 관리를 위한 테이블 추가
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS section_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                board_type TEXT NOT NULL,
+                section_key TEXT NOT NULL,
+                section_name TEXT NOT NULL,
+                section_order INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(board_type, section_key)
+            )
+        ''')
+        
+        # 기본 섹션 데이터 삽입 (없는 경우에만)
+        cursor.execute("SELECT COUNT(*) FROM section_config WHERE board_type = 'safety_instruction'")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute('''
+                INSERT INTO section_config (board_type, section_key, section_name, section_order) VALUES
+                ('safety_instruction', 'basic_info', '기본정보', 1),
+                ('safety_instruction', 'violation_info', '위반정보', 2),
+                ('safety_instruction', 'additional', '추가기입정보', 3)
+            ''')
+        
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS partner_standards_column_config (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -819,10 +844,6 @@ def partner_accident():
             
             # 폴백 컬럼 설정
             fallback = None
-            if field_name == 'company_name':
-                fallback = 'responsible_company1'
-            elif field_name == 'business_number':
-                fallback = 'responsible_company1_no'
                 
             query, params = search_builder.add_search_condition(
                 query, params, field_name, field_value,
@@ -841,6 +862,11 @@ def partner_accident():
     accidents = conn.execute(query, params).fetchall()
     accidents = [dict(row) for row in accidents]
     
+    # No 컬럼 추가 (역순 번호)
+    offset = (page - 1) * per_page
+    for i, accident in enumerate(accidents):
+        accident['no'] = total_count - offset - i
+    
     # 디버그: 첫 번째 사고 데이터 확인
     if accidents:
         print(f"[DEBUG] 첫 번째 사고 데이터 키: {list(accidents[0].keys())[:10]}")
@@ -855,7 +881,17 @@ def partner_accident():
     """).fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
     
+    # 드롭다운 컬럼에 대해 코드-값 매핑 정보 추가
+    for col in dynamic_columns:
+        if col['column_type'] == 'dropdown':
+            col['code_mapping'] = get_dropdown_options_for_display('accident', col['column_key'])
+    
     conn.close()
+    
+    # smart_apply_mappings 적용 (드롭다운 코드를 라벨로 변환)
+    if accidents:
+        from common_mapping import smart_apply_mappings
+        accidents = smart_apply_mappings(accidents, 'accident', dynamic_columns, DB_PATH)
     
     # 페이지네이션 객체 생성
     import math
@@ -904,111 +940,119 @@ def partner_accident():
 @app.route("/safety-instruction")
 def safety_instruction_route():
     """환경안전 지시서 페이지 라우트"""
-    # partner_accident와 완전히 동일한 로직 사용하되 템플릿만 변경
+    from common_mapping import smart_apply_mappings
+    import math
+    
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
     
-    # 검색 조건 (재해날짜 제외)
+    # 검색 조건
     filters = {
         'company_name': request.args.get('company_name', '').strip(),
-        'business_number': request.args.get('business_number', '').strip()
+        'business_number': request.args.get('business_number', '').strip(),
+        'violation_date_from': request.args.get('violation_date_from'),
+        'violation_date_to': request.args.get('violation_date_to')
     }
     
-    # safety_instruction 전용 로직으로 데이터 조회
-    # Phase 1: 동적 컬럼 설정 가져오기
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
+    
+    # 섹션 정보 가져오기
+    sections = conn.execute("""
+        SELECT * FROM section_config 
+        WHERE is_active = 1 
+        ORDER BY section_order
+    """).fetchall()
+    sections = [dict(row) for row in sections]
+    
+    # 동적 컬럼 설정 가져오기 (활성화되고 삭제되지 않은 것만)
     dynamic_columns_rows = conn.execute("""
         SELECT * FROM safety_instruction_column_config 
-        WHERE is_active = 1 
+        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
         ORDER BY column_order
     """).fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    
+    # 섹션별로 컬럼 그룹핑 (detailed_content와 violation_content 제외)
+    section_columns = {}
+    for section in sections:
+        section_columns[section['section_key']] = [
+            col for col in dynamic_columns 
+            if col.get('tab') == section['section_key'] 
+            and col['column_key'] not in ['detailed_content', 'violation_content']
+        ]
+    
+    # tab이 None인 컬럼들은 추가하지 않음 (관리자가 섹션을 지정하지 않은 컬럼은 표시하지 않음)
+    
     
     # 드롭다운 컬럼에 대해 코드-값 매핑 정보 추가
     for col in dynamic_columns:
         if col['column_type'] == 'dropdown':
             col['code_mapping'] = get_dropdown_options_for_display('safety_instruction', col['column_key'])
     
-    # 환경안전 지시서 더미 데이터 생성
-    all_accidents = []
+    # 실제 DB에서 환경안전 지시서 조회
+    query = """
+        SELECT * FROM safety_instructions 
+        WHERE is_deleted = 0
+    """
+    params = []
     
-    # 월별로 발부번호 생성 (YYYY-MM-00 형식)
-    month_counters = {}  # 월별 카운터
-    
-    for i in range(30):
-        # 년월 생성
-        year = 2024
-        month = (i % 12) + 1
-        year_month = f'{year}-{month:02d}'
-        
-        # 해당 년월의 카운터 증가
-        if year_month not in month_counters:
-            month_counters[year_month] = 0
-        month_counters[year_month] += 1
-        
-        # YYYY-MM-00 형식으로 발부번호 생성
-        issue_number = f'{year_month}-{month_counters[year_month]:02d}'
-        
-        # 더미 데이터 배열들
-        classifications = ['환경', '안전', '보건', '품질']
-        employment_types = ['정규직', '계약직', '파견직', '임시직']
-        discipline_types = ['경고', '견책', '정직', '출입정지']
-        violation_types = ['작업절차위반', '안전장비미착용', '무단작업', '환경오염']
-        accident_types = ['추락', '협착', '절단', '화재', '누출']
-        grades = ['경미', '일반', '중대', '치명']
-        
-        safety_item = {
-            'id': i + 1,
-            'no': i + 1,  # No 컬럼
-            'issue_number': issue_number,  # 발부번호
-            'issuer': f'발행인{i+1}',  # 발행인
-            'issuer_department': f'안전관리팀{(i % 3) + 1}',  # 발행부서
-            'classification': classifications[i % 4],  # 분류
-            'employment_type': employment_types[i % 4],  # 고용형태
-            'primary_company': f'협력사{(i % 20) + 1}',  # 1차사명
-            'primary_business_number': f'{1000000000 + i * 11111}',  # 1차사_사업자번호
-            'subcontractor': f'하도급사{(i % 10) + 1}' if i % 3 == 0 else '-',  # 하도사명
-            'subcontractor_business_number': f'{2000000000 + i * 22222}' if i % 3 == 0 else '-',  # 하도사_사업자번호
-            'disciplined_person': f'징계자{i+1}',  # 징계자
-            'gbm': f'GBM{(i % 5) + 1}',  # GBM
-            'business_division': f'사업부{(i % 4) + 1}',  # 사업부
-            'team': f'팀{(i % 8) + 1}',  # 팀
-            'department': f'부서{(i % 6) + 1}',  # 소속부서
-            'violation_date': f'2024-{(i % 12) + 1:02d}-{(i % 28) + 1:02d}',  # 위반일자
-            'discipline_date': f'2024-{(i % 12) + 1:02d}-{((i % 28) + 2):02d}',  # 징계일자
-            'discipline_department': f'징계발의부서{(i % 3) + 1}',  # 징계발의부서
-            'discipline_type': discipline_types[i % 4],  # 징계유형
-            'accident_type': accident_types[i % 5],  # 사고유형
-            'accident_grade': grades[i % 4],  # 사고등급
-            'safety_violation_grade': grades[i % 4],  # 환경안전수칙 위반등급
-            'violation_type': violation_types[i % 4],  # 위반유형
-            'violation_content': f'위반내용 상세설명 {i+1}번 항목',  # 위반내용
-            'access_ban_start_date': f'2024-{(i % 12) + 1:02d}-{((i % 28) + 3):02d}' if i % 4 == 0 else '-',  # 출입정지 시작일
-            'access_ban_end_date': f'2024-{(i % 12) + 1:02d}-{((i % 28) + 10):02d}' if i % 4 == 0 else '-',  # 출입정지 종료일
-            'period': f'{(i % 30) + 1}일' if i % 4 == 0 else '-',  # 기간
-            'work_grade': f'등급{(i % 5) + 1}',  # 작업등급
-            'penalty_points': (i % 10) + 1,  # 감점
-            'disciplined_person_id': f'EMP{1000 + i}',  # 징계자ID
-            'custom_data': '{}'  # 동적 컬럼용
-        }
-        all_accidents.append(safety_item)
-    
-    # 필터링 (환경안전 지시서 컬럼에 맞게 수정)
-    filtered_accidents = all_accidents
+    # 필터링 적용
     if filters['company_name']:
-        filtered_accidents = [a for a in filtered_accidents if filters['company_name'].lower() in a['primary_company'].lower()]
+        query += " AND (primary_company LIKE ? OR subcontractor LIKE ?)"
+        params.extend([f"%{filters['company_name']}%", f"%{filters['company_name']}%"])
+    
     if filters['business_number']:
-        filtered_accidents = [a for a in filtered_accidents if filters['business_number'] in str(a['primary_business_number'])]
+        query += " AND (primary_business_number LIKE ? OR subcontractor_business_number LIKE ?)"
+        params.extend([f"%{filters['business_number']}%", f"%{filters['business_number']}%"])
     
-    total_count = len(filtered_accidents)
+    if filters['violation_date_from']:
+        query += " AND violation_date >= ?"
+        params.append(filters['violation_date_from'])
     
-    # 페이지네이션
-    start = (page - 1) * per_page
-    end = start + per_page
-    accidents = filtered_accidents[start:end]
+    if filters['violation_date_to']:
+        query += " AND violation_date <= ?"
+        params.append(filters['violation_date_to'])
     
-    # 페이지네이션 객체 생성 (partner_accident와 동일)
+    # 정렬 (최신순)
+    query += " ORDER BY violation_date DESC, issue_number DESC"
+    
+    # 전체 개수 조회
+    count_query = query.replace("SELECT *", "SELECT COUNT(*)")
+    total_count = conn.execute(count_query, params).fetchone()[0]
+    
+    # 페이지네이션 적용
+    query += f" LIMIT {per_page} OFFSET {(page - 1) * per_page}"
+    
+    # 데이터 조회
+    safety_instructions = conn.execute(query, params).fetchall()
+    safety_instructions = [dict(row) for row in safety_instructions]
+    
+    # No 컬럼 추가 (역순 번호)
+    offset = (page - 1) * per_page
+    for i, instruction in enumerate(safety_instructions):
+        instruction['no'] = total_count - offset - i
+        
+        # custom_data 파싱 및 플래튼
+        if instruction.get('custom_data'):
+            try:
+                import json as pyjson
+                custom_data = pyjson.loads(instruction['custom_data'])
+                instruction.update(custom_data)  # custom_data를 최상위 레벨로 병합
+            except Exception as e:
+                logging.error(f"Custom data parsing error: {e}")
+                pass
+    
+    # smart_apply_mappings 적용 (드롭다운 코드를 라벨로 변환)
+    if safety_instructions:
+        safety_instructions = smart_apply_mappings(
+            safety_instructions, 
+            'safety_instruction', 
+            dynamic_columns,
+            DB_PATH
+        )
+    
+    # 페이지네이션 객체 생성
     class Pagination:
         def __init__(self, page, per_page, total_count):
             self.page = page
@@ -1045,11 +1089,14 @@ def safety_instruction_route():
     pagination = Pagination(page, per_page, total_count)
     conn.close()
     
+    # 템플릿에 전달
     return render_template('safety-instruction.html',
-                         accidents=accidents,
+                         accidents=safety_instructions,  # 템플릿 호환성 유지
                          total_count=total_count,
                          pagination=pagination,
                          dynamic_columns=dynamic_columns,
+                         sections=sections,
+                         section_columns=section_columns,
                          menu=MENU_CONFIG)
 
 @app.route("/safety-instruction-register")
@@ -1070,7 +1117,10 @@ def safety_instruction_register():
     # Row 객체를 딕셔너리로 변환
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
     
-    conn.close()
+    # column_span을 정수로 변환
+    for col in dynamic_columns:
+        if col.get('column_span'):
+            col['column_span'] = int(col['column_span'])
     
     # 드롭다운 컬럼에 대해 코드-값 매핑 적용
     for col in dynamic_columns:
@@ -1084,13 +1134,63 @@ def safety_instruction_register():
             else:
                 logging.info(f"  - {col['column_name']} ({col['column_key']}): 드롭다운 옵션 없음")
     
+    # 기본정보 드롭다운 옵션 로드 (accident-register와 동일한 패턴)
+    basic_options = {}
+    from board_services import CodeService
+    code_service = CodeService('safety_instruction', DB_PATH)
+    
+    # 기본정보 필드들의 드롭다운 옵션 로드
+    basic_fields = [
+        'classification',           # 분류
+        'employment_type',          # 고용형태
+        'discipline_type',          # 징계유형
+        'accident_type',            # 사고유형
+        'accident_grade',           # 사고등급
+        'safety_violation_grade',   # 환경안전수칙 위반등급
+        'violation_type',           # 위반유형
+        'work_grade'                # 작업등급
+    ]
+    
+    for field in basic_fields:
+        codes = code_service.list(field)
+        basic_options[field] = codes
+        logging.info(f"드롭다운 옵션 로드: {field} -> {len(codes)}개")
+    
+    conn.close()
+    
     logging.info(f"동적 컬럼 {len(dynamic_columns)}개 로드됨")
+    logging.info(f"기본 옵션 {len(basic_options)}개 필드 로드됨")
+    
+    # 섹션 정보 로드
+    from section_service import SectionConfigService
+    section_service = SectionConfigService('safety_instruction', DB_PATH)
+    sections = section_service.get_sections()
+    logging.info(f"섹션 {len(sections)}개 로드됨")
+    
+    # 섹션별로 컬럼 분류 (동적)
+    section_columns = {}
+    for section in sections:
+        section_columns[section['section_key']] = [
+            col for col in dynamic_columns if col.get('tab') == section['section_key']
+        ]
+        logging.info(f"섹션 '{section['section_name']}': {len(section_columns[section['section_key']])}개 컬럼")
+    
+    # 하위 호환성을 위한 변수 유지 (템플릿이 아직 하드코딩된 경우)
+    basic_info_columns = section_columns.get('basic_info', [])
+    violation_info_columns = section_columns.get('violation_info', [])
+    additional_columns = section_columns.get('additional', [])
     
     # 팝업 모드인지 확인
     is_popup = request.args.get('popup') == '1'
     
     return render_template('safety-instruction-register.html',
                          dynamic_columns=dynamic_columns,
+                         sections=sections,  # 섹션 정보 추가
+                         section_columns=section_columns,  # 섹션별 컬럼 추가
+                         basic_info_columns=basic_info_columns,  # 하위 호환성
+                         violation_info_columns=violation_info_columns,  # 하위 호환성
+                         additional_columns=additional_columns,  # 하위 호환성
+                         basic_options=basic_options,  # basic_options 추가
                          menu=MENU_CONFIG,
                          is_popup=is_popup)
 
@@ -1182,18 +1282,49 @@ def safety_instruction_detail(issue_number):
         conn.close()
         return "환경안전 지시서 정보를 찾을 수 없습니다.", 404
     
-    # 동적 컬럼 설정 가져오기
+    # 동적 컬럼 설정 가져오기 (활성화되고 삭제되지 않은 것만)
     dynamic_columns_rows = conn.execute("""
         SELECT * FROM safety_instruction_column_config 
-        WHERE is_active = 1 
+        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
         ORDER BY column_order
     """).fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
     
-    # 탭별로 컬럼 분류
-    basic_info_columns = [col for col in dynamic_columns if col.get('tab') == 'basic_info']
-    violation_info_columns = [col for col in dynamic_columns if col.get('tab') == 'violation_info']
-    additional_columns = [col for col in dynamic_columns if not col.get('tab') or col.get('tab') == 'additional']
+    # column_span을 정수로 변환
+    for col in dynamic_columns:
+        if col.get('column_span'):
+            col['column_span'] = int(col['column_span'])
+    
+    # 드롭다운 컬럼에 대해 코드-값 매핑 적용
+    for col in dynamic_columns:
+        if col['column_type'] == 'dropdown':
+            # 코드-값 매핑 방식으로 옵션 가져오기
+            code_options = get_dropdown_options_for_display('safety_instruction', col['column_key'])
+            # 코드-값 매핑 방식 사용 (DB dropdown_option_codes_v2 테이블)
+            col['dropdown_options_mapped'] = code_options if code_options else []
+            if code_options:
+                logging.info(f"  - {col['column_name']} ({col['column_key']}): 코드-값 매핑 {len(code_options)}개 옵션")
+            else:
+                logging.info(f"  - {col['column_name']} ({col['column_key']}): 드롭다운 옵션 없음")
+    
+    # 섹션 정보 로드
+    from section_service import SectionConfigService
+    section_service = SectionConfigService('safety_instruction', DB_PATH)
+    sections = section_service.get_sections()
+    logging.info(f"섹션 {len(sections)}개 로드됨")
+    
+    # 섹션별로 컬럼 분류 (동적)
+    section_columns = {}
+    for section in sections:
+        section_columns[section['section_key']] = [
+            col for col in dynamic_columns if col.get('tab') == section['section_key']
+        ]
+        logging.info(f"섹션 '{section['section_name']}': {len(section_columns[section['section_key']])}개 컬럼")
+    
+    # 하위 호환성을 위한 변수 유지 (템플릿이 아직 하드코딩된 경우)
+    basic_info_columns = section_columns.get('basic_info', [])
+    violation_info_columns = section_columns.get('violation_info', [])
+    additional_columns = section_columns.get('additional', [])
     
     # 첨부파일 조회 - AttachmentService 사용 (공통 모듈)
     from board_services import AttachmentService
@@ -1203,54 +1334,64 @@ def safety_instruction_detail(issue_number):
     
     conn.close()
     
-    # DictAsAttr 클래스 정의
-    class DictAsAttr:
-        def __init__(self, d):
-            for k, v in d.items():
-                setattr(self, k, v)
-    
-    # custom_data 파싱 및 안전한 로깅을 위한 person_name 추출
-    custom_data = {}
-    person_name = "알 수 없음"
-    
+    # instruction을 항상 dict로 변환하여 템플릿에서 일관되게 처리
     if isinstance(instruction, dict):
-        if instruction.get('custom_data'):
-            try:
-                custom_data = pyjson.loads(instruction['custom_data'])
-            except:
-                custom_data = {}
-        person_name = instruction.get('disciplined_person', '알 수 없음')
-        # 딕셔너리를 DictAsAttr로 변환
-        instruction = DictAsAttr(instruction)
+        instruction_dict = instruction
     else:
-        # SQLite Row 객체인 경우
-        if 'custom_data' in instruction.keys() and instruction['custom_data']:
-            try:
-                custom_data = pyjson.loads(instruction['custom_data'])
-            except:
-                custom_data = {}
-        # SQLite Row에서 안전하게 person_name 추출
+        # SQLite Row 객체를 dict로 변환
+        instruction_dict = dict(instruction)
+    
+    # custom_data 파싱 및 병합
+    custom_data = {}
+    if instruction_dict.get('custom_data'):
         try:
-            if 'disciplined_person' in instruction.keys():
-                person_name = instruction['disciplined_person'] if instruction['disciplined_person'] else '알 수 없음'
-            else:
-                person_name = '알 수 없음'
-        except (KeyError, TypeError, AttributeError):
-            person_name = '알 수 없음'
+            custom_data = pyjson.loads(instruction_dict['custom_data'])
+            # custom_data의 내용을 instruction_dict에 병합
+            instruction_dict.update(custom_data)
+        except:
+            custom_data = {}
+    
+    # person_name 추출
+    person_name = instruction_dict.get('disciplined_person', '알 수 없음')
     
     logging.info(f"환경안전 지시서 {issue_number} ({person_name}) 상세 페이지 로드")
+    
+    # 기본정보 드롭다운 옵션 로드
+    basic_options = {}
+    from board_services import CodeService
+    code_service = CodeService('safety_instruction', DB_PATH)
+    
+    # 기본정보 필드들의 드롭다운 옵션 로드
+    basic_fields = [
+        'classification',           # 분류
+        'employment_type',          # 고용형태
+        'discipline_type',          # 징계유형
+        'accident_type',            # 사고유형
+        'accident_grade',           # 사고등급
+        'safety_violation_grade',   # 환경안전수칙 위반등급
+        'violation_type',           # 위반유형
+        'work_grade'                # 작업등급
+    ]
+    
+    for field in basic_fields:
+        codes = code_service.list(field)
+        basic_options[field] = codes
+        logging.info(f"드롭다운 옵션 로드: {field} -> {len(codes)}개")
     
     # 팝업 모드인지 확인
     is_popup = request.args.get('popup') == '1'
     
     return render_template('safety-instruction-detail.html',
-                         instruction=instruction,
+                         instruction=instruction_dict,
                          attachments=[dict(att) for att in attachments],
                          dynamic_columns=dynamic_columns,
-                         basic_info_columns=basic_info_columns,
-                         violation_info_columns=violation_info_columns,
-                         additional_columns=additional_columns,
+                         sections=sections,  # 섹션 정보 추가
+                         section_columns=section_columns,  # 섹션별 컬럼 추가
+                         basic_info_columns=basic_info_columns,  # 하위 호환성
+                         violation_info_columns=violation_info_columns,  # 하위 호환성
+                         additional_columns=additional_columns,  # 하위 호환성
                          custom_data=custom_data,
+                         basic_options=basic_options,  # basic_options 추가
                          menu=MENU_CONFIG,
                          is_popup=is_popup)
 
@@ -1266,6 +1407,8 @@ def update_safety_instruction():
         # violation_content는 더 이상 사용하지 않음
         detailed_content = request.form.get('detailed_content', '')
         custom_data = request.form.get('custom_data', '{}')
+        basic_info = request.form.get('basic_info', '{}')  # 기본정보 추가
+        violation_info = request.form.get('violation_info', '{}')  # 위반정보 추가
         
         # deleted_attachments 파싱
         deleted_attachments_str = request.form.get('deleted_attachments', '[]')
@@ -1282,6 +1425,8 @@ def update_safety_instruction():
         # JSON 파싱
         try:
             custom_data_dict = pyjson.loads(custom_data) if custom_data != '{}' else {}
+            basic_info_dict = pyjson.loads(basic_info) if basic_info != '{}' else {}
+            violation_info_dict = pyjson.loads(violation_info) if violation_info != '{}' else {}
         except ValueError:  # JSONDecodeError is a subclass of ValueError
             return jsonify({"success": False, "message": "잘못된 데이터 형식입니다."}), 400
         
@@ -1327,12 +1472,38 @@ def update_safety_instruction():
         existing = cursor.fetchone()
         
         if existing:
-            # 업데이트 - violation_content는 더 이상 업데이트하지 않음
-            cursor.execute("""
+            # 업데이트 - 기본정보와 위반정보 필드들도 함께 업데이트
+            update_fields = []
+            update_values = []
+            
+            # 기본정보 필드들 업데이트
+            for field, value in basic_info_dict.items():
+                if field != 'issue_number':  # 발부번호는 수정 불가
+                    update_fields.append(f"{field} = ?")
+                    update_values.append(value)
+            
+            # 위반정보 필드들 업데이트
+            for field, value in violation_info_dict.items():
+                update_fields.append(f"{field} = ?")
+                update_values.append(value)
+            
+            # custom_data와 detailed_content 추가
+            update_fields.append("custom_data = ?")
+            update_values.append(pyjson.dumps(custom_data_dict))
+            update_fields.append("detailed_content = ?")
+            update_values.append(detailed_content)
+            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+            
+            # WHERE 조건 값 추가
+            update_values.append(issue_number)
+            
+            # UPDATE 쿼리 실행
+            update_query = f"""
                 UPDATE safety_instructions 
-                SET custom_data = ?, detailed_content = ?, updated_at = CURRENT_TIMESTAMP
+                SET {', '.join(update_fields)}
                 WHERE issue_number = ?
-            """, (pyjson.dumps(custom_data_dict), detailed_content, issue_number))
+            """
+            cursor.execute(update_query, update_values)
         else:
             # 새로 생성 - violation_content 제외
             cursor.execute("""
@@ -1626,7 +1797,7 @@ def partner_change_request():
                 
             change_request = type('obj', (object,), {
                 'id': row['id'],
-                'no': offset + i + 1,
+                'no': total_count - offset - i,  # No 컬럼 (역순)
                 'request_number': row['request_number'],  # request_number 추가
                 'requester_name': row['requester_name'],
                 'requester_department': row['requester_department'],
@@ -1996,17 +2167,9 @@ def accident_detail(accident_id):
             'floor': f'{(i % 20) + 1}층',
             'location_category': location_categories[i % 5],  # 장소구분 추가
             'location_detail': f'상세위치{i+1:03d}',  # 세부장소
-            'detail_location': f'상세위치{i+1:03d}',
             'report_date': accident_date_fixed,  # 등록일 추가
-            'accident_time': f'{9 + (i % 10):02d}:{(i * 5) % 60:02d}',  # 시간 -> accident_time으로 변경
-            'time': f'{9 + (i % 10):02d}:{(i * 5) % 60:02d}',
             'day_of_week': days_of_week[i % 7],
-            'accident_content': f'사고내용{i+1}에 대한 상세 설명입니다.',
-            'business_number': f'{1000000000 + i * 11111}',  # 사업자번호 추가
-            'responsible_company_1': f'협력사{(i % 20) + 1}',
-            'responsible_company_1_business_number': f'{1000000000 + i * 11111}',
-            'responsible_company_2': f'협력사{(i % 15) + 1}' if i % 3 == 0 else None,
-            'responsible_company_2_business_number': f'{2000000000 + i * 22222}' if i % 3 == 0 else None,
+            'accident_content': f'사고내용{i+1}에 대한 상세 설명입니다.'
         })
     
     # DB에서 실제 사고 데이터 가져오기
@@ -2031,6 +2194,11 @@ def accident_detail(accident_id):
                 break
     else:
         accident = dict(accident)  # Row를 dict로 변환
+        
+        # ACC 사고의 경우 report_date가 없으면 오늘 날짜로 설정
+        if accident.get('accident_number', '').startswith('ACC'):
+            if not accident.get('report_date'):
+                accident['report_date'] = get_korean_time().strftime('%Y-%m-%d')
     
     if not accident:
         logging.warning(f"사고를 찾을 수 없습니다: {accident_id}")
@@ -2154,8 +2322,9 @@ def accident_detail(accident_id):
         code_service = CodeService('accident', DB_PATH)
         
         # 기본정보 필드들의 드롭다운 옵션 로드
+        # injury_form, injury_type이 실제 사용되는 필드명
         basic_fields = ['workplace', 'accident_grade', 'major_category', 
-                       'disaster_form', 'disaster_type', 'floor', 
+                       'injury_form', 'injury_type', 'floor', 
                        'location_category', 'building']
         
         for field in basic_fields:
@@ -2329,7 +2498,10 @@ def accident_register():
     # Row 객체를 딕셔너리로 변환
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
     
-    conn.close()
+    # column_span을 정수로 변환
+    for col in dynamic_columns:
+        if col.get('column_span'):
+            col['column_span'] = int(col['column_span'])
     
     # 드롭다운 컬럼에 대해 코드-값 매핑 적용
     for col in dynamic_columns:
@@ -2343,13 +2515,58 @@ def accident_register():
             else:
                 logging.info(f"  - {col['column_name']} ({col['column_key']}): 드롭다운 옵션 없음")
     
+    # 기본정보 드롭다운 옵션 로드 (accident_detail과 동일한 로직)
+    basic_options = {}
+    from board_services import CodeService
+    code_service = CodeService('accident', DB_PATH)
+    
+    # 기본정보 필드들의 드롭다운 옵션 로드
+    # injury_* 키를 사용 (템플릿에서 사용하는 키)
+    basic_fields = {
+        'workplace': 'workplace',
+        'accident_grade': 'accident_grade',
+        'major_category': 'major_category',
+        'injury_form': 'injury_form',     # disaster_form 대신 injury_form
+        'injury_type': 'injury_type',     # disaster_type 대신 injury_type
+        'floor': 'floor',
+        'location_category': 'location_category',
+        'building': 'building'
+    }
+    
+    for template_key, db_key in basic_fields.items():
+        codes = code_service.list(db_key)
+        basic_options[template_key] = codes
+        logging.info(f"드롭다운 옵션 로드: {template_key} -> {len(codes)}개")
+    
+    # 건물은 마스터 DB에서 우선 로드 (있다면)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT DISTINCT building_code as option_code, 
+                   building_name as option_value
+            FROM building_master 
+            WHERE is_active = 1
+            ORDER BY building_name
+        """)
+        building_rows = cursor.fetchall()
+        if building_rows:
+            basic_options['building'] = [dict(row) for row in building_rows]
+            logging.info(f"건물 마스터에서 {len(building_rows)}개 로드")
+    except:
+        # 건물 마스터 테이블이 없으면 드롭다운 코드 사용
+        pass
+    
+    conn.close()
+    
     logging.info(f"동적 컬럼 {len(dynamic_columns)}개 로드됨")
+    logging.info(f"기본 옵션 {len(basic_options)}개 필드 로드됨")
     
     # 팝업 모드인지 확인
     is_popup = request.args.get('popup') == '1'
     
     return render_template('accident-register.html',
                          dynamic_columns=dynamic_columns,
+                         basic_options=basic_options,  # basic_options 추가
                          menu=MENU_CONFIG,
                          is_popup=is_popup)
 
@@ -2497,23 +2714,22 @@ def register_accident():
         # json already imported globally
         import datetime
         
-        # 기본정보 필드들 받기
+        # 기본정보 필드들 받기 (ACCIDENTS_QUERY와 동일한 14개 필드 + α)
+        accident_number = ''  # 자동생성
         accident_name = request.form.get('accident_name', '')
-        accident_date = request.form.get('accident_date', '')
-        accident_time = request.form.get('accident_time', '')
-        accident_grade = request.form.get('accident_grade', '')
-        accident_type = request.form.get('accident_type', '')
-        injury_type = request.form.get('injury_type', '')
-        injury_form = request.form.get('injury_form', '')
         workplace = request.form.get('workplace', '')
+        accident_grade = request.form.get('accident_grade', '')
+        major_category = request.form.get('major_category', '')
+        injury_form = request.form.get('injury_form', '')
+        injury_type = request.form.get('injury_type', '')
+        accident_date = request.form.get('accident_date', '')
+        day_of_week = request.form.get('day_of_week', '')
+        # 등록일은 항상 오늘 날짜(한국 시간)로 설정
+        report_date = get_korean_time().strftime('%Y-%m-%d')
         building = request.form.get('building', '')
         floor = request.form.get('floor', '')
+        location_category = request.form.get('location_category', '')
         location_detail = request.form.get('location_detail', '')
-        day_of_week = request.form.get('day_of_week', '')
-        responsible_company1 = request.form.get('responsible_company1', '')
-        responsible_company1_no = request.form.get('responsible_company1_no', '')
-        responsible_company2 = request.form.get('responsible_company2', '')
-        responsible_company2_no = request.form.get('responsible_company2_no', '')
         
         detailed_content = request.form.get('detailed_content')
         custom_data = pyjson.loads(request.form.get('custom_data', '{}'))  # 동적 컬럼
@@ -2521,7 +2737,7 @@ def register_accident():
         files = request.files.getlist('files')
         
         logging.info(f"등록 요청 받음 - 사고명: {accident_name}")
-        logging.info(f"사고 날짜: {accident_date}, 시간: {accident_time}")
+        logging.info(f"사고 날짜: {accident_date}")
         logging.info(f"동적 컬럼 데이터: {custom_data}")
         logging.info(f"첨부파일 개수: {len(files)}")
         
@@ -2562,7 +2778,6 @@ def register_accident():
             ('accident_number', 'TEXT'),
             ('accident_name', 'TEXT'),
             ('accident_date', 'TEXT'),
-            ('accident_time', 'TEXT'),
             ('accident_datetime', 'TEXT'),
             ('accident_grade', 'TEXT'),
             ('accident_type', 'TEXT'),
@@ -2573,10 +2788,9 @@ def register_accident():
             ('floor', 'TEXT'),
             ('location_detail', 'TEXT'),
             ('day_of_week', 'TEXT'),
-            ('responsible_company1', 'TEXT'),
-            ('responsible_company1_no', 'TEXT'),
-            ('responsible_company2', 'TEXT'),
-            ('responsible_company2_no', 'TEXT'),
+            ('major_category', 'TEXT'),
+            ('location_category', 'TEXT'),
+            ('report_date', 'TEXT'),
             ('custom_data', 'TEXT')
         ]
         
@@ -2586,57 +2800,45 @@ def register_accident():
                 logging.info(f"컬럼 추가: {col_name}")
         
         # datetime 조합 (정렬용)
-        if accident_date and accident_time:
-            accident_datetime = f"{accident_date} {accident_time}"
-        elif accident_date:
+        if accident_date:
             accident_datetime = f"{accident_date} 00:00"
         else:
             accident_datetime = get_korean_time().strftime('%Y-%m-%d %H:%M')
         
         cursor.execute("""
             INSERT INTO accidents_cache (
-                accident_number, 
+                accident_number,
                 accident_name,
-                accident_date,
-                accident_time,
-                accident_datetime,
-                accident_grade,
-                accident_type,
-                injury_type,
-                injury_form,
                 workplace,
+                accident_grade,
+                major_category,
+                injury_form,
+                injury_type,
+                accident_date,
+                day_of_week,
+                report_date,
                 building,
                 floor,
+                location_category,
                 location_detail,
-                day_of_week,
-                responsible_company1,
-                responsible_company1_no,
-                responsible_company2,
-                responsible_company2_no,
-                custom_data,
-                business_number
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                custom_data
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             accident_number,
             accident_name or f"사고_{accident_number}",
-            accident_date or today.strftime('%Y-%m-%d'),
-            accident_time or '',
-            accident_datetime,
-            accident_grade or '',
-            accident_type or '',
-            injury_type or '',
-            injury_form or '',
             workplace or '',
+            accident_grade or '',
+            major_category or '',
+            injury_form or '',
+            injury_type or '',
+            accident_date or today.strftime('%Y-%m-%d'),
+            day_of_week or '',
+            report_date or today.strftime('%Y-%m-%d'),
             building or '',
             floor or '',
+            location_category or '',
             location_detail or '',
-            day_of_week or '',
-            responsible_company1 or '',
-            responsible_company1_no or '',
-            responsible_company2 or '',
-            responsible_company2_no or '',
-            pyjson.dumps(custom_data),
-            responsible_company1_no or "DIRECT-ENTRY"  # 수기입력 표시
+            pyjson.dumps(custom_data)
         ))
         
         # 2. 상세내용 저장
@@ -2689,37 +2891,44 @@ def register_safety_instruction():
         # json already imported globally
         import datetime
         
-        # 환경안전 지시서 31개 필드 받기
-        issue_number = request.form.get('issue_number', '')  # 발부번호 (자동생성)
-        issuer = request.form.get('issuer', '')  # 발행인
-        issuer_department = request.form.get('issuer_department', '')  # 발행부서
-        classification = request.form.get('classification', '')  # 분류
-        employment_type = request.form.get('employment_type', '')  # 고용형태
-        primary_company = request.form.get('primary_company', '')  # 1차사명
-        primary_business_number = request.form.get('primary_business_number', '')  # 1차사_사업자번호
-        subcontractor = request.form.get('subcontractor', '')  # 하도사명
-        subcontractor_business_number = request.form.get('subcontractor_business_number', '')  # 하도사_사업자번호
-        disciplined_person = request.form.get('disciplined_person', '')  # 징계자
-        gbm = request.form.get('gbm', '')  # GBM
-        business_division = request.form.get('business_division', '')  # 사업부
-        team = request.form.get('team', '')  # 팀
-        department = request.form.get('department', '')  # 소속부서
-        violation_date = request.form.get('violation_date', '')  # 위반일자
-        discipline_date = request.form.get('discipline_date', '')  # 징계일자
-        discipline_department = request.form.get('discipline_department', '')  # 징계발의부서
-        discipline_type = request.form.get('discipline_type', '')  # 징계유형
-        accident_type = request.form.get('accident_type', '')  # 사고유형
-        accident_grade = request.form.get('accident_grade', '')  # 사고등급
-        safety_violation_grade = request.form.get('safety_violation_grade', '')  # 환경안전수칙 위반등급
-        violation_type = request.form.get('violation_type', '')  # 위반유형
-        # violation_content는 더 이상 사용하지 않음, detailed_content 사용
+        # basic_info와 violation_info JSON 파싱
+        basic_info = pyjson.loads(request.form.get('basic_info', '{}'))
+        violation_info = pyjson.loads(request.form.get('violation_info', '{}'))
+        
+        # 개별 필드 추출 (basic_info에서)
+        issue_number = basic_info.get('issue_number', '')  # 발부번호 (자동생성)
+        issuer = basic_info.get('issuer', '')  # 발행인
+        issuer_department = basic_info.get('issuer_department', '')  # 발행부서
+        classification = basic_info.get('classification', '')  # 분류
+        employment_type = basic_info.get('employment_type', '')  # 고용형태
+        primary_company = basic_info.get('primary_company', '')  # 1차사명
+        primary_business_number = basic_info.get('primary_business_number', '')  # 1차사_사업자번호
+        subcontractor = basic_info.get('subcontractor', '')  # 하도사명
+        subcontractor_business_number = basic_info.get('subcontractor_business_number', '')  # 하도사_사업자번호
+        disciplined_person = basic_info.get('disciplined_person', '')  # 징계자
+        gbm = basic_info.get('gbm', '')  # GBM
+        business_division = basic_info.get('business_division', '')  # 사업부
+        team = basic_info.get('team', '')  # 팀
+        department = basic_info.get('department', '')  # 소속부서
+        
+        # 개별 필드 추출 (violation_info에서)
+        violation_date = violation_info.get('violation_date', '')  # 위반일자
+        discipline_date = violation_info.get('discipline_date', '')  # 징계일자
+        discipline_department = violation_info.get('discipline_department', '')  # 징계발의부서
+        discipline_type = violation_info.get('discipline_type', '')  # 징계유형
+        accident_type = violation_info.get('accident_type', '')  # 사고유형
+        accident_grade = violation_info.get('accident_grade', '')  # 사고등급
+        safety_violation_grade = violation_info.get('safety_violation_grade', '')  # 환경안전수칙 위반등급
+        violation_type = violation_info.get('violation_type', '')  # 위반유형
+        access_ban_start_date = violation_info.get('access_ban_start_date', '')  # 출입정지 시작일
+        access_ban_end_date = violation_info.get('access_ban_end_date', '')  # 출입정지 종료일
+        period = violation_info.get('period', '')  # 기간
+        work_grade = violation_info.get('work_grade', '')  # 작업등급
+        penalty_points = violation_info.get('penalty_points', '')  # 감점
+        disciplined_person_id = violation_info.get('disciplined_person_id', '')  # 징계자ID
+        
+        # 상세내용
         detailed_content = request.form.get('detailed_content', '')  # 상세내용
-        access_ban_start_date = request.form.get('access_ban_start_date', '')  # 출입정지 시작일
-        access_ban_end_date = request.form.get('access_ban_end_date', '')  # 출입정지 종료일
-        period = request.form.get('period', '')  # 기간
-        work_grade = request.form.get('work_grade', '')  # 작업등급
-        penalty_points = request.form.get('penalty_points', '')  # 감점
-        disciplined_person_id = request.form.get('disciplined_person_id', '')  # 징계자ID
         
         # 동적 컬럼 및 첨부파일
         custom_data = pyjson.loads(request.form.get('custom_data', '{}'))
@@ -3139,7 +3348,7 @@ def update_accident():
                 logging.error(f"ACC 사고 기본정보 업데이트 중 오류: {e}")
         
         # 먼저 해당 사고가 accidents_cache에 있는지 확인
-        cursor.execute("SELECT id, business_number FROM accidents_cache WHERE accident_number = ?", (accident_number,))
+        cursor.execute("SELECT id FROM accidents_cache WHERE accident_number = ?", (accident_number,))
         accident_row = cursor.fetchone()
         
         if accident_row:
@@ -3152,11 +3361,11 @@ def update_accident():
             logging.info(f"동적 컬럼 데이터 업데이트 완료: {accident_number}")
         else:
             # 새 레코드 생성 (업체 정보는 선택적)
-            # 비공식/직접등록 사고는 'DIRECT-ENTRY'로 표시
+            # 비공식/직접등록 사고
             cursor.execute("""
-                INSERT INTO accidents_cache (business_number, accident_number, accident_name, custom_data, accident_date)
-                VALUES (?, ?, ?, ?, date('now'))
-            """, ('DIRECT-ENTRY', accident_number, f"사고_{accident_number}", custom_data))
+                INSERT INTO accidents_cache (accident_number, accident_name, custom_data, accident_date)
+                VALUES (?, ?, ?, date('now'))
+            """, (accident_number, f"사고_{accident_number}", custom_data))
             logging.info(f"새 사고 레코드 생성 (직접등록) 및 동적 컬럼 데이터 저장: {accident_number}")
         
         # 2. 사고 첨부파일 처리 - item_id 사용
@@ -3426,6 +3635,12 @@ def admin_accident_basic_codes():
     """사고 기본정보 코드 관리 페이지"""
     return render_template('admin-accident-basic-codes.html', menu=MENU_CONFIG)
 
+@app.route("/admin/safety-instruction-codes")
+@require_admin_auth
+def admin_safety_instruction_codes():
+    """환경안전 지시서 코드 관리 페이지"""
+    return render_template('admin-safety-instruction-codes.html', menu=MENU_CONFIG)
+
 @app.route("/admin/person-master")
 @require_admin_auth
 def admin_person_master():
@@ -3436,7 +3651,14 @@ def admin_person_master():
 @require_admin_auth  
 def admin_safety_instruction_columns():
     """환경안전 지시서 컬럼 관리 페이지"""
-    return render_template('admin-safety-instruction-columns.html', menu=MENU_CONFIG)
+    # 섹션 정보 로드
+    from section_service import SectionConfigService
+    section_service = SectionConfigService('safety_instruction', DB_PATH)
+    sections = section_service.get_sections()
+    
+    return render_template('admin-safety-instruction-columns.html', 
+                         menu=MENU_CONFIG,
+                         sections=sections)
 
 @app.route("/admin/safety-instruction-columns-simplified")
 @require_admin_auth
@@ -3794,6 +4016,55 @@ def get_deleted_partners():
     conn.close()
     
     return jsonify({"success": True, "partners": deleted_partners})
+
+@app.route('/api/<board_type>/delete', methods=['POST'])
+def delete_items(board_type):
+    """범용 소프트 삭제 API - 각 게시판의 primary key를 사용"""
+    try:
+        data = request.json
+        ids = data.get('ids', [])
+        
+        if not ids:
+            return jsonify({"success": False, "message": "삭제할 항목이 없습니다."}), 400
+        
+        # 게시판별 테이블 및 primary key 매핑
+        board_config = {
+            'accidents': {'table': 'accidents_cache', 'pk': 'id'},
+            'safety-instructions': {'table': 'safety_instructions', 'pk': 'id'},
+            'change-requests': {'table': 'change_requests_cache', 'pk': 'id'},
+            'partners': {'table': 'partners_cache', 'pk': 'id'}
+        }
+        
+        if board_type not in board_config:
+            return jsonify({"success": False, "message": "잘못된 게시판 타입입니다."}), 400
+        
+        config = board_config[board_type]
+        table_name = config['table']
+        pk_column = config['pk']
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 소프트 삭제 수행
+        placeholders = ','.join('?' * len(ids))
+        cursor.execute(f"""
+            UPDATE {table_name} 
+            SET is_deleted = 1 
+            WHERE {pk_column} IN ({placeholders})
+        """, ids)
+        
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "deleted_count": deleted_count,
+            "message": f"{deleted_count}건이 삭제되었습니다."
+        })
+    except Exception as e:
+        logging.error(f"{board_type} 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route('/api/accidents/delete', methods=['POST'])
 def delete_accidents():
@@ -4311,6 +4582,67 @@ def delete_safety_instruction_column(column_id):
         logging.error(f"환경안전 지시서 컬럼 삭제 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
+# ============= 섹션 관리 API =============
+@app.route("/api/safety-instruction-sections", methods=["GET"])
+def get_safety_instruction_sections():
+    """환경안전 지시서 섹션 목록 조회"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('safety_instruction', DB_PATH)
+        sections = section_service.get_sections()
+        return jsonify({"success": True, "sections": sections})
+    except Exception as e:
+        logging.error(f"섹션 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/safety-instruction-sections", methods=["POST"])
+def add_safety_instruction_section():
+    """환경안전 지시서 섹션 추가"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('safety_instruction', DB_PATH)
+        result = section_service.add_section(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"섹션 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/safety-instruction-sections/<int:section_id>", methods=["PUT"])
+def update_safety_instruction_section(section_id):
+    """환경안전 지시서 섹션 수정"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('safety_instruction', DB_PATH)
+        result = section_service.update_section(section_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"섹션 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/safety-instruction-sections/<int:section_id>", methods=["DELETE"])
+def delete_safety_instruction_section(section_id):
+    """환경안전 지시서 섹션 삭제"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('safety_instruction', DB_PATH)
+        result = section_service.delete_section(section_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"섹션 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/safety-instruction-sections/reorder", methods=["POST"])
+def reorder_safety_instruction_sections():
+    """환경안전 지시서 섹션 순서 변경"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('safety_instruction', DB_PATH)
+        result = section_service.reorder_sections(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"섹션 순서 변경 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
 @app.route("/<path:url>")
 def page_view(url):
     """일반 페이지 체크 (catch-all 라우트)"""
@@ -4361,13 +4693,7 @@ def export_accidents_excel():
         """
         params = []
         
-        if company_name:
-            query += " AND (responsible_company1 LIKE ? OR responsible_company2 LIKE ?)"
-            params.extend([f'%{company_name}%', f'%{company_name}%'])
-        
-        if business_number:
-            query += " AND (responsible_company1_no LIKE ? OR responsible_company2_no LIKE ?)"
-            params.extend([f'%{business_number}%', f'%{business_number}%'])
+        # company_name과 business_number 필터링은 제거 (responsible_company 관련)
         
         if accident_date_start:
             query += " AND accident_date >= ?"
@@ -4399,12 +4725,11 @@ def export_accidents_excel():
         header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
         header_align = Alignment(horizontal="center", vertical="center")
         
-        # 헤더 작성 (사고번호는 자동 생성되므로 제외)
+        # 헤더 작성 (ACCIDENTS_QUERY와 동일한 14개 필드)
         headers = [
-            '사고명', '재해날짜', '시간', '사고등급', '사고분류',
-            '재해유형', '재해형태', '사업장', '건물', '층', '세부위치',
-            '요일', '귀책협력사(1차)', '귀책협력사(1차)사업자번호',
-            '귀책협력사(2차)', '귀책협력사(2차)사업자번호'
+            '사고번호', '사고명', '사업장', '사고등급', '대분류',
+            '재해형태', '재해유형', '재해날짜', '요일', '등록일',
+            '건물', '층', '장소구분', '세부위치'
         ]
         
         # 동적 컬럼 헤더 추가
@@ -4422,23 +4747,21 @@ def export_accidents_excel():
         for row_idx, accident_row in enumerate(accidents, 2):
             accident = dict(accident_row)
             
-            # 기본 필드 쓰기 (사고번호 제외)
-            ws.cell(row=row_idx, column=1, value=accident.get('accident_name', ''))
-            ws.cell(row=row_idx, column=2, value=accident.get('accident_date', ''))
-            ws.cell(row=row_idx, column=3, value=accident.get('accident_time', ''))
+            # 기본 필드 쓰기 (ACCIDENTS_QUERY 순서대로 14개)
+            ws.cell(row=row_idx, column=1, value=accident.get('accident_number', ''))
+            ws.cell(row=row_idx, column=2, value=accident.get('accident_name', ''))
+            ws.cell(row=row_idx, column=3, value=accident.get('workplace', ''))
             ws.cell(row=row_idx, column=4, value=accident.get('accident_grade', ''))
-            ws.cell(row=row_idx, column=5, value=accident.get('accident_type', ''))
-            ws.cell(row=row_idx, column=6, value=accident.get('injury_type', ''))
-            ws.cell(row=row_idx, column=7, value=accident.get('injury_form', ''))
-            ws.cell(row=row_idx, column=8, value=accident.get('workplace', ''))
-            ws.cell(row=row_idx, column=9, value=accident.get('building', ''))
-            ws.cell(row=row_idx, column=10, value=accident.get('floor', ''))
-            ws.cell(row=row_idx, column=11, value=accident.get('location_detail', ''))
-            ws.cell(row=row_idx, column=12, value=accident.get('day_of_week', ''))
-            ws.cell(row=row_idx, column=13, value=accident.get('responsible_company1', ''))
-            ws.cell(row=row_idx, column=14, value=accident.get('responsible_company1_no', ''))
-            ws.cell(row=row_idx, column=15, value=accident.get('responsible_company2', ''))
-            ws.cell(row=row_idx, column=16, value=accident.get('responsible_company2_no', ''))
+            ws.cell(row=row_idx, column=5, value=accident.get('major_category', ''))
+            ws.cell(row=row_idx, column=6, value=accident.get('injury_form', ''))
+            ws.cell(row=row_idx, column=7, value=accident.get('injury_type', ''))
+            ws.cell(row=row_idx, column=8, value=accident.get('accident_date', ''))
+            ws.cell(row=row_idx, column=9, value=accident.get('day_of_week', ''))
+            ws.cell(row=row_idx, column=10, value=accident.get('report_date', ''))
+            ws.cell(row=row_idx, column=11, value=accident.get('building', ''))
+            ws.cell(row=row_idx, column=12, value=accident.get('floor', ''))
+            ws.cell(row=row_idx, column=13, value=accident.get('location_category', ''))
+            ws.cell(row=row_idx, column=14, value=accident.get('location_detail', ''))
             
             # 동적 컬럼 데이터 쓰기
             # json already imported globally
@@ -4450,7 +4773,7 @@ def export_accidents_excel():
                 except:
                     custom_data = {}
             
-            for col_idx, col in enumerate(dynamic_columns, 17):
+            for col_idx, col in enumerate(dynamic_columns, 15):
                 value = custom_data.get(col['column_key'], '')
                 # popup 타입 데이터 처리
                 if isinstance(value, dict):
@@ -4564,10 +4887,6 @@ def import_accidents():
             '층': 'floor',
             '세부위치': 'location_detail',
             '요일': 'day_of_week',
-            '귀책협력사(1차)': 'responsible_company1',
-            '귀책협력사(1차)사업자번호': 'responsible_company1_no',
-            '귀책협력사(2차)': 'responsible_company2',
-            '귀책협력사(2차)사업자번호': 'responsible_company2_no',
             '처리상태': 'processing_status',
             '조치사항': 'measures',
             '재발방지대책': 'prevention_measures',
@@ -4630,8 +4949,7 @@ def import_accidents():
                         if db_column in ['accident_name', 'accident_date', 'accident_time', 
                                        'accident_level', 'accident_classification', 'disaster_type', 'disaster_form',
                                        'workplace', 'building', 'floor', 'location_detail', 'day_of_week',
-                                       'responsible_company1', 'responsible_company1_no', 'responsible_company2',
-                                       'responsible_company2_no', 'processing_status', 'measures', 
+                                       'processing_status', 'measures', 
                                        'prevention_measures', 'department', 'manager', 'completion_date',
                                        'cause_analysis', 'attachment', 'occurrence_location']:
                             data[db_column] = str_value

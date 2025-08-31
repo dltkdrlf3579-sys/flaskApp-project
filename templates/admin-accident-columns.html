@@ -458,8 +458,8 @@ let editingId = null;
             container.innerHTML = '';
             
             pendingColumns.forEach((column, index) => {
-                // 삭제된 컬럼은 표시하지 않음
-                if (column._deleted) return;
+                // 삭제된 컬럼이나 숨겨진 컬럼은 표시하지 않음
+                if (column._deleted || column._hidden) return;
                 
                 const card = document.createElement('div');
                 // 비활성 컬럼에 투명도 추가
@@ -1060,18 +1060,16 @@ let editingId = null;
         }
         
         function deleteColumn(id) {
-            if (!confirm('⚠️ 주의: 이 컬럼을 완전히 삭제하면 모든 관련 데이터가 영구 삭제됩니다.\n복구가 불가능합니다. 정말 삭제하시겠습니까?')) {
-                return;
-            }
-            
             const index = pendingColumns.findIndex(c => String(c.id) === String(id));
             if (index !== -1) {
                 if (pendingColumns[index]._isNew) {
                     // 새로 추가한 컬럼은 바로 제거
                     pendingColumns.splice(index, 1);
                 } else {
-                    // 기존 컬럼은 삭제 예정 표시
+                    // 기존 컬럼은 삭제 예정 표시 (soft delete)
                     pendingColumns[index]._toDelete = true;
+                    // 화면에서 즉시 숨기기 위해 추가 플래그
+                    pendingColumns[index]._hidden = true;
                 }
             }
             
@@ -1136,20 +1134,22 @@ let editingId = null;
                 
                 for (const column of pendingColumns) {
                     if (column._toDelete && !column._isNew) {
-                        // 기존 컬럼 삭제 처리
-                        console.log('삭제 처리 중:', column.id, column.column_name);
+                        // 기존 컬럼 soft delete 처리 (is_deleted = 1)
+                        console.log('Soft delete 처리 중:', column.id, column.column_name);
                         const response = await fetch(`/api/accident-columns/${column.id}`, {
-                            method: 'DELETE'
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ is_deleted: 1 })
                         });
                         const result = await response.json();
-                        console.log('삭제 응답:', result);
+                        console.log('Soft delete 응답:', result);
                         
                         if (response.ok) {
                             successCount++;
-                            console.log('삭제 성공:', column.id, column.column_name);
+                            console.log('Soft delete 성공:', column.id, column.column_name);
                         } else {
                             errorCount++;
-                            console.error('삭제 실패:', column.id, result.message);
+                            console.error('Soft delete 실패:', column.id, result.message);
                         }
                     } else if (column._isNew && !column._toDelete) {
                         // 새 컬럼 추가
