@@ -221,7 +221,9 @@ def register_follow_sop():
     """새 Follow SOP 등록"""
     conn = None
     try:
-        data = request.get_json()
+        # safety-instruction과 동일한 방식으로 form data 처리
+        import json
+        data = json.loads(request.form.get('data', '{}'))
         conn = get_db_connection()
         cursor = conn.cursor()
         
@@ -266,7 +268,9 @@ def update_follow_sop():
     """Follow SOP 수정"""
     conn = None
     try:
-        data = request.get_json()
+        # safety-instruction과 동일한 방식으로 form data 처리
+        import json
+        data = json.loads(request.form.get('data', '{}'))
         work_req_no = data.get('work_req_no')
         
         if not work_req_no:
@@ -529,7 +533,9 @@ def register_full_process():
     """새 Full Process 등록"""
     conn = None
     try:
-        data = request.get_json()
+        # safety-instruction과 동일한 방식으로 form data 처리
+        import json
+        data = json.loads(request.form.get('data', '{}'))
         conn = get_db_connection()
         cursor = conn.cursor()
         
@@ -574,7 +580,9 @@ def update_full_process():
     """Full Process 수정"""
     conn = None
     try:
-        data = request.get_json()
+        # safety-instruction과 동일한 방식으로 form data 처리
+        import json
+        data = json.loads(request.form.get('data', '{}'))
         fullprocess_number = data.get('fullprocess_number')
         
         if not fullprocess_number:
