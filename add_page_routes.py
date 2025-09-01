@@ -120,6 +120,8 @@ def follow_sop_route():
     return render_template('follow-sop.html',
                          items=items,
                          dynamic_columns=dynamic_columns,
+                         sections=sections,
+                         section_columns=section_columns,
                          pagination=pagination,
                          search_params=search_params,
                          menu=MENU_CONFIG)
