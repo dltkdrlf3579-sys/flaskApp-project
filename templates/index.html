@@ -8,17 +8,18 @@
 body {
     margin: 0;
     padding: 0;
-    overflow: hidden;
+    overflow-y: auto;  /* 세로 스크롤 허용 */
+    overflow-x: hidden;  /* 가로 스크롤 차단 */
 }
 
-/* 전체 화면 대시보드 컨테이너 */
+/* 전체 화면 대시보드 컨테이너 - 1920x940 고정 */
 .dashboard-wrapper {
     position: relative;  /* absolute 대신 relative 사용 */
     top: 0;
     left: 0;
-    width: 100%;
-    height: calc(100vh - 56px);
-    margin: 0;
+    width: 1920px;  /* 너비 1920px 고정 */
+    height: 940px;  /* 높이 940px 고정 */
+    margin: 0 auto;  /* 가운데 정렬 */
     padding: 0;
     background: #f5f5f5; /* 로딩 중 배경색 */
     z-index: 1; /* 낮은 z-index */

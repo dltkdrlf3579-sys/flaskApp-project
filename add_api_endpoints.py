@@ -1,0 +1,209 @@
+# Follow SOP API 엔드포인트
+@app.route("/api/followsop-columns", methods=["GET"])
+def get_followsop_columns():
+    """Follow SOP 페이지 동적 컬럼 설정 조회"""
+    try:
+        column_service = ColumnConfigService('followsop', DB_PATH)
+        columns = column_service.list_columns()
+        return jsonify(columns)
+    except Exception as e:
+        logging.error(f"Follow SOP 컬럼 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/followsop-columns", methods=["POST"])
+def add_followsop_column():
+    """Follow SOP 페이지 동적 컬럼 추가"""
+    try:
+        column_service = ColumnConfigService('followsop', DB_PATH)
+        result = column_service.add_column(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 컬럼 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/followsop-columns/<int:column_id>", methods=["PUT"])
+def update_followsop_column(column_id):
+    """Follow SOP 페이지 동적 컬럼 수정"""
+    try:
+        column_service = ColumnConfigService('followsop', DB_PATH)
+        result = column_service.update_column(column_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 컬럼 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/followsop-columns/<int:column_id>", methods=["DELETE"])
+def delete_followsop_column(column_id):
+    """Follow SOP 페이지 동적 컬럼 삭제 (비활성화)"""
+    try:
+        column_service = ColumnConfigService('followsop', DB_PATH)
+        result = column_service.delete_column(column_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 컬럼 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/followsop-sections", methods=["GET"])
+def get_followsop_sections():
+    """Follow SOP 섹션 목록 조회"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('followsop', DB_PATH)
+        sections = section_service.get_sections()
+        return jsonify({"success": True, "sections": sections})
+    except Exception as e:
+        logging.error(f"Follow SOP 섹션 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/followsop-sections", methods=["POST"])
+def add_followsop_section():
+    """Follow SOP 섹션 추가"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('followsop', DB_PATH)
+        result = section_service.add_section(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 섹션 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/followsop-sections/<int:section_id>", methods=["PUT"])
+def update_followsop_section(section_id):
+    """Follow SOP 섹션 수정"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('followsop', DB_PATH)
+        result = section_service.update_section(section_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 섹션 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/followsop-sections/<int:section_id>", methods=["DELETE"])
+def delete_followsop_section(section_id):
+    """Follow SOP 섹션 삭제"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('followsop', DB_PATH)
+        result = section_service.delete_section(section_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 섹션 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/followsop-sections/reorder", methods=["POST"])
+def reorder_followsop_sections():
+    """Follow SOP 섹션 순서 변경"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('followsop', DB_PATH)
+        result = section_service.reorder_sections(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 섹션 순서 변경 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+# Full Process API 엔드포인트
+@app.route("/api/fullprocess-columns", methods=["GET"])
+def get_fullprocess_columns():
+    """Full Process 페이지 동적 컬럼 설정 조회"""
+    try:
+        column_service = ColumnConfigService('fullprocess', DB_PATH)
+        columns = column_service.list_columns()
+        return jsonify(columns)
+    except Exception as e:
+        logging.error(f"Full Process 컬럼 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/fullprocess-columns", methods=["POST"])
+def add_fullprocess_column():
+    """Full Process 페이지 동적 컬럼 추가"""
+    try:
+        column_service = ColumnConfigService('fullprocess', DB_PATH)
+        result = column_service.add_column(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 컬럼 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/fullprocess-columns/<int:column_id>", methods=["PUT"])
+def update_fullprocess_column(column_id):
+    """Full Process 페이지 동적 컬럼 수정"""
+    try:
+        column_service = ColumnConfigService('fullprocess', DB_PATH)
+        result = column_service.update_column(column_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 컬럼 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/fullprocess-columns/<int:column_id>", methods=["DELETE"])
+def delete_fullprocess_column(column_id):
+    """Full Process 페이지 동적 컬럼 삭제 (비활성화)"""
+    try:
+        column_service = ColumnConfigService('fullprocess', DB_PATH)
+        result = column_service.delete_column(column_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 컬럼 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/fullprocess-sections", methods=["GET"])
+def get_fullprocess_sections():
+    """Full Process 섹션 목록 조회"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('fullprocess', DB_PATH)
+        sections = section_service.get_sections()
+        return jsonify({"success": True, "sections": sections})
+    except Exception as e:
+        logging.error(f"Full Process 섹션 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/fullprocess-sections", methods=["POST"])
+def add_fullprocess_section():
+    """Full Process 섹션 추가"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('fullprocess', DB_PATH)
+        result = section_service.add_section(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 섹션 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/fullprocess-sections/<int:section_id>", methods=["PUT"])
+def update_fullprocess_section(section_id):
+    """Full Process 섹션 수정"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('fullprocess', DB_PATH)
+        result = section_service.update_section(section_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 섹션 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/fullprocess-sections/<int:section_id>", methods=["DELETE"])
+def delete_fullprocess_section(section_id):
+    """Full Process 섹션 삭제"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('fullprocess', DB_PATH)
+        result = section_service.delete_section(section_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 섹션 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/fullprocess-sections/reorder", methods=["POST"])
+def reorder_fullprocess_sections():
+    """Full Process 섹션 순서 변경"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('fullprocess', DB_PATH)
+        result = section_service.reorder_sections(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 섹션 순서 변경 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500

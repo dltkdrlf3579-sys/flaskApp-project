@@ -221,7 +221,6 @@
     <div class="admin-header">
         <div class="container">
             <h1><i class="bi bi-gear-fill"></i> 환경안전 지시서 컬럼 관리</h1>
-            <p>사고 페이지의 추가 기입정보 컬럼을 관리합니다</p>
         </div>
     </div>
     
@@ -432,13 +431,14 @@
                         
                         <div class="mb-3">
                             <label class="form-label">입력 타입 <span class="text-danger">*</span></label>
-                            <select class="form-select" id="columnType" onchange="toggleOptionsField(); toggleTableField(); toggleSpanField(); checkTypeChange();">
+                            <select class="form-select" id="columnType" onchange="toggleOptionsField(); toggleTableField(); toggleSpanField(); toggleListField(); checkTypeChange();">
                                 <option value="" disabled selected>타입을 선택하세요</option>
                                 <option value="text">텍스트</option>
                                 <option value="dropdown">드롭다운</option>
                                 <option value="date">날짜</option>
                                 <option value="time">시간</option>
                                 <option value="table">테이블</option>
+                                <option value="list">리스트</option>
                             </select>
                             <div id="typeChangeWarning" class="alert alert-warning mt-2" style="display: none; font-size: 13px; padding: 8px 12px;">
                                 <i class="bi bi-exclamation-triangle"></i> 타입 변경 시 기존 데이터가 삭제될 수 있습니다.
@@ -532,6 +532,31 @@
                                 <i class="bi bi-code-square"></i> 코드 편집기 열기
                             </button>
                             <input type="hidden" id="dropdownOptions" />
+                        </div>
+                        
+                        <!-- 리스트 설정 영역 -->
+                        <div class="mb-3" id="listConfigField" style="display: none;">
+                            <label class="form-label">리스트 항목 설정</label>
+                            <div class="alert alert-info" style="font-size: 13px;">
+                                <i class="bi bi-info-circle"></i> 리스트에 포함될 항목을 설정합니다. (현재는 협력사 근로자만 지원)
+                            </div>
+                            <div class="d-flex gap-2 align-items-center">
+                                <select class="form-select" id="listItemType">
+                                    <option value="partner_worker">협력사 근로자</option>
+                                </select>
+                            </div>
+                            <div class="mt-2">
+                                <small class="text-muted">
+                                    리스트로 선택 시 다음 컬럼들이 자동 생성됩니다:
+                                    <ul style="margin-top: 5px;">
+                                        <li>성함 (팝업 검색)</li>
+                                        <li>ID (자동 연동)</li>
+                                        <li>소속업체 (자동 연동)</li>
+                                        <li>사업자번호 (자동 연동)</li>
+                                    </ul>
+                                </small>
+                            </div>
+                            <input type="hidden" id="listConfig" value="partner_worker">
                         </div>
                         
                         <div class="form-check mb-3">
@@ -1364,6 +1389,12 @@ let editingId = null;
                 type === 'text' ? 'block' : 'none';
         }
         
+        function toggleListField() {
+            const type = document.getElementById('columnType').value;
+            document.getElementById('listConfigField').style.display = 
+                type === 'list' ? 'block' : 'none';
+        }
+        
         function updateMappingFields() {
             const tableSelect = document.getElementById('tableSelect').value;
             const mappingContainer = document.getElementById('mappingContainer');
@@ -1562,7 +1593,35 @@ let editingId = null;
                 }
             } else {
                 // 새 컬럼 추가
-                if (columnType === 'table') {
+                if (columnType === 'list') {
+                    // 리스트 타입 처리
+                    const listItemType = document.getElementById('listItemType').value;
+                    
+                    if (listItemType === 'partner_worker') {
+                        // 협력사 근로자 리스트를 위한 컬럼 생성
+                        const newId = Date.now();
+                        const baseOrder = pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete).length;
+                        
+                        const newColumn = {
+                            id: newId,
+                            column_name: columnName,
+                            column_key: columnKey,
+                            column_type: 'list',
+                            list_item_type: 'partner_worker',
+                            tab: selectedSection,
+                            is_active: isActive,
+                            column_order: baseOrder,
+                            _isNew: true,
+                            _listConfig: listItemType
+                        };
+                        
+                        pendingColumns.push(newColumn);
+                        console.log(`리스트 컬럼 생성:`, newColumn);
+                        
+                        alert(`✅ 리스트 컬럼이 생성되었습니다:\n\n${columnName}\n\n"전체 변경사항 저장" 버튼을 눌러야 최종 반영됩니다.`);
+                    }
+                    
+                } else if (columnType === 'table') {
                     // 테이블 타입: 선택된 테이블 설정 확인
                     const selectedTable = document.getElementById('selectedTableConfig').value;
                     if (!selectedTable) {
@@ -1993,6 +2052,7 @@ let editingId = null;
                 name: '담당자',
                 columns: [
                     { name: '담당자', key_suffix: '', type: 'popup_person' },
+                    { name: '담당자 ID', key_suffix: '_id', type: 'linked_text' },
                     { name: '담당자 부서', key_suffix: '_dept', type: 'linked_dept' }
                 ]
             },

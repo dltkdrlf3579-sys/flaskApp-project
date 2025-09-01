@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>리스트 필드 테스트</title>
+</head>
+<body>
+    <h1>리스트 필드 JSON 파싱 테스트</h1>
+    
+    <!-- 테스트용 hidden input -->
+    <input type="hidden" 
+           id="tteesstt" 
+           data-field="tteesstt"
+           data-field-type="list"
+           data-section="additional"
+           value='[{"name":"김철수","id":"W001","company":"한국건설(주)","bizno":"123-45-67890"}]'>
+    
+    <button onclick="testParsing()">테스트 실행</button>
+    
+    <div id="result"></div>
+    
+    <script>
+    function testParsing() {
+        const input = document.getElementById('tteesstt');
+        const resultDiv = document.getElementById('result');
+        
+        console.log('=== 테스트 시작 ===');
+        console.log('input element:', input);
+        console.log('dataset:', input.dataset);
+        console.log('data-field-type:', input.dataset.fieldType);
+        
+        let value = input.value;
+        console.log('원본 값:', value);
+        console.log('원본 타입:', typeof value);
+        
+        // 조건 1: data-field-type="list" 체크
+        if (input.dataset.fieldType === 'list') {
+            console.log('✅ data-field-type="list" 감지됨');
+            try {
+                value = JSON.parse(value);
+                console.log('파싱 성공:', value);
+                resultDiv.innerHTML = '<h2 style="color: green">✅ 성공: 배열로 파싱됨</h2>';
+            } catch(e) {
+                console.log('파싱 실패:', e);
+                resultDiv.innerHTML = '<h2 style="color: red">❌ 파싱 실패</h2>';
+            }
+        } else {
+            console.log('❌ data-field-type="list" 감지 실패');
+            console.log('  실제 값:', input.dataset.fieldType);
+            console.log('  getAttribute:', input.getAttribute('data-field-type'));
+            resultDiv.innerHTML = '<h2 style="color: orange">⚠️ data-field-type 감지 실패</h2>';
+        }
+        
+        // 조건 2: 문자열이 [로 시작하는지 체크 (대체 방법)
+        if (typeof value === 'string' && value.startsWith('[')) {
+            console.log('대체 방법: 배열처럼 보이는 문자열');
+            try {
+                const parsed = JSON.parse(value);
+                if (Array.isArray(parsed)) {
+                    console.log('대체 파싱 성공:', parsed);
+                    resultDiv.innerHTML += '<p>대체 방법으로 파싱 성공</p>';
+                }
+            } catch(e) {
+                console.log('대체 파싱 실패:', e);
+            }
+        }
+        
+        console.log('=== 테스트 완료 ===');
+    }
+    </script>
+</body>
+</html>

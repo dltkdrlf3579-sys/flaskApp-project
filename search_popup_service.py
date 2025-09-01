@@ -101,12 +101,11 @@ class SearchPopupService:
                 'search_fields': [
                     {'field': 'worker_name', 'label': '근로자명'},
                     {'field': 'worker_id', 'label': '근로자ID'},
-                    {'field': 'company_name', 'label': '소속회사'},
-                    {'field': 'birth_date', 'label': '생년월일'}
+                    {'field': 'company_name', 'label': '소속회사'}
                 ],
                 'default_search_field': 'worker_name',
-                'display_fields': ['worker_name', 'worker_id', 'company_name', 'business_number', 'access_status', 'birth_date'],
-                'display_labels': {'worker_name': '근로자명', 'worker_id': '근로자ID', 'company_name': '소속회사', 'business_number': '사업자번호', 'access_status': '출입여부', 'birth_date': '생년월일'},
+                'display_fields': ['worker_name', 'worker_id', 'company_name', 'business_number'],
+                'display_labels': {'worker_name': '근로자명', 'worker_id': '근로자ID', 'company_name': '소속회사', 'business_number': '사업자번호'},
                 'id_field': 'worker_id',
                 'title': '협력사 근로자 검색',
                 'placeholder': '검색어를 입력하세요',

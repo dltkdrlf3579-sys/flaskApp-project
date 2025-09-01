@@ -1,0 +1,277 @@
+{# 리스트 필드 공통 컴포넌트 V2 - 개선된 버전 #}
+{# 사용법: {% include 'includes/list_field_component_v2.html' %} #}
+
+{% macro render_list_field(col, col_value, section, mode='view') %}
+    {% if col.column_type == 'list' %}
+        {% set list_data = col_value | from_json if col_value else [] %}
+        
+        <!-- 리스트 필드 컨테이너 -->
+        <div class="list-field-wrapper" style="width: 100%;">
+            <!-- 숨겨진 input (데이터 저장용) -->
+            <input type="hidden" 
+                   id="{{ col.column_key }}" 
+                   class="{{ section.section_key }}-input" 
+                   data-field="{{ col.column_key }}"
+                   data-section="{{ section.section_key }}"
+                   data-list-type="{{ col.list_item_type }}"
+                   value="{{ col_value }}">
+            
+            <!-- 편집 모드에서만 추가 버튼 표시 -->
+            {% if mode == 'edit' or mode == 'register' %}
+            <div style="margin-bottom: 10px;">
+                <button type="button" class="btn btn-sm btn-success" 
+                        onclick="showAddForm_{{ col.column_key }}()">
+                    <i class="bi bi-plus-circle"></i> 협력사 근로자 추가
+                </button>
+            </div>
+            {% endif %}
+            
+            <!-- 추가 폼 영역 (기본 숨김) -->
+            <div id="{{ col.column_key }}_add_form" style="display: none; margin-bottom: 15px;">
+                <div style="border: 1px solid #3b82f6; background: #eff6ff; padding: 15px; border-radius: 4px;">
+                    <h6 style="margin: 0 0 10px 0; color: #1e40af;">새 협력사 근로자 추가</h6>
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+                        <div>
+                            <label style="display: block; font-size: 12px; color: #374151; margin-bottom: 4px;">성함 *</label>
+                            <div style="display: flex; gap: 4px;">
+                                <input type="text" 
+                                       id="{{ col.column_key }}_new_name" 
+                                       style="flex: 1; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px;"
+                                       placeholder="클릭하여 검색"
+                                       readonly>
+                                <button type="button" 
+                                        onclick="searchContractor_{{ col.column_key }}()"
+                                        style="padding: 6px 10px; background: white; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer;">
+                                    🔍
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 12px; color: #374151; margin-bottom: 4px;">ID</label>
+                            <input type="text" 
+                                   id="{{ col.column_key }}_new_id" 
+                                   style="width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; background: #f3f4f6;"
+                                   readonly>
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 12px; color: #374151; margin-bottom: 4px;">소속업체</label>
+                            <input type="text" 
+                                   id="{{ col.column_key }}_new_company" 
+                                   style="width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; background: #f3f4f6;"
+                                   readonly>
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 12px; color: #374151; margin-bottom: 4px;">사업자번호</label>
+                            <input type="text" 
+                                   id="{{ col.column_key }}_new_bizno" 
+                                   style="width: 100%; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; background: #f3f4f6;"
+                                   readonly>
+                        </div>
+                    </div>
+                    <div style="margin-top: 10px; text-align: right;">
+                        <button type="button" 
+                                onclick="cancelAdd_{{ col.column_key }}()"
+                                style="padding: 6px 12px; background: #6b7280; color: white; border: none; border-radius: 4px; margin-right: 5px; cursor: pointer;">
+                            취소
+                        </button>
+                        <button type="button" 
+                                onclick="saveAdd_{{ col.column_key }}()"
+                                style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                            추가
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 리스트 테이블 -->
+            <div style="border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+                <!-- 테이블 헤더 -->
+                <div style="display: flex; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-size: 13px; font-weight: 600;">
+                    <div style="width: 50px; padding: 10px; text-align: center; border-right: 1px solid #e5e7eb;">No.</div>
+                    <div style="flex: 1; padding: 10px; border-right: 1px solid #e5e7eb;">성함</div>
+                    <div style="width: 100px; padding: 10px; border-right: 1px solid #e5e7eb;">ID</div>
+                    <div style="flex: 1.5; padding: 10px; border-right: 1px solid #e5e7eb;">소속업체</div>
+                    <div style="width: 130px; padding: 10px; {% if mode == 'edit' or mode == 'register' %}border-right: 1px solid #e5e7eb;{% endif %}">사업자번호</div>
+                    {% if mode == 'edit' or mode == 'register' %}
+                    <div style="width: 60px; padding: 10px; text-align: center;">삭제</div>
+                    {% endif %}
+                </div>
+                
+                <!-- 테이블 바디 -->
+                <div id="{{ col.column_key }}_list_body" style="max-height: 300px; overflow-y: auto; background: white;">
+                    {% if list_data and list_data|length > 0 %}
+                        {% for item in list_data %}
+                        <div class="{{ col.column_key }}_list_row" 
+                             data-index="{{ loop.index0 }}"
+                             style="display: flex; border-bottom: 1px solid #f3f4f6; font-size: 13px;">
+                            <div style="width: 50px; padding: 10px; text-align: center; border-right: 1px solid #f3f4f6;">
+                                {{ loop.index }}
+                            </div>
+                            <div style="flex: 1; padding: 10px; border-right: 1px solid #f3f4f6;">
+                                {{ item.name or '-' }}
+                            </div>
+                            <div style="width: 100px; padding: 10px; border-right: 1px solid #f3f4f6;">
+                                {{ item.id or '-' }}
+                            </div>
+                            <div style="flex: 1.5; padding: 10px; border-right: 1px solid #f3f4f6;">
+                                {{ item.company or '-' }}
+                            </div>
+                            <div style="width: 130px; padding: 10px; {% if mode == 'edit' or mode == 'register' %}border-right: 1px solid #f3f4f6;{% endif %}">
+                                {{ item.bizno or '-' }}
+                            </div>
+                            {% if mode == 'edit' or mode == 'register' %}
+                            <div style="width: 60px; padding: 10px; text-align: center;">
+                                <button type="button" 
+                                        onclick="removeItem_{{ col.column_key }}({{ loop.index0 }})"
+                                        style="background: none; border: none; color: #dc2626; cursor: pointer; font-size: 16px;"
+                                        title="삭제">
+                                    🗑️
+                                </button>
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div id="{{ col.column_key }}_empty_message" 
+                             style="padding: 30px; text-align: center; color: #6b7280;">
+                            등록된 협력사 근로자가 없습니다.
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <!-- 카운트 표시 -->
+            <div style="margin-top: 10px; font-size: 13px; color: #6b7280;">
+                총 <span id="{{ col.column_key }}_count">{{ list_data|length if list_data else 0 }}</span>명
+            </div>
+        </div>
+        
+        <!-- 필드별 스크립트 -->
+        <script>
+        // {{ col.column_key }}용 데이터 관리
+        var {{ col.column_key }}_data = {{ col_value|default('[]')|safe }};
+        
+        // 추가 폼 표시
+        function showAddForm_{{ col.column_key }}() {
+            document.getElementById('{{ col.column_key }}_add_form').style.display = 'block';
+            // 폼 초기화
+            document.getElementById('{{ col.column_key }}_new_name').value = '';
+            document.getElementById('{{ col.column_key }}_new_id').value = '';
+            document.getElementById('{{ col.column_key }}_new_company').value = '';
+            document.getElementById('{{ col.column_key }}_new_bizno').value = '';
+        }
+        
+        // 추가 취소
+        function cancelAdd_{{ col.column_key }}() {
+            document.getElementById('{{ col.column_key }}_add_form').style.display = 'none';
+        }
+        
+        // 협력사 근로자 검색
+        function searchContractor_{{ col.column_key }}() {
+            const callbackName = 'contractorCallback_{{ col.column_key }}';
+            
+            // 팝업 열기
+            const popup = window.open(`/search-popup?type=contractor&callback=${callbackName}`, 
+                'contractorPopup', 'width=900,height=600,scrollbars=yes');
+            
+            // 콜백 함수 정의
+            window[callbackName] = function(data) {
+                document.getElementById('{{ col.column_key }}_new_name').value = data.worker_name || '';
+                document.getElementById('{{ col.column_key }}_new_id').value = data.worker_id || '';
+                document.getElementById('{{ col.column_key }}_new_company').value = data.company_name || '';
+                document.getElementById('{{ col.column_key }}_new_bizno').value = data.business_number || '';
+                delete window[callbackName];
+            };
+        }
+        
+        // 추가 저장
+        function saveAdd_{{ col.column_key }}() {
+            const name = document.getElementById('{{ col.column_key }}_new_name').value;
+            const id = document.getElementById('{{ col.column_key }}_new_id').value;
+            const company = document.getElementById('{{ col.column_key }}_new_company').value;
+            const bizno = document.getElementById('{{ col.column_key }}_new_bizno').value;
+            
+            if (!name) {
+                alert('성함을 선택해주세요.');
+                return;
+            }
+            
+            // 데이터 추가
+            const newItem = { name: name, id: id, company: company, bizno: bizno };
+            {{ col.column_key }}_data.push(newItem);
+            
+            // UI 업데이트
+            renderList_{{ col.column_key }}();
+            
+            // 폼 숨기기
+            cancelAdd_{{ col.column_key }}();
+        }
+        
+        // 항목 제거
+        function removeItem_{{ col.column_key }}(index) {
+            if (!confirm('정말 삭제하시겠습니까?')) {
+                return;
+            }
+            
+            {{ col.column_key }}_data.splice(index, 1);
+            renderList_{{ col.column_key }}();
+        }
+        
+        // 리스트 렌더링
+        function renderList_{{ col.column_key }}() {
+            const container = document.getElementById('{{ col.column_key }}_list_body');
+            
+            if ({{ col.column_key }}_data.length === 0) {
+                container.innerHTML = `
+                    <div id="{{ col.column_key }}_empty_message" 
+                         style="padding: 30px; text-align: center; color: #6b7280;">
+                        등록된 협력사 근로자가 없습니다.
+                    </div>
+                `;
+            } else {
+                let html = '';
+                {{ col.column_key }}_data.forEach((item, index) => {
+                    html += `
+                        <div class="{{ col.column_key }}_list_row" 
+                             data-index="${index}"
+                             style="display: flex; border-bottom: 1px solid #f3f4f6; font-size: 13px;">
+                            <div style="width: 50px; padding: 10px; text-align: center; border-right: 1px solid #f3f4f6;">
+                                ${index + 1}
+                            </div>
+                            <div style="flex: 1; padding: 10px; border-right: 1px solid #f3f4f6;">
+                                ${item.name || '-'}
+                            </div>
+                            <div style="width: 100px; padding: 10px; border-right: 1px solid #f3f4f6;">
+                                ${item.id || '-'}
+                            </div>
+                            <div style="flex: 1.5; padding: 10px; border-right: 1px solid #f3f4f6;">
+                                ${item.company || '-'}
+                            </div>
+                            <div style="width: 130px; padding: 10px; {% if mode == 'edit' or mode == 'register' %}border-right: 1px solid #f3f4f6;{% endif %}">
+                                ${item.bizno || '-'}
+                            </div>
+                            {% if mode == 'edit' or mode == 'register' %}
+                            <div style="width: 60px; padding: 10px; text-align: center;">
+                                <button type="button" 
+                                        onclick="removeItem_{{ col.column_key }}(${index})"
+                                        style="background: none; border: none; color: #dc2626; cursor: pointer; font-size: 16px;"
+                                        title="삭제">
+                                    🗑️
+                                </button>
+                            </div>
+                            {% endif %}
+                        </div>
+                    `;
+                });
+                container.innerHTML = html;
+            }
+            
+            // 카운트 업데이트
+            document.getElementById('{{ col.column_key }}_count').textContent = {{ col.column_key }}_data.length;
+            
+            // hidden input 업데이트
+            document.getElementById('{{ col.column_key }}').value = JSON.stringify({{ col.column_key }}_data);
+        }
+        </script>
+    {% endif %}
+{% endmacro %}

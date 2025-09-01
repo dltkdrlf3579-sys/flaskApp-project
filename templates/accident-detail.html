@@ -52,8 +52,16 @@
                             {% set span = col.column_span|default(1)|int %}
                             
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
+                                {% if col.column_type != 'list' %}
                                 <label>{{ col.column_name }}</label>
-                                {% set col_value = instruction[col.column_key] | default('', true) %}
+                                {% endif %}
+                                {% if section.section_key != 'basic' and col.column_type == 'list' %}
+                                    {% set col_value = custom_data.get(col.column_key, '[]') if custom_data else '[]' %}
+                                    <!-- 디버깅: 리스트 필드 값 확인 -->
+                                    <!-- col_value for {{ col.column_key }}: {{ col_value }} -->
+                                {% else %}
+                                    {% set col_value = instruction[col.column_key] | default('', true) %}
+                                {% endif %}
                             
                             {% if col.column_key == 'accident_number' %}
                                 <!-- 발부번호는 수정 불가 -->
@@ -95,6 +103,10 @@
                                        data-section="{{ section.section_key }}"
                                        value="{{ col_value }}"
                                        placeholder="시간 선택">
+                            {% elif col.column_type == 'list' %}
+                                <!-- 리스트 필드 -->
+                                {% from 'includes/list_field_v3.html' import render_list_field %}
+                                {{ render_list_field(col, col_value, section, mode='edit') }}
                             {% elif col.column_type == 'number' %}
                                 <!-- 숫자 필드 -->
                                 <input type="number" 
@@ -334,6 +346,8 @@ function openPopup(fieldKey) {
     // 팝업 구현 (필요시 추가)
     alert('팝업 기능은 추가 구현이 필요합니다.');
 }
+
+// 기본 스크립트 끝
 </script>
 
 <style>
@@ -628,6 +642,19 @@ function openPopup(fieldKey) {
     background: #6b7280;
     color: white;
     margin-left: 10px;
+
+/* 리스트 표시 스타일 */
+.list-display {
+    width: 100%;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.list-item-display {
+    border: 1px solid #dee2e6;
+    background: #f8f9fa;
+    font-size: 13px;
+}
 }
 
 .btn-cancel:hover {

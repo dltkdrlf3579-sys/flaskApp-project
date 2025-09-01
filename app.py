@@ -2279,36 +2279,20 @@ def accident_detail(accident_id):
     attachments = attachment_service.list(accident['accident_number'])
     logging.info(f"Accident {accident['accident_number']}: {len(attachments)} attachments found")
     
-    # Phase 2: 동적 컬럼 설정 가져오기 (추가정보 섹션용 - 기본정보 필드 제외)
-    # 기본정보 섹션에 이미 표시되는 필드들은 제외
-    basic_info_fields = [
-        'accident_number', 'accident_name', 'workplace', 'accident_grade',
-        'major_category', 'injury_form', 'injury_type', 'accident_date',
-        'day_of_week', 'report_date', 'building', 'floor',
-        'location_category', 'location_detail'
-    ]
-    
+    # 동적 컬럼 설정 가져오기 - safety-instruction과 동일한 방식 (활성화되고 삭제되지 않은 것만)
     dynamic_columns_rows = conn.execute("""
         SELECT * FROM accident_column_config 
-        WHERE is_active = 1 
-        AND column_key NOT IN ({})
+        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
         ORDER BY column_order
-    """.format(','.join(['?'] * len(basic_info_fields))), basic_info_fields).fetchall()
-    
-    # Row 객체를 딕셔너리로 변환
+    """).fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
     
-    # 섹션별로 컬럼 그룹핑
-    section_columns = {}
-    for section in sections:
-        section_columns[section['section_key']] = [
-            col for col in dynamic_columns 
-            if col.get('tab') == section['section_key']
-        ]
+    # column_span을 정수로 변환
+    for col in dynamic_columns:
+        if col.get('column_span'):
+            col['column_span'] = int(col['column_span'])
     
-    conn.close()
-    
-    # 드롭다운 컬럼에 대해 코드-값 매핑 적용 (등록 페이지와 동일한 로직)
+    # 드롭다운 컬럼에 대해 코드-값 매핑 적용
     for col in dynamic_columns:
         if col['column_type'] == 'dropdown':
             # 코드-값 매핑 방식으로 옵션 가져오기
@@ -2317,6 +2301,24 @@ def accident_detail(accident_id):
             col['dropdown_options_mapped'] = code_options if code_options else []
             if code_options:
                 logging.info(f"  - {col['column_name']} ({col['column_key']}): 코드-값 매핑 {len(code_options)}개 옵션")
+            else:
+                logging.info(f"  - {col['column_name']} ({col['column_key']}): 드롭다운 옵션 없음")
+    
+    # 섹션별로 컬럼 그룹핑 - safety-instruction과 동일한 방식
+    section_columns = {}
+    for section in sections:
+        section_columns[section['section_key']] = [
+            col for col in dynamic_columns 
+            if col.get('tab') == section['section_key']
+        ]
+        logging.info(f"섹션 '{section['section_name']}': {len(section_columns[section['section_key']])}개 컬럼")
+    
+    # 하위 호환성을 위한 변수 유지 (템플릿이 아직 하드코딩된 경우)
+    basic_info_columns = section_columns.get('basic_info', [])
+    violation_info_columns = section_columns.get('accident_info', [])  # accident_info로 수정
+    additional_columns = section_columns.get('additional', [])
+    
+    conn.close()
     
     # 딕셔너리를 객체처럼 사용할 수 있도록 변환 (None 값 처리 개선)
     class DictAsAttr:
@@ -2335,6 +2337,18 @@ def accident_detail(accident_id):
     if 'custom_data' in accident and accident['custom_data']:
         try:
             custom_data = pyjson.loads(accident['custom_data'])
+            
+            # 리스트 필드 추가 처리 (이중 인코딩 문제 해결)
+            for key, value in custom_data.items():
+                if isinstance(value, str) and value.startswith('['):
+                    try:
+                        parsed = pyjson.loads(value)
+                        if isinstance(parsed, list):
+                            custom_data[key] = parsed
+                            logging.info(f"Converted string to list for {key}: {len(parsed)} items")
+                    except:
+                        pass
+            
             logging.info(f"Loaded custom_data: {custom_data}")
         except Exception as e:
             logging.error(f"Error parsing custom_data: {e}")
@@ -2414,12 +2428,15 @@ def accident_detail(accident_id):
                          sections=sections,
                          section_columns=section_columns,
                          dynamic_columns=dynamic_columns,  # 동적 컬럼 정보
+                         basic_info_columns=basic_info_columns,  # 하위 호환성
+                         violation_info_columns=violation_info_columns,  # 하위 호환성
+                         additional_columns=additional_columns,  # 하위 호환성
                          custom_data=custom_data,  # 기존 데이터
                          basic_options=basic_options,  # 기본정보 드롭다운 옵션
                          menu=MENU_CONFIG, 
                          is_popup=is_popup,
                          is_direct_entry=is_direct_entry,  # ACC 여부 전달
-                         board_type='accident')  # 게시판 타입 전달
+                         board_type='accident')  # 게시판 타입 전달  # 게시판 타입 전달  # 게시판 타입 전달
 
 def get_dropdown_options_for_display(board_type, column_key):
     """보드별 드롭다운 옵션을 코드-값 매핑 방식으로 가져오기
@@ -2535,20 +2552,12 @@ def accident_register():
     logging.info("사고 등록 페이지 접근")
     
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row  # Row 객체로 반환
+    conn.row_factory = sqlite3.Row
     
-    # 섹션 정보 가져오기
-    sections = conn.execute("""
-        SELECT * FROM section_config 
-        WHERE board_type = 'accident' AND is_active = 1 
-        ORDER BY section_order
-    """).fetchall()
-    sections = [dict(row) for row in sections]
-    
-    # 동적 컬럼 설정 가져오기
+    # 동적 컬럼 설정 가져오기 - is_deleted 체크 추가
     dynamic_columns_rows = conn.execute("""
         SELECT * FROM accident_column_config 
-        WHERE is_active = 1 
+        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
         ORDER BY column_order
     """).fetchall()
     
@@ -2572,28 +2581,27 @@ def accident_register():
             else:
                 logging.info(f"  - {col['column_name']} ({col['column_key']}): 드롭다운 옵션 없음")
     
-    # 기본정보 드롭다운 옵션 로드 (accident_detail과 동일한 로직)
+    # 기본정보 드롭다운 옵션 로드 (safety-instruction과 동일한 패턴)
     basic_options = {}
     from board_services import CodeService
     code_service = CodeService('accident', DB_PATH)
     
     # 기본정보 필드들의 드롭다운 옵션 로드
-    # injury_* 키를 사용 (템플릿에서 사용하는 키)
-    basic_fields = {
-        'workplace': 'workplace',
-        'accident_grade': 'accident_grade',
-        'major_category': 'major_category',
-        'injury_form': 'injury_form',     # disaster_form 대신 injury_form
-        'injury_type': 'injury_type',     # disaster_type 대신 injury_type
-        'floor': 'floor',
-        'location_category': 'location_category',
-        'building': 'building'
-    }
+    basic_fields = [
+        'workplace',            # 사업장
+        'accident_grade',       # 사고등급
+        'major_category',       # 대분류
+        'injury_form',          # 재해형태
+        'injury_type',          # 재해유형
+        'floor',                # 층수
+        'location_category',    # 장소구분
+        'building'              # 건물
+    ]
     
-    for template_key, db_key in basic_fields.items():
-        codes = code_service.list(db_key)
-        basic_options[template_key] = codes
-        logging.info(f"드롭다운 옵션 로드: {template_key} -> {len(codes)}개")
+    for field in basic_fields:
+        codes = code_service.list(field)
+        basic_options[field] = codes
+        logging.info(f"드롭다운 옵션 로드: {field} -> {len(codes)}개")
     
     # 건물은 마스터 DB에서 우선 로드 (있다면)
     try:
@@ -2613,27 +2621,40 @@ def accident_register():
         # 건물 마스터 테이블이 없으면 드롭다운 코드 사용
         pass
     
-    # 섹션별로 컬럼 그룹핑
+    conn.close()
+    
+    logging.info(f"동적 컬럼 {len(dynamic_columns)}개 로드됨")
+    logging.info(f"기본 옵션 {len(basic_options)}개 필드 로드됨")
+    
+    # 섹션 정보 로드 - safety-instruction과 동일한 방식
+    from section_service import SectionConfigService
+    section_service = SectionConfigService('accident', DB_PATH)
+    sections = section_service.get_sections()
+    logging.info(f"섹션 {len(sections)}개 로드됨")
+    
+    # 섹션별로 컬럼 분류 (동적) - safety-instruction과 동일한 방식
     section_columns = {}
     for section in sections:
         section_columns[section['section_key']] = [
-            col for col in dynamic_columns 
-            if col.get('tab') == section['section_key']
+            col for col in dynamic_columns if col.get('tab') == section['section_key']
         ]
+        logging.info(f"섹션 '{section['section_name']}': {len(section_columns[section['section_key']])}개 컬럼")
     
-    conn.close()
-    
-    logging.info(f"섹션 {len(sections)}개 로드됨")
-    logging.info(f"동적 컬럼 {len(dynamic_columns)}개 로드됨")
-    logging.info(f"기본 옵션 {len(basic_options)}개 필드 로드됨")
+    # 하위 호환성을 위한 변수 유지 (템플릿이 아직 하드코딩된 경우)
+    basic_info_columns = section_columns.get('basic_info', [])
+    violation_info_columns = section_columns.get('accident_info', [])  # accident_info로 수정
+    additional_columns = section_columns.get('additional', [])
     
     # 팝업 모드인지 확인
     is_popup = request.args.get('popup') == '1'
     
     return render_template('accident-register.html',
-                         sections=sections,
-                         section_columns=section_columns,
                          dynamic_columns=dynamic_columns,
+                         sections=sections,  # 섹션 정보 추가
+                         section_columns=section_columns,  # 섹션별 컬럼 추가
+                         basic_info_columns=basic_info_columns,  # 하위 호환성
+                         violation_info_columns=violation_info_columns,  # 하위 호환성
+                         additional_columns=additional_columns,  # 하위 호환성
                          basic_options=basic_options,  # basic_options 추가
                          menu=MENU_CONFIG,
                          is_popup=is_popup)
@@ -2804,10 +2825,42 @@ def register_accident():
         attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
         files = request.files.getlist('files')
         
+        print(f"=== 등록 요청 받음 ===")
+        print(f"사고명: {accident_name}")
+        print(f"사고 날짜: {accident_date}")
+        print(f"받은 모든 form 데이터:")
+        for key in request.form.keys():
+            print(f"  {key}: {request.form.get(key)}")
+        
+        print(f"custom_data 원본: {request.form.get('custom_data', 'None')}")
+        print(f"custom_data 파싱 후: {custom_data}")
+        print(f"custom_data 키: {list(custom_data.keys())}")
+        print(f"첨부파일 개수: {len(files)}")
+        
+        # 리스트 타입 필드 확인 및 처리
+        list_fields = []
+        for key, value in custom_data.items():
+            # 이미 리스트인 경우 (클라이언트에서 제대로 파싱한 경우)
+            if isinstance(value, list):
+                list_fields.append(key)
+                print(f"✅ 리스트 필드 정상 - {key}: {len(value)}개 항목")
+            # 문자열로 저장된 리스트 (이중 인코딩 문제)
+            elif isinstance(value, str) and value.startswith('['):
+                list_fields.append(key)
+                print(f"⚠️ 문자열로 된 리스트 필드 발견 - {key}: {value}")
+                try:
+                    # 문자열을 실제 리스트로 변환
+                    parsed_value = pyjson.loads(value)
+                    custom_data[key] = parsed_value
+                    print(f"   → 리스트로 변환 성공: {len(parsed_value)}개 항목")
+                except:
+                    print(f"   → 리스트로 변환 실패, 빈 배열로 설정")
+                    custom_data[key] = []
+        print(f"발견된 리스트 필드: {list_fields}")
+        
         logging.info(f"등록 요청 받음 - 사고명: {accident_name}")
-        logging.info(f"사고 날짜: {accident_date}")
         logging.info(f"동적 컬럼 데이터: {custom_data}")
-        logging.info(f"첨부파일 개수: {len(files)}")
+        logging.info(f"리스트 필드: {list_fields}")
         
         # 새 사고번호 생성 (수기입력: ACCYYMMDD00 형식)
         # 한국 시간 기준으로 생성
@@ -2939,7 +2992,20 @@ def register_accident():
                     """, (accident_number, filename, file_path, os.path.getsize(file_path), description))
         
         conn.commit()
+        
+        # 저장 확인
+        cursor.execute("SELECT custom_data FROM accidents_cache WHERE accident_number = ?", (accident_number,))
+        saved_data = cursor.fetchone()
+        if saved_data:
+            print(f"DB에 저장된 custom_data: {saved_data[0]}")
+            try:
+                parsed_saved = pyjson.loads(saved_data[0]) if saved_data[0] else {}
+                print(f"DB에서 파싱된 데이터: {parsed_saved}")
+            except:
+                print("DB에서 JSON 파싱 실패")
+        
         logging.info(f"사고 {accident_number} 등록 완료")
+        print(f"=== 등록 완료: {accident_number} ===")
         
         return jsonify({"success": True, "accident_number": accident_number})
         
@@ -3353,6 +3419,16 @@ def update_accident():
         
         print(f"Accident Number: {accident_number}")
         print(f"Custom Data received: {custom_data}")  # 디버깅용 추가
+        print(f"Custom Data type: {type(custom_data)}")
+        
+        # custom_data 파싱
+        if isinstance(custom_data, str):
+            try:
+                custom_data = pyjson.loads(custom_data)
+                print(f"Custom Data parsed: {custom_data}")
+            except:
+                custom_data = {}
+        
         print(f"Files count: {len(files)}")
         print(f"Attachment data: {attachment_data}")
         
@@ -3430,14 +3506,26 @@ def update_accident():
         accident_row = cursor.fetchone()
         
         if accident_row:
+            # custom_data를 JSON 문자열로 변환
+            if not isinstance(custom_data, str):
+                custom_data_str = pyjson.dumps(custom_data)
+            else:
+                custom_data_str = custom_data
+            
             # 기존 레코드 업데이트
             cursor.execute("""
                 UPDATE accidents_cache 
                 SET custom_data = ?
                 WHERE accident_number = ?
-            """, (custom_data, accident_number))
-            logging.info(f"동적 컬럼 데이터 업데이트 완료: {accident_number}")
+            """, (custom_data_str, accident_number))
+            logging.info(f"동적 컬럼 데이터 업데이트 완료: {accident_number} - {custom_data_str}")
         else:
+            # custom_data를 JSON 문자열로 변환
+            if not isinstance(custom_data, str):
+                custom_data_str = pyjson.dumps(custom_data)
+            else:
+                custom_data_str = custom_data
+            
             # 새 레코드 생성 (업체 정보는 선택적)
             # 비공식/직접등록 사고
             korean_date = get_korean_time().strftime('%Y-%m-%d')
@@ -3448,7 +3536,7 @@ def update_accident():
                     injury_type, report_date
                 )
                 VALUES (?, ?, ?, ?, '', '', '', '', '', ?)
-            """, (accident_number, f"사고_{accident_number}", custom_data, korean_date, korean_date))
+            """, (accident_number, f"사고_{accident_number}", custom_data_str, korean_date, korean_date))
             logging.info(f"새 사고 레코드 생성 (직접등록) 및 동적 컬럼 데이터 저장: {accident_number}")
         
         # 2. 사고 첨부파일 처리 - item_id 사용
@@ -3781,6 +3869,30 @@ def admin_safety_instruction_columns_simplified():
 def admin_change_request_columns():
     """기준정보 변경요청 컬럼 관리 페이지"""
     return render_template('admin-change-request-columns.html', menu=MENU_CONFIG)
+
+@app.route("/admin/followsop-columns")
+@require_admin_auth
+def admin_followsop_columns():
+    """Follow SOP 컬럼 관리 페이지"""
+    from section_service import SectionConfigService
+    section_service = SectionConfigService('followsop', DB_PATH)
+    sections = section_service.get_sections()
+    
+    return render_template('admin-followsop-columns.html', 
+                         menu=MENU_CONFIG,
+                         sections=sections)
+
+@app.route("/admin/fullprocess-columns")
+@require_admin_auth
+def admin_fullprocess_columns():
+    """Full Process 컬럼 관리 페이지"""
+    from section_service import SectionConfigService
+    section_service = SectionConfigService('fullprocess', DB_PATH)
+    sections = section_service.get_sections()
+    
+    return render_template('admin-fullprocess-columns.html', 
+                         menu=MENU_CONFIG,
+                         sections=sections)
 
 @app.route("/admin/change-request-columns-simplified")
 @require_admin_auth
@@ -4753,6 +4865,216 @@ def reorder_safety_instruction_sections():
         logging.error(f"섹션 순서 변경 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
+# ============= Follow SOP API 엔드포인트 =============
+@app.route("/api/followsop-columns", methods=["GET"])
+def get_followsop_columns():
+    """Follow SOP 페이지 동적 컬럼 설정 조회"""
+    try:
+        column_service = ColumnConfigService('followsop', DB_PATH)
+        columns = column_service.list_columns()
+        return jsonify(columns)
+    except Exception as e:
+        logging.error(f"Follow SOP 컬럼 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/followsop-columns", methods=["POST"])
+def add_followsop_column():
+    """Follow SOP 페이지 동적 컬럼 추가"""
+    try:
+        column_service = ColumnConfigService('followsop', DB_PATH)
+        result = column_service.add_column(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 컬럼 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/followsop-columns/<int:column_id>", methods=["PUT"])
+def update_followsop_column(column_id):
+    """Follow SOP 페이지 동적 컬럼 수정"""
+    try:
+        column_service = ColumnConfigService('followsop', DB_PATH)
+        result = column_service.update_column(column_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 컬럼 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/followsop-columns/<int:column_id>", methods=["DELETE"])
+def delete_followsop_column(column_id):
+    """Follow SOP 페이지 동적 컬럼 삭제 (비활성화)"""
+    try:
+        column_service = ColumnConfigService('followsop', DB_PATH)
+        result = column_service.delete_column(column_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 컬럼 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/followsop-sections", methods=["GET"])
+def get_followsop_sections():
+    """Follow SOP 섹션 목록 조회"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('followsop', DB_PATH)
+        sections = section_service.get_sections()
+        return jsonify({"success": True, "sections": sections})
+    except Exception as e:
+        logging.error(f"Follow SOP 섹션 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/followsop-sections", methods=["POST"])
+def add_followsop_section():
+    """Follow SOP 섹션 추가"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('followsop', DB_PATH)
+        result = section_service.add_section(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 섹션 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/followsop-sections/<int:section_id>", methods=["PUT"])
+def update_followsop_section(section_id):
+    """Follow SOP 섹션 수정"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('followsop', DB_PATH)
+        result = section_service.update_section(section_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 섹션 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/followsop-sections/<int:section_id>", methods=["DELETE"])
+def delete_followsop_section(section_id):
+    """Follow SOP 섹션 삭제"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('followsop', DB_PATH)
+        result = section_service.delete_section(section_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 섹션 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/followsop-sections/reorder", methods=["POST"])
+def reorder_followsop_sections():
+    """Follow SOP 섹션 순서 변경"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('followsop', DB_PATH)
+        result = section_service.reorder_sections(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 섹션 순서 변경 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+# ============= Full Process API 엔드포인트 =============
+@app.route("/api/fullprocess-columns", methods=["GET"])
+def get_fullprocess_columns():
+    """Full Process 페이지 동적 컬럼 설정 조회"""
+    try:
+        column_service = ColumnConfigService('fullprocess', DB_PATH)
+        columns = column_service.list_columns()
+        return jsonify(columns)
+    except Exception as e:
+        logging.error(f"Full Process 컬럼 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/fullprocess-columns", methods=["POST"])
+def add_fullprocess_column():
+    """Full Process 페이지 동적 컬럼 추가"""
+    try:
+        column_service = ColumnConfigService('fullprocess', DB_PATH)
+        result = column_service.add_column(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 컬럼 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/fullprocess-columns/<int:column_id>", methods=["PUT"])
+def update_fullprocess_column(column_id):
+    """Full Process 페이지 동적 컬럼 수정"""
+    try:
+        column_service = ColumnConfigService('fullprocess', DB_PATH)
+        result = column_service.update_column(column_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 컬럼 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/fullprocess-columns/<int:column_id>", methods=["DELETE"])
+def delete_fullprocess_column(column_id):
+    """Full Process 페이지 동적 컬럼 삭제 (비활성화)"""
+    try:
+        column_service = ColumnConfigService('fullprocess', DB_PATH)
+        result = column_service.delete_column(column_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 컬럼 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/fullprocess-sections", methods=["GET"])
+def get_fullprocess_sections():
+    """Full Process 섹션 목록 조회"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('fullprocess', DB_PATH)
+        sections = section_service.get_sections()
+        return jsonify({"success": True, "sections": sections})
+    except Exception as e:
+        logging.error(f"Full Process 섹션 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/fullprocess-sections", methods=["POST"])
+def add_fullprocess_section():
+    """Full Process 섹션 추가"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('fullprocess', DB_PATH)
+        result = section_service.add_section(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 섹션 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/fullprocess-sections/<int:section_id>", methods=["PUT"])
+def update_fullprocess_section(section_id):
+    """Full Process 섹션 수정"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('fullprocess', DB_PATH)
+        result = section_service.update_section(section_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 섹션 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/fullprocess-sections/<int:section_id>", methods=["DELETE"])
+def delete_fullprocess_section(section_id):
+    """Full Process 섹션 삭제"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('fullprocess', DB_PATH)
+        result = section_service.delete_section(section_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 섹션 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/fullprocess-sections/reorder", methods=["POST"])
+def reorder_fullprocess_sections():
+    """Full Process 섹션 순서 변경"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('fullprocess', DB_PATH)
+        result = section_service.reorder_sections(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 섹션 순서 변경 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
 # ============= 사고게시판 섹션 관리 API =============
 @app.route("/api/accident-sections", methods=["GET"])
 def get_accident_sections():
@@ -4848,10 +5170,11 @@ def export_accidents_excel():
         conn = get_db_connection()
         conn.row_factory = sqlite3.Row
         
-        # 동적 컬럼 정보 가져오기
+        # 동적 컬럼 정보 가져오기 (활성화되고 삭제되지 않은 컬럼만)
         dynamic_columns_rows = conn.execute("""
             SELECT * FROM accident_column_config 
             WHERE is_active = 1 
+            AND (is_deleted = 0 OR is_deleted IS NULL)
             ORDER BY column_order
         """).fetchall()
         dynamic_columns = [dict(row) for row in dynamic_columns_rows]
@@ -6206,6 +6529,10 @@ def board_items_delete_api(board):
         logging.error(f"Board items delete API error: {e}")
         return jsonify({"error": str(e)}), 500
 
+
+# ============= Follow SOP & Full Process 페이지 라우트 =============
+# 파일이 길어서 임시로 외부 파일에서 import
+exec(open('add_page_routes.py').read())
 
 if __name__ == "__main__":
     print("Flask 앱 시작 중...", flush=True)

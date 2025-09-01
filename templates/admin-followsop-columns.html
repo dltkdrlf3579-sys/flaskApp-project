@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}협력사 사고 컬럼 관리 - 관리자{% endblock %}
+{% block title %}Follow SOP 컬럼 관리 - 관리자{% endblock %}
 {% block content %}
 <style>
 .admin-container {
@@ -193,12 +193,34 @@
             background: #ffe8e8 !important;
             border: 2px dashed #d32f2f;
         }
+        
+        /* Bootstrap Icons 강제 표시 */
+        .bi::before {
+            display: inline-block;
+            font-family: 'bootstrap-icons' !important;
+            font-style: normal;
+            font-weight: normal !important;
+            font-variant: normal;
+            text-transform: none;
+            line-height: 1;
+            vertical-align: -.125em;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        .bi-trash::before {
+            content: "\f5de" !important;
+        }
+        
+        .bi-pencil::before {
+            content: "\f4ca" !important;
+        }
     </style>
 
 <div class="admin-container">
     <div class="admin-header">
         <div class="container">
-            <h1><i class="bi bi-gear-fill"></i> 협력사 사고 컬럼 관리</h1>
+            <h1><i class="bi bi-gear-fill"></i> Follow SOP 컬럼 관리</h1>
         </div>
     </div>
     
@@ -596,6 +618,8 @@
 let columns = [];
 let pendingColumns = []; // 모든 변경사항을 담는 단순 배열
 let sections = {{ sections | tojson | safe }};  // 섹션 정보
+let sectionsToDelete = [];  // 삭제할 섹션 추적
+let sectionsToAdd = [];  // 새로 추가할 섹션 추적
 let originalSections = JSON.parse(JSON.stringify({{ sections | tojson | safe }}));  // 원본 섹션 정보 보관
 let sectionChanges = {};  // 섹션 변경사항 추적
 let editingId = null;
@@ -686,12 +710,7 @@ let editingId = null;
             });
         }
         
-        // 삭제할 섹션 ID 추적
-        let sectionsToDelete = [];
-        
-        // 새로 추가할 섹션 추적
-        let sectionsToAdd = [];
-        
+        // 섹션명 편집 활성화
         // 섹션 삭제
         function deleteSection(sectionId, sectionName) {
             // 기본 섹션은 삭제 불가
@@ -753,7 +772,6 @@ let editingId = null;
             alert('섹션이 삭제 예정입니다. "전체 변경사항 저장" 버튼을 눌러 적용하세요.');
         }
         
-        // 섹션명 편집 활성화
         function enableSectionEdit(sectionId, element) {
             // 이미 편집 중인 경우 무시
             if (element.tagName === 'INPUT') {
@@ -888,45 +906,45 @@ let editingId = null;
                 return;
             }
             
-            // 임시 ID 생성 (음수로 설정하여 새 섹션임을 표시)
-            const tempId = -(sectionsToAdd.length + 1);
-            
-            // section_key 생성 (section_name을 snake_case로 변환)
-            const sectionKey = sectionName.toLowerCase()
-                .replace(/\s+/g, '_')
-                .replace(/[^a-z0-9_]/g, '');
-            
-            // 새 섹션 객체 생성
-            const newSection = {
-                id: tempId,
-                section_key: sectionKey,
-                section_name: sectionName,
-                section_order: sections.length + 1,
-                _isNew: true  // 새 섹션임을 표시
-            };
-            
-            // 추가할 섹션 목록에 추가
-            sectionsToAdd.push({
-                section_name: sectionName,
-                section_key: sectionKey
+            fetch('/api/followsop-sections', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ section_name: sectionName })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // 새 섹션 정보 추가
+                    sections.push({
+                        id: data.section_id,
+                        section_key: data.section_key,
+                        section_name: sectionName,
+                        section_order: sections.length + 1
+                    });
+                    
+                    // UI 다시 렌더링
+                    renderSections();
+                    loadColumns();
+                    
+                    // 모달 닫기
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('sectionModal'));
+                    modal.hide();
+                    
+                    alert('새 섹션이 추가되었습니다.');
+                } else {
+                    alert('섹션 추가 실패: ' + (data.error || '알 수 없는 오류'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('섹션 추가 중 오류가 발생했습니다.');
             });
-            
-            // 로컬 섹션 배열에 추가
-            sections.push(newSection);
-            
-            // UI 다시 렌더링
-            renderSections();
-            loadColumns();
-            
-            // 모달 닫기
-            const modal = bootstrap.Modal.getInstance(document.getElementById('sectionModal'));
-            modal.hide();
-            
-            alert('새 섹션이 추가 예정입니다. "전체 변경사항 저장" 버튼을 눌러 적용하세요.');
         }
         
         function loadColumns() {
-            fetch('/api/accident-columns')
+            fetch('/api/followsop-columns')
                 .then(response => response.json())
                 .then(data => {
                     // 모든 컬럼을 표시 (비활성 포함)
@@ -1029,11 +1047,11 @@ let editingId = null;
                         <div class="column-key">${column.column_key}</div>
                         <div class="column-controls">
                             <span class="column-type-badge">${getTypeLabel(column.column_type)}</span>
-                            <div style="display: flex; gap: 5px;">
-                                <button class="btn btn-sm btn-link p-0" onclick="editColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''}>
+                            <div style="display: flex; gap: 5px; align-items: center;">
+                                <button class="btn btn-sm btn-link p-0" onclick="editColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''} title="편집">
                                     <i class="bi bi-pencil" style="font-size: 14px;"></i>
                                 </button>
-                                <button class="btn btn-sm btn-link p-0 text-danger" onclick="deleteColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''}>
+                                <button class="btn btn-sm btn-link p-0 text-danger" onclick="deleteColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''} title="삭제">
                                     <i class="bi bi-trash" style="font-size: 14px;"></i>
                                 </button>
                                 <div class="form-check form-switch" style="margin: 0;">
@@ -1337,7 +1355,6 @@ let editingId = null;
             
             toggleOptionsField();
             toggleSpanField();
-            toggleListField();
             
             // linked 타입이 아닌 경우에만 toggleTableField 호출
             if (column.column_type !== 'linked_text' && column.column_type !== 'linked_dept') {
@@ -1797,10 +1814,8 @@ let editingId = null;
             // 변경사항이 있는지 확인
             const hasColumnChanges = pendingColumns.some(c => c._isNew || c._modified || c._toDelete);
             const hasSectionChanges = Object.keys(sectionChanges).length > 0;
-            const hasSectionDeletes = sectionsToDelete.length > 0;
-            const hasSectionAdds = sectionsToAdd.length > 0;
             
-            if (!hasColumnChanges && !hasSectionChanges && !hasSectionDeletes && !hasSectionAdds) {
+            if (!hasColumnChanges && !hasSectionChanges) {
                 alert('변경사항이 없습니다.');
                 return;
             }
@@ -1817,7 +1832,7 @@ let editingId = null;
                 for (const [sectionId, change] of Object.entries(sectionChanges)) {
                     if (!change.is_new) {
                         // 기존 섹션 이름 변경
-                        const response = await fetch(`/api/accident-sections/${sectionId}`, {
+                        const response = await fetch(`/api/followsop-sections/${sectionId}`, {
                             method: 'PUT',
                             headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify({ section_name: change.section_name })
@@ -1838,81 +1853,15 @@ let editingId = null;
                     }
                 }
                 
-                // 새 섹션 추가 처리
-                for (const newSection of sectionsToAdd) {
-                    const response = await fetch('/api/accident-sections', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            section_name: newSection.section_name,
-                            section_key: newSection.section_key
-                        })
-                    });
-                    
-                    if (response.ok) {
-                        const data = await response.json();
-                        successCount++;
-                        console.log(`섹션 '${newSection.section_name}' 추가 성공`);
-                        
-                        // 임시 ID를 실제 ID로 업데이트
-                        const tempSection = sections.find(s => s.section_key === newSection.section_key && s._isNew);
-                        if (tempSection) {
-                            tempSection.id = data.section_id;
-                            delete tempSection._isNew;
-                        }
-                        
-                        // 원본 섹션 목록에 추가
-                        originalSections.push({
-                            id: data.section_id,
-                            section_key: newSection.section_key,
-                            section_name: newSection.section_name,
-                            section_order: sections.length
-                        });
-                    } else {
-                        errorCount++;
-                        console.error(`섹션 '${newSection.section_name}' 추가 실패`);
-                    }
-                }
-                
-                // 섹션 삭제 처리
-                const failedSections = [];
-                for (const sectionId of sectionsToDelete) {
-                    const response = await fetch(`/api/accident-sections/${sectionId}`, {
-                        method: 'DELETE',
-                        headers: {'Content-Type': 'application/json'}
-                    });
-                    
-                    if (response.ok) {
-                        successCount++;
-                        console.log(`섹션 ID ${sectionId} 삭제 성공`);
-                        // 원본에서도 제거
-                        originalSections = originalSections.filter(s => s.id !== sectionId);
-                    } else {
-                        errorCount++;
-                        const result = await response.json();
-                        const section = sections.find(s => s.id === sectionId);
-                        const sectionName = section ? section.section_name : `ID ${sectionId}`;
-                        failedSections.push(`${sectionName}: ${result.error || '알 수 없는 오류'}`);
-                        console.error(`섹션 ID ${sectionId} 삭제 실패:`, result);
-                        
-                        // 삭제 실패한 섹션은 다시 추가
-                        if (section && !sections.find(s => s.id === sectionId)) {
-                            sections.push(section);
-                        }
-                    }
-                }
-                
                 // 섹션 변경사항 초기화
                 sectionChanges = {};
-                sectionsToDelete = [];
-                sectionsToAdd = [];
                 
                 // 컬럼 변경사항 처리
                 for (const column of pendingColumns) {
                     if (column._toDelete && !column._isNew) {
                         // 기존 컬럼 삭제 처리
                         console.log('삭제 처리 중:', column.id, column.column_name);
-                        const response = await fetch(`/api/accident-columns/${column.id}`, {
+                        const response = await fetch(`/api/followsop-columns/${column.id}`, {
                             method: 'DELETE'
                         });
                         const result = await response.json();
@@ -1942,7 +1891,7 @@ let editingId = null;
                             table_name: column._tableName || null
                         };
                         console.log('추가 처리 중:', data);
-                        const response = await fetch('/api/accident-columns', {
+                        const response = await fetch('/api/followsop-columns', {
                             method: 'POST',
                             headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify(data)
@@ -1970,7 +1919,7 @@ let editingId = null;
                             table_name: column._tableName || null
                         };
                         console.log('수정 처리 중:', column.id, data);
-                        const response = await fetch(`/api/accident-columns/${column.id}`, {
+                        const response = await fetch(`/api/followsop-columns/${column.id}`, {
                             method: 'PUT',
                             headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify(data)
@@ -1985,11 +1934,7 @@ let editingId = null;
                 }
                 
                 if (errorCount > 0) {
-                    let errorMessage = `일부 변경사항 저장 중 오류가 발생했습니다.\n성공: ${successCount}, 실패: ${errorCount}`;
-                    if (failedSections && failedSections.length > 0) {
-                        errorMessage += '\n\n섹션 삭제 실패:\n' + failedSections.join('\n');
-                    }
-                    alert(errorMessage);
+                    alert(`일부 변경사항 저장 중 오류가 발생했습니다.\n성공: ${successCount}, 실패: ${errorCount}`);
                 } else {
                     alert('모든 변경사항이 저장되었습니다.');
                 }
@@ -2004,23 +1949,14 @@ let editingId = null;
         
         function resetChanges() {
             const hasChanges = pendingColumns.some(c => c._isNew || c._modified || c._toDelete);
-            const hasSectionDeletes = sectionsToDelete.length > 0;
             
-            if (hasChanges || hasSectionDeletes) {
+            if (hasChanges) {
                 if (!confirm('모든 변경사항을 취소하시겠습니까?')) {
                     return;
                 }
             }
             
-            // 섹션 삭제 목록 초기화
-            sectionsToDelete = [];
-            sectionChanges = {};
-            
-            // 섹션 다시 로드
-            loadSections();
-            
-            // 컬럼 다시 로드
-            loadColumns();
+            loadColumns(); // 원본 다시 로드
         }
         
         function updatePreview() {
@@ -2072,7 +2008,7 @@ let editingId = null;
             const top = (window.screen.height - height) / 2;
             
             const codeEditorWindow = window.open(
-                `/admin/accident-codes?column_key=${columnKey}&embedded=true`,
+                `/admin/followsop-codes?column_key=${columnKey}&embedded=true`,
                 'codeEditor',
                 `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
             );

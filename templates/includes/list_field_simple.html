@@ -1,0 +1,404 @@
+{# 리스트 필드 - 심플 버전 #}
+
+{% macro render_list_field(col, col_value, section, mode='view') %}
+{% if col.column_type == 'list' %}
+    {% if col_value %}
+        {% set list_data = col_value | from_json %}
+    {% else %}
+        {% set list_data = [] %}
+    {% endif %}
+    
+    <style>
+    .list-field-wrapper-{{ col.column_key }} {
+        grid-column: 1 / -1;
+        margin: 20px 0;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        border: 1px solid #dee2e6;
+    }
+    
+    .list-field-container-{{ col.column_key }} {
+        width: 100%;
+    }
+    
+    .list-field-header-{{ col.column_key }} {
+        margin-bottom: 10px;
+    }
+    
+    .list-field-table-{{ col.column_key }} {
+        width: 100%;
+        border-collapse: collapse;
+        border: 1px solid #dee2e6;
+        background: white;
+    }
+    
+    .list-field-table-{{ col.column_key }} thead {
+        background: #f8f9fa;
+    }
+    
+    .list-field-table-{{ col.column_key }} th {
+        padding: 8px;
+        text-align: left;
+        font-size: 13px;
+        font-weight: 600;
+        border-bottom: 2px solid #dee2e6;
+        color: #495057;
+    }
+    
+    .list-field-table-{{ col.column_key }} td {
+        padding: 8px;
+        font-size: 13px;
+        border-bottom: 1px solid #f1f3f5;
+    }
+    
+    .list-field-table-{{ col.column_key }} tbody tr:hover {
+        background: #f8f9fa;
+    }
+    
+    .list-field-empty-{{ col.column_key }} {
+        text-align: center;
+        padding: 30px;
+        color: #6c757d;
+    }
+    
+    
+    .list-field-form-row-{{ col.column_key }} {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 10px;
+    }
+    
+    .list-field-form-col-{{ col.column_key }} {
+        flex: 1;
+    }
+    
+    .list-field-form-col-{{ col.column_key }} label {
+        display: block;
+        font-size: 12px;
+        color: #495057;
+        margin-bottom: 4px;
+        font-weight: 500;
+    }
+    
+    .list-field-form-col-{{ col.column_key }} input {
+        width: 100%;
+        padding: 6px 8px;
+        border: 1px solid #ced4da;
+        border-radius: 3px;
+        font-size: 13px;
+    }
+    
+    .list-field-form-col-{{ col.column_key }} input[readonly] {
+        background: #e9ecef;
+    }
+    
+    .list-field-search-btn-{{ col.column_key }} {
+        padding: 6px 10px;
+        background: #007bff;
+        color: white;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 13px;
+    }
+    
+    .list-field-search-btn-{{ col.column_key }}:hover {
+        background: #0056b3;
+    }
+    
+    .list-field-form-actions-{{ col.column_key }} {
+        text-align: right;
+        padding-top: 10px;
+    }
+    
+    .list-field-btn-{{ col.column_key }} {
+        padding: 6px 12px;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 13px;
+        margin-left: 5px;
+    }
+    
+    .list-field-btn-primary-{{ col.column_key }} {
+        background: #28a745;
+        color: white;
+    }
+    
+    .list-field-btn-secondary-{{ col.column_key }} {
+        background: #6c757d;
+        color: white;
+    }
+    
+    .list-field-btn-danger-{{ col.column_key }} {
+        background: transparent;
+        color: #dc3545;
+        padding: 2px 6px;
+    }
+    
+    .list-field-btn-add-{{ col.column_key }} {
+        background: #007bff;
+        color: white;
+        padding: 8px 16px;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+    
+    .list-field-btn-add-{{ col.column_key }}:hover {
+        background: #0056b3;
+    }
+    </style>
+    
+    <div class="list-field-container-{{ col.column_key }}">
+        <!-- Hidden input for data storage -->
+        <input type="hidden" 
+               id="{{ col.column_key }}" 
+               name="{{ col.column_key }}"
+               class="{{ section.section_key }}-input" 
+               data-field="{{ col.column_key }}"
+               data-section="{{ section.section_key }}"
+               value="{{ col_value if col_value else '[]' }}">
+        
+        {% if mode == 'edit' or mode == 'register' %}
+        <!-- Add button -->
+        <div class="list-field-header-{{ col.column_key }}">
+            <button type="button" 
+                    class="list-field-btn-add-{{ col.column_key }}"
+                    onclick="showAddForm_{{ col.column_key }}()">
+                + 협력사 근로자 추가
+            </button>
+        </div>
+        
+        <!-- Overlay -->
+        <div id="{{ col.column_key }}_overlay" 
+             class="list-field-overlay-{{ col.column_key }}"
+             onclick="cancelAdd_{{ col.column_key }}()"></div>
+        
+        <!-- Add form (hidden by default) -->
+        <div id="{{ col.column_key }}_add_form" 
+             class="list-field-add-form-{{ col.column_key }}" 
+             style="display: none;">
+            <h6 style="margin: 0 0 15px 0; color: #495057;">새 협력사 근로자 정보</h6>
+            
+            <div class="list-field-form-row-{{ col.column_key }}">
+                <div class="list-field-form-col-{{ col.column_key }}">
+                    <label>성함 *</label>
+                    <div style="display: flex; gap: 5px;">
+                        <input type="text" 
+                               id="{{ col.column_key }}_new_name" 
+                               placeholder="검색 버튼을 클릭하세요"
+                               readonly>
+                        <button type="button" 
+                                class="list-field-search-btn-{{ col.column_key }}"
+                                onclick="searchWorker_{{ col.column_key }}()">
+                            검색
+                        </button>
+                    </div>
+                </div>
+                <div class="list-field-form-col-{{ col.column_key }}">
+                    <label>ID</label>
+                    <input type="text" 
+                           id="{{ col.column_key }}_new_id" 
+                           readonly>
+                </div>
+            </div>
+            
+            <div class="list-field-form-row-{{ col.column_key }}">
+                <div class="list-field-form-col-{{ col.column_key }}">
+                    <label>소속업체</label>
+                    <input type="text" 
+                           id="{{ col.column_key }}_new_company" 
+                           readonly>
+                </div>
+                <div class="list-field-form-col-{{ col.column_key }}">
+                    <label>사업자번호</label>
+                    <input type="text" 
+                           id="{{ col.column_key }}_new_bizno" 
+                           readonly>
+                </div>
+            </div>
+            
+            <div class="list-field-form-actions-{{ col.column_key }}">
+                <button type="button" 
+                        class="list-field-btn-{{ col.column_key }} list-field-btn-secondary-{{ col.column_key }}"
+                        onclick="cancelAdd_{{ col.column_key }}()">
+                    취소
+                </button>
+                <button type="button" 
+                        class="list-field-btn-{{ col.column_key }} list-field-btn-primary-{{ col.column_key }}"
+                        onclick="saveAdd_{{ col.column_key }}()">
+                    추가
+                </button>
+            </div>
+        </div>
+        {% endif %}
+        
+        <!-- Data table -->
+        <table class="list-field-table-{{ col.column_key }}">
+            <thead>
+                <tr>
+                    <th style="width: 50px; text-align: center;">No.</th>
+                    <th>성함</th>
+                    <th style="width: 100px;">ID</th>
+                    <th>소속업체</th>
+                    <th style="width: 130px;">사업자번호</th>
+                    {% if mode == 'edit' or mode == 'register' %}
+                    <th style="width: 60px; text-align: center;">삭제</th>
+                    {% endif %}
+                </tr>
+            </thead>
+            <tbody id="{{ col.column_key }}_tbody">
+                {% if list_data and list_data|length > 0 %}
+                    {% for item in list_data %}
+                    <tr data-index="{{ loop.index0 }}">
+                        <td style="text-align: center;">{{ loop.index }}</td>
+                        <td>{{ item.name or '-' }}</td>
+                        <td>{{ item.id or '-' }}</td>
+                        <td>{{ item.company or '-' }}</td>
+                        <td>{{ item.bizno or '-' }}</td>
+                        {% if mode == 'edit' or mode == 'register' %}
+                        <td style="text-align: center;">
+                            <button type="button" 
+                                    class="list-field-btn-danger-{{ col.column_key }}"
+                                    onclick="removeItem_{{ col.column_key }}({{ loop.index0 }})">
+                                ✕
+                            </button>
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr id="{{ col.column_key }}_empty_row">
+                        <td colspan="{% if mode == 'edit' or mode == 'register' %}6{% else %}5{% endif %}" 
+                            class="list-field-empty-{{ col.column_key }}">
+                            등록된 협력사 근로자가 없습니다.
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+        
+        <!-- Count display -->
+        <div style="margin-top: 10px; font-size: 13px; color: #6c757d;">
+            총 <span id="{{ col.column_key }}_count">{{ list_data|length if list_data else 0 }}</span>명
+        </div>
+    </div>
+    
+    <script>
+    (function() {
+        // 로컬 스코프로 격리
+        var {{ col.column_key }}_data = [];
+        
+        // 초기 데이터 로드
+        try {
+            var initialData = document.getElementById('{{ col.column_key }}').value;
+            if (initialData) {
+                {{ col.column_key }}_data = JSON.parse(initialData);
+            }
+        } catch(e) {
+            console.log('Failed to parse initial data:', e);
+            {{ col.column_key }}_data = [];
+        }
+        
+        // 전역 함수로 등록
+        window.showAddForm_{{ col.column_key }} = function() {
+            document.getElementById('{{ col.column_key }}_overlay').style.display = 'block';
+            document.getElementById('{{ col.column_key }}_add_form').style.display = 'block';
+            // 폼 초기화
+            document.getElementById('{{ col.column_key }}_new_name').value = '';
+            document.getElementById('{{ col.column_key }}_new_id').value = '';
+            document.getElementById('{{ col.column_key }}_new_company').value = '';
+            document.getElementById('{{ col.column_key }}_new_bizno').value = '';
+        };
+        
+        window.cancelAdd_{{ col.column_key }} = function() {
+            document.getElementById('{{ col.column_key }}_overlay').style.display = 'none';
+            document.getElementById('{{ col.column_key }}_add_form').style.display = 'none';
+        };
+        
+        window.searchWorker_{{ col.column_key }} = function() {
+            var callbackName = 'workerCallback_{{ col.column_key }}_' + Date.now();
+            
+            window[callbackName] = function(data) {
+                document.getElementById('{{ col.column_key }}_new_name').value = data.worker_name || '';
+                document.getElementById('{{ col.column_key }}_new_id').value = data.worker_id || '';
+                document.getElementById('{{ col.column_key }}_new_company').value = data.company_name || '';
+                document.getElementById('{{ col.column_key }}_new_bizno').value = data.business_number || '';
+                delete window[callbackName];
+            };
+            
+            window.open('/search-popup?type=contractor&callback=' + callbackName, 
+                       'workerPopup', 'width=900,height=600,scrollbars=yes');
+        };
+        
+        window.saveAdd_{{ col.column_key }} = function() {
+            var name = document.getElementById('{{ col.column_key }}_new_name').value;
+            var id = document.getElementById('{{ col.column_key }}_new_id').value;
+            var company = document.getElementById('{{ col.column_key }}_new_company').value;
+            var bizno = document.getElementById('{{ col.column_key }}_new_bizno').value;
+            
+            if (!name) {
+                alert('성함을 선택해주세요.');
+                return;
+            }
+            
+            {{ col.column_key }}_data.push({
+                name: name,
+                id: id,
+                company: company,
+                bizno: bizno
+            });
+            
+            renderTable_{{ col.column_key }}();
+            window.cancelAdd_{{ col.column_key }}();
+        };
+        
+        window.removeItem_{{ col.column_key }} = function(index) {
+            if (confirm('정말 삭제하시겠습니까?')) {
+                {{ col.column_key }}_data.splice(index, 1);
+                renderTable_{{ col.column_key }}();
+            }
+        };
+        
+        function renderTable_{{ col.column_key }}() {
+            var tbody = document.getElementById('{{ col.column_key }}_tbody');
+            var html = '';
+            
+            if ({{ col.column_key }}_data.length === 0) {
+                html = '<tr id="{{ col.column_key }}_empty_row">' +
+                       '<td colspan="{% if mode == "edit" or mode == "register" %}6{% else %}5{% endif %}" ' +
+                       'class="list-field-empty-{{ col.column_key }}">' +
+                       '등록된 협력사 근로자가 없습니다.</td></tr>';
+            } else {
+                {{ col.column_key }}_data.forEach(function(item, index) {
+                    html += '<tr data-index="' + index + '">' +
+                           '<td style="text-align: center;">' + (index + 1) + '</td>' +
+                           '<td>' + (item.name || '-') + '</td>' +
+                           '<td>' + (item.id || '-') + '</td>' +
+                           '<td>' + (item.company || '-') + '</td>' +
+                           '<td>' + (item.bizno || '-') + '</td>' +
+                           {% if mode == 'edit' or mode == 'register' %}
+                           '<td style="text-align: center;">' +
+                           '<button type="button" class="list-field-btn-danger-{{ col.column_key }}" ' +
+                           'onclick="removeItem_{{ col.column_key }}(' + index + ')">✕</button>' +
+                           '</td>' +
+                           {% endif %}
+                           '</tr>';
+                });
+            }
+            
+            tbody.innerHTML = html;
+            
+            // Update count
+            document.getElementById('{{ col.column_key }}_count').textContent = {{ col.column_key }}_data.length;
+            
+            // Update hidden input
+            document.getElementById('{{ col.column_key }}').value = JSON.stringify({{ col.column_key }}_data);
+        }
+    })();
+    </script>
+{% endif %}
+{% endmacro %}

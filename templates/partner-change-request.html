@@ -306,12 +306,12 @@
     <form method="GET" class="search-form">
         <div class="search-fields">
             <div class="search-group">
-                <label>요청자명</label>
-                <input type="text" name="requester_name" value="{{ request.args.get('requester_name', '') }}" placeholder="요청자명을 입력하세요">
-            </div>
-            <div class="search-group">
                 <label>협력사명</label>
                 <input type="text" name="company_name" value="{{ request.args.get('company_name', '') }}" placeholder="협력사명을 입력하세요">
+            </div>
+            <div class="search-group">
+                <label>사업자번호</label>
+                <input type="text" name="business_number" value="{{ request.args.get('business_number', '') }}" placeholder="사업자번호를 입력하세요">
             </div>
         </div>
     </form>

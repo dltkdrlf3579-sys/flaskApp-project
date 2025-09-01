@@ -1,0 +1,543 @@
+{# 리스트 필드 공통 컴포넌트 #}
+{# 사용법: {% include 'includes/list_field_component.html' %} #}
+
+{% macro render_list_field(col, col_value, section, mode='view') %}
+    {% if col.column_type == 'list' %}
+        <!-- 리스트 필드 -->
+        <div class="list-field-container">
+            {% set list_data = col_value | from_json if col_value else [] %}
+            
+            <!-- 헤더 영역 -->
+            <div class="list-field-header">
+                <div class="list-header-left">
+                    <span class="list-field-title">{{ col.column_name }}</span>
+                    <span class="list-count">총 <span id="{{ col.column_key }}_count">{{ list_data|length if list_data else 0 }}</span>명</span>
+                </div>
+                {% if mode == 'edit' or mode == 'register' %}
+                <div class="list-header-right">
+                    <button type="button" class="btn-add-list-item" 
+                            onclick="addListItem('{{ col.column_key }}', '{{ col.list_item_type }}')">
+                        추가
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+            
+            <!-- 테이블 영역 -->
+            <div class="list-field-table">
+                <div class="list-table-header">
+                    <div class="list-col-no">No.</div>
+                    <div class="list-col-name">성함</div>
+                    <div class="list-col-id">ID</div>
+                    <div class="list-col-company">소속업체</div>
+                    <div class="list-col-bizno">사업자번호</div>
+                    {% if mode == 'edit' or mode == 'register' %}
+                    <div class="list-col-action">관리</div>
+                    {% endif %}
+                </div>
+                <div class="list-table-body" id="{{ col.column_key }}_items">
+                    {% if list_data and list_data|length > 0 %}
+                        {% for item in list_data %}
+                        <div class="list-table-row" data-index="{{ loop.index0 }}">
+                            <div class="list-col-no">{{ loop.index }}</div>
+                            <div class="list-col-name">{{ item.name or '-' }}</div>
+                            <div class="list-col-id">{{ item.id or '-' }}</div>
+                            <div class="list-col-company">{{ item.company or '-' }}</div>
+                            <div class="list-col-bizno">{{ item.bizno or '-' }}</div>
+                            {% if mode == 'edit' or mode == 'register' %}
+                            <div class="list-col-action">
+                                <button class="btn-edit-item" onclick="editListItem('{{ col.column_key }}', {{ loop.index0 }})" title="수정">✏️</button>
+                                <button class="btn-delete-item" onclick="removeListItem('{{ col.column_key }}', {{ loop.index0 }})" title="삭제">🗑️</button>
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="list-table-row no-data">
+                            <div class="list-col-full">
+                                {% if col.list_item_type == 'partner_worker' %}
+                                    등록된 협력사 근로자가 없습니다.
+                                {% else %}
+                                    등록된 항목이 없습니다.
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <input type="hidden" 
+                   id="{{ col.column_key }}" 
+                   class="{{ section.section_key }}-input" 
+                   data-field="{{ col.column_key }}"
+                   data-section="{{ section.section_key }}"
+                   data-list-type="{{ col.list_item_type }}"
+                   value="{{ col_value }}">
+        </div>
+    {% endif %}
+{% endmacro %}
+
+{# 리스트 필드 스타일 #}
+{% macro list_field_styles() %}
+<style>
+/* 리스트 필드 컨테이너 */
+.list-field-container {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    width: 100%;
+}
+
+/* 헤더 영역 */
+.list-field-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #f9fafb;
+    border-radius: 8px 8px 0 0;
+}
+
+.list-header-left {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.list-field-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #374151;
+}
+
+.list-count {
+    font-size: 13px;
+    color: #6b7280;
+}
+
+.btn-add-list-item {
+    padding: 5px 10px;
+    background: #28a745;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.2s;
+}
+
+.btn-add-list-item:hover {
+    background: #218838;
+}
+
+/* 테이블 영역 */
+.list-field-table {
+    padding: 0;
+}
+
+.list-table-header {
+    display: flex;
+    background: #f3f4f6;
+    border-bottom: 1px solid #e5e7eb;
+    font-size: 13px;
+    font-weight: 600;
+    color: #4b5563;
+}
+
+.list-table-body {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.list-table-row {
+    display: flex;
+    border-bottom: 1px solid #f3f4f6;
+    font-size: 13px;
+    background: white;
+    transition: background 0.1s;
+}
+
+.list-table-row:hover {
+    background: #f9fafb;
+}
+
+.list-table-row.no-data {
+    padding: 20px;
+    text-align: center;
+    color: #6b7280;
+}
+
+/* 컬럼 너비 설정 */
+.list-col-no {
+    width: 50px;
+    padding: 10px;
+    text-align: center;
+}
+
+.list-col-name {
+    flex: 1;
+    min-width: 120px;
+    padding: 10px;
+}
+
+.list-col-id {
+    width: 100px;
+    padding: 10px;
+}
+
+.list-col-company {
+    flex: 1.5;
+    min-width: 150px;
+    padding: 10px;
+}
+
+.list-col-bizno {
+    width: 130px;
+    padding: 10px;
+}
+
+.list-col-action {
+    width: 80px;
+    padding: 10px;
+    text-align: center;
+}
+
+.list-col-full {
+    width: 100%;
+    padding: 10px;
+    text-align: center;
+    color: #6b7280;
+}
+
+/* 버튼 스타일 */
+.btn-edit-item, .btn-delete-item {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 2px 4px;
+    transition: transform 0.1s;
+}
+
+.btn-edit-item:hover, .btn-delete-item:hover {
+    transform: scale(1.2);
+}
+
+/* 편집 폼 스타일 */
+.list-edit-form {
+    border: 1px solid #3b82f6;
+    background: #eff6ff;
+    padding: 10px;
+    border-radius: 4px;
+    margin-bottom: 10px;
+}
+
+.list-edit-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.list-edit-field label {
+    display: block;
+    font-size: 12px;
+    color: #4b5563;
+    margin-bottom: 4px;
+}
+
+.list-edit-field input {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.list-edit-field input[readonly] {
+    background: #f3f4f6;
+    cursor: not-allowed;
+}
+
+.list-search-group {
+    display: flex;
+    gap: 4px;
+}
+
+.list-search-group input {
+    flex: 1;
+}
+
+.list-search-group button {
+    padding: 6px 10px;
+    background: #f3f4f6;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.list-search-group button:hover {
+    background: #e5e7eb;
+}
+
+.list-edit-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.btn-save-item, .btn-cancel-item {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.btn-save-item {
+    background: #3b82f6;
+    color: white;
+}
+
+.btn-save-item:hover {
+    background: #2563eb;
+}
+
+.btn-cancel-item {
+    background: #6b7280;
+    color: white;
+}
+
+.btn-cancel-item:hover {
+    background: #4b5563;
+}
+</style>
+{% endmacro %}
+
+{# JavaScript 함수들 - 페이지당 한 번만 포함 #}
+{% macro render_list_scripts() %}
+<script>
+// 리스트 관련 전역 변수
+if (typeof listItemCounters === 'undefined') {
+    var listItemCounters = {};
+}
+
+// 리스트 아이템 추가 함수
+function addListItem(fieldKey, itemType) {
+    const itemsContainer = document.getElementById(fieldKey + '_items');
+    
+    // "등록된 항목이 없습니다" 메시지 제거
+    const noDataRow = itemsContainer.querySelector('.no-data');
+    if (noDataRow) {
+        noDataRow.remove();
+    }
+    
+    // 새 인덱스 생성
+    if (!listItemCounters[fieldKey]) {
+        listItemCounters[fieldKey] = 0;
+    }
+    const itemIndex = listItemCounters[fieldKey]++;
+    
+    // 편집 폼 추가
+    const editFormDiv = document.createElement('div');
+    editFormDiv.className = 'list-edit-form';
+    editFormDiv.dataset.index = itemIndex;
+    
+    if (itemType === 'partner_worker') {
+        editFormDiv.innerHTML = `
+            <div class="list-edit-grid">
+                <div class="list-edit-field">
+                    <label>성함</label>
+                    <div class="list-search-group">
+                        <input type="text" id="${fieldKey}_${itemIndex}_name" placeholder="클릭하여 선택" readonly>
+                        <button type="button" onclick="openContractorPopup('${fieldKey}', ${itemIndex})">
+                            🔍
+                        </button>
+                    </div>
+                </div>
+                <div class="list-edit-field">
+                    <label>ID</label>
+                    <input type="text" id="${fieldKey}_${itemIndex}_id" readonly>
+                </div>
+                <div class="list-edit-field">
+                    <label>소속업체</label>
+                    <input type="text" id="${fieldKey}_${itemIndex}_company" readonly>
+                </div>
+                <div class="list-edit-field">
+                    <label>사업자번호</label>
+                    <input type="text" id="${fieldKey}_${itemIndex}_bizno" readonly>
+                </div>
+            </div>
+            <div class="list-edit-actions">
+                <button type="button" class="btn-cancel-item" onclick="cancelAddItem('${fieldKey}', ${itemIndex})">취소</button>
+                <button type="button" class="btn-save-item" onclick="saveListItem('${fieldKey}', ${itemIndex})">저장</button>
+            </div>
+        `;
+    }
+    
+    // 편집 폼을 테이블에 추가
+    itemsContainer.insertBefore(editFormDiv, itemsContainer.firstChild);
+}
+
+// 리스트 아이템 저장
+function saveListItem(fieldKey, itemIndex) {
+    const name = document.getElementById(`${fieldKey}_${itemIndex}_name`).value;
+    const id = document.getElementById(`${fieldKey}_${itemIndex}_id`).value;
+    const company = document.getElementById(`${fieldKey}_${itemIndex}_company`).value;
+    const bizno = document.getElementById(`${fieldKey}_${itemIndex}_bizno`).value;
+    
+    if (!name) {
+        alert('성함을 선택해주세요.');
+        return;
+    }
+    
+    const itemsContainer = document.getElementById(fieldKey + '_items');
+    const editForm = itemsContainer.querySelector(`[data-index="${itemIndex}"]`);
+    
+    // 테이블 행으로 변환
+    const rowDiv = document.createElement('div');
+    rowDiv.className = 'list-table-row';
+    rowDiv.dataset.index = itemIndex;
+    
+    // 현재 행 개수 계산
+    const rowCount = itemsContainer.querySelectorAll('.list-table-row').length + 1;
+    
+    rowDiv.innerHTML = `
+        <div class="list-col-no">${rowCount}</div>
+        <div class="list-col-name">${name}</div>
+        <div class="list-col-id">${id}</div>
+        <div class="list-col-company">${company}</div>
+        <div class="list-col-bizno">${bizno}</div>
+        <div class="list-col-action">
+            <button class="btn-delete-item" onclick="removeListItem('${fieldKey}', ${itemIndex})" title="삭제">🗑️</button>
+        </div>
+    `;
+    
+    // 편집 폼을 행으로 교체
+    itemsContainer.replaceChild(rowDiv, editForm);
+    
+    // 카운트 업데이트
+    updateListCount(fieldKey);
+    updateListData(fieldKey);
+}
+
+// 추가 취소
+function cancelAddItem(fieldKey, itemIndex) {
+    const itemsContainer = document.getElementById(fieldKey + '_items');
+    const editForm = itemsContainer.querySelector(`[data-index="${itemIndex}"]`);
+    if (editForm) {
+        editForm.remove();
+    }
+    
+    // 항목이 없으면 "등록된 항목이 없습니다" 메시지 표시
+    if (itemsContainer.children.length === 0) {
+        const noDataRow = document.createElement('div');
+        noDataRow.className = 'list-table-row no-data';
+        noDataRow.innerHTML = '<div class="list-col-full">등록된 협력사 근로자가 없습니다.</div>';
+        itemsContainer.appendChild(noDataRow);
+    }
+}
+
+// 리스트 카운트 업데이트
+function updateListCount(fieldKey) {
+    const itemsContainer = document.getElementById(fieldKey + '_items');
+    const rowCount = itemsContainer.querySelectorAll('.list-table-row:not(.no-data)').length;
+    const countElement = document.getElementById(fieldKey + '_count');
+    if (countElement) {
+        countElement.textContent = rowCount;
+    }
+}
+
+// 리스트 아이템 제거 함수
+function removeListItem(fieldKey, itemIndex) {
+    if (!confirm('정말 삭제하시겠습니까?')) {
+        return;
+    }
+    
+    const itemsContainer = document.getElementById(fieldKey + '_items');
+    const itemToRemove = itemsContainer.querySelector(`[data-index="${itemIndex}"]`);
+    
+    if (itemToRemove) {
+        itemToRemove.remove();
+        
+        // 행 번호 재정렬
+        const rows = itemsContainer.querySelectorAll('.list-table-row:not(.no-data)');
+        rows.forEach((row, index) => {
+            const noCol = row.querySelector('.list-col-no');
+            if (noCol) {
+                noCol.textContent = index + 1;
+            }
+        });
+        
+        // 항목이 없으면 "등록된 항목이 없습니다" 메시지 표시
+        if (rows.length === 0) {
+            const noDataRow = document.createElement('div');
+            noDataRow.className = 'list-table-row no-data';
+            noDataRow.innerHTML = '<div class="list-col-full">등록된 협력사 근로자가 없습니다.</div>';
+            itemsContainer.appendChild(noDataRow);
+        }
+        
+        updateListCount(fieldKey);
+        updateListData(fieldKey);
+    }
+}
+
+// 리스트 데이터 업데이트 함수
+function updateListData(fieldKey) {
+    const itemsContainer = document.getElementById(fieldKey + '_items');
+    const rows = itemsContainer.querySelectorAll('.list-table-row:not(.no-data)');
+    const data = [];
+    
+    rows.forEach(row => {
+        const name = row.querySelector('.list-col-name')?.textContent || '';
+        const id = row.querySelector('.list-col-id')?.textContent || '';
+        const company = row.querySelector('.list-col-company')?.textContent || '';
+        const bizno = row.querySelector('.list-col-bizno')?.textContent || '';
+        
+        if (name && name !== '-') {
+            data.push({
+                name: name,
+                id: id,
+                company: company,
+                bizno: bizno
+            });
+        }
+    });
+    
+    // hidden input에 JSON 형태로 저장
+    const hiddenInput = document.getElementById(fieldKey);
+    if (hiddenInput) {
+        hiddenInput.value = JSON.stringify(data);
+    }
+}
+
+// 협력사 근로자 팝업 열기 함수
+function openContractorPopup(fieldKey, itemIndex) {
+    // 고유한 콜백 함수명 생성
+    const callbackName = `contractorCallback_${fieldKey}_${itemIndex}`;
+    
+    // 팝업창 열기 (contractor 타입과 콜백 지정)
+    const popup = window.open(`/search-popup?type=contractor&callback=${callbackName}`, 'contractorPopup', 
+        'width=900,height=600,scrollbars=yes');
+    
+    // 팝업에서 선택 시 콜백 처리
+    window[callbackName] = function(data) {
+        // 선택된 데이터를 해당 리스트 아이템의 필드에 채우기
+        const nameInput = document.getElementById(`${fieldKey}_${itemIndex}_name`);
+        const idInput = document.getElementById(`${fieldKey}_${itemIndex}_id`);
+        const companyInput = document.getElementById(`${fieldKey}_${itemIndex}_company`);
+        const biznoInput = document.getElementById(`${fieldKey}_${itemIndex}_bizno`);
+        
+        if (nameInput) nameInput.value = data.worker_name || '';
+        if (idInput) idInput.value = data.worker_id || '';
+        if (companyInput) companyInput.value = data.company_name || '';
+        if (biznoInput) biznoInput.value = data.business_number || '';
+        
+        // 콜백 함수 제거
+        delete window[callbackName];
+    };
+}
+</script>
+{% endmacro %}

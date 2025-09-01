@@ -17,25 +17,13 @@ MENU_CONFIG = [
     {
         "title": "작업안전",
         "submenu": [
-            {"title": "작업안전 현황", "url": "work-safety"},
-        ],
-    },
-    {
-        "title": "위험성평가",
-        "submenu": [
-            {"title": "위험성평가 현황", "url": "risk-assessment"},
-        ],
-    },
-    {
-        "title": "적격성평가",
-        "submenu": [
-            {"title": "적격성평가 현황", "url": "qualification-assessment"},
+            {"title": "Follow SOP", "url": "follow-sop"},
         ],
     },
     {
         "title": "안전문화",
         "submenu": [
-            {"title": "안전문화 현황", "url": "safety-culture"},
+            {"title": "FullProcess", "url": "full-process"},
         ],
     },
 ]

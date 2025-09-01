@@ -1,0 +1,370 @@
+{# 리스트 필드 - V3 (CSS 그리드 호환) #}
+
+{% macro render_list_field(col, col_value, section, mode='view') %}
+{% if col.column_type == 'list' %}
+    {% if col_value %}
+        {% if col_value is string %}
+            {% set list_data = [] %}
+            <!-- 문자열을 JavaScript에서 파싱 -->
+        {% else %}
+            {% set list_data = col_value %}
+        {% endif %}
+    {% else %}
+        {% set list_data = [] %}
+    {% endif %}
+    
+    <!-- 리스트 필드 전체 컨테이너 -->
+    <div class="list-field-container-{{ col.column_key }}">
+        <!-- Hidden input for data storage -->
+        <input type="hidden" 
+               id="{{ col.column_key }}" 
+               name="{{ col.column_key }}"
+               class="{{ section.section_key }}-input" 
+               data-field="{{ col.column_key }}"
+               data-field-type="list"
+               data-section="{{ section.section_key }}"
+               {% if col_value is string %}
+               value="{{ col_value }}"
+               {% else %}
+               value="{{ col_value | tojson if col_value else '[]' }}"
+               {% endif %}>
+        
+        <!-- 제목과 추가 버튼 -->
+        <div class="list-field-header-{{ col.column_key }}">
+            <h6 class="list-field-title-{{ col.column_key }}">{{ col.column_name }}</h6>
+            {% if mode == 'edit' or mode == 'register' %}
+            <button type="button" 
+                    class="list-field-add-btn-{{ col.column_key }}"
+                    onclick="addWorker_{{ col.column_key }}()">
+                + 협력사 근로자 추가
+            </button>
+            {% endif %}
+        </div>
+        
+        <!-- 데이터 테이블 -->
+        <div class="list-field-table-wrapper-{{ col.column_key }}">
+            <table class="list-field-table-{{ col.column_key }}">
+                <thead>
+                    <tr>
+                        <th>No.</th>
+                        <th>성함</th>
+                        <th>ID</th>
+                        <th>소속업체</th>
+                        <th>사업자번호</th>
+                        {% if mode == 'edit' or mode == 'register' %}
+                        <th>관리</th>
+                        {% endif %}
+                    </tr>
+                </thead>
+                <tbody id="{{ col.column_key }}_tbody">
+                    {% if list_data and list_data|length > 0 %}
+                        {% for item in list_data %}
+                        <tr>
+                            <td>{{ loop.index }}</td>
+                            <td>{{ item.name or '-' }}</td>
+                            <td>{{ item.id or '-' }}</td>
+                            <td>{{ item.company or '-' }}</td>
+                            <td>{{ item.bizno or '-' }}</td>
+                            {% if mode == 'edit' or mode == 'register' %}
+                            <td>
+                                <button type="button" 
+                                        class="list-field-remove-btn-{{ col.column_key }}"
+                                        onclick="removeItem_{{ col.column_key }}({{ loop.index0 }})">
+                                    삭제
+                                </button>
+                            </td>
+                            {% endif %}
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr id="{{ col.column_key }}_empty_row">
+                            <td colspan="{% if mode == 'edit' or mode == 'register' %}6{% else %}5{% endif %}">
+                                등록된 협력사 근로자가 없습니다.
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- 총 인원수 -->
+        <div class="list-field-count-{{ col.column_key }}">
+            총 <span id="{{ col.column_key }}_count">{{ list_data|length if list_data else 0 }}</span>명
+        </div>
+    </div>
+    
+    <style>
+    /* 리스트 필드 컨테이너 - 그리드 호환 */
+    .list-field-container-{{ col.column_key }} {
+        grid-column: 1 / -1; /* 전체 그리드 열 사용 */
+        margin: 20px 0;
+        background: #fff;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        overflow: hidden;
+    }
+    
+    /* 헤더 */
+    .list-field-header-{{ col.column_key }} {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 15px 20px;
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        border-bottom: 1px solid #dee2e6;
+    }
+    
+    .list-field-title-{{ col.column_key }} {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 600;
+        color: #495057;
+    }
+    
+    .list-field-add-btn-{{ col.column_key }} {
+        background: #007bff;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 4px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        box-shadow: 0 2px 4px rgba(0,123,255,0.2);
+    }
+    
+    .list-field-add-btn-{{ col.column_key }}:hover {
+        background: #0056b3;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(0,123,255,0.3);
+    }
+    
+    /* 테이블 래퍼 */
+    .list-field-table-wrapper-{{ col.column_key }} {
+        overflow-x: auto;
+        max-width: 100%;
+    }
+    
+    /* 테이블 스타일 */
+    .list-field-table-{{ col.column_key }} {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        min-width: 1200px; /* 최소 너비 확장 */
+    }
+    
+    .list-field-table-{{ col.column_key }} th {
+        background: #f1f3f4;
+        padding: 12px 10px;
+        text-align: left;
+        font-size: 14px;
+        font-weight: 600;
+        color: #495057;
+        border-bottom: 2px solid #dee2e6;
+        white-space: nowrap;
+    }
+    
+    .list-field-table-{{ col.column_key }} th:nth-child(1) { width: 60px; text-align: center; }
+    .list-field-table-{{ col.column_key }} th:nth-child(2) { width: 150px; }
+    .list-field-table-{{ col.column_key }} th:nth-child(3) { width: 150px; }
+    .list-field-table-{{ col.column_key }} th:nth-child(4) { width: 350px; }
+    .list-field-table-{{ col.column_key }} th:nth-child(5) { width: 160px; }
+    .list-field-table-{{ col.column_key }} th:nth-child(6) { width: 80px; text-align: center; }
+    
+    .list-field-table-{{ col.column_key }} td {
+        padding: 12px 8px;
+        font-size: 14px;
+        color: #495057;
+        border-bottom: 1px solid #e9ecef;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    
+    .list-field-table-{{ col.column_key }} td:nth-child(1) {
+        text-align: center;
+        font-weight: 600;
+    }
+    
+    .list-field-table-{{ col.column_key }} td:nth-child(6) {
+        text-align: center;
+    }
+    
+    .list-field-table-{{ col.column_key }} tbody tr:hover {
+        background: #f8f9fa;
+    }
+    
+    .list-field-table-{{ col.column_key }} tbody tr:nth-child(even) {
+        background: #fdfdfd;
+    }
+    
+    .list-field-table-{{ col.column_key }} tbody tr:nth-child(even):hover {
+        background: #f8f9fa;
+    }
+    
+    /* 삭제 버튼 */
+    .list-field-remove-btn-{{ col.column_key }} {
+        background: #dc3545;
+        color: white;
+        border: none;
+        padding: 4px 8px;
+        border-radius: 3px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    
+    .list-field-remove-btn-{{ col.column_key }}:hover {
+        background: #c82333;
+        transform: scale(1.05);
+    }
+    
+    /* 빈 상태 */
+    .list-field-table-{{ col.column_key }} #{{ col.column_key }}_empty_row td {
+        text-align: center;
+        padding: 40px;
+        color: #6c757d;
+        font-style: italic;
+        background: #f8f9fa;
+    }
+    
+    /* 카운트 */
+    .list-field-count-{{ col.column_key }} {
+        padding: 10px 20px;
+        font-size: 14px;
+        color: #6c757d;
+        background: #f8f9fa;
+        border-top: 1px solid #e9ecef;
+        text-align: right;
+    }
+    
+    .list-field-count-{{ col.column_key }} span {
+        font-weight: 600;
+        color: #007bff;
+    }
+    </style>
+    
+    <script>
+    (function() {
+        // 로컬 스코프로 격리
+        var {{ col.column_key }}_data = [];
+        
+        // 렌더링 함수를 먼저 정의
+        function renderTable_{{ col.column_key }}() {
+            var tbody = document.getElementById('{{ col.column_key }}_tbody');
+            var html = '';
+            
+            if ({{ col.column_key }}_data.length === 0) {
+                html = '<tr id="{{ col.column_key }}_empty_row">' +
+                       '<td colspan="{% if mode == "edit" or mode == "register" %}6{% else %}5{% endif %}">' +
+                       '등록된 협력사 근로자가 없습니다.</td></tr>';
+            } else {
+                {{ col.column_key }}_data.forEach(function(item, index) {
+                    html += '<tr>' +
+                           '<td>' + (index + 1) + '</td>' +
+                           '<td>' + (item.name || '-') + '</td>' +
+                           '<td>' + (item.id || '-') + '</td>' +
+                           '<td>' + (item.company || '-') + '</td>' +
+                           '<td>' + (item.bizno || '-') + '</td>' +
+                           {% if mode == 'edit' or mode == 'register' %}
+                           '<td>' +
+                           '<button type="button" class="list-field-remove-btn-{{ col.column_key }}" ' +
+                           'onclick="removeItem_{{ col.column_key }}(' + index + ')">삭제</button>' +
+                           '</td>' +
+                           {% endif %}
+                           '</tr>';
+                });
+            }
+            
+            tbody.innerHTML = html;
+            
+            // Update count
+            document.getElementById('{{ col.column_key }}_count').textContent = {{ col.column_key }}_data.length;
+            
+            // Update hidden input - 중요!
+            var jsonData = JSON.stringify({{ col.column_key }}_data);
+            document.getElementById('{{ col.column_key }}').value = jsonData;
+            console.log('{{ col.column_key }} hidden input 업데이트:', jsonData);
+            console.log('{{ col.column_key }} hidden input 현재 value:', document.getElementById('{{ col.column_key }}').value);
+        }
+        
+        // 초기 데이터 로드
+        try {
+            var initialData = document.getElementById('{{ col.column_key }}').value;
+            if (initialData && initialData !== '[]') {
+                {{ col.column_key }}_data = JSON.parse(initialData);
+                console.log('{{ col.column_key }} 초기 데이터:', {{ col.column_key }}_data);
+                
+                // 초기 데이터가 있으면 테이블 다시 렌더링
+                if ({{ col.column_key }}_data.length > 0) {
+                    renderTable_{{ col.column_key }}();
+                }
+            }
+        } catch(e) {
+            console.log('{{ col.column_key }} 초기 데이터 파싱 실패:', e);
+            {{ col.column_key }}_data = [];
+        }
+        
+        // 바로 검색 팝업 띄우기
+        window.addWorker_{{ col.column_key }} = function() {
+            var callbackName = 'workerCallback_{{ col.column_key }}_' + Date.now();
+            console.log('{{ col.column_key }} 검색 팝업 열기');
+            console.log('현재 {{ col.column_key }}_data:', {{ col.column_key }}_data);
+            
+            window[callbackName] = function(data) {
+                console.log('{{ col.column_key }} 선택된 데이터:', data);
+                console.log('데이터 타입 확인:', {
+                    worker_name: typeof data.worker_name,
+                    worker_id: typeof data.worker_id,
+                    company_name: typeof data.company_name,
+                    business_number: typeof data.business_number
+                });
+                
+                // 중복 체크
+                var isDuplicate = {{ col.column_key }}_data.some(function(item) {
+                    return item.id === data.worker_id;
+                });
+                
+                if (isDuplicate) {
+                    alert('이미 추가된 근로자입니다.');
+                    delete window[callbackName];
+                    return;
+                }
+                
+                // 데이터 추가
+                var newItem = {
+                    name: data.worker_name || '',
+                    id: data.worker_id || '',
+                    company: data.company_name || '',
+                    bizno: data.business_number || ''
+                };
+                
+                console.log('추가할 새 항목:', newItem);
+                {{ col.column_key }}_data.push(newItem);
+                
+                console.log('{{ col.column_key }} 추가 후 데이터:', {{ col.column_key }}_data);
+                console.log('{{ col.column_key }} 데이터 길이:', {{ col.column_key }}_data.length);
+                
+                renderTable_{{ col.column_key }}();
+                delete window[callbackName];
+            };
+            
+            // 검색 팝업 열기
+            window.open('/search-popup?type=contractor&callback=' + callbackName, 
+                       'workerPopup', 'width=900,height=600,scrollbars=yes');
+        };
+        
+        window.removeItem_{{ col.column_key }} = function(index) {
+            if (confirm('정말 삭제하시겠습니까?')) {
+                console.log('{{ col.column_key }} 삭제 인덱스:', index);
+                {{ col.column_key }}_data.splice(index, 1);
+                console.log('{{ col.column_key }} 삭제 후 데이터:', {{ col.column_key }}_data);
+                renderTable_{{ col.column_key }}();
+            }
+        };
+    })();
+    </script>
+{% endif %}
+{% endmacro %}

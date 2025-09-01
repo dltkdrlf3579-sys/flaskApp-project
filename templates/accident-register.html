@@ -52,7 +52,9 @@
                             {% set span = col.column_span|default(1)|int %}
                             
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
+                                {% if col.column_type != 'list' %}
                                 <label>{{ col.column_name }}</label>
+                                {% endif %}
                                 
                                 {% if col.column_key == 'accident_number' %}
                                     <!-- 발부번호는 자동 생성 -->
@@ -92,6 +94,11 @@
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            placeholder="시간 선택">
+                                           
+                                {% elif col.column_type == 'list' %}
+                                    <!-- 리스트 필드 -->
+                                    {% from 'includes/list_field_v3.html' import render_list_field %}
+                                    {{ render_list_field(col, '', section, mode='register') }}
                                            
                                 {% elif col.column_type == 'number' %}
                                     <!-- 숫자 필드 -->
@@ -198,7 +205,7 @@
 
     <!-- 저장 버튼 영역 -->
     <div class="save-section">
-        <button class="btn-save" onclick="registerSafetyInstruction()">등록완료</button>
+        <button class="btn-save" onclick="registerAccident()">등록완료</button>
     </div>
 </div>
 
@@ -253,6 +260,26 @@ function collectDynamicFields() {
                 value = input.value;
             }
             
+            // 리스트 필드 처리 - 더 간단하고 확실한 방법
+            // 1. data-field-type 체크 또는 2. JSON 배열 문자열 체크
+            if ((input.getAttribute('data-field-type') === 'list' || 
+                 (typeof value === 'string' && value.trim().startsWith('['))) && value) {
+                console.log(`🔍 리스트 필드 감지: ${fieldKey}`);
+                try {
+                    const parsed = JSON.parse(value);
+                    if (Array.isArray(parsed)) {
+                        value = parsed;
+                        console.log(`✅ 리스트 필드 ${fieldKey} 파싱 성공: ${parsed.length}개 항목`);
+                    } else {
+                        console.log(`⚠️ ${fieldKey}는 배열이 아님`);
+                    }
+                } catch(e) {
+                    console.log(`❌ 리스트 필드 ${fieldKey} 파싱 실패:`, e);
+                    // 파싱 실패 시 빈 배열로 설정
+                    value = [];
+                }
+            }
+            
             data[fieldKey] = value;
         });
     });
@@ -261,31 +288,95 @@ function collectDynamicFields() {
 }
 
 // 등록 함수
-function registerSafetyInstruction() {
+function registerAccident() {
+    console.log('=== 등록 시작 ===');
     const formData = new FormData();
     
     // 상세내용 처리
     const editableDiv = document.getElementById('detailed-content');
     const detailedContent = editableDiv ? editableDiv.innerHTML : '';
     formData.append('detailed_content', detailedContent);
+    console.log('상세내용:', detailedContent);
     
     // 동적 필드 수집
     const dynamicData = collectDynamicFields();
+    console.log('=== collectDynamicFields 결과 ===');
+    console.log('전체 데이터:', dynamicData);
+    
+    // 각 필드의 타입 확인
+    for (const [key, value] of Object.entries(dynamicData)) {
+        if (Array.isArray(value)) {
+            console.log(`  ${key}: 배열 (${value.length}개 항목)`);
+        } else if (typeof value === 'string' && value.startsWith('[')) {
+            console.log(`  ${key}: JSON 문자열 "${value.substring(0, 50)}..."`);
+        } else {
+            console.log(`  ${key}: ${typeof value} = "${value}"`);
+        }
+    }
     
     // 각 필드를 FormData에 추가
     for (const [key, value] of Object.entries(dynamicData)) {
-        formData.append(key, value);
+        // 배열은 JSON 문자열로 변환해서 추가
+        if (Array.isArray(value)) {
+            formData.append(key, JSON.stringify(value));
+        } else {
+            formData.append(key, value);
+        }
     }
     
-    // custom_data 처리 (additional 섹션 데이터 등)
+    // custom_data 처리 (모든 동적 컬럼 포함)
     const customData = {};
-    const additionalColumns = sectionColumns['additional'] || [];
-    additionalColumns.forEach(col => {
-        if (dynamicData[col.column_key]) {
-            customData[col.column_key] = dynamicData[col.column_key];
-        }
+    
+    // 모든 섹션의 동적 컬럼 데이터를 custom_data에 포함
+    sections.forEach(section => {
+        const columns = sectionColumns[section.section_key] || [];
+        columns.forEach(col => {
+            // 기본 섹션의 필드는 제외 (이미 개별 필드로 전송됨)
+            if (section.section_key !== 'basic' && dynamicData[col.column_key]) {
+                let value = dynamicData[col.column_key];
+                
+                // 리스트 필드 처리 - custom_data 구성 시점에서 한 번 더 확인
+                if (typeof value === 'string' && value.trim().startsWith('[')) {
+                    console.log(`custom_data 구성 시 리스트 필드 감지: ${col.column_key}`);
+                    try {
+                        const parsed = JSON.parse(value);
+                        if (Array.isArray(parsed)) {
+                            value = parsed;
+                            console.log(`✅ custom_data에서 파싱 성공: ${col.column_key} = 배열(${parsed.length}개)`);
+                        }
+                    } catch(e) {
+                        console.log(`❌ custom_data에서 파싱 실패: ${col.column_key}`, e);
+                    }
+                }
+                
+                customData[col.column_key] = value;
+                
+                // 디버깅: 최종 타입 확인
+                if (Array.isArray(value)) {
+                    console.log(`✅ custom_data에 배열로 저장됨: ${col.column_key} = 배열(${value.length}개)`);
+                } else if (typeof value === 'string') {
+                    console.log(`⚠️ custom_data에 문자열로 저장됨: ${col.column_key} = "${value.substring(0, 50)}..."`);
+                } else {
+                    console.log(`custom_data에 추가: ${col.column_key} = ${typeof value}`);
+                }
+            }
+        });
     });
-    formData.append('custom_data', JSON.stringify(customData));
+    
+    console.log('최종 custom_data 객체:', customData);
+    const customDataString = JSON.stringify(customData);
+    console.log('최종 custom_data JSON 문자열:', customDataString);
+    
+    // custom_data 검증 - 리스트 필드가 올바르게 포함되었는지 확인
+    for (const [key, value] of Object.entries(customData)) {
+        if (Array.isArray(value)) {
+            console.log(`✅ 리스트 필드 ${key}: 배열로 정상 포함됨, 항목 수: ${value.length}`);
+        } else if (typeof value === 'string' && value.startsWith('[')) {
+            console.log(`❌ 리스트 필드 ${key}: 문자열로 포함됨 (이중 인코딩 문제!)`, value);
+        }
+    }
+    
+    formData.append('custom_data', customDataString);
     
     // 첨부파일 처리
     const attachmentData = [];
@@ -306,28 +397,62 @@ function registerSafetyInstruction() {
         });
     }
     
+    // FormData 내용 확인
+    console.log('=== FormData 전송 내용 ===');
+    for (let [key, value] of formData.entries()) {
+        if (key === 'custom_data') {
+            console.log(`${key}:`, value);
+            try {
+                const parsed = JSON.parse(value);
+                console.log('custom_data 파싱된 내용:', parsed);
+                for (const [k, v] of Object.entries(parsed)) {
+                    if (Array.isArray(v)) {
+                        console.log(`  - ${k}: 배열 (${v.length}개 항목)`);
+                    } else {
+                        console.log(`  - ${k}: ${typeof v}`);
+                    }
+                }
+            } catch(e) {
+                console.error('custom_data 파싱 실패:', e);
+            }
+        } else {
+            console.log(`${key}:`, value);
+        }
+    }
+    
     // 서버로 전송
+    console.log('서버로 전송 시작...');
     fetch('/register-accident', {
         method: 'POST',
         body: formData
     })
-    .then(response => response.json())
+    .then(response => {
+        console.log('서버 응답 상태:', response.status);
+        return response.json();
+    })
     .then(data => {
+        console.log('서버 응답 데이터:', data);
         if (data.success) {
-            alert('사고가 성공적으로 등록되었습니다.');
-            if (window.opener) {
-                window.opener.location.reload();
-                window.close();
-            } else {
-                window.location.href = '/accident';
-            }
+            alert('사고가 성공적으로 등록되었습니다. 사고번호: ' + data.accident_number);
+            console.log('등록 성공! Console을 확인하세요.');
+            
+            // 디버깅을 위해 창 닫기 비활성화
+            // setTimeout(() => {
+            //     if (window.opener) {
+            //         window.opener.location.reload();
+            //         window.close();
+            //     } else {
+            //         window.location.href = '/accident';
+            //     }
+            // }, 3000);
         } else {
             alert('등록 실패: ' + (data.message || '알 수 없는 오류'));
+            console.error('등록 실패 상세:', data);
         }
     })
     .catch(error => {
-        console.error('Error:', error);
-        alert('등록 중 오류가 발생했습니다.');
+        console.error('전송 오류:', error);
+        alert('등록 중 오류가 발생했습니다: ' + error.message);
     });
 }
 
@@ -336,6 +461,8 @@ function openPopup(fieldKey) {
     // 팝업 구현 (필요시 추가)
     alert('팝업 기능은 추가 구현이 필요합니다.');
 }
+
+// 기본 스크립트 끝
 </script>
 
 <style>
@@ -347,6 +474,30 @@ function openPopup(fieldKey) {
     border-radius: 4px;
     font-size: 14px;
     resize: vertical;
+}
+
+/* 리스트 컨테이너 스타일 */
+.list-container {
+    width: 100%;
+}
+
+.list-items {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.list-item {
+    border: 1px solid #dee2e6;
+    background: #f8f9fa;
+}
+
+.list-item .card-body {
+    padding: 10px;
+}
+
+.list-item .form-label {
+    font-size: 12px;
+    margin-bottom: 4px;
 }
 
 .info-cell.span-2 {

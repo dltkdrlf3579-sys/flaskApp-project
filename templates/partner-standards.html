@@ -309,37 +309,6 @@
                 <label>사업자번호</label>
                 <input type="text" name="business_number" value="{{ request.args.get('business_number', '') }}" placeholder="사업자번호를 입력하세요">
             </div>
-            <div class="search-group filter-group">
-                <label>업종(대분류)</label>
-                <div class="filter-select">
-                    <input type="text" id="major-filter-input" placeholder="업종을 검색하세요" autocomplete="off">
-                    <input type="hidden" name="business_type_major" value="{{ request.args.get('business_type_major', '') }}">
-                    <button type="button" class="filter-dropdown-btn">▼</button>
-                    <div class="filter-dropdown" id="major-dropdown">
-                        <div class="filter-options"></div>
-                    </div>
-                </div>
-            </div>
-            <div class="search-group filter-group">
-                <label>업종(소분류)</label>
-                <div class="filter-select">
-                    <input type="text" id="minor-filter-input" placeholder="소분류를 검색하세요" autocomplete="off">
-                    <input type="hidden" name="business_type_minor" value="{{ request.args.get('business_type_minor', '') }}">
-                    <button type="button" class="filter-dropdown-btn">▼</button>
-                    <div class="filter-dropdown" id="minor-dropdown">
-                        <div class="filter-options"></div>
-                    </div>
-                </div>
-            </div>
-            <div class="search-group range-group">
-                <label>상시근로자</label>
-                <div class="range-inputs">
-                    <input type="number" name="workers_min" value="{{ request.args.get('workers_min', '') }}" placeholder="최소" min="0">
-                    <span class="range-separator">~</span>
-                    <input type="number" name="workers_max" value="{{ request.args.get('workers_max', '') }}" placeholder="최대" min="0">
-                    <span class="range-unit">명</span>
-                </div>
-            </div>
         </div>
     </form>
 </div>
