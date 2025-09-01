@@ -4,8 +4,10 @@ def follow_sop_route():
     """Follow SOP 페이지 라우트"""
     from common_mapping import smart_apply_mappings
     import math
+    import sqlite3
     
     conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
     # 동적 컬럼 정보 가져오기
@@ -125,9 +127,11 @@ def follow_sop_route():
 @app.route("/follow-sop-register")
 def follow_sop_register():
     """Follow SOP 등록 페이지"""
+    import sqlite3
     logging.info("Follow SOP 등록 페이지 접근")
     
     conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
     # 섹션 정보 가져오기
@@ -149,9 +153,11 @@ def follow_sop_register():
 def follow_sop_detail(work_req_no):
     """Follow SOP 상세정보 페이지"""
     import json
+    import sqlite3
     logging.info(f"Follow SOP 상세 정보 조회: {work_req_no}")
     
     conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
     # Follow SOP 정보 조회
@@ -288,8 +294,10 @@ def full_process_route():
     """Full Process 페이지 라우트"""
     from common_mapping import smart_apply_mappings
     import math
+    import sqlite3
     
     conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
     # 동적 컬럼 정보 가져오기
@@ -409,9 +417,11 @@ def full_process_route():
 @app.route("/full-process-register")
 def full_process_register():
     """Full Process 등록 페이지"""
+    import sqlite3
     logging.info("Full Process 등록 페이지 접근")
     
     conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
     # 섹션 정보 가져오기
@@ -433,9 +443,11 @@ def full_process_register():
 def full_process_detail(fullprocess_number):
     """Full Process 상세정보 페이지"""
     import json
+    import sqlite3
     logging.info(f"Full Process 상세 정보 조회: {fullprocess_number}")
     
     conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
     # Full Process 정보 조회
