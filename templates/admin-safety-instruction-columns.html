@@ -193,6 +193,28 @@
             background: #ffe8e8 !important;
             border: 2px dashed #d32f2f;
         }
+        
+        /* Bootstrap Icons 강제 표시 */
+        .bi::before {
+            display: inline-block;
+            font-family: 'bootstrap-icons' !important;
+            font-style: normal;
+            font-weight: normal !important;
+            font-variant: normal;
+            text-transform: none;
+            line-height: 1;
+            vertical-align: -.125em;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        .bi-trash::before {
+            content: "\f5de" !important;
+        }
+        
+        .bi-pencil::before {
+            content: "\f4ca" !important;
+        }
     </style>
 
 <div class="admin-container">
@@ -415,6 +437,7 @@
                                 <option value="text">텍스트</option>
                                 <option value="dropdown">드롭다운</option>
                                 <option value="date">날짜</option>
+                                <option value="time">시간</option>
                                 <option value="table">테이블</option>
                             </select>
                             <div id="typeChangeWarning" class="alert alert-warning mt-2" style="display: none; font-size: 13px; padding: 8px 12px;">
@@ -570,6 +593,8 @@
 let columns = [];
 let pendingColumns = []; // 모든 변경사항을 담는 단순 배열
 let sections = {{ sections | tojson | safe }};  // 섹션 정보
+let sectionsToDelete = [];  // 삭제할 섹션 추적
+let sectionsToAdd = [];  // 새로 추가할 섹션 추적
 let originalSections = JSON.parse(JSON.stringify({{ sections | tojson | safe }}));  // 원본 섹션 정보 보관
 let sectionChanges = {};  // 섹션 변경사항 추적
 let editingId = null;
@@ -647,6 +672,10 @@ let editingId = null;
                             ${section.section_name}
                         </span>
                         <small style="margin-left: 10px; color: #999;">(더블클릭으로 이름 변경)</small>
+                        ${section.section_key !== 'basic_info' && section.section_key !== 'violation_info' ? 
+                            `<button class="btn btn-sm btn-danger float-end" onclick="deleteSection(${section.id}, '${section.section_name}')">
+                                <i class="bi bi-trash"></i> 삭제
+                            </button>` : ''}
                     </div>
                     <div class="columns-grid" id="${section.section_key}-columns">
                         <!-- 동적으로 로드됨 -->
@@ -657,6 +686,67 @@ let editingId = null;
         }
         
         // 섹션명 편집 활성화
+        // 섹션 삭제
+        function deleteSection(sectionId, sectionName) {
+            // 기본 섹션은 삭제 불가
+            const section = sections.find(s => s.id === sectionId);
+            if (!section) return;
+            
+            if (section.section_key === 'basic_info' || section.section_key === 'violation_info') {
+                alert('기본 섹션은 삭제할 수 없습니다.');
+                return;
+            }
+            
+            // 새로 추가했지만 아직 저장되지 않은 섹션인 경우
+            if (section._isNew) {
+                if (!confirm(`"${sectionName}" 섹션을 삭제하시겠습니까?\n(아직 저장되지 않은 섹션입니다)`)) {
+                    return;
+                }
+                
+                // sectionsToAdd에서 제거
+                sectionsToAdd = sectionsToAdd.filter(s => s.section_key !== section.section_key);
+                
+                // 로컬 배열에서 섹션 제거
+                sections = sections.filter(s => s.id !== sectionId);
+                renderSections();
+                loadColumns();
+                
+                alert('섹션이 삭제되었습니다.');
+                return;
+            }
+            
+            // 해당 섹션에 속한 컬럼이 있는지 확인
+            const sectionColumns = pendingColumns.filter(col => col.tab === section.section_key);
+            
+            if (sectionColumns.length > 0) {
+                if (!confirm(`"${sectionName}" 섹션에 ${sectionColumns.length}개의 컬럼이 있습니다.\n섹션을 삭제하면 해당 컬럼들의 섹션 설정이 해제됩니다.\n정말 삭제하시겠습니까?`)) {
+                    return;
+                }
+                
+                // 해당 섹션의 컬럼들의 tab을 null로 변경
+                sectionColumns.forEach(col => {
+                    col.tab = null;
+                    col._isModified = true;
+                });
+            } else {
+                if (!confirm(`"${sectionName}" 섹션을 삭제하시겠습니까?`)) {
+                    return;
+                }
+            }
+            
+            // 삭제 목록에 추가
+            sectionsToDelete.push(sectionId);
+            
+            // 로컬 배열에서 섹션 제거 (UI만 업데이트)
+            sections = sections.filter(s => s.id !== sectionId);
+            
+            // UI 다시 렌더링
+            renderSections();
+            loadColumns();
+            
+            alert('섹션이 삭제 예정입니다. "전체 변경사항 저장" 버튼을 눌러 적용하세요.');
+        }
+        
         function enableSectionEdit(sectionId, element) {
             // 이미 편집 중인 경우 무시
             if (element.tagName === 'INPUT') {
@@ -932,11 +1022,11 @@ let editingId = null;
                         <div class="column-key">${column.column_key}</div>
                         <div class="column-controls">
                             <span class="column-type-badge">${getTypeLabel(column.column_type)}</span>
-                            <div style="display: flex; gap: 5px;">
-                                <button class="btn btn-sm btn-link p-0" onclick="editColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''}>
+                            <div style="display: flex; gap: 5px; align-items: center;">
+                                <button class="btn btn-sm btn-link p-0" onclick="editColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''} title="편집">
                                     <i class="bi bi-pencil" style="font-size: 14px;"></i>
                                 </button>
-                                <button class="btn btn-sm btn-link p-0 text-danger" onclick="deleteColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''}>
+                                <button class="btn btn-sm btn-link p-0 text-danger" onclick="deleteColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''} title="삭제">
                                     <i class="bi bi-trash" style="font-size: 14px;"></i>
                                 </button>
                                 <div class="form-check form-switch" style="margin: 0;">
@@ -1044,6 +1134,7 @@ let editingId = null;
                 'text': '텍스트',
                 'dropdown': '드롭다운',
                 'date': '날짜',
+                'time': '시간',
                 'table': '테이블',
                 'table_select': '테이블 선택',
                 'popup_person': '담당자',

@@ -415,6 +415,7 @@
                                 <option value="text">텍스트</option>
                                 <option value="dropdown">드롭다운</option>
                                 <option value="date">날짜</option>
+                                <option value="time">시간</option>
                                 <option value="table">테이블</option>
                             </select>
                             <div id="typeChangeWarning" class="alert alert-warning mt-2" style="display: none; font-size: 13px; padding: 8px 12px;">
@@ -1115,6 +1116,7 @@ let editingId = null;
                 'text': '텍스트',
                 'dropdown': '드롭다운',
                 'date': '날짜',
+                'time': '시간',
                 'table': '테이블',
                 'table_select': '테이블 선택',
                 'popup_person': '담당자',
@@ -1813,6 +1815,7 @@ let editingId = null;
                 }
                 
                 // 섹션 삭제 처리
+                const failedSections = [];
                 for (const sectionId of sectionsToDelete) {
                     const response = await fetch(`/api/accident-sections/${sectionId}`, {
                         method: 'DELETE',
@@ -1826,7 +1829,16 @@ let editingId = null;
                         originalSections = originalSections.filter(s => s.id !== sectionId);
                     } else {
                         errorCount++;
-                        console.error(`섹션 ID ${sectionId} 삭제 실패`);
+                        const result = await response.json();
+                        const section = sections.find(s => s.id === sectionId);
+                        const sectionName = section ? section.section_name : `ID ${sectionId}`;
+                        failedSections.push(`${sectionName}: ${result.error || '알 수 없는 오류'}`);
+                        console.error(`섹션 ID ${sectionId} 삭제 실패:`, result);
+                        
+                        // 삭제 실패한 섹션은 다시 추가
+                        if (section && !sections.find(s => s.id === sectionId)) {
+                            sections.push(section);
+                        }
                     }
                 }
                 
@@ -1913,7 +1925,11 @@ let editingId = null;
                 }
                 
                 if (errorCount > 0) {
-                    alert(`일부 변경사항 저장 중 오류가 발생했습니다.\n성공: ${successCount}, 실패: ${errorCount}`);
+                    let errorMessage = `일부 변경사항 저장 중 오류가 발생했습니다.\n성공: ${successCount}, 실패: ${errorCount}`;
+                    if (failedSections && failedSections.length > 0) {
+                        errorMessage += '\n\n섹션 삭제 실패:\n' + failedSections.join('\n');
+                    }
+                    alert(errorMessage);
                 } else {
                     alert('모든 변경사항이 저장되었습니다.');
                 }

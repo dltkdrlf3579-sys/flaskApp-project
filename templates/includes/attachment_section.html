@@ -2,10 +2,14 @@
 {% macro render_attachment_section(attachments, board_type) %}
 <div class="section attachments-section">
     <div class="section-header">
-        <h3 class="section-title">첨부파일</h3>
-        <button class="btn-add-file" onclick="document.getElementById('file-input').click();">추가</button>
-        <span class="file-count">총 <span id="file-count">{{ attachments|length if attachments else 0 }}</span>개</span>
-        <span class="file-size"><span id="file-size">0</span> MB / 50 MB</span>
+        <div class="attachments-header-left">
+            <h3 class="section-title">첨부파일</h3>
+        </div>
+        <div class="attachments-header-right">
+            <button class="btn-add-file" onclick="document.getElementById('file-input').click();">추가</button>
+            <span class="file-count">총 <span id="file-count">{{ attachments|length if attachments else 0 }}</span>개</span>
+            <span class="file-size"><span id="file-size">0</span> MB / 50 MB</span>
+        </div>
     </div>
     <div class="section-content">
         <input type="file" id="file-input" multiple style="display: none;" onchange="handleFileUpload(this.files)">
@@ -48,6 +52,144 @@
 <!-- 공통 첨부파일 스타일 -->
 {% macro attachment_styles() %}
 <style>
+/* 첨부파일 섹션 기본 스타일 */
+.attachments-section {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+
+.attachments-section .section-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #f9fafb;
+    border-radius: 8px 8px 0 0;
+}
+
+.attachments-section .section-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #374151;
+    margin: 0;
+}
+
+.btn-add-file {
+    padding: 6px 12px;
+    background: #28a745;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.2s;
+}
+
+.btn-add-file:hover {
+    background: #218838;
+}
+
+.attachments-header-left {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.attachments-header-right {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    text-align: right;
+}
+
+.file-count, .file-size {
+    font-size: 14px;
+    color: #666;
+}
+
+.attachments-section .section-content {
+    padding: 0;
+}
+
+.attachments-table {
+    border: none;
+    width: 100%;
+}
+
+.attachments-table .table-header {
+    display: grid;
+    grid-template-columns: 60px 1fr 2fr 100px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e1e5e9;
+    font-weight: 600;
+    font-size: 14px;
+    color: #374151;
+}
+
+.attachments-table .table-header > div {
+    padding: 12px 16px;
+    border-right: 1px solid #e1e5e9;
+    display: flex;
+    align-items: center;
+}
+
+.attachments-table .table-header > div:last-child {
+    border-right: none;
+}
+
+.attachments-table .table-body {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.attachments-table .table-row {
+    display: grid;
+    grid-template-columns: 60px 1fr 2fr 100px;
+    border-bottom: 1px solid #e1e5e9;
+    background: white;
+    transition: background 0.2s;
+}
+
+.attachments-table .table-row:hover {
+    background: #f8f9fa;
+}
+
+.attachments-table .table-row > div {
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    border-right: 1px solid #e1e5e9;
+}
+
+.attachments-table .table-row > div:last-child {
+    border-right: none;
+}
+
+.attachments-table .table-row.no-data {
+    grid-template-columns: 1fr;
+}
+
+.attachments-table .col-full {
+    text-align: center;
+    color: #999;
+    padding: 20px !important;
+}
+
+.attachments-table .file-icon {
+    margin-right: 8px;
+}
+
+.attachments-table .attachment-desc {
+    width: 100%;
+    padding: 6px 10px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
 .attachments-table .btn-delete {
     background: none;
     border: none;

@@ -197,84 +197,6 @@ function toggleSection(sectionId) {
 
 // 첨부파일 관련 변수와 함수는 공통 컴포넌트에서 제공됨
 
-// 첨부파일 업로드 처리
-function handleFileUpload(files) {
-    for (let file of files) {
-        if (totalFileSize + file.size > maxFileSize) {
-            alert('총 파일 크기가 50MB를 초과할 수 없습니다.');
-            break;
-        }
-        
-        uploadedFiles.push(file);
-        totalFileSize += file.size;
-        
-        const tbody = document.getElementById('attachments-tbody');
-        const noDataRow = document.getElementById('no-data-row');
-        
-        if (noDataRow) {
-            noDataRow.remove();
-        }
-        
-        const row = document.createElement('div');
-        row.className = 'table-row';
-        row.innerHTML = `
-            <div class="col-no">${uploadedFiles.length}</div>
-            <div class="col-file">${file.name}</div>
-            <div class="col-desc">
-                <input type="text" class="file-desc-input" placeholder="파일 설명 입력">
-            </div>
-            <div class="col-action">
-                <button class="btn-delete" onclick="removeFile(${uploadedFiles.length - 1})">삭제</button>
-            </div>
-        `;
-        tbody.appendChild(row);
-    }
-    
-    updateFileInfo();
-}
-
-// 파일 제거
-function removeFile(index) {
-    totalFileSize -= uploadedFiles[index].size;
-    uploadedFiles.splice(index, 1);
-    
-    // 테이블 다시 그리기
-    const tbody = document.getElementById('attachments-tbody');
-    tbody.innerHTML = '';
-    
-    if (uploadedFiles.length === 0) {
-        tbody.innerHTML = `
-            <div class="table-row no-data" id="no-data-row">
-                <div class="col-full">등록된 첨부파일이 없습니다.</div>
-            </div>
-        `;
-    } else {
-        uploadedFiles.forEach((file, idx) => {
-            const row = document.createElement('div');
-            row.className = 'table-row';
-            row.innerHTML = `
-                <div class="col-no">${idx + 1}</div>
-                <div class="col-file">${file.name}</div>
-                <div class="col-desc">
-                    <input type="text" class="file-desc-input" placeholder="파일 설명 입력">
-                </div>
-                <div class="col-action">
-                    <button class="btn-delete" onclick="removeFile(${idx})">삭제</button>
-                </div>
-            `;
-            tbody.appendChild(row);
-        });
-    }
-    
-    updateFileInfo();
-}
-
-// 파일 정보 업데이트
-function updateFileInfo() {
-    document.getElementById('file-count').textContent = uploadedFiles.length;
-    document.getElementById('file-size').textContent = (totalFileSize / (1024 * 1024)).toFixed(2);
-}
-
 // 동적 필드 수집 함수
 function collectDynamicFields() {
     const data = {};
@@ -344,7 +266,7 @@ function registerSafetyInstruction() {
     // 첨부파일 처리
     const attachmentData = [];
     document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)').forEach((row, index) => {
-        const descInput = row.querySelector('.file-desc-input');
+        const descInput = row.querySelector('.attachment-desc');
         attachmentData.push({
             description: descInput ? descInput.value : ''
         });
