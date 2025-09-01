@@ -10,7 +10,7 @@ def follow_sop_route():
     
     # 동적 컬럼 정보 가져오기
     cursor.execute("""
-        SELECT * FROM followsop_column_config 
+        SELECT * FROM follow_sop_column_config 
         WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
         ORDER BY column_order
     """)
@@ -41,7 +41,7 @@ def follow_sop_route():
     # 전체 건수 조회
     count_query = f"""
         SELECT COUNT(*) 
-        FROM followsop s
+        FROM follow_sop s
         WHERE {where_sql}
     """
     
@@ -51,7 +51,7 @@ def follow_sop_route():
     # 데이터 조회
     query = f"""
         SELECT s.* 
-        FROM followsop s
+        FROM follow_sop s
         WHERE {where_sql}
         ORDER BY s.created_at DESC
         LIMIT ? OFFSET ?
@@ -75,7 +75,44 @@ def follow_sop_route():
     conn.close()
     
     # 페이지네이션 객체 생성
-    from pagination import Pagination
+    class Pagination:
+        def __init__(self, page, per_page, total_count):
+            self.page = page
+            self.per_page = per_page
+            self.total_count = total_count
+            self.total_pages = math.ceil(total_count / per_page) if per_page > 0 else 0
+            
+        @property
+        def pages(self):
+            return list(range(1, self.total_pages + 1))
+        
+        @property
+        def prev_num(self):
+            return self.page - 1 if self.page > 1 else None
+        
+        @property
+        def next_num(self):
+            return self.page + 1 if self.page < self.total_pages else None
+        
+        @property
+        def has_prev(self):
+            return self.page > 1
+        
+        @property
+        def has_next(self):
+            return self.page < self.total_pages
+        
+        def iter_pages(self, left_edge=2, left_current=2, right_current=3, right_edge=2):
+            last = 0
+            for num in range(1, self.total_pages + 1):
+                if num <= left_edge or \
+                   (self.page - left_current - 1 < num < self.page + right_current) or \
+                   num > self.total_pages - right_edge:
+                    if last + 1 != num:
+                        yield None
+                    yield num
+                    last = num
+    
     pagination = Pagination(page=page, per_page=per_page, total_count=total_count)
     
     return render_template('follow-sop.html',
@@ -95,7 +132,7 @@ def follow_sop_register():
     
     # 섹션 정보 가져오기
     from section_service import SectionConfigService
-    section_service = SectionConfigService('followsop', DB_PATH)
+    section_service = SectionConfigService('follow_sop', DB_PATH)
     sections = section_service.get_sections_with_columns()
     
     conn.close()
@@ -119,7 +156,7 @@ def follow_sop_detail(work_req_no):
     
     # Follow SOP 정보 조회
     cursor.execute("""
-        SELECT * FROM followsop
+        SELECT * FROM follow_sop
         WHERE work_req_no = ?
     """, (work_req_no,))
     
@@ -140,7 +177,7 @@ def follow_sop_detail(work_req_no):
     
     # 섹션별 컬럼 정보 가져오기
     from section_service import SectionConfigService
-    section_service = SectionConfigService('followsop', DB_PATH)
+    section_service = SectionConfigService('follow_sop', DB_PATH)
     sections = section_service.get_sections_with_columns()
     
     conn.close()
@@ -179,7 +216,7 @@ def register_follow_sop():
         
         # Follow SOP 등록
         cursor.execute("""
-            INSERT INTO followsop (work_req_no, custom_data, created_at, created_by)
+            INSERT INTO follow_sop (work_req_no, custom_data, created_at, created_by)
             VALUES (?, ?, datetime('now'), ?)
         """, (work_req_no, custom_data_json, session.get('user_id', 'system')))
         
@@ -224,7 +261,7 @@ def update_follow_sop():
         
         # Follow SOP 업데이트
         cursor.execute("""
-            UPDATE followsop 
+            UPDATE follow_sop 
             SET custom_data = ?, updated_at = datetime('now'), updated_by = ?
             WHERE work_req_no = ?
         """, (custom_data_json, session.get('user_id', 'system'), work_req_no))
@@ -257,7 +294,7 @@ def full_process_route():
     
     # 동적 컬럼 정보 가져오기
     cursor.execute("""
-        SELECT * FROM fullprocess_column_config 
+        SELECT * FROM full_process_column_config 
         WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
         ORDER BY column_order
     """)
@@ -288,7 +325,7 @@ def full_process_route():
     # 전체 건수 조회
     count_query = f"""
         SELECT COUNT(*) 
-        FROM fullprocess p
+        FROM full_process p
         WHERE {where_sql}
     """
     
@@ -298,7 +335,7 @@ def full_process_route():
     # 데이터 조회
     query = f"""
         SELECT p.* 
-        FROM fullprocess p
+        FROM full_process p
         WHERE {where_sql}
         ORDER BY p.created_at DESC
         LIMIT ? OFFSET ?
@@ -322,7 +359,44 @@ def full_process_route():
     conn.close()
     
     # 페이지네이션 객체 생성
-    from pagination import Pagination
+    class Pagination:
+        def __init__(self, page, per_page, total_count):
+            self.page = page
+            self.per_page = per_page
+            self.total_count = total_count
+            self.total_pages = math.ceil(total_count / per_page) if per_page > 0 else 0
+            
+        @property
+        def pages(self):
+            return list(range(1, self.total_pages + 1))
+        
+        @property
+        def prev_num(self):
+            return self.page - 1 if self.page > 1 else None
+        
+        @property
+        def next_num(self):
+            return self.page + 1 if self.page < self.total_pages else None
+        
+        @property
+        def has_prev(self):
+            return self.page > 1
+        
+        @property
+        def has_next(self):
+            return self.page < self.total_pages
+        
+        def iter_pages(self, left_edge=2, left_current=2, right_current=3, right_edge=2):
+            last = 0
+            for num in range(1, self.total_pages + 1):
+                if num <= left_edge or \
+                   (self.page - left_current - 1 < num < self.page + right_current) or \
+                   num > self.total_pages - right_edge:
+                    if last + 1 != num:
+                        yield None
+                    yield num
+                    last = num
+    
     pagination = Pagination(page=page, per_page=per_page, total_count=total_count)
     
     return render_template('full-process.html',
@@ -342,7 +416,7 @@ def full_process_register():
     
     # 섹션 정보 가져오기
     from section_service import SectionConfigService
-    section_service = SectionConfigService('fullprocess', DB_PATH)
+    section_service = SectionConfigService('full_process', DB_PATH)
     sections = section_service.get_sections_with_columns()
     
     conn.close()
@@ -366,7 +440,7 @@ def full_process_detail(fullprocess_number):
     
     # Full Process 정보 조회
     cursor.execute("""
-        SELECT * FROM fullprocess
+        SELECT * FROM full_process
         WHERE fullprocess_number = ?
     """, (fullprocess_number,))
     
@@ -387,7 +461,7 @@ def full_process_detail(fullprocess_number):
     
     # 섹션별 컬럼 정보 가져오기
     from section_service import SectionConfigService
-    section_service = SectionConfigService('fullprocess', DB_PATH)
+    section_service = SectionConfigService('full_process', DB_PATH)
     sections = section_service.get_sections_with_columns()
     
     conn.close()
@@ -426,7 +500,7 @@ def register_full_process():
         
         # Full Process 등록
         cursor.execute("""
-            INSERT INTO fullprocess (fullprocess_number, custom_data, created_at, created_by)
+            INSERT INTO full_process (fullprocess_number, custom_data, created_at, created_by)
             VALUES (?, ?, datetime('now'), ?)
         """, (fullprocess_number, custom_data_json, session.get('user_id', 'system')))
         
@@ -471,7 +545,7 @@ def update_full_process():
         
         # Full Process 업데이트
         cursor.execute("""
-            UPDATE fullprocess 
+            UPDATE full_process 
             SET custom_data = ?, updated_at = datetime('now'), updated_by = ?
             WHERE fullprocess_number = ?
         """, (custom_data_json, session.get('user_id', 'system'), fullprocess_number))

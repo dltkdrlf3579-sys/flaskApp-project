@@ -280,8 +280,9 @@ def init_db():
     conn.commit()
     conn.close()
     
-    # 외부 DB 연동이 활성화된 경우 동기화 시도
-    if db_config.external_db_enabled:
+    # 외부 DB 연동이 활성화되고 시작 시 동기화가 설정된 경우에만 동기화
+    sync_on_startup = db_config.config.getboolean('DATABASE', 'SYNC_ON_STARTUP', fallback=False)
+    if db_config.external_db_enabled and sync_on_startup:
         sync_success = True
         
         # 1. 협력사 데이터 동기화
