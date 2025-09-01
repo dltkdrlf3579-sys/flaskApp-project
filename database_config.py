@@ -271,69 +271,8 @@ class PartnerDataManager:
         
         # permanent_workers 컬럼은 위에서 이미 처리됨 (중복 제거)
         
-        # 건물 마스터 테이블
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS building_master (
-                building_code TEXT PRIMARY KEY,
-                building_name TEXT NOT NULL,
-                SITE TEXT,
-                SITE_TYPE TEXT
-            )
-        ''')
-        
-        # 부서 마스터 테이블
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS department_master (
-                dept_code TEXT PRIMARY KEY,
-                dept_name TEXT NOT NULL,
-                parent_dept_code TEXT,
-                dept_level INTEGER
-            )
-        ''')
-        
-        # 더미 데이터 삽입 (건물)
-        cursor.execute("SELECT COUNT(*) FROM building_master")
-        if cursor.fetchone()[0] == 0:
-            buildings = [
-                ('BLD001', '본관', '서울시 강남구 테헤란로 123', '사무실'),
-                ('BLD002', '신관', '서울시 강남구 테헤란로 124', '사무실'),
-                ('BLD003', '연구동', '서울시 강남구 테헤란로 125', '연구소'),
-                ('BLD004', '공장 A동', '경기도 수원시 영통구 광교로 100', '생산시설'),
-                ('BLD005', '공장 B동', '경기도 수원시 영통구 광교로 101', '생산시설'),
-                ('BLD006', '물류센터', '경기도 용인시 기흥구 동백중앙로 200', '물류시설'),
-                ('BLD007', '연수원', '경기도 이천시 부발읍 신하리 100', '교육시설'),
-                ('BLD008', '기숙사 A동', '서울시 강남구 테헤란로 126', '주거시설'),
-                ('BLD009', '기숙사 B동', '서울시 강남구 테헤란로 127', '주거시설'),
-                ('BLD010', '체육관', '서울시 강남구 테헤란로 128', '체육시설')
-            ]
-            cursor.executemany('INSERT INTO building_master VALUES (?, ?, ?, ?)', buildings)
-        
-        # 더미 데이터 삽입 (부서)
-        cursor.execute("SELECT COUNT(*) FROM department_master")
-        if cursor.fetchone()[0] == 0:
-            departments = [
-                ('DEPT001', '경영지원본부', None, 1),
-                ('DEPT002', '인사팀', 'DEPT001', 2),
-                ('DEPT003', '총무팀', 'DEPT001', 2),
-                ('DEPT004', '재무팀', 'DEPT001', 2),
-                ('DEPT005', '영업본부', None, 1),
-                ('DEPT006', '국내영업팀', 'DEPT005', 2),
-                ('DEPT007', '해외영업팀', 'DEPT005', 2),
-                ('DEPT008', '마케팅팀', 'DEPT005', 2),
-                ('DEPT009', '생산본부', None, 1),
-                ('DEPT010', '생산1팀', 'DEPT009', 2),
-                ('DEPT011', '생산2팀', 'DEPT009', 2),
-                ('DEPT012', '품질관리팀', 'DEPT009', 2),
-                ('DEPT013', '연구개발본부', None, 1),
-                ('DEPT014', 'SW개발팀', 'DEPT013', 2),
-                ('DEPT015', 'HW개발팀', 'DEPT013', 2),
-                ('DEPT016', '신기술연구팀', 'DEPT013', 2),
-                ('DEPT017', '안전보건팀', None, 1),
-                ('DEPT018', '환경안전파트', 'DEPT017', 2),
-                ('DEPT019', '산업보건파트', 'DEPT017', 2),
-                ('DEPT020', '시설관리팀', None, 1)
-            ]
-            cursor.executemany('INSERT INTO department_master VALUES (?, ?, ?, ?)', departments)
+        # 마스터 테이블은 더 이상 사용하지 않음 (캐시 테이블만 사용)
+        # building_master, department_master 테이블 및 더미 데이터 제거
         
         conn.commit()
         conn.close()
@@ -345,8 +284,8 @@ class PartnerDataManager:
             return False
         
         try:
-            # config.ini에서 PARTNERS_QUERY 가져오기 (간단!)
-            query = self.config.get('SQL_QUERIES', 'PARTNERS_QUERY')
+            # config.ini에서 PARTNERS_EXTERNAL_QUERY 가져오기 (외부 DB용)
+            query = self.config.get('MASTER_DATA_QUERIES', 'PARTNERS_EXTERNAL_QUERY')
             print(f"[INFO] 실행할 쿼리: {query[:100]}...")
             
             # ✨ 기존 성공 방식으로 데이터 조회
@@ -772,8 +711,12 @@ class DatabaseConfig:
 db_config = DatabaseConfig()
 partner_manager = PartnerDataManager()
 
-def maybe_daily_sync():
-    """하루에 한 번만 동기화하는 유틸리티 함수"""
+def maybe_daily_sync(force=False):
+    """하루에 한 번만 동기화하는 유틸리티 함수
+    
+    Args:
+        force: True면 무조건 동기화 실행 (최초 실행 시 사용)
+    """
     conn = sqlite3.connect(db_config.local_db_path)
     cur = conn.cursor()
     
@@ -784,6 +727,13 @@ def maybe_daily_sync():
             last_full_sync DATETIME
         )
     ''')
+    
+    # 캐시 테이블이 비어있는지 확인 (최초 실행 감지)
+    cur.execute("SELECT COUNT(*) FROM partners_cache")
+    partners_count = cur.fetchone()[0]
+    if partners_count == 0:
+        print("[INFO] 캐시 테이블이 비어있음 - 최초 실행으로 감지, 강제 동기화")
+        force = True
     
     # 마지막 동기화 시간 확인
     row = cur.execute("SELECT last_full_sync FROM sync_state WHERE id=1").fetchone()
@@ -796,7 +746,7 @@ def maybe_daily_sync():
     else:
         print("[INFO] 첫 동기화 수행 필요")
     
-    if need_sync:
+    if force or need_sync:
         print("[INFO] 일일 동기화 시작...")
         success = False
         

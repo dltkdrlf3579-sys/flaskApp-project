@@ -2398,7 +2398,7 @@ def accident_detail(accident_id):
             cursor.execute("""
                 SELECT DISTINCT building_code as option_code, 
                        building_name as option_value
-                FROM building_master 
+                FROM buildings_cache 
                 WHERE is_active = 1
                 ORDER BY building_name
             """)
@@ -2610,7 +2610,7 @@ def accident_register():
         cursor.execute("""
             SELECT DISTINCT building_code as option_code, 
                    building_name as option_value
-            FROM building_master 
+            FROM buildings_cache 
             WHERE is_active = 1
             ORDER BY building_name
         """)
@@ -4403,7 +4403,7 @@ def search_buildings():
         if search_term:
             cursor.execute("""
                 SELECT building_code, building_name
-                FROM building_master
+                FROM buildings_cache
                 WHERE building_name LIKE ? OR building_code LIKE ?
                 ORDER BY building_name
                 LIMIT 50
@@ -4411,7 +4411,7 @@ def search_buildings():
         else:
             cursor.execute("""
                 SELECT building_code, building_name
-                FROM building_master
+                FROM buildings_cache
                 ORDER BY building_name
                 LIMIT 50
             """)
@@ -4442,7 +4442,7 @@ def search_departments():
             cursor.execute("""
                 SELECT d.dept_code, d.dept_name, 
                        p.dept_name as parent_name, d.dept_level
-                FROM department_master d
+                FROM departments_cache d
                 LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
                 WHERE d.dept_name LIKE ? OR d.dept_code LIKE ?
                 ORDER BY d.dept_level, d.dept_name
@@ -4452,7 +4452,7 @@ def search_departments():
             cursor.execute("""
                 SELECT d.dept_code, d.dept_name, 
                        p.dept_name as parent_name, d.dept_level
-                FROM department_master d
+                FROM departments_cache d
                 LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
                 ORDER BY d.dept_level, d.dept_name
                 LIMIT 50
@@ -4574,7 +4574,7 @@ def api_search():
                     if search_value == 'building_code':
                         cursor.execute("""
                             SELECT building_code, building_name
-                            FROM building_master
+                            FROM buildings_cache
                             WHERE building_code LIKE ?
                             ORDER BY building_name
                             LIMIT 50
@@ -4582,7 +4582,7 @@ def api_search():
                     else:
                         cursor.execute("""
                             SELECT building_code, building_name
-                            FROM building_master
+                            FROM buildings_cache
                             WHERE building_name LIKE ?
                             ORDER BY building_name
                             LIMIT 50
@@ -4590,7 +4590,7 @@ def api_search():
                 else:
                     cursor.execute("""
                         SELECT building_code, building_name
-                        FROM building_master
+                        FROM buildings_cache
                         ORDER BY building_name
                         LIMIT 50
                     """)
@@ -4637,7 +4637,7 @@ def api_search():
                         cursor.execute("""
                             SELECT d.dept_code, d.dept_name, 
                                    p.dept_name as parent_name, d.dept_level
-                            FROM department_master d
+                            FROM departments_cache d
                             LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
                             WHERE d.dept_code LIKE ?
                             ORDER BY d.dept_level, d.dept_name
@@ -4647,7 +4647,7 @@ def api_search():
                         cursor.execute("""
                             SELECT d.dept_code, d.dept_name, 
                                    p.dept_name as parent_name, d.dept_level
-                            FROM department_master d
+                            FROM departments_cache d
                             LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
                             WHERE d.dept_name LIKE ?
                             ORDER BY d.dept_level, d.dept_name
@@ -4657,7 +4657,7 @@ def api_search():
                     cursor.execute("""
                         SELECT d.dept_code, d.dept_name, 
                                p.dept_name as parent_name, d.dept_level
-                        FROM department_master d
+                        FROM departments_cache d
                         LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
                         ORDER BY d.dept_level, d.dept_name
                         LIMIT 50
