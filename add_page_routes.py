@@ -134,10 +134,26 @@ def follow_sop_register():
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
+    # 동적 컬럼 설정 가져오기 (safety_instruction과 동일한 패턴)
+    cursor.execute("""
+        SELECT * FROM follow_sop_column_config 
+        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
+        ORDER BY column_order
+    """)
+    dynamic_columns_rows = cursor.fetchall()
+    dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    
     # 섹션 정보 가져오기
     from section_service import SectionConfigService
     section_service = SectionConfigService('follow_sop', DB_PATH)
-    sections = section_service.get_sections_with_columns()
+    sections = section_service.get_sections()
+    
+    # 섹션별로 컬럼 분류 (safety_instruction과 동일한 패턴)
+    section_columns = {}
+    for section in sections:
+        section_columns[section['section_key']] = [
+            col for col in dynamic_columns if col.get('tab') == section['section_key']
+        ]
     
     conn.close()
     
@@ -145,7 +161,9 @@ def follow_sop_register():
     is_popup = request.args.get('popup') == '1'
     
     return render_template('follow-sop-register.html',
+                         dynamic_columns=dynamic_columns,
                          sections=sections,
+                         section_columns=section_columns,  # 중요! 이것이 누락되어 있었음
                          is_popup=is_popup,
                          menu=MENU_CONFIG)
 
@@ -424,10 +442,26 @@ def full_process_register():
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
+    # 동적 컬럼 설정 가져오기 (safety_instruction과 동일한 패턴)
+    cursor.execute("""
+        SELECT * FROM full_process_column_config 
+        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
+        ORDER BY column_order
+    """)
+    dynamic_columns_rows = cursor.fetchall()
+    dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    
     # 섹션 정보 가져오기
     from section_service import SectionConfigService
     section_service = SectionConfigService('full_process', DB_PATH)
-    sections = section_service.get_sections_with_columns()
+    sections = section_service.get_sections()
+    
+    # 섹션별로 컬럼 분류 (safety_instruction과 동일한 패턴)
+    section_columns = {}
+    for section in sections:
+        section_columns[section['section_key']] = [
+            col for col in dynamic_columns if col.get('tab') == section['section_key']
+        ]
     
     conn.close()
     
@@ -435,7 +469,9 @@ def full_process_register():
     is_popup = request.args.get('popup') == '1'
     
     return render_template('full-process-register.html',
+                         dynamic_columns=dynamic_columns,
                          sections=sections,
+                         section_columns=section_columns,  # 중요! 이것이 누락되어 있었음
                          is_popup=is_popup,
                          menu=MENU_CONFIG)
 
