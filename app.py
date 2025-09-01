@@ -301,6 +301,30 @@ def init_db():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        
+        # Follow SOP 데이터 테이블 (동적 컬럼 데이터 저장용)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS follow_sop (
+                work_req_no TEXT PRIMARY KEY,
+                custom_data TEXT DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_by TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_by TEXT
+            )
+        ''')
+        
+        # Full Process 데이터 테이블 (동적 컬럼 데이터 저장용)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS full_process (
+                process_id TEXT PRIMARY KEY,
+                custom_data TEXT DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_by TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_by TEXT
+            )
+        ''')
     except Exception as _e:
         logging.debug(f"Column config table ensure failed: {_e}")
     
