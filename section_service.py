@@ -33,6 +33,36 @@ class SectionConfigService:
         finally:
             conn.close()
     
+    def get_sections_with_columns(self):
+        """섹션과 해당 컬럼들을 함께 가져오기"""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        try:
+            # 섹션 가져오기
+            sections = self.get_sections()
+            
+            # 각 섹션에 대한 컬럼 가져오기
+            table_name = f"{self.board_type}_column_config"
+            
+            for section in sections:
+                cursor.execute(f"""
+                    SELECT * FROM {table_name}
+                    WHERE tab = ? AND is_active = 1
+                    ORDER BY column_order
+                """, (section['section_key'],))
+                
+                section['columns'] = [dict(row) for row in cursor.fetchall()]
+            
+            return sections
+            
+        except Exception as e:
+            logging.error(f"섹션과 컬럼 조회 오류: {e}")
+            return self._get_default_sections()
+        finally:
+            conn.close()
+    
     def _get_default_sections(self):
         """기본 섹션 반환 (폴백용)"""
         if self.board_type == 'safety_instruction':
