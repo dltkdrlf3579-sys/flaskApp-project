@@ -317,7 +317,7 @@ def init_db():
         # Full Process 데이터 테이블 (동적 컬럼 데이터 저장용)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS full_process (
-                process_id TEXT PRIMARY KEY,
+                fullprocess_number TEXT PRIMARY KEY,
                 custom_data TEXT DEFAULT '{}',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_by TEXT,
