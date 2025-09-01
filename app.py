@@ -6532,7 +6532,7 @@ def board_items_delete_api(board):
 
 # ============= Follow SOP & Full Process 페이지 라우트 =============
 # 파일이 길어서 임시로 외부 파일에서 import
-exec(open('add_page_routes.py').read())
+exec(open('add_page_routes.py', encoding='utf-8').read())
 
 if __name__ == "__main__":
     print("Flask 앱 시작 중...", flush=True)
