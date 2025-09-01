@@ -263,6 +263,44 @@ def init_db():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        
+        # Follow SOP 컬럼 설정 테이블
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS follow_sop_column_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                column_key TEXT UNIQUE NOT NULL,
+                column_name TEXT NOT NULL,
+                column_type TEXT DEFAULT 'text',
+                column_order INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                is_deleted INTEGER DEFAULT 0,
+                dropdown_options TEXT,
+                tab TEXT,
+                column_span INTEGER DEFAULT 1,
+                linked_columns TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Full Process 컬럼 설정 테이블
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS full_process_column_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                column_key TEXT UNIQUE NOT NULL,
+                column_name TEXT NOT NULL,
+                column_type TEXT DEFAULT 'text',
+                column_order INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                is_deleted INTEGER DEFAULT 0,
+                dropdown_options TEXT,
+                tab TEXT,
+                column_span INTEGER DEFAULT 1,
+                linked_columns TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
     except Exception as _e:
         logging.debug(f"Column config table ensure failed: {_e}")
     
