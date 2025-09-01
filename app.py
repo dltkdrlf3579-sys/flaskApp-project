@@ -283,6 +283,12 @@ def init_db():
             )
         ''')
         
+        # Follow SOP 테이블에 is_deleted 컬럼 추가 (기존 테이블 업데이트)
+        cursor.execute("PRAGMA table_info(follow_sop_column_config)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if 'is_deleted' not in columns:
+            cursor.execute("ALTER TABLE follow_sop_column_config ADD COLUMN is_deleted INTEGER DEFAULT 0")
+        
         # Full Process 컬럼 설정 테이블
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS full_process_column_config (
@@ -301,6 +307,12 @@ def init_db():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        
+        # Full Process 테이블에 is_deleted 컬럼 추가 (기존 테이블 업데이트)
+        cursor.execute("PRAGMA table_info(full_process_column_config)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if 'is_deleted' not in columns:
+            cursor.execute("ALTER TABLE full_process_column_config ADD COLUMN is_deleted INTEGER DEFAULT 0")
         
         # Follow SOP 데이터 테이블 (동적 컬럼 데이터 저장용)
         cursor.execute('''
