@@ -6542,6 +6542,15 @@ if __name__ == "__main__":
     print("데이터베이스 초기화 중...", flush=True)
     init_db()
     
+    # 일일 동기화 체크 (24시간 경과 시만 동기화)
+    from database_config import maybe_daily_sync
+    if db_config.external_db_enabled:
+        try:
+            print("일일 동기화 체크 중...", flush=True)
+            maybe_daily_sync()
+        except Exception as e:
+            print(f"일일 동기화 체크 중 오류: {e}", flush=True)
+    
     # JSON 컬럼 설정 동기화 (조건부 - GPT 제안대로 단순화)
     if db_config.config.getboolean('COLUMNS', 'SYNC_ON_STARTUP', fallback=False):
         try:

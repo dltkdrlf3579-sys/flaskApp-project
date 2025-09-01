@@ -5,7 +5,9 @@ import logging
 import sys
 import traceback
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
+from decimal import Decimal
+import numpy as np
 
 # 설정 파일 로드
 config = configparser.ConfigParser()
@@ -27,6 +29,25 @@ except ImportError as e:
 except Exception as e:
     IQADB_AVAILABLE = False
     print(f"[ERROR] IQADB 모듈 로드 중 오류 발생: {e}")
+
+def _normalize_df(df):
+    """DataFrame 컬럼명 정규화 - 소문자화 & 공백 제거"""
+    df.columns = [str(c).strip().lower() for c in df.columns]
+    return df
+
+def _to_sqlite_safe(v):
+    """SQLite에 안전하게 저장하기 위한 타입 변환"""
+    if pd.isna(v):
+        return None
+    if isinstance(v, (pd.Timestamp, datetime, date)):
+        return str(v)[:19]  # 'YYYY-MM-DD HH:MM:SS'
+    if isinstance(v, Decimal):
+        return float(v)
+    if isinstance(v, (np.integer, )):
+        return int(v)
+    if isinstance(v, (np.floating, )):
+        return float(v)
+    return v
 
 def execute_SQL(query):
     """
@@ -87,10 +108,9 @@ class PartnerDataManager:
             'is_deleted': 'INTEGER DEFAULT 0'
         }
         
-        # 테이블이 없거나 구조가 다르면 재생성
-        if not existing_columns or set(existing_columns.keys()) != set(required_columns.keys()):
-            print("[INFO] partners_cache 테이블 구조가 변경되어 재생성합니다.")
-            cursor.execute("DROP TABLE IF EXISTS partners_cache")
+        # 테이블이 없으면 생성, 있으면 부족한 컬럼만 추가
+        if not existing_columns:
+            print("[INFO] partners_cache 테이블이 없어 새로 생성합니다.")
             cursor.execute('''
                 CREATE TABLE partners_cache (
                     business_number TEXT PRIMARY KEY,
@@ -109,9 +129,17 @@ class PartnerDataManager:
                     is_deleted INTEGER DEFAULT 0
                 )
             ''')
-            print("[SUCCESS] partners_cache 테이블 재생성 완료")
+            print("[SUCCESS] partners_cache 테이블 생성 완료")
         else:
-            print("[INFO] partners_cache 테이블 구조가 정상입니다.")
+            # 부족한 컬럼만 ALTER로 추가
+            for col, ctype in required_columns.items():
+                if col not in existing_columns:
+                    # PRIMARY KEY나 NOT NULL은 ALTER로 추가할 수 없으므로 기본값 처리
+                    if 'PRIMARY KEY' in ctype or 'NOT NULL' in ctype:
+                        ctype = ctype.replace('PRIMARY KEY', '').replace('NOT NULL', '').strip()
+                    print(f"[INFO] partners_cache 테이블에 {col} 컬럼 추가")
+                    cursor.execute(f"ALTER TABLE partners_cache ADD COLUMN {col} {ctype}")
+            print("[INFO] partners_cache 테이블 구조 확인 완료")
         
         # 협력사 상세내용 테이블 (로컬 전용)
         cursor.execute('''
@@ -241,15 +269,7 @@ class PartnerDataManager:
             )
         ''')
         
-        # 기존 테이블에 permanent_workers 컬럼이 없으면 추가
-        try:
-            cursor.execute("ALTER TABLE partners_cache ADD COLUMN permanent_workers INTEGER")
-            logging.info("partners_cache 테이블에 permanent_workers 컬럼 추가 완료")
-        except Exception as e:
-            if "duplicate column name" in str(e).lower() or "already exists" in str(e).lower():
-                logging.info("permanent_workers 컬럼이 이미 존재합니다")
-            else:
-                logging.warning(f"permanent_workers 컬럼 추가 중 오류: {e}")
+        # permanent_workers 컬럼은 위에서 이미 처리됨 (중복 제거)
         
         # 건물 마스터 테이블
         cursor.execute('''
@@ -395,13 +415,14 @@ class PartnerDataManager:
             return False
         
         try:
-            # config.ini에서 ACCIDENTS_QUERY 가져오기 (간단!)
-            query = self.config.get('SQL_QUERIES', 'ACCIDENTS_QUERY')
+            # 외부 DB용 쿼리 사용 (MASTER_DATA_QUERIES > ACCIDENTS_EXTERNAL_QUERY)
+            query = self.config.get('MASTER_DATA_QUERIES', 'ACCIDENTS_EXTERNAL_QUERY')
             print(f"[INFO] 실행할 사고 쿼리: {query[:100]}...")
             
             # ✨ 기존 성공 방식으로 데이터 조회
             print("[INFO] IQADB_CONNECT310을 사용하여 사고 데이터 조회 시작...")
             df = execute_SQL(query)
+            df = _normalize_df(df)  # 컬럼명 정규화 (소문자화 & 공백 제거)
             print(f"[INFO] 사고 데이터 조회 완료: {len(df)} 건")
             
             if df.empty:
@@ -438,7 +459,7 @@ class PartnerDataManager:
                         accident_date, day_of_week, report_date, building, floor,
                         location_category, location_detail
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
+                ''', tuple(_to_sqlite_safe(dfv) for dfv in (
                     row.get('accident_number', ''),
                     row.get('accident_name', ''),
                     row.get('workplace', ''),
@@ -453,7 +474,7 @@ class PartnerDataManager:
                     row.get('floor', ''),
                     row.get('location_category', ''),
                     row.get('location_detail', '')
-                ))
+                )))
             
             conn.commit()
             conn.close()
@@ -750,4 +771,84 @@ class DatabaseConfig:
 # 전역 인스턴스
 db_config = DatabaseConfig()
 partner_manager = PartnerDataManager()
+
+def maybe_daily_sync():
+    """하루에 한 번만 동기화하는 유틸리티 함수"""
+    conn = sqlite3.connect(db_config.local_db_path)
+    cur = conn.cursor()
+    
+    # 동기화 상태 테이블 생성
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS sync_state (
+            id INTEGER PRIMARY KEY CHECK (id=1),
+            last_full_sync DATETIME
+        )
+    ''')
+    
+    # 마지막 동기화 시간 확인
+    row = cur.execute("SELECT last_full_sync FROM sync_state WHERE id=1").fetchone()
+    need_sync = True
+    
+    if row and row[0]:
+        last = pd.to_datetime(row[0])
+        need_sync = (pd.Timestamp.now() - last) > pd.Timedelta(days=1)
+        print(f"[INFO] 마지막 동기화: {row[0]}, 동기화 필요: {need_sync}")
+    else:
+        print("[INFO] 첫 동기화 수행 필요")
+    
+    if need_sync:
+        print("[INFO] 일일 동기화 시작...")
+        success = False
+        
+        # 협력사 데이터 동기화
+        try:
+            if partner_manager.sync_partners_from_external_db():
+                success = True
+                print("[SUCCESS] 협력사 데이터 동기화 완료")
+        except Exception as e:
+            print(f"[ERROR] 협력사 동기화 실패: {e}")
+        
+        # 사고 데이터 동기화
+        try:
+            if partner_manager.sync_accidents_from_external_db():
+                success = True
+                print("[SUCCESS] 사고 데이터 동기화 완료")
+        except Exception as e:
+            print(f"[ERROR] 사고 동기화 실패: {e}")
+        
+        # 다른 마스터 데이터 동기화
+        try:
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'EMPLOYEE_QUERY'):
+                partner_manager.sync_employees_from_external_db()
+        except Exception as e:
+            print(f"[ERROR] 임직원 동기화 실패: {e}")
+            
+        try:
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'DEPARTMENT_QUERY'):
+                partner_manager.sync_departments_from_external_db()
+        except Exception as e:
+            print(f"[ERROR] 부서 동기화 실패: {e}")
+            
+        try:
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'BUILDING_QUERY'):
+                partner_manager.sync_buildings_from_external_db()
+        except Exception as e:
+            print(f"[ERROR] 건물 동기화 실패: {e}")
+            
+        try:
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'CONTRACTOR_QUERY'):
+                partner_manager.sync_contractors_from_external_db()
+        except Exception as e:
+            print(f"[ERROR] 협력사 근로자 동기화 실패: {e}")
+        
+        # 동기화 성공 시 마지막 동기화 시간 업데이트
+        if success:
+            cur.execute("INSERT OR REPLACE INTO sync_state (id, last_full_sync) VALUES (1, ?)",
+                       (pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),))
+            conn.commit()
+            print(f"[SUCCESS] 일일 동기화 완료: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    else:
+        print("[INFO] 동기화 스킵 (24시간 미경과)")
+    
+    conn.close()
 partner_manager.db_config = db_config  # 순환 참조 해결
