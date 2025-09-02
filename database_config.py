@@ -348,9 +348,8 @@ class PartnerDataManager:
             # 트랜잭션 시작
             cursor.execute("BEGIN IMMEDIATE")
             
-            # 기존 is_deleted 값을 보존하기 위해 먼저 백업
-            cursor.execute("SELECT business_number, is_deleted FROM partners_cache WHERE is_deleted = 1")
-            deleted_partners = {row[0]: row[1] for row in cursor.fetchall()}
+            # 기존 is_deleted 값을 보존하지 않고 모두 새로 동기화
+            # 외부 DB의 데이터는 모두 활성 상태로 간주
             
             # 기존 캐시 데이터 삭제
             cursor.execute("DELETE FROM partners_cache")
@@ -359,8 +358,8 @@ class PartnerDataManager:
             rows = []
             for _, row in df.iterrows():
                 business_number = row.get('business_number', '')
-                # 이전에 삭제된 협력사면 is_deleted = 1 유지, 아니면 0
-                is_deleted_value = deleted_partners.get(business_number, 0)
+                # 모든 외부 DB 데이터는 is_deleted = 0 (활성 상태)
+                is_deleted_value = 0
                 
                 rows.append((
                     business_number,
@@ -375,7 +374,7 @@ class PartnerDataManager:
                     row.get('annual_revenue', None),
                     row.get('transaction_count', ''),  # TEXT로 변경
                     row.get('permanent_workers', None),  # 추가
-                    is_deleted_value  # 기존 삭제 상태 유지
+                    is_deleted_value  # 모든 데이터를 활성 상태로
                 ))
             
             # 배치 삽입
@@ -390,7 +389,7 @@ class PartnerDataManager:
             conn.commit()
             conn.close()
             
-            print(f"[SUCCESS] ✅ 협력사 데이터 {len(df)}건 동기화 완료")
+            print(f"[SUCCESS] ✅ 협력사 데이터 {len(df)}건 동기화 완료 (모두 활성 상태)")
             return True
             
         except Exception as e:
