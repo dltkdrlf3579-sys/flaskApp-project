@@ -2,7 +2,7 @@ import os
 import logging
 from datetime import datetime
 import pytz
-from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, Response
 from timezone_config import KST, get_korean_time, get_korean_time_str
 from werkzeug.utils import secure_filename
 from config.menu import MENU_CONFIG
@@ -5711,6 +5711,411 @@ def import_accidents():
         logging.error(f"엑셀 임포트 중 오류: {e}")
         import traceback
         logging.error(traceback.format_exc())
+        return jsonify({"success": False, "message": str(e)}), 500
+
+# ===== Follow SOP 엑셀 다운로드 API =====
+@app.route('/api/follow-sop-export')
+def export_follow_sop_excel():
+    """Follow SOP 데이터 엑셀 다운로드"""
+    try:
+        import openpyxl
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill
+        import io
+        
+        # DB 연결
+        conn = get_db_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # 동적 컬럼 정보 가져오기 (활성화되고 삭제되지 않은 컬럼만)
+        cursor.execute("""
+            SELECT * FROM follow_sop_column_config 
+            WHERE is_active = 1 
+            AND (is_deleted = 0 OR is_deleted IS NULL)
+            ORDER BY column_order
+        """)
+        dynamic_columns = cursor.fetchall()
+        
+        # Follow SOP 데이터 조회
+        cursor.execute("""
+            SELECT * FROM follow_sop 
+            WHERE (is_deleted = 0 OR is_deleted IS NULL)
+            ORDER BY created_at DESC
+        """)
+        data = cursor.fetchall()
+        
+        # 엑셀 워크북 생성
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Follow SOP"
+        
+        # 헤더 스타일 설정
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_align = Alignment(horizontal="center", vertical="center")
+        
+        # 헤더 작성
+        col_idx = 1
+        
+        # 기본 필드 (follow_sop 테이블에 맞게)
+        basic_headers = ['점검번호', '등록일', '작성자']
+        for header in basic_headers:
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            col_idx += 1
+        
+        # 동적 컬럼 - 삭제되지 않은 것만
+        for col in dynamic_columns:
+            cell = ws.cell(row=1, column=col_idx, value=col['column_name'])
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            col_idx += 1
+        
+        # 데이터 작성
+        for row_idx, row in enumerate(data, 2):
+            # 먼저 row를 dict로 변환
+            row_dict = dict(row)
+            col_idx = 1
+            
+            # 기본 필드 - 실제 컬럼명 사용
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('work_req_no', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('created_at', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('created_by', ''))
+            col_idx += 1
+            
+            # custom_data 파싱
+            custom_data = {}
+            if row_dict.get('custom_data'):
+                try:
+                    custom_data = json.loads(row_dict.get('custom_data', '{}'))
+                except:
+                    custom_data = {}
+            
+            # 동적 컬럼 데이터 - 활성화되고 삭제되지 않은 컬럼만
+            for col in dynamic_columns:
+                value = custom_data.get(col['column_key'], '')
+                # 팝업형 값(dict)이면 이름 추출
+                if isinstance(value, dict):
+                    value = value.get('name', str(value))
+                ws.cell(row=row_idx, column=col_idx, value=value)
+                col_idx += 1
+        
+        # 컬럼 너비 자동 조정
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min((max_length + 2) * 1.2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+        
+        # 파일 저장
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        filename = f"follow_sop_{get_korean_time().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        conn.close()
+        
+        return Response(
+            output.getvalue(),
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={
+                'Content-Disposition': f'attachment; filename={filename}',
+                'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            }
+        )
+        
+    except Exception as e:
+        import traceback
+        logging.error(f"Follow SOP 엑셀 다운로드 중 오류: {e}")
+        logging.error(traceback.format_exc())
+        if conn:
+            conn.close()
+        return jsonify({"success": False, "message": str(e)}), 500
+
+# ===== Full Process 엑셀 다운로드 API =====
+@app.route('/api/full-process-export')
+def export_full_process_excel():
+    """Full Process 데이터 엑셀 다운로드"""
+    try:
+        import openpyxl
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill
+        import io
+        
+        # DB 연결
+        conn = get_db_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # 동적 컬럼 정보 가져오기 (활성화되고 삭제되지 않은 컬럼만)
+        cursor.execute("""
+            SELECT * FROM full_process_column_config 
+            WHERE is_active = 1 
+            AND (is_deleted = 0 OR is_deleted IS NULL)
+            ORDER BY column_order
+        """)
+        dynamic_columns = cursor.fetchall()
+        
+        # Full Process 데이터 조회
+        cursor.execute("""
+            SELECT * FROM full_process 
+            WHERE (is_deleted = 0 OR is_deleted IS NULL)
+            ORDER BY created_at DESC
+        """)
+        data = cursor.fetchall()
+        
+        # 엑셀 워크북 생성
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Full Process"
+        
+        # 헤더 스타일 설정
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_align = Alignment(horizontal="center", vertical="center")
+        
+        # 헤더 작성
+        col_idx = 1
+        
+        # 기본 필드 (full_process 테이블에 맞게)
+        basic_headers = ['프로세스 번호', '작성일', '작성자']
+        for header in basic_headers:
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            col_idx += 1
+        
+        # 동적 컬럼 - 삭제되지 않은 것만
+        for col in dynamic_columns:
+            cell = ws.cell(row=1, column=col_idx, value=col['column_name'])
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            col_idx += 1
+        
+        # 데이터 작성
+        for row_idx, row in enumerate(data, 2):
+            # 먼저 row를 dict로 변환
+            row_dict = dict(row)
+            col_idx = 1
+            
+            # 기본 필드 - 실제 컬럼명 사용
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('fullprocess_number', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('created_at', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('created_by', ''))
+            col_idx += 1
+            
+            # custom_data 파싱
+            custom_data = {}
+            if row_dict.get('custom_data'):
+                try:
+                    custom_data = json.loads(row_dict.get('custom_data', '{}'))
+                except:
+                    custom_data = {}
+            
+            # 동적 컬럼 데이터 - 활성화되고 삭제되지 않은 컬럼만
+            for col in dynamic_columns:
+                value = custom_data.get(col['column_key'], '')
+                # 팝업형 값(dict)이면 이름 추출
+                if isinstance(value, dict):
+                    value = value.get('name', str(value))
+                ws.cell(row=row_idx, column=col_idx, value=value)
+                col_idx += 1
+        
+        # 컬럼 너비 자동 조정
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min((max_length + 2) * 1.2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+        
+        # 파일 저장
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        filename = f"full_process_{get_korean_time().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        conn.close()
+        
+        return Response(
+            output.getvalue(),
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={
+                'Content-Disposition': f'attachment; filename={filename}',
+                'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            }
+        )
+        
+    except Exception as e:
+        import traceback
+        logging.error(f"Full Process 엑셀 다운로드 중 오류: {e}")
+        logging.error(traceback.format_exc())
+        if conn:
+            conn.close()
+        return jsonify({"success": False, "message": str(e)}), 500
+
+# ===== Safety Instruction 엑셀 다운로드 API =====
+@app.route('/api/safety-instruction-export')
+def export_safety_instruction_excel():
+    """Safety Instruction 데이터 엑셀 다운로드"""
+    try:
+        import openpyxl
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill
+        import io
+        
+        # DB 연결
+        conn = get_db_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # 동적 컬럼 정보 가져오기 (활성화되고 삭제되지 않은 컬럼만)
+        cursor.execute("""
+            SELECT * FROM safety_instruction_column_config 
+            WHERE is_active = 1 
+            AND (is_deleted = 0 OR is_deleted IS NULL)
+            ORDER BY column_order
+        """)
+        dynamic_columns = cursor.fetchall()
+        
+        # Safety Instruction 데이터 조회 - safety_instructions_cache 테이블 사용
+        cursor.execute("""
+            SELECT * FROM safety_instructions_cache 
+            WHERE (is_deleted = 0 OR is_deleted IS NULL)
+            ORDER BY violation_date DESC, discipline_date DESC
+        """)
+        data = cursor.fetchall()
+        
+        # 엑셀 워크북 생성
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Safety Instructions"
+        
+        # 헤더 스타일 설정
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_align = Alignment(horizontal="center", vertical="center")
+        
+        # 헤더 작성
+        col_idx = 1
+        
+        # 기본 필드 (safety_instructions_cache 테이블의 주요 컬럼)
+        basic_headers = ['발부번호', '발부자', '위반일자', '징계일자', '피징계자']
+        for header in basic_headers:
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            col_idx += 1
+        
+        # 동적 컬럼 - 삭제되지 않은 것만
+        for col in dynamic_columns:
+            cell = ws.cell(row=1, column=col_idx, value=col['column_name'])
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            col_idx += 1
+        
+        # 데이터 작성
+        for row_idx, row in enumerate(data, 2):
+            # 먼저 row를 dict로 변환
+            row_dict = dict(row)
+            col_idx = 1
+            
+            # 기본 필드 - 실제 컬럼명 사용
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('issue_number', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('issuer', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('violation_date', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('discipline_date', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('disciplined_person', ''))
+            col_idx += 1
+            
+            # custom_data 파싱 (있는 경우)
+            custom_data = {}
+            if row_dict.get('custom_data'):
+                try:
+                    custom_data = json.loads(row_dict.get('custom_data', '{}'))
+                except:
+                    custom_data = {}
+            
+            # 동적 컬럼 데이터 - 먼저 실제 컬럼에서 찾고, 없으면 custom_data에서
+            for col in dynamic_columns:
+                col_key = col['column_key']
+                # 먼저 실제 테이블 컬럼에서 값 찾기
+                value = row_dict.get(col_key, '')
+                # 없으면 custom_data에서 찾기
+                if not value and custom_data:
+                    value = custom_data.get(col_key, '')
+                # 팝업형 값(dict)이면 이름 추출
+                if isinstance(value, dict):
+                    value = value.get('name', str(value))
+                ws.cell(row=row_idx, column=col_idx, value=value)
+                col_idx += 1
+        
+        # 컬럼 너비 자동 조정
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min((max_length + 2) * 1.2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+        
+        # 파일 저장
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        filename = f"safety_instruction_{get_korean_time().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        conn.close()
+        
+        return Response(
+            output.getvalue(),
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={
+                'Content-Disposition': f'attachment; filename={filename}',
+                'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            }
+        )
+        
+    except Exception as e:
+        import traceback
+        logging.error(f"Safety Instruction 엑셀 다운로드 중 오류: {e}")
+        logging.error(traceback.format_exc())
+        if conn:
+            conn.close()
         return jsonify({"success": False, "message": str(e)}), 500
 
 # ===== 협력사 엑셀 다운로드 API =====
