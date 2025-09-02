@@ -35,19 +35,12 @@ def follow_sop_route():
     dynamic_columns_rows = cursor.fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
     
-    # 기본정보 필드 추가 (하드코딩)
-    basic_fields = [
-        {'column_name': 'work_req_no', 'column_label': '점검번호', 'column_type': 'text', 'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info'},
-        {'column_name': 'created_at', 'column_label': '등록일', 'column_type': 'datetime', 'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info'}
-    ]
-    
     # 섹션별로 컬럼 분류
-    section_columns = {'basic_info': basic_fields}
+    section_columns = {}
     for section in sections:
-        if section['section_key'] != 'basic_info':
-            section_columns[section['section_key']] = [
-                col for col in dynamic_columns if col.get('tab') == section['section_key']
-            ]
+        section_columns[section['section_key']] = [
+            col for col in dynamic_columns if col.get('tab') == section['section_key']
+        ]
     
     # 페이지네이션 처리
     page = request.args.get('page', 1, type=int)
@@ -469,19 +462,12 @@ def full_process_route():
     dynamic_columns_rows = cursor.fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
     
-    # 기본정보 필드 추가 (하드코딩)
-    basic_fields = [
-        {'column_name': 'fullprocess_number', 'column_label': '평가번호', 'column_type': 'text', 'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info'},
-        {'column_name': 'created_at', 'column_label': '등록일', 'column_type': 'datetime', 'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info'}
-    ]
-    
     # 섹션별로 컬럼 분류
-    section_columns = {'basic_info': basic_fields}
+    section_columns = {}
     for section in sections:
-        if section['section_key'] != 'basic_info':
-            section_columns[section['section_key']] = [
-                col for col in dynamic_columns if col.get('tab') == section['section_key']
-            ]
+        section_columns[section['section_key']] = [
+            col for col in dynamic_columns if col.get('tab') == section['section_key']
+        ]
     
     # 페이지네이션 처리
     page = request.args.get('page', 1, type=int)

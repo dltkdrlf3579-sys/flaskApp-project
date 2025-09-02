@@ -68,7 +68,7 @@
                 {% for item in safety_instructions %}
                 <tr>
                     <td class="checkbox-column">
-                        <input type="checkbox" class="accident-checkbox" value="{{ item.id }}" onchange="updateDeleteButton()">
+                        <input type="checkbox" class="accident-checkbox" value="{{ item.issue_number }}" onchange="updateDeleteButton()">
                     </td>
                     <td class="fixed-col">
                         {{ item.no }}
@@ -817,12 +817,12 @@ function deleteSelected() {
         return;
     }
     
-    if (!confirm(`선택한 ${ids.length}개의 사고를 삭제하시겠습니까?\n(삭제된 항목은 관리자 메뉴에서 복구 가능합니다)`)) {
+    if (!confirm(`선택한 ${ids.length}개의 환경안전지시서를 삭제하시겠습니까?\n(삭제된 항목은 관리자 메뉴에서 복구 가능합니다)`)) {
         return;
     }
     
     // 삭제 API 호출
-    fetch('/api/accidents/delete', {
+    fetch('/api/safety-instructions/delete', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',

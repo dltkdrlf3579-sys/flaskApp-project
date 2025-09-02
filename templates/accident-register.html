@@ -109,15 +109,16 @@
                                            data-section="{{ section.section_key }}"
                                            placeholder="{{ col.column_name }} 입력">
                                            
-                                {% elif col.column_type == 'linked' %}
+                                {% elif col.column_type in ['linked', 'linked_text', 'linked_dept'] %}
                                     <!-- 연결된 필드 (읽기 전용) -->
                                     <input type="text" 
                                            id="{{ col.column_key }}" 
-                                           class="{{ section.section_key }}-input" 
+                                           class="{{ section.section_key }}-input linked-field" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
+                                           data-linked-type="{{ col.column_type }}"
                                            readonly
-                                           style="background-color: #f3f4f6;">
+                                           style="background-color: #e9ecef; cursor: not-allowed;">
                                            
                                 {% elif col.column_type == 'popup' %}
                                     <!-- 팝업 필드 -->
@@ -132,6 +133,96 @@
                                         <button class="btn btn-sm btn-outline-secondary" 
                                                 onclick="openPopup('{{ col.column_key }}')">
                                             <i class="bi bi-search"></i>
+                                        </button>
+                                    </div>
+                                    
+                                {% elif col.column_type == 'popup_person' %}
+                                    <!-- 담당자 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               id="{{ col.column_key }}" 
+                                               class="{{ section.section_key }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="popup_person"
+                                               placeholder="담당자 검색"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <button class="btn btn-sm btn-outline-primary" 
+                                                onclick="openPersonSearch('{{ col.column_key }}')">
+                                            <i class="bi bi-person-search"></i> 검색
+                                        </button>
+                                    </div>
+                                    
+                                {% elif col.column_type == 'popup_company' %}
+                                    <!-- 업체 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               id="{{ col.column_key }}" 
+                                               class="{{ section.section_key }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="popup_company"
+                                               placeholder="업체 검색"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <button class="btn btn-sm btn-outline-primary" 
+                                                onclick="openCompanySearch('{{ col.column_key }}')">
+                                            <i class="bi bi-building"></i> 검색
+                                        </button>
+                                    </div>
+                                    
+                                {% elif col.column_type == 'popup_building' %}
+                                    <!-- 건물 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               id="{{ col.column_key }}" 
+                                               class="{{ section.section_key }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="popup_building"
+                                               placeholder="건물 검색"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <button class="btn btn-sm btn-outline-primary" 
+                                                onclick="openBuildingSearch('{{ col.column_key }}')">
+                                            <i class="bi bi-building"></i> 검색
+                                        </button>
+                                    </div>
+                                    
+                                {% elif col.column_type == 'popup_department' %}
+                                    <!-- 부서 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               id="{{ col.column_key }}" 
+                                               class="{{ section.section_key }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="popup_department"
+                                               placeholder="부서 검색"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <button class="btn btn-sm btn-outline-primary" 
+                                                onclick="openDepartmentSearch('{{ col.column_key }}')">
+                                            <i class="bi bi-diagram-3"></i> 검색
+                                        </button>
+                                    </div>
+                                    
+                                {% elif col.column_type == 'popup_contractor' %}
+                                    <!-- 협력사 근로자 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               id="{{ col.column_key }}" 
+                                               class="{{ section.section_key }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="popup_contractor"
+                                               placeholder="협력사 근로자 검색"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <button class="btn btn-sm btn-outline-primary" 
+                                                onclick="openContractorSearch('{{ col.column_key }}')">
+                                            <i class="bi bi-person-badge"></i> 검색
                                         </button>
                                     </div>
                                     
@@ -462,6 +553,378 @@ function openPopup(fieldKey) {
     alert('팝업 기능은 추가 구현이 필요합니다.');
 }
 
+// 담당자 검색 팝업 열기 함수
+function openPersonSearch(fieldKey) {
+    // 팝업 윈도우 옵션 설정
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes',
+        'toolbar=no',
+        'menubar=no',
+        'location=no',
+        'status=no'
+    ].join(',');
+    
+    // 담당자 검색 팝업 URL
+    const popupUrl = `/search-popup?type=person&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'personSearch', popupOptions);
+    
+    // 팝업이 차단되었는지 확인
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    // 팝업에서 선택된 데이터를 받는 함수
+    window.receivePersonSelection = function(fieldKey, data) {
+        console.log('receivePersonSelection 호출:', fieldKey, data);
+        
+        // 메인 필드 업데이트
+        const mainField = document.getElementById(fieldKey);
+        if (mainField) {
+            mainField.value = data.employee_name || data.name || '';
+            console.log(`메인 필드 ${fieldKey} 업데이트: ${mainField.value}`);
+        } else {
+            console.error(`메인 필드 ${fieldKey}를 찾을 수 없음`);
+        }
+        
+        // _id 필드 업데이트
+        const idFieldKey = fieldKey + '_id';
+        const idField = document.getElementById(idFieldKey);
+        if (idField) {
+            idField.value = data.employee_id || data.id || '';
+            idField.setAttribute('readonly', true);
+            idField.style.backgroundColor = '#f8f9fa';
+            console.log(`ID 필드 ${idFieldKey} 업데이트: ${idField.value}`);
+        } else {
+            console.log(`ID 필드 ${idFieldKey}를 찾을 수 없음`);
+        }
+        
+        // _dept 필드 업데이트
+        const deptFieldKey = fieldKey + '_dept';
+        const deptField = document.getElementById(deptFieldKey);
+        if (deptField && (data.department_name || data.department)) {
+            deptField.value = data.department_name || data.department || '';
+            deptField.setAttribute('readonly', true);
+            deptField.style.backgroundColor = '#f8f9fa';
+            console.log(`부서 필드 ${deptFieldKey} 업데이트: ${deptField.value}`);
+        } else {
+            console.log(`부서 필드 ${deptFieldKey}를 찾을 수 없음`);
+        }
+    };
+    
+    popup.focus();
+}
+
+// 업체 검색 팝업 열기 함수
+function openCompanySearch(fieldKey) {
+    // 팝업 윈도우 옵션 설정
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes',
+        'toolbar=no',
+        'menubar=no',
+        'location=no',
+        'status=no'
+    ].join(',');
+    
+    // 업체 검색 팝업 URL
+    const popupUrl = `/search-popup?type=company&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'companySearch', popupOptions);
+    
+    // 팝업이 차단되었는지 확인
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    // 팝업에서 선택된 데이터를 받는 함수
+    window.receiveCompanySelection = function(fieldKey, data) {
+        console.log('receiveCompanySelection 호출:', fieldKey, data);
+        
+        // 메인 필드 업데이트
+        const mainField = document.getElementById(fieldKey);
+        if (mainField) {
+            mainField.value = data.company_name || '';
+            console.log(`메인 필드 ${fieldKey} 업데이트: ${mainField.value}`);
+        } else {
+            console.error(`메인 필드 ${fieldKey}를 찾을 수 없음`);
+        }
+        
+        // _business_number 필드 업데이트
+        const bnFieldKey = fieldKey + '_business_number';
+        const bnField = document.getElementById(bnFieldKey);
+        if (bnField) {
+            bnField.value = data.business_number || '';
+            bnField.setAttribute('readonly', true);
+            bnField.style.backgroundColor = '#f8f9fa';
+            console.log(`사업자번호 필드 ${bnFieldKey} 업데이트: ${bnField.value}`);
+        } else {
+            console.log(`사업자번호 필드 ${bnFieldKey}를 찾을 수 없음 - 모든 input 요소 확인:`);
+            document.querySelectorAll('input').forEach(input => {
+                if (input.id.includes(fieldKey)) {
+                    console.log(`  발견된 필드: id="${input.id}", type="${input.type}", value="${input.value}"`);
+                }
+            });
+        }
+    };
+    
+    popup.focus();
+}
+
+// 부서 검색 팝업 열기 함수
+function openDepartmentSearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes',
+        'toolbar=no',
+        'menubar=no',
+        'location=no',
+        'status=no'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=department&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'departmentSearch', popupOptions);
+    
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    // 팝업에서 선택된 데이터를 받는 함수
+    window.receiveDepartmentSelection = function(fieldKey, data) {
+        console.log('receiveDepartmentSelection 호출:', fieldKey, data);
+        console.log('받은 데이터 전체:', JSON.stringify(data));
+        
+        const mainField = document.getElementById(fieldKey);
+        if (mainField) {
+            // dept_name이 실제 필드명
+            mainField.value = data.dept_name || data.department_name || '';
+            console.log(`메인 필드 ${fieldKey} 업데이트: ${mainField.value}`);
+        } else {
+            console.error(`메인 필드 ${fieldKey}를 찾을 수 없음`);
+        }
+        
+        // _code 필드 업데이트
+        const codeFieldKey = fieldKey + '_code';
+        console.log(`부서코드 필드 찾기: ${codeFieldKey}`);
+        const codeField = document.getElementById(codeFieldKey);
+        if (codeField) {
+            // dept_code가 실제 필드명
+            const codeValue = data.dept_code || data.department_code || '';
+            console.log(`부서코드 값: ${codeValue}`);
+            codeField.value = codeValue;
+            codeField.setAttribute('readonly', true);
+            codeField.style.backgroundColor = '#f8f9fa';
+            console.log(`부서코드 필드 ${codeFieldKey} 업데이트 완료: ${codeField.value}`);
+        } else {
+            console.error(`부서코드 필드 ${codeFieldKey}를 찾을 수 없음`);
+            // 모든 input 중에서 test2 관련 필드 찾기
+            document.querySelectorAll('input').forEach(input => {
+                if (input.id && input.id.includes('test2')) {
+                    console.log(`Found test2 field: id="${input.id}", type="${input.type}", readonly="${input.readOnly}"`);
+                }
+            });
+        }
+    };
+    
+    popup.focus();
+}
+
+// 협력사 근로자 검색 팝업 열기 함수
+function openContractorSearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes',
+        'toolbar=no',
+        'menubar=no',
+        'location=no',
+        'status=no'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=contractor&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'contractorSearch', popupOptions);
+    
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    // 팝업에서 선택된 데이터를 받는 함수
+    window.receiveContractorSelection = function(fieldKey, data) {
+        console.log('receiveContractorSelection 호출:', fieldKey, data);
+        console.log('받은 데이터 전체:', JSON.stringify(data));
+        
+        const mainField = document.getElementById(fieldKey);
+        if (mainField) {
+            // worker_name이 실제 필드명
+            mainField.value = data.worker_name || data.contractor_name || data.name || '';
+            console.log(`메인 필드 ${fieldKey} 업데이트: ${mainField.value}`);
+        } else {
+            console.error(`메인 필드 ${fieldKey}를 찾을 수 없음`);
+        }
+        
+        // _id 필드 업데이트
+        const idFieldKey = fieldKey + '_id';
+        console.log(`ID 필드 찾기: ${idFieldKey}`);
+        const idField = document.getElementById(idFieldKey);
+        if (idField) {
+            // worker_id가 실제 필드명
+            const idValue = data.worker_id || data.contractor_id || data.id || '';
+            console.log(`ID 값: ${idValue}`);
+            idField.value = idValue;
+            idField.setAttribute('readonly', true);
+            idField.style.backgroundColor = '#f8f9fa';
+            console.log(`ID 필드 ${idFieldKey} 업데이트 완료: ${idField.value}`);
+        } else {
+            console.error(`ID 필드 ${idFieldKey}를 찾을 수 없음`);
+            // 모든 input 중에서 test4 관련 필드 찾기
+            document.querySelectorAll('input').forEach(input => {
+                if (input.id && input.id.includes('test4')) {
+                    console.log(`Found test4 field: id="${input.id}", type="${input.type}", readonly="${input.readOnly}"`);
+                }
+            });
+        }
+        
+        // _company_name 필드 업데이트 (소속업체)
+        const companyFieldKey = fieldKey + '_company_name';
+        console.log(`회사명 필드 찾기: ${companyFieldKey}`);
+        const companyField = document.getElementById(companyFieldKey);
+        if (companyField) {
+            const companyValue = data.company_name || data.company || '';
+            console.log(`회사명 값: ${companyValue}`);
+            companyField.value = companyValue;
+            companyField.setAttribute('readonly', true);
+            companyField.style.backgroundColor = '#f8f9fa';
+            console.log(`소속업체 필드 ${companyFieldKey} 업데이트 완료: ${companyField.value}`);
+        } else {
+            console.error(`회사명 필드 ${companyFieldKey}를 찾을 수 없음`);
+        }
+    };
+    
+    popup.focus();
+}
+
+// 건물 검색 팝업 열기 함수
+function openBuildingSearch(fieldKey) {
+    // 팝업 윈도우 옵션 설정
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes',
+        'toolbar=no',
+        'menubar=no',
+        'location=no',
+        'status=no'
+    ].join(',');
+    
+    // 건물 검색 팝업 URL
+    const popupUrl = `/search-popup?type=building&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'buildingSearch', popupOptions);
+    
+    // 팝업이 차단되었는지 확인
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    // 팝업에서 선택된 데이터를 받는 함수
+    window.receiveBuildingSelection = function(fieldKey, data) {
+        console.log('receiveBuildingSelection 호출:', fieldKey, data);
+        
+        // 메인 필드 업데이트
+        const mainField = document.getElementById(fieldKey);
+        if (mainField) {
+            mainField.value = data.building_name || '';
+            console.log(`메인 필드 ${fieldKey} 업데이트: ${mainField.value}`);
+        } else {
+            console.error(`메인 필드 ${fieldKey}를 찾을 수 없음`);
+        }
+        
+        // _code 필드 업데이트
+        const codeFieldKey = fieldKey + '_code';
+        const codeField = document.getElementById(codeFieldKey);
+        if (codeField) {
+            codeField.value = data.building_code || '';
+            codeField.setAttribute('readonly', true);
+            codeField.style.backgroundColor = '#f8f9fa';
+            console.log(`건물코드 필드 ${codeFieldKey} 업데이트: ${codeField.value}`);
+        } else {
+            console.log(`건물코드 필드 ${codeFieldKey}를 찾을 수 없음`);
+        }
+    };
+    
+    popup.focus();
+}
+
+// 페이지 로드시 디버깅
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('=== 페이지에 렌더링된 모든 필드 ===');
+    const allInputs = document.querySelectorAll('input[id]');
+    const fieldGroups = {};
+    
+    allInputs.forEach(input => {
+        const id = input.id;
+        console.log(`필드: id="${id}", type="${input.type}", readonly="${input.readOnly}", value="${input.value}"`);
+        
+        // 필드를 그룹별로 분류
+        if (id.includes('test1') || id.includes('test2') || id.includes('test3') || id.includes('test4')) {
+            const baseKey = id.split('_')[0];
+            if (!fieldGroups[baseKey]) fieldGroups[baseKey] = [];
+            fieldGroups[baseKey].push(id);
+        }
+    });
+    
+    console.log('=== 테스트 필드 그룹 ===');
+    Object.keys(fieldGroups).forEach(key => {
+        console.log(`${key}: ${fieldGroups[key].join(', ')}`);
+    });
+});
+
 // 기본 스크립트 끝
 </script>
 
@@ -774,6 +1237,30 @@ function openPopup(fieldKey) {
 
 .btn-save:hover {
     background: #1d4ed8;
+}
+/* 검색 버튼 스타일 */
+.input-group .btn-outline-primary {
+    color: #0d6efd;
+    border-color: #0d6efd;
+}
+
+.input-group .btn-outline-primary:hover {
+    color: #fff;
+    background-color: #0d6efd;
+    border-color: #0d6efd;
+}
+
+.input-group .btn-outline-primary i {
+    margin-right: 4px;
+}
+
+/* linked 필드 읽기 전용 스타일 강화 */
+input[readonly].linked-field,
+input[data-field$="_id"][readonly],
+input[data-field$="_dept"][readonly] {
+    background-color: #e9ecef !important;
+    cursor: not-allowed !important;
+    opacity: 0.8 !important;
 }
 </style>
 

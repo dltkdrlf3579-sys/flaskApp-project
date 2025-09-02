@@ -15,7 +15,7 @@
 <div class="page-header">
     <h2 class="page-title">Full Process 등록</h2>
     <div class="breadcrumb">
-        <a href="{{ url_for('page_view', url='full-process') }}">Full Process</a>
+        <a href="{{ url_for('page_view', url='follow-sop') }}">Follow SOP</a>
         <span class="separator">></span>
         <span class="current">신규 등록</span>
     </div>
@@ -23,6 +23,10 @@
 {% endif %}
 
 <div class="accident-detail-container">
+    <!-- 디버깅: 섹션 개수 확인 -->
+    <!-- sections count: {{ sections|length }} -->
+    <!-- section_columns keys: {{ section_columns.keys()|list }} -->
+    
     <!-- 동적 섹션 렌더링 -->
     {% for section in sections %}
     <div class="section {{ section.section_key|replace('_', '-') }}-section">
@@ -35,7 +39,6 @@
         <div class="section-content" id="{{ section.section_key|replace('_', '-') }}-content">
             <div class="info-table">
                 {% set all_columns = section_columns[section.section_key] %}
-                <!-- Debug: all_columns = {{ all_columns }} -->
                 <!-- detailed_content와 violation_content는 제외 -->
                 {% set columns = [] %}
                 {% for col in all_columns %}
@@ -43,7 +46,6 @@
                         {% set _ = columns.append(col) %}
                     {% endif %}
                 {% endfor %}
-                <!-- Debug: columns after filter = {{ columns }} -->
                 {% set columns_per_row = 4 %}
                 
                 <!-- batch 방식으로 4개씩 묶어서 처리 -->
@@ -56,8 +58,8 @@
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
                                 <label>{{ col.column_name }}</label>
                                 
-                                {% if col.column_key == 'fullprocess_number' %}
-                                    <!-- 평가번호는 자동 생성 -->
+                                {% if col.column_key == 'work_req_no' %}
+                                    <!-- 점검번호는 자동 생성 -->
                                     <div class="value">{{ col.default_value if col.default_value else '자동 생성됩니다' }}</div>
                                     
                                 {% elif col.column_key == 'created_at' %}
@@ -129,6 +131,27 @@
                                         </button>
                                     </div>
                                     
+                                {% elif col.input_type == 'table' %}
+                                    <!-- 테이블 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               id="{{ col.column_key }}" 
+                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="table"
+                                               placeholder="검색하여 선택"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <input type="hidden" 
+                                               id="{{ col.column_key }}_id" 
+                                               data-field="{{ col.column_key }}_id">
+                                        <button class="btn btn-sm btn-outline-primary" 
+                                                onclick="openTableSearch('{{ col.column_key }}')">
+                                            <i class="bi bi-search"></i> 검색
+                                        </button>
+                                    </div>
+                                    
                                 {% elif col.column_type == 'textarea' %}
                                     <!-- 텍스트영역 필드 -->
                                     <textarea id="{{ col.column_key }}" 
@@ -175,7 +198,7 @@
 
     <!-- 첨부파일 영역 (공통 컴포넌트) -->
     {% from 'includes/attachment_section.html' import render_attachment_section %}
-    {{ render_attachment_section([], 'safety_process') }}
+    {{ render_attachment_section([], 'safety_sop') }}
 
     <!-- 저장 버튼 영역 -->
     <div class="save-section">
@@ -293,7 +316,7 @@ function registerFullProcess() {
     }
     
     // 서버로 전송
-    fetch('/register-full-process', {
+    fetch('/register-follow-sop', {
         method: 'POST',
         body: formData
     })
@@ -321,6 +344,46 @@ function registerFullProcess() {
 function openPopup(fieldKey) {
     // 팝업 구현 (필요시 추가)
     alert('팝업 기능은 추가 구현이 필요합니다.');
+}
+
+// 테이블 검색 팝업 열기 함수
+function openTableSearch(fieldKey) {
+    // 팝업 윈도우 옵션 설정
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes',
+        'toolbar=no',
+        'menubar=no',
+        'location=no',
+        'status=no'
+    ].join(',');
+    
+    // 테이블 검색 팝업 URL (향후 구현 필요)
+    const popupUrl = `/table-search?field=${fieldKey}&type=employee`;
+    const popup = window.open(popupUrl, 'tableSearch', popupOptions);
+    
+    // 팝업이 차단되었는지 확인
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    // 팝업에서 선택된 데이터를 받는 함수
+    window.receiveTableSelection = function(fieldKey, data) {
+        document.getElementById(fieldKey).value = data.name || data.display_name;
+        document.getElementById(fieldKey + '_id').value = data.id;
+    };
+    
+    popup.focus();
 }
 </script>
 
@@ -401,11 +464,13 @@ function openPopup(fieldKey) {
 .info-cell select,
 .info-cell textarea,
 .info-cell .value {
-    width: 100%;
-    padding: 8px 12px;
-    border: 1px solid #d1d5db;
-    border-radius: 4px;
-    font-size: 14px;
+    width: 100% !important;
+    padding: 8px 12px !important;
+    border: 1px solid #d1d5db !important;
+    border-radius: 4px !important;
+    font-size: 14px !important;
+    display: block !important;
+    visibility: visible !important;
 }
 
 .info-cell textarea {

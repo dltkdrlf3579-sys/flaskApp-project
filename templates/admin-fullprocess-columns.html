@@ -614,7 +614,17 @@
     </div>
 </div>
 
+<!-- Sortable.js CDN 먼저 로드 -->
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+
 <script>
+// Sortable.js 로드 확인
+if (typeof Sortable !== 'undefined') {
+    console.log('✅ Sortable.js loaded successfully');
+} else {
+    console.error('❌ Sortable.js failed to load');
+}
+
 let columns = [];
 let pendingColumns = []; // 모든 변경사항을 담는 단순 배열
 let sections = {{ sections | tojson | safe }};  // 섹션 정보
@@ -1094,6 +1104,7 @@ let editingId = null;
             
             // Sortable 초기화 (섹션 간 이동 및 섹션 내 순서 변경 가능)
             if (window.Sortable) {
+                console.log(`Initializing Sortable for ${containerId}`);
                 sortableInstances[containerId] = new Sortable(container, {
                     group: 'shared', // 모든 섹션이 같은 그룹
                     animation: 150,
@@ -2264,8 +2275,5 @@ let editingId = null;
             }
         });
 </script>
-
-<!-- Sortable.js CDN 추가 -->
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 
 {% endblock %}

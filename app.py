@@ -913,7 +913,7 @@ def partner_accident():
     # 동적 컬럼 설정 가져오기 (활성화되고 삭제되지 않은 것만)
     dynamic_columns_rows = conn.execute("""
         SELECT * FROM accident_column_config 
-        WHERE is_active = 1
+        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
         ORDER BY column_order
     """).fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
@@ -1215,7 +1215,7 @@ def safety_instruction_register():
     # 동적 컬럼 설정 가져오기 (safety_instruction 전용 테이블 사용)
     dynamic_columns_rows = conn.execute("""
         SELECT * FROM safety_instruction_column_config 
-        WHERE is_active = 1 
+        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
         ORDER BY column_order
     """).fetchall()
     
@@ -2424,7 +2424,10 @@ def accident_detail(accident_id):
                     except:
                         pass
             
-            logging.info(f"Loaded custom_data: {custom_data}")
+            # custom_data를 accident 딕셔너리에 병합 (partner_accident와 동일하게)
+            accident.update(custom_data)
+            
+            logging.info(f"Loaded and merged custom_data: {custom_data}")
         except Exception as e:
             logging.error(f"Error parsing custom_data: {e}")
             custom_data = {}
@@ -4363,6 +4366,108 @@ def delete_accidents():
         })
     except Exception as e:
         logging.error(f"사고 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route('/api/safety-instructions/delete', methods=['POST'])
+def delete_safety_instructions():
+    """선택한 환경안전지시서들을 소프트 삭제"""
+    try:
+        data = request.json
+        ids = data.get('ids', [])  # 실제로는 issue_number들
+        
+        if not ids:
+            return jsonify({"success": False, "message": "삭제할 항목이 없습니다."}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # safety_instructions_cache 테이블에서 소프트 삭제 (issue_number 기준)
+        placeholders = ','.join('?' * len(ids))
+        cursor.execute(f"""
+            UPDATE safety_instructions_cache 
+            SET is_deleted = 1 
+            WHERE issue_number IN ({placeholders})
+        """, ids)
+        
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "deleted_count": deleted_count,
+            "message": f"{deleted_count}건이 삭제되었습니다."
+        })
+    except Exception as e:
+        logging.error(f"환경안전지시서 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route('/api/follow-sop/delete', methods=['POST'])
+def delete_follow_sop():
+    """선택한 Follow SOP들을 소프트 삭제"""
+    try:
+        data = request.json
+        ids = data.get('ids', [])  # 실제로는 work_req_no들
+        
+        if not ids:
+            return jsonify({"success": False, "message": "삭제할 항목이 없습니다."}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # follow_sop 테이블에서 소프트 삭제 (work_req_no 기준)
+        placeholders = ','.join('?' * len(ids))
+        cursor.execute(f"""
+            UPDATE follow_sop 
+            SET is_deleted = 1 
+            WHERE work_req_no IN ({placeholders})
+        """, ids)
+        
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "deleted_count": deleted_count,
+            "message": f"{deleted_count}건이 삭제되었습니다."
+        })
+    except Exception as e:
+        logging.error(f"Follow SOP 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route('/api/full-process/delete', methods=['POST'])
+def delete_full_process():
+    """선택한 Full Process들을 소프트 삭제"""
+    try:
+        data = request.json
+        ids = data.get('ids', [])  # 실제로는 fullprocess_number들
+        
+        if not ids:
+            return jsonify({"success": False, "message": "삭제할 항목이 없습니다."}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # full_process 테이블에서 소프트 삭제 (fullprocess_number 기준)
+        placeholders = ','.join('?' * len(ids))
+        cursor.execute(f"""
+            UPDATE full_process 
+            SET is_deleted = 1 
+            WHERE fullprocess_number IN ({placeholders})
+        """, ids)
+        
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "deleted_count": deleted_count,
+            "message": f"{deleted_count}건이 삭제되었습니다."
+        })
+    except Exception as e:
+        logging.error(f"Full Process 삭제 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route('/api/accidents/restore', methods=['POST'])
@@ -6576,6 +6681,7 @@ def board_items_delete_api(board):
 # ============= Follow SOP & Full Process 페이지 라우트 =============
 # 파일이 길어서 임시로 외부 파일에서 import
 exec(open('add_page_routes.py', encoding='utf-8').read())
+
 
 if __name__ == "__main__":
     print("Flask 앱 시작 중...", flush=True)

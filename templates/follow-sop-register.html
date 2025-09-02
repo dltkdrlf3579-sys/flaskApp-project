@@ -131,6 +131,27 @@
                                         </button>
                                     </div>
                                     
+                                {% elif col.input_type == 'table' %}
+                                    <!-- 테이블 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               id="{{ col.column_key }}" 
+                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="table"
+                                               placeholder="검색하여 선택"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <input type="hidden" 
+                                               id="{{ col.column_key }}_id" 
+                                               data-field="{{ col.column_key }}_id">
+                                        <button class="btn btn-sm btn-outline-primary" 
+                                                onclick="openTableSearch('{{ col.column_key }}')">
+                                            <i class="bi bi-search"></i> 검색
+                                        </button>
+                                    </div>
+                                    
                                 {% elif col.column_type == 'textarea' %}
                                     <!-- 텍스트영역 필드 -->
                                     <textarea id="{{ col.column_key }}" 
@@ -323,6 +344,46 @@ function registerFollowSop() {
 function openPopup(fieldKey) {
     // 팝업 구현 (필요시 추가)
     alert('팝업 기능은 추가 구현이 필요합니다.');
+}
+
+// 테이블 검색 팝업 열기 함수
+function openTableSearch(fieldKey) {
+    // 팝업 윈도우 옵션 설정
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes',
+        'toolbar=no',
+        'menubar=no',
+        'location=no',
+        'status=no'
+    ].join(',');
+    
+    // 테이블 검색 팝업 URL (향후 구현 필요)
+    const popupUrl = `/table-search?field=${fieldKey}&type=employee`;
+    const popup = window.open(popupUrl, 'tableSearch', popupOptions);
+    
+    // 팝업이 차단되었는지 확인
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    // 팝업에서 선택된 데이터를 받는 함수
+    window.receiveTableSelection = function(fieldKey, data) {
+        document.getElementById(fieldKey).value = data.name || data.display_name;
+        document.getElementById(fieldKey + '_id').value = data.id;
+    };
+    
+    popup.focus();
 }
 </script>
 

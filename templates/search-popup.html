@@ -64,17 +64,19 @@
 
     .search-btn {
         padding: 8px 20px;
-        background: #4285f4;
+        background: #0d6efd;
         color: white;
-        border: none;
+        border: 1px solid #0d6efd;
         border-radius: 4px;
         font-size: 14px;
         cursor: pointer;
         white-space: nowrap;
+        transition: all 0.2s;
     }
 
     .search-btn:hover {
-        background: #3367d6;
+        background: #0b5ed7;
+        border-color: #0b5ed7;
     }
 
     /* 자동완성 드롭다운 */
@@ -225,18 +227,21 @@
     }
 
     .btn-confirm {
-        background: #4285f4;
+        background: #0d6efd;
         color: white;
-        border: none;
+        border: 1px solid #0d6efd;
     }
 
-    .btn-confirm:hover {
-        background: #3367d6;
+    .btn-confirm:hover:not(:disabled) {
+        background: #0b5ed7;
+        border-color: #0b5ed7;
     }
 
     .btn-confirm:disabled {
-        background: #ccc;
+        background: #6c757d;
+        border-color: #6c757d;
         cursor: not-allowed;
+        opacity: 0.65;
     }
 
     /* 로딩 상태 */
@@ -630,9 +635,40 @@ function confirmSelection() {
         return;
     }
     
+    // URL에서 field 파라미터 가져오기
+    const urlParams = new URLSearchParams(window.location.search);
+    const fieldKey = urlParams.get('field');
+    const searchType = urlParams.get('type');
+    
     // 부모 창에 데이터 전달
-    if (window.opener && searchConfig.callback) {
-        window.opener[searchConfig.callback](selectedItem);
+    if (window.opener) {
+        // 타입별로 다른 함수 호출
+        if (searchType === 'person') {
+            if (window.opener.receivePersonSelection) {
+                window.opener.receivePersonSelection(fieldKey, selectedItem);
+            }
+        } else if (searchType === 'company') {
+            if (window.opener.receiveCompanySelection) {
+                window.opener.receiveCompanySelection(fieldKey, selectedItem);
+            }
+        } else if (searchType === 'building') {
+            if (window.opener.receiveBuildingSelection) {
+                window.opener.receiveBuildingSelection(fieldKey, selectedItem);
+            }
+        } else if (searchType === 'department') {
+            if (window.opener.receiveDepartmentSelection) {
+                window.opener.receiveDepartmentSelection(fieldKey, selectedItem);
+            }
+        } else if (searchType === 'contractor') {
+            if (window.opener.receiveContractorSelection) {
+                window.opener.receiveContractorSelection(fieldKey, selectedItem);
+            }
+        } else {
+            // 기본 callback 사용
+            if (searchConfig.callback && window.opener[searchConfig.callback]) {
+                window.opener[searchConfig.callback](selectedItem);
+            }
+        }
     }
     
     window.close();

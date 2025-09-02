@@ -945,9 +945,42 @@ def maybe_daily_sync(force=False):
         except Exception as e:
             print(f"[ERROR] 협력사 근로자 동기화 실패: {e}")
             
+        # 환경안전지시서는 최초 1회만 동기화 (이미 데이터가 있으면 절대 동기화 안 함)
         try:
             if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'SAFETY_INSTRUCTIONS_EXTERNAL_QUERY'):
-                partner_manager.sync_safety_instructions_from_external_db()
+                # 동기화 이력 테이블 확인/생성
+                cur.execute('''
+                    CREATE TABLE IF NOT EXISTS safety_instructions_sync_history (
+                        id INTEGER PRIMARY KEY CHECK (id=1),
+                        first_sync_done INTEGER DEFAULT 0,
+                        sync_date DATETIME,
+                        record_count INTEGER
+                    )
+                ''')
+                
+                # 동기화 이력 확인
+                cur.execute("SELECT first_sync_done FROM safety_instructions_sync_history WHERE id=1")
+                sync_history = cur.fetchone()
+                
+                if not sync_history or sync_history[0] == 0:
+                    # 최초 1회만 실행
+                    print("[INFO] 환경안전지시서 최초 1회 동기화 실행")
+                    partner_manager.sync_safety_instructions_from_external_db()
+                    
+                    # 동기화 완료 기록
+                    cur.execute("SELECT COUNT(*) FROM safety_instructions_cache")
+                    count = cur.fetchone()[0]
+                    cur.execute("""
+                        INSERT OR REPLACE INTO safety_instructions_sync_history 
+                        (id, first_sync_done, sync_date, record_count) 
+                        VALUES (1, 1, datetime('now'), ?)
+                    """, (count,))
+                    conn.commit()
+                    print(f"[SUCCESS] 환경안전지시서 최초 동기화 완료: {count}건")
+                else:
+                    cur.execute("SELECT COUNT(*) FROM safety_instructions_cache")
+                    current_count = cur.fetchone()[0]
+                    print(f"[INFO] 환경안전지시서 동기화 영구 스킵 (최초 동기화 완료됨, 현재 {current_count}건)")
         except Exception as e:
             print(f"[ERROR] 안전지시서 동기화 실패: {e}")
         

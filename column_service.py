@@ -221,23 +221,55 @@ class ColumnConfigService:
             if isinstance(dropdown_options, list):
                 dropdown_options = json.dumps(dropdown_options, ensure_ascii=False)
             
+            # input_type 처리 (follow_sop, full_process용)
+            input_type = None
+            if 'input_type' in column_data:
+                input_type = column_data.get('input_type')
+            elif column_data.get('column_type') == 'table':
+                # column_type이 table인 경우 input_type을 table로 설정
+                input_type = 'table'
+            
+            # 테이블에 input_type 컬럼이 있는지 확인
+            cursor.execute(f"PRAGMA table_info({self.table_name})")
+            columns = [col[1] for col in cursor.fetchall()]
+            has_input_type = 'input_type' in columns
+            
             # 컬럼 추가
-            cursor.execute(f"""
-                INSERT INTO {self.table_name} 
-                (column_key, column_name, column_type, column_order, is_active, 
-                 is_required, dropdown_options, column_span, tab)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                column_key,
-                column_data['column_name'],
-                column_data.get('column_type', 'text'),
-                max_order + 1,
-                column_data.get('is_active', 1),
-                column_data.get('is_required', 0),
-                dropdown_options,
-                column_data.get('column_span', 1),  # column_span 추가
-                column_data.get('tab', 'additional')  # tab 필드 추가 (기본값: additional)
-            ))
+            if has_input_type:
+                cursor.execute(f"""
+                    INSERT INTO {self.table_name} 
+                    (column_key, column_name, column_type, column_order, is_active, 
+                     is_required, dropdown_options, column_span, tab, input_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    column_key,
+                    column_data['column_name'],
+                    column_data.get('column_type', 'text'),
+                    max_order + 1,
+                    column_data.get('is_active', 1),
+                    column_data.get('is_required', 0),
+                    dropdown_options,
+                    column_data.get('column_span', 1),  # column_span 추가
+                    column_data.get('tab', 'additional'),  # tab 필드 추가 (기본값: additional)
+                    input_type
+                ))
+            else:
+                cursor.execute(f"""
+                    INSERT INTO {self.table_name} 
+                    (column_key, column_name, column_type, column_order, is_active, 
+                     is_required, dropdown_options, column_span, tab)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    column_key,
+                    column_data['column_name'],
+                    column_data.get('column_type', 'text'),
+                    max_order + 1,
+                    column_data.get('is_active', 1),
+                    column_data.get('is_required', 0),
+                    dropdown_options,
+                    column_data.get('column_span', 1),  # column_span 추가
+                    column_data.get('tab', 'additional')  # tab 필드 추가 (기본값: additional)
+                ))
             
             column_id = cursor.lastrowid
             conn.commit()
@@ -308,8 +340,20 @@ class ColumnConfigService:
             update_fields = []
             update_values = []
             
+            # input_type이 지원되는지 확인
+            cursor.execute(f"PRAGMA table_info({self.table_name})")
+            columns = [col[1] for col in cursor.fetchall()]
+            has_input_type = 'input_type' in columns
+            
             allowed_fields = ['column_name', 'column_type', 'is_active', 
                              'is_required', 'dropdown_options', 'column_order', 'column_span', 'tab']
+            
+            # input_type이 있으면 허용 필드에 추가
+            if has_input_type:
+                allowed_fields.append('input_type')
+                # column_type이 table인 경우 자동으로 input_type 설정
+                if column_data.get('column_type') == 'table' and 'input_type' not in column_data:
+                    column_data['input_type'] = 'table'
             
             for field in allowed_fields:
                 if field in column_data:

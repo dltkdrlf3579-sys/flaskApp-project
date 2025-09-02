@@ -71,24 +71,22 @@
                 {% for item in fullprocesses %}
                 <tr>
                     <td class="checkbox-column">
-                        <input type="checkbox" class="accident-checkbox" value="{{ item.id }}" onchange="updateDeleteButton()">
+                        <input type="checkbox" class="accident-checkbox" value="{{ item.fullprocess_number }}" onchange="updateDeleteButton()">
                     </td>
                     <td class="fixed-col">
                         {{ item.no }}
                     </td>
                     <!-- 하드코딩된 컬럼들 -->
                     <td>
-                        <a href="javascript:void(0)" class="company-link" onclick="openFullProcessModal('{{ item.fullprocess_number }}')">{{ item.process_number or item.fullprocess_number or '-' }}</a>
+                        <a href="javascript:void(0)" class="company-link" onclick="openFullProcessModal('{{ item.fullprocess_number }}')">{{ item.fullprocess_number or '-' }}</a>
                     </td>
-                    <td>{{ item.start_date or item.created_at or '-' }}</td>
+                    <td>{{ item.created_at or '-' }}</td>
                     
                     {% for section in sections %}
                         {% for col in section_columns[section['section_key']] %}
-                            {% if col['column_key'] not in ['detailed_content', 'violation_content', 'fullprocess_number', 'registered_date'] %}
+                            {% if col['column_key'] not in ['detailed_content', 'violation_content', 'fullprocess_number', 'created_at', 'registered_date'] %}
                             <td>
-                                {% if col['column_key'] == 'fullprocess_number' %}
-                                    <a href="javascript:void(0)" class="company-link" onclick="openFullProcessModal('{{ item.fullprocess_number }}')">{{ item.fullprocess_number or '-' }}</a>
-                                {% elif col['column_type'] == 'dropdown' %}
+                                {% if col['column_type'] == 'dropdown' %}
                                     {% set field_label = col['column_key'] + '_label' %}
                                     {% if item.custom_mapped and col['column_key'] in item.custom_mapped %}
                                         {{ item.custom_mapped[col['column_key']] or '-' }}
@@ -826,12 +824,12 @@ function deleteSelected() {
         return;
     }
     
-    if (!confirm(`선택한 ${ids.length}개의 사고를 삭제하시겠습니까?\n(삭제된 항목은 관리자 메뉴에서 복구 가능합니다)`)) {
+    if (!confirm(`선택한 ${ids.length}개의 Full Process를 삭제하시겠습니까?\n(삭제된 항목은 관리자 메뉴에서 복구 가능합니다)`)) {
         return;
     }
     
     // 삭제 API 호출
-    fetch('/api/accidents/delete', {
+    fetch('/api/full-process/delete', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
