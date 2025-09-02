@@ -35,6 +35,7 @@
         <div class="section-content" id="{{ section.section_key|replace('_', '-') }}-content">
             <div class="info-table">
                 {% set all_columns = section_columns[section.section_key] %}
+                <!-- Debug: all_columns = {{ all_columns }} -->
                 <!-- detailed_content와 violation_content는 제외 -->
                 {% set columns = [] %}
                 {% for col in all_columns %}
@@ -42,6 +43,7 @@
                         {% set _ = columns.append(col) %}
                     {% endif %}
                 {% endfor %}
+                <!-- Debug: columns after filter = {{ columns }} -->
                 {% set columns_per_row = 4 %}
                 
                 <!-- batch 방식으로 4개씩 묶어서 처리 -->
@@ -55,8 +57,16 @@
                                 <label>{{ col.column_name }}</label>
                                 
                                 {% if col.column_key == 'fullprocess_number' %}
-                                    <!-- 발부번호는 자동 생성 -->
-                                    <div class="value">자동 생성됩니다</div>
+                                    <!-- 평가번호는 자동 생성 -->
+                                    <div class="value">{{ col.default_value if col.default_value else '자동 생성됩니다' }}</div>
+                                    
+                                {% elif col.column_key == 'created_at' %}
+                                    <!-- 등록일은 자동 생성 -->
+                                    <div class="value">{{ col.default_value if col.default_value else '자동 생성됩니다' }}</div>
+                                    
+                                {% elif col.is_readonly %}
+                                    <!-- 읽기 전용 필드 -->
+                                    <div class="value">{{ col.default_value if col.default_value else '-' }}</div>
                                     
                                 {% elif col.column_type == 'dropdown' %}
                                     <!-- 드롭다운 필드 -->
@@ -165,7 +175,7 @@
 
     <!-- 첨부파일 영역 (공통 컴포넌트) -->
     {% from 'includes/attachment_section.html' import render_attachment_section %}
-    {{ render_attachment_section([], 'safety_instruction') }}
+    {{ render_attachment_section([], 'safety_process') }}
 
     <!-- 저장 버튼 영역 -->
     <div class="save-section">
@@ -361,16 +371,23 @@ function openPopup(fieldKey) {
 }
 
 .info-row {
-    display: grid !important;
-    grid-template-columns: repeat(4, 1fr) !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
     gap: 16px !important;
     margin-bottom: 16px !important;
+    min-height: 80px !important;
+    visibility: visible !important;
+    opacity: 1 !important;
 }
 
 .info-cell {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    flex: 0 0 calc(25% - 12px) !important;
+    min-height: 60px !important;
+    visibility: visible !important;
+    opacity: 1 !important;
 }
 
 .info-cell label {

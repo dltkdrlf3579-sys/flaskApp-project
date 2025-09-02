@@ -221,7 +221,8 @@ class PartnerDataManager:
             CREATE TABLE IF NOT EXISTS departments_cache (
                 dept_code TEXT PRIMARY KEY,
                 dept_name TEXT,
-                parent_dept_code TEXT
+                parent_dept_code TEXT,
+                dept_level INTEGER
             )
         ''')
         
@@ -269,6 +270,44 @@ class PartnerDataManager:
             )
         ''')
         
+        # 안전지시서 캐시 테이블
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS safety_instructions_cache (
+                issue_number TEXT PRIMARY KEY,
+                issuer TEXT,
+                issuer_department TEXT,
+                classification TEXT,
+                employment_type TEXT,
+                primary_company TEXT,
+                primary_business_number TEXT,
+                subcontractor TEXT,
+                subcontractor_business_number TEXT,
+                disciplined_person TEXT,
+                disciplined_person_id TEXT,
+                gbm TEXT,
+                business_division TEXT,
+                team TEXT,
+                department TEXT,
+                work_grade TEXT,
+                violation_date TEXT,
+                discipline_date TEXT,
+                discipline_department TEXT,
+                discipline_type TEXT,
+                accident_type TEXT,
+                accident_grade TEXT,
+                safety_violation_grade TEXT,
+                violation_type TEXT,
+                access_ban_start_date TEXT,
+                access_ban_end_date TEXT,
+                period TEXT,
+                penalty_points TEXT,
+                violation_content TEXT,
+                detailed_content TEXT,
+                is_deleted INTEGER DEFAULT 0,
+                synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
         # permanent_workers 컬럼은 위에서 이미 처리됨 (중복 제거)
         
         # 마스터 테이블은 더 이상 사용하지 않음 (캐시 테이블만 사용)
@@ -298,8 +337,16 @@ class PartnerDataManager:
                 return False
             
             # DataFrame을 SQLite에 저장
-            conn = sqlite3.connect(self.local_db_path)
+            conn = sqlite3.connect(self.local_db_path, timeout=30.0)
             cursor = conn.cursor()
+            
+            # PRAGMA 설정 추가
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            
+            # 트랜잭션 시작
+            cursor.execute("BEGIN IMMEDIATE")
             
             # 기존 is_deleted 값을 보존하기 위해 먼저 백업
             cursor.execute("SELECT business_number, is_deleted FROM partners_cache WHERE is_deleted = 1")
@@ -308,19 +355,14 @@ class PartnerDataManager:
             # 기존 캐시 데이터 삭제
             cursor.execute("DELETE FROM partners_cache")
             
-            # DataFrame을 레코드 배열로 변환하여 SQLite에 삽입
+            # 배치 삽입을 위한 데이터 준비
+            rows = []
             for _, row in df.iterrows():
                 business_number = row.get('business_number', '')
                 # 이전에 삭제된 협력사면 is_deleted = 1 유지, 아니면 0
                 is_deleted_value = deleted_partners.get(business_number, 0)
                 
-                cursor.execute('''
-                    INSERT INTO partners_cache (
-                        business_number, company_name, partner_class, business_type_major,
-                        business_type_minor, hazard_work_flag, representative, address,
-                        average_age, annual_revenue, transaction_count, permanent_workers, is_deleted
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
+                rows.append((
                     business_number,
                     row.get('company_name', ''),
                     row.get('partner_class', ''),
@@ -335,6 +377,15 @@ class PartnerDataManager:
                     row.get('permanent_workers', None),  # 추가
                     is_deleted_value  # 기존 삭제 상태 유지
                 ))
+            
+            # 배치 삽입
+            cursor.executemany('''
+                INSERT INTO partners_cache (
+                    business_number, company_name, partner_class, business_type_major,
+                    business_type_minor, hazard_work_flag, representative, address,
+                    average_age, annual_revenue, transaction_count, permanent_workers, is_deleted
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', rows)
             
             conn.commit()
             conn.close()
@@ -433,8 +484,8 @@ class PartnerDataManager:
             return False
         
         try:
-            # config.ini에서 EMPLOYEE_QUERY 가져오기
-            query = self.config.get('MASTER_DATA_QUERIES', 'EMPLOYEE_QUERY')
+            # config.ini에서 EMPLOYEE_EXTERNAL_QUERY 가져오기 (외부 DB용)
+            query = self.config.get('MASTER_DATA_QUERIES', 'EMPLOYEE_EXTERNAL_QUERY')
             print(f"[INFO] 실행할 임직원 쿼리: {query[:100]}...")
             
             # 외부 DB에서 데이터 조회
@@ -483,8 +534,8 @@ class PartnerDataManager:
             return False
         
         try:
-            # config.ini에서 DEPARTMENT_QUERY 가져오기
-            query = self.config.get('MASTER_DATA_QUERIES', 'DEPARTMENT_QUERY')
+            # config.ini에서 DEPARTMENT_EXTERNAL_QUERY 가져오기 (외부 DB용)
+            query = self.config.get('MASTER_DATA_QUERIES', 'DEPARTMENT_EXTERNAL_QUERY')
             print(f"[INFO] 실행할 부서 쿼리: {query[:100]}...")
             
             # 외부 DB에서 데이터 조회
@@ -507,12 +558,13 @@ class PartnerDataManager:
             for _, row in df.iterrows():
                 cursor.execute('''
                     INSERT INTO departments_cache (
-                        dept_code, dept_name, parent_dept_code
-                    ) VALUES (?, ?, ?)
+                        dept_code, dept_name, parent_dept_code, dept_level
+                    ) VALUES (?, ?, ?, ?)
                 ''', (
                     row.get('dept_code', ''),
                     row.get('dept_name', ''),
-                    row.get('parent_dept_code', '')
+                    row.get('parent_dept_code', ''),
+                    row.get('dept_level', None)
                 ))
             
             conn.commit()
@@ -533,8 +585,8 @@ class PartnerDataManager:
             return False
         
         try:
-            # config.ini에서 BUILDING_QUERY 가져오기
-            query = self.config.get('MASTER_DATA_QUERIES', 'BUILDING_QUERY')
+            # config.ini에서 BUILDING_EXTERNAL_QUERY 가져오기 (외부 DB용)
+            query = self.config.get('MASTER_DATA_QUERIES', 'BUILDING_EXTERNAL_QUERY')
             print(f"[INFO] 실행할 건물 쿼리: {query[:100]}...")
             
             # 외부 DB에서 데이터 조회
@@ -584,8 +636,8 @@ class PartnerDataManager:
             return False
         
         try:
-            # config.ini에서 CONTRACTOR_QUERY 가져오기
-            query = self.config.get('MASTER_DATA_QUERIES', 'CONTRACTOR_QUERY')
+            # config.ini에서 CONTRACTOR_EXTERNAL_QUERY 가져오기 (외부 DB용)
+            query = self.config.get('MASTER_DATA_QUERIES', 'CONTRACTOR_EXTERNAL_QUERY')
             print(f"[INFO] 실행할 협력사 근로자 쿼리: {query[:100]}...")
             
             # 외부 DB에서 데이터 조회
@@ -625,6 +677,103 @@ class PartnerDataManager:
             
         except Exception as e:
             print(f"[ERROR] ❌ 협력사 근로자 데이터 동기화 실패: {e}")
+            traceback.print_exc()
+            return False
+    
+    def sync_safety_instructions_from_external_db(self):
+        """외부 DB에서 안전지시서 데이터 동기화"""
+        if not IQADB_AVAILABLE:
+            print("[ERROR] IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
+            return False
+        
+        try:
+            # config.ini에서 SAFETY_INSTRUCTIONS_EXTERNAL_QUERY 가져오기 (외부 DB용)
+            query = self.config.get('MASTER_DATA_QUERIES', 'SAFETY_INSTRUCTIONS_EXTERNAL_QUERY')
+            print(f"[INFO] 실행할 안전지시서 쿼리: {query[:100]}...")
+            
+            # 외부 DB에서 데이터 조회
+            print("[INFO] IQADB_CONNECT310을 사용하여 안전지시서 데이터 조회 시작...")
+            df = execute_SQL(query)
+            print(f"[INFO] 안전지시서 데이터 조회 완료: {len(df)} 건")
+            
+            if df.empty:
+                print("[WARNING] 조회된 안전지시서 데이터가 없습니다.")
+                return False
+            
+            # SQLite에 저장
+            conn = sqlite3.connect(self.local_db_path, timeout=30.0)
+            cursor = conn.cursor()
+            
+            # PRAGMA 설정
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            
+            # 트랜잭션 시작
+            cursor.execute("BEGIN IMMEDIATE")
+            
+            # 기존 캐시 데이터 삭제
+            cursor.execute("DELETE FROM safety_instructions_cache")
+            
+            # 배치 삽입을 위한 데이터 준비
+            rows = []
+            for _, row in df.iterrows():
+                rows.append((
+                    row.get('issue_number', ''),
+                    row.get('issuer', ''),
+                    row.get('issuer_department', ''),
+                    row.get('classification', ''),
+                    row.get('employment_type', ''),
+                    row.get('primary_company', ''),
+                    row.get('primary_business_number', ''),
+                    row.get('subcontractor', ''),
+                    row.get('subcontractor_business_number', ''),
+                    row.get('disciplined_person', ''),
+                    row.get('disciplined_person_id', ''),
+                    row.get('gbm', ''),
+                    row.get('business_division', ''),
+                    row.get('team', ''),
+                    row.get('department', ''),
+                    row.get('work_grade', ''),
+                    row.get('violation_date', ''),
+                    row.get('discipline_date', ''),
+                    row.get('discipline_department', ''),
+                    row.get('discipline_type', ''),
+                    row.get('accident_type', ''),
+                    row.get('accident_grade', ''),
+                    row.get('safety_violation_grade', ''),
+                    row.get('violation_type', ''),
+                    row.get('access_ban_start_date', ''),
+                    row.get('access_ban_end_date', ''),
+                    row.get('period', ''),
+                    row.get('penalty_points', ''),
+                    row.get('violation_content', ''),
+                    row.get('detailed_content', ''),
+                    0  # is_deleted = 0
+                ))
+            
+            # 배치 삽입
+            cursor.executemany('''
+                INSERT INTO safety_instructions_cache (
+                    issue_number, issuer, issuer_department, classification,
+                    employment_type, primary_company, primary_business_number,
+                    subcontractor, subcontractor_business_number, disciplined_person,
+                    disciplined_person_id, gbm, business_division, team, department,
+                    work_grade, violation_date, discipline_date, discipline_department,
+                    discipline_type, accident_type, accident_grade, safety_violation_grade,
+                    violation_type, access_ban_start_date, access_ban_end_date, period,
+                    penalty_points, violation_content, detailed_content, is_deleted
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', rows)
+            
+            conn.commit()
+            conn.close()
+            
+            print(f"[SUCCESS] ✅ 안전지시서 데이터 {len(df)}건 동기화 완료")
+            return True
+            
+        except Exception as e:
+            print(f"[ERROR] ❌ 안전지시서 데이터 동기화 실패: {e}")
             traceback.print_exc()
             return False
     
@@ -687,8 +836,8 @@ class PartnerDataManager:
         count_query = query.replace("SELECT *", "SELECT COUNT(*)")
         total_count = conn.execute(count_query, params).fetchone()[0]
         
-        # 페이징 적용 - 상시근로자 수 큰 순으로 정렬
-        query += " ORDER BY permanent_workers DESC NULLS LAST, company_name LIMIT ? OFFSET ?"
+        # 페이징 적용 - 상시근로자 수 큰 순으로 정렬 (SQLite 호환)
+        query += " ORDER BY (permanent_workers IS NULL), permanent_workers DESC, company_name LIMIT ? OFFSET ?"
         params.extend([per_page, (page - 1) * per_page])
         
         partners = conn.execute(query, params).fetchall()
@@ -703,9 +852,14 @@ class DatabaseConfig:
         self.local_db_path = config.get('DATABASE', 'LOCAL_DB_PATH', fallback='portal.db')
         self.external_db_enabled = config.getboolean('DATABASE', 'EXTERNAL_DB_ENABLED', fallback=False)
     
-    def get_sqlite_connection(self):
+    def get_sqlite_connection(self, timeout=10.0):
         """SQLite 연결 반환"""
-        return sqlite3.connect(self.local_db_path)
+        conn = sqlite3.connect(self.local_db_path, timeout=timeout)
+        cur = conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=5000")
+        cur.execute("PRAGMA synchronous=NORMAL")
+        return conn
 
 # 전역 인스턴스
 db_config = DatabaseConfig()
@@ -766,30 +920,36 @@ def maybe_daily_sync(force=False):
         except Exception as e:
             print(f"[ERROR] 사고 동기화 실패: {e}")
         
-        # 다른 마스터 데이터 동기화
+        # 다른 마스터 데이터 동기화 (외부 쿼리 존재 여부로 체크)
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'EMPLOYEE_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'EMPLOYEE_EXTERNAL_QUERY'):
                 partner_manager.sync_employees_from_external_db()
         except Exception as e:
             print(f"[ERROR] 임직원 동기화 실패: {e}")
             
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'DEPARTMENT_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'DEPARTMENT_EXTERNAL_QUERY'):
                 partner_manager.sync_departments_from_external_db()
         except Exception as e:
             print(f"[ERROR] 부서 동기화 실패: {e}")
             
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'BUILDING_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'BUILDING_EXTERNAL_QUERY'):
                 partner_manager.sync_buildings_from_external_db()
         except Exception as e:
             print(f"[ERROR] 건물 동기화 실패: {e}")
             
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'CONTRACTOR_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'CONTRACTOR_EXTERNAL_QUERY'):
                 partner_manager.sync_contractors_from_external_db()
         except Exception as e:
             print(f"[ERROR] 협력사 근로자 동기화 실패: {e}")
+            
+        try:
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'SAFETY_INSTRUCTIONS_EXTERNAL_QUERY'):
+                partner_manager.sync_safety_instructions_from_external_db()
+        except Exception as e:
+            print(f"[ERROR] 안전지시서 동기화 실패: {e}")
         
         # 동기화 성공 시 마지막 동기화 시간 업데이트
         if success:

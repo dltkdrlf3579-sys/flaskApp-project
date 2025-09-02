@@ -5,10 +5,26 @@ def follow_sop_route():
     from common_mapping import smart_apply_mappings
     import math
     import sqlite3
+    from section_service import SectionConfigService
     
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+    
+    # 섹션 서비스 초기화
+    section_service = SectionConfigService('follow_sop', DB_PATH)
+    
+    # 기본 섹션 확인 및 생성
+    cursor.execute("SELECT COUNT(*) FROM follow_sop_sections WHERE section_key = 'basic_info'")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("""
+            INSERT INTO follow_sop_sections (section_key, section_name, section_order, is_active)
+            VALUES ('basic_info', '기본정보', 1, 1)
+        """)
+        conn.commit()
+    
+    # 섹션 정보 가져오기
+    sections = section_service.get_sections()
     
     # 동적 컬럼 정보 가져오기
     cursor.execute("""
@@ -18,6 +34,20 @@ def follow_sop_route():
     """)
     dynamic_columns_rows = cursor.fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    
+    # 기본정보 필드 추가 (하드코딩)
+    basic_fields = [
+        {'column_name': 'work_req_no', 'column_label': '점검번호', 'column_type': 'text', 'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info'},
+        {'column_name': 'created_at', 'column_label': '등록일', 'column_type': 'datetime', 'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info'}
+    ]
+    
+    # 섹션별로 컬럼 분류
+    section_columns = {'basic_info': basic_fields}
+    for section in sections:
+        if section['section_key'] != 'basic_info':
+            section_columns[section['section_key']] = [
+                col for col in dynamic_columns if col.get('tab') == section['section_key']
+            ]
     
     # 페이지네이션 처리
     page = request.args.get('page', 1, type=int)
@@ -37,7 +67,8 @@ def follow_sop_route():
             where_clauses.append(f"s.{field} LIKE ?")
             query_params.append(f"%{value}%")
     
-    # WHERE 절 구성
+    # WHERE 절 구성 (삭제되지 않은 항목만)
+    where_clauses.insert(0, "(s.is_deleted = 0 OR s.is_deleted IS NULL)")
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
     
     # 전체 건수 조회
@@ -63,18 +94,26 @@ def follow_sop_route():
     cursor.execute(query, query_params)
     
     items = []
-    for row in cursor.fetchall():
+    for idx, row in enumerate(cursor.fetchall()):
         item = dict(row)
-        # custom_data JSON 파싱
+        item['no'] = total_count - ((page - 1) * per_page) - idx  # 번호 추가
+        
+        # custom_data JSON 파싱 및 플래튼
         if item.get('custom_data'):
             try:
                 import json
-                item['custom_data'] = json.loads(item['custom_data'])
-            except:
-                item['custom_data'] = {}
+                custom_data = json.loads(item['custom_data'])
+                item.update(custom_data)  # 최상위 레벨에 병합
+            except Exception as e:
+                logging.error(f"custom_data 파싱 오류: {e}")
         items.append(item)
     
     conn.close()
+    
+    # smart_apply_mappings 적용 (드롭다운 코드를 라벨로 변환)
+    if items:
+        from common_mapping import smart_apply_mappings
+        items = smart_apply_mappings(items, 'follow_sop', dynamic_columns, DB_PATH)
     
     # 페이지네이션 객체 생성
     class Pagination:
@@ -118,7 +157,7 @@ def follow_sop_route():
     pagination = Pagination(page=page, per_page=per_page, total_count=total_count)
     
     return render_template('follow-sop.html',
-                         items=items,
+                         followsops=items,  # Follow SOP 전용 변수명
                          dynamic_columns=dynamic_columns,
                          sections=sections,
                          section_columns=section_columns,
@@ -130,13 +169,29 @@ def follow_sop_route():
 def follow_sop_register():
     """Follow SOP 등록 페이지"""
     import sqlite3
+    from timezone_config import get_korean_time_str
     logging.info("Follow SOP 등록 페이지 접근")
     
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
-    # 동적 컬럼 설정 가져오기 (safety_instruction과 동일한 패턴)
+    # 섹션 정보 가져오기
+    from section_service import SectionConfigService
+    section_service = SectionConfigService('follow_sop', DB_PATH)
+    
+    # 기본 섹션 확인 및 생성
+    cursor.execute("SELECT COUNT(*) FROM follow_sop_sections WHERE section_key = 'basic_info'")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("""
+            INSERT INTO follow_sop_sections (section_key, section_name, section_order, is_active)
+            VALUES ('basic_info', '기본정보', 1, 1)
+        """)
+        conn.commit()
+    
+    sections = section_service.get_sections()
+    
+    # 동적 컬럼 설정 가져오기
     cursor.execute("""
         SELECT * FROM follow_sop_column_config 
         WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
@@ -145,17 +200,30 @@ def follow_sop_register():
     dynamic_columns_rows = cursor.fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
     
-    # 섹션 정보 가져오기
-    from section_service import SectionConfigService
-    section_service = SectionConfigService('follow_sop', DB_PATH)
-    sections = section_service.get_sections()
+    # 기본정보 필드 추가 (하드코딩) - 자동 생성값 포함
+    now_str = get_korean_time_str('%Y%m%d%H%M%S')
+    work_req_no = f"SOP{now_str}"
+    created_at = get_korean_time_str('%Y-%m-%d %H:%M:%S')
     
-    # 섹션별로 컬럼 분류 (safety_instruction과 동일한 패턴)
-    section_columns = {}
+    basic_fields = [
+        {'column_key': 'work_req_no', 'column_name': '점검번호', 'column_type': 'text', 
+         'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info', 'default_value': work_req_no},
+        {'column_key': 'created_at', 'column_name': '등록일', 'column_type': 'datetime', 
+         'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info', 'default_value': created_at}
+    ]
+    
+    # 섹션별로 컬럼 분류
+    section_columns = {'basic_info': basic_fields}
     for section in sections:
-        section_columns[section['section_key']] = [
-            col for col in dynamic_columns if col.get('tab') == section['section_key']
-        ]
+        if section['section_key'] != 'basic_info':
+            section_columns[section['section_key']] = [
+                col for col in dynamic_columns if col.get('tab') == section['section_key']
+            ]
+    
+    # 디버깅용 로그
+    logging.info(f"Follow SOP Register - sections: {sections}")
+    logging.info(f"Follow SOP Register - section_columns: {section_columns}")
+    logging.info(f"Follow SOP Register - basic_fields: {basic_fields}")
     
     conn.close()
     
@@ -198,13 +266,43 @@ def follow_sop_detail(work_req_no):
     if sop.get('custom_data'):
         try:
             custom_data = json.loads(sop['custom_data'])
+            # sop 딕셔너리에 custom_data 병합 (중요!)
+            sop.update(custom_data)
         except:
             custom_data = {}
     
     # 섹션별 컬럼 정보 가져오기
     from section_service import SectionConfigService
     section_service = SectionConfigService('follow_sop', DB_PATH)
-    sections = section_service.get_sections_with_columns()
+    sections = section_service.get_sections()
+    
+    # 동적 컬럼 설정 가져오기
+    cursor.execute("""
+        SELECT * FROM follow_sop_column_config 
+        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
+        ORDER BY column_order
+    """)
+    dynamic_columns = [dict(row) for row in cursor.fetchall()]
+    
+    # 기본정보 필드 추가 (하드코딩)
+    basic_fields = [
+        {'column_key': 'work_req_no', 'column_name': '점검번호', 'column_type': 'text', 
+         'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info'},
+        {'column_key': 'created_at', 'column_name': '등록일', 'column_type': 'datetime', 
+         'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info'}
+    ]
+    
+    # 섹션별로 컬럼 분류
+    section_columns = {'basic_info': basic_fields}
+    for section in sections:
+        if section['section_key'] != 'basic_info':
+            section_columns[section['section_key']] = [
+                col for col in dynamic_columns if col.get('tab') == section['section_key']
+            ]
+    
+    # 디버깅용 로그
+    logging.info(f"Follow SOP Detail - sections: {sections}")
+    logging.info(f"Follow SOP Detail - section_columns: {section_columns}")
     
     conn.close()
     
@@ -215,6 +313,7 @@ def follow_sop_detail(work_req_no):
                          sop=sop,
                          custom_data=custom_data,
                          sections=sections,
+                         section_columns=section_columns,
                          is_popup=is_popup,
                          menu=MENU_CONFIG)
 
@@ -225,14 +324,26 @@ def register_follow_sop():
     try:
         # safety-instruction과 동일한 방식으로 form data 처리
         import json
+        from timezone_config import get_korean_time_str
         data = json.loads(request.form.get('data', '{}'))
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # work_req_no 생성 (자동 생성 로직 필요)
-        import datetime
-        now = datetime.datetime.now()
-        work_req_no = f"SOP{now.strftime('%Y%m%d%H%M%S')}"
+        # work_req_no 생성 (Korean time 사용)
+        work_req_no = f"SOP{get_korean_time_str('%Y%m%d%H%M%S')}"
+        
+        # follow_sop 테이블이 없으면 생성
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS follow_sop (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                work_req_no TEXT UNIQUE NOT NULL,
+                custom_data TEXT,
+                created_at TEXT,
+                created_by TEXT,
+                updated_by TEXT,
+                is_deleted INTEGER DEFAULT 0
+            )
+        """)
         
         # custom_data 처리
         custom_data = data.get('custom_data', {})
@@ -242,11 +353,14 @@ def register_follow_sop():
         else:
             custom_data_json = custom_data
         
+        # 한국 시간으로 created_at 설정
+        created_at = get_korean_time_str('%Y-%m-%d %H:%M:%S')
+        
         # Follow SOP 등록
         cursor.execute("""
             INSERT INTO follow_sop (work_req_no, custom_data, created_at, created_by)
-            VALUES (?, ?, datetime('now'), ?)
-        """, (work_req_no, custom_data_json, session.get('user_id', 'system')))
+            VALUES (?, ?, ?, ?)
+        """, (work_req_no, custom_data_json, created_at, session.get('user_id', 'system')))
         
         conn.commit()
         
@@ -270,29 +384,35 @@ def update_follow_sop():
     """Follow SOP 수정"""
     conn = None
     try:
-        # safety-instruction과 동일한 방식으로 form data 처리
         import json
-        data = json.loads(request.form.get('data', '{}'))
-        work_req_no = data.get('work_req_no')
+        
+        # safety-instruction과 동일한 방식으로 FormData 받기
+        work_req_no = request.form.get('work_req_no')
+        detailed_content = request.form.get('detailed_content', '')
+        custom_data = request.form.get('custom_data', '{}')
         
         if not work_req_no:
-            return jsonify({'success': False, 'message': '작업요청번호가 필요합니다.'}), 400
+            return jsonify({'success': False, 'message': '점검번호가 필요합니다.'}), 400
+        
+        # JSON 파싱
+        try:
+            custom_data_dict = json.loads(custom_data) if custom_data != '{}' else {}
+        except ValueError:
+            return jsonify({"success": False, "message": "잘못된 데이터 형식입니다."}), 400
         
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # custom_data 처리
-        custom_data = data.get('custom_data', {})
-        if isinstance(custom_data, dict):
-            import json
-            custom_data_json = json.dumps(custom_data, ensure_ascii=False)
-        else:
-            custom_data_json = custom_data
+        # custom_data에 detailed_content 포함
+        if detailed_content:
+            custom_data_dict['detailed_content'] = detailed_content
+        
+        custom_data_json = json.dumps(custom_data_dict, ensure_ascii=False)
         
         # Follow SOP 업데이트
         cursor.execute("""
             UPDATE follow_sop 
-            SET custom_data = ?, updated_at = datetime('now'), updated_by = ?
+            SET custom_data = ?, updated_by = ?
             WHERE work_req_no = ?
         """, (custom_data_json, session.get('user_id', 'system'), work_req_no))
         
@@ -319,10 +439,26 @@ def full_process_route():
     from common_mapping import smart_apply_mappings
     import math
     import sqlite3
+    from section_service import SectionConfigService
     
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+    
+    # 섹션 서비스 초기화
+    section_service = SectionConfigService('full_process', DB_PATH)
+    
+    # 기본 섹션 확인 및 생성
+    cursor.execute("SELECT COUNT(*) FROM full_process_sections WHERE section_key = 'basic_info'")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("""
+            INSERT INTO full_process_sections (section_key, section_name, section_order, is_active)
+            VALUES ('basic_info', '기본정보', 1, 1)
+        """)
+        conn.commit()
+    
+    # 섹션 정보 가져오기
+    sections = section_service.get_sections()
     
     # 동적 컬럼 정보 가져오기
     cursor.execute("""
@@ -332,6 +468,20 @@ def full_process_route():
     """)
     dynamic_columns_rows = cursor.fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    
+    # 기본정보 필드 추가 (하드코딩)
+    basic_fields = [
+        {'column_name': 'fullprocess_number', 'column_label': '평가번호', 'column_type': 'text', 'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info'},
+        {'column_name': 'created_at', 'column_label': '등록일', 'column_type': 'datetime', 'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info'}
+    ]
+    
+    # 섹션별로 컬럼 분류
+    section_columns = {'basic_info': basic_fields}
+    for section in sections:
+        if section['section_key'] != 'basic_info':
+            section_columns[section['section_key']] = [
+                col for col in dynamic_columns if col.get('tab') == section['section_key']
+            ]
     
     # 페이지네이션 처리
     page = request.args.get('page', 1, type=int)
@@ -351,7 +501,8 @@ def full_process_route():
             where_clauses.append(f"p.{field} LIKE ?")
             query_params.append(f"%{value}%")
     
-    # WHERE 절 구성
+    # WHERE 절 구성 (삭제되지 않은 항목만)
+    where_clauses.insert(0, "(p.is_deleted = 0 OR p.is_deleted IS NULL)")
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
     
     # 전체 건수 조회
@@ -377,18 +528,26 @@ def full_process_route():
     cursor.execute(query, query_params)
     
     items = []
-    for row in cursor.fetchall():
+    for idx, row in enumerate(cursor.fetchall()):
         item = dict(row)
-        # custom_data JSON 파싱
+        item['no'] = total_count - ((page - 1) * per_page) - idx  # 번호 추가
+        
+        # custom_data JSON 파싱 및 플래튼
         if item.get('custom_data'):
             try:
                 import json
-                item['custom_data'] = json.loads(item['custom_data'])
-            except:
-                item['custom_data'] = {}
+                custom_data = json.loads(item['custom_data'])
+                item.update(custom_data)  # 최상위 레벨에 병합
+            except Exception as e:
+                logging.error(f"custom_data 파싱 오류: {e}")
         items.append(item)
     
     conn.close()
+    
+    # smart_apply_mappings 적용 (드롭다운 코드를 라벨로 변환)
+    if items:
+        from common_mapping import smart_apply_mappings
+        items = smart_apply_mappings(items, 'full_process', dynamic_columns, DB_PATH)
     
     # 페이지네이션 객체 생성
     class Pagination:
@@ -432,8 +591,10 @@ def full_process_route():
     pagination = Pagination(page=page, per_page=per_page, total_count=total_count)
     
     return render_template('full-process.html',
-                         items=items,
+                         fullprocesses=items,  # Full Process 전용 변수명
                          dynamic_columns=dynamic_columns,
+                         sections=sections,
+                         section_columns=section_columns,
                          pagination=pagination,
                          search_params=search_params,
                          menu=MENU_CONFIG)
@@ -442,13 +603,30 @@ def full_process_route():
 def full_process_register():
     """Full Process 등록 페이지"""
     import sqlite3
+    from timezone_config import get_korean_time_str
     logging.info("Full Process 등록 페이지 접근")
     
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
-    # 동적 컬럼 설정 가져오기 (safety_instruction과 동일한 패턴)
+    # 섹션 서비스 초기화
+    from section_service import SectionConfigService
+    section_service = SectionConfigService('full_process', DB_PATH)
+    
+    # 기본 섹션 확인 및 생성
+    cursor.execute("SELECT COUNT(*) FROM full_process_sections WHERE section_key = 'basic_info'")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("""
+            INSERT INTO full_process_sections (section_key, section_name, section_order, is_active)
+            VALUES ('basic_info', '기본정보', 1, 1)
+        """)
+        conn.commit()
+    
+    # 섹션 정보 가져오기
+    sections = section_service.get_sections()
+    
+    # 동적 컬럼 설정 가져오기
     cursor.execute("""
         SELECT * FROM full_process_column_config 
         WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
@@ -457,17 +635,25 @@ def full_process_register():
     dynamic_columns_rows = cursor.fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
     
-    # 섹션 정보 가져오기
-    from section_service import SectionConfigService
-    section_service = SectionConfigService('full_process', DB_PATH)
-    sections = section_service.get_sections()
+    # 기본정보 필드 추가 (하드코딩) - 자동 생성값 포함
+    now_str = get_korean_time_str('%Y%m%d%H%M%S')
+    fullprocess_number = f"FP{now_str}"
+    created_at = get_korean_time_str('%Y-%m-%d %H:%M:%S')
     
-    # 섹션별로 컬럼 분류 (safety_instruction과 동일한 패턴)
-    section_columns = {}
+    basic_fields = [
+        {'column_key': 'fullprocess_number', 'column_name': '평가번호', 'column_type': 'text', 
+         'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info', 'default_value': fullprocess_number},
+        {'column_key': 'created_at', 'column_name': '등록일', 'column_type': 'datetime', 
+         'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info', 'default_value': created_at}
+    ]
+    
+    # 섹션별로 컬럼 분류
+    section_columns = {'basic_info': basic_fields}
     for section in sections:
-        section_columns[section['section_key']] = [
-            col for col in dynamic_columns if col.get('tab') == section['section_key']
-        ]
+        if section['section_key'] != 'basic_info':
+            section_columns[section['section_key']] = [
+                col for col in dynamic_columns if col.get('tab') == section['section_key']
+            ]
     
     conn.close()
     
@@ -510,13 +696,39 @@ def full_process_detail(fullprocess_number):
     if process.get('custom_data'):
         try:
             custom_data = json.loads(process['custom_data'])
+            # process 딕셔너리에 custom_data 병합 (중요!)
+            process.update(custom_data)
         except:
             custom_data = {}
     
     # 섹션별 컬럼 정보 가져오기
     from section_service import SectionConfigService
     section_service = SectionConfigService('full_process', DB_PATH)
-    sections = section_service.get_sections_with_columns()
+    sections = section_service.get_sections()
+    
+    # 동적 컬럼 설정 가져오기
+    cursor.execute("""
+        SELECT * FROM full_process_column_config 
+        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
+        ORDER BY column_order
+    """)
+    dynamic_columns = [dict(row) for row in cursor.fetchall()]
+    
+    # 기본정보 필드 추가 (하드코딩)
+    basic_fields = [
+        {'column_key': 'fullprocess_number', 'column_name': '평가번호', 'column_type': 'text', 
+         'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info'},
+        {'column_key': 'created_at', 'column_name': '등록일', 'column_type': 'datetime', 
+         'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info'}
+    ]
+    
+    # 섹션별로 컬럼 분류
+    section_columns = {'basic_info': basic_fields}
+    for section in sections:
+        if section['section_key'] != 'basic_info':
+            section_columns[section['section_key']] = [
+                col for col in dynamic_columns if col.get('tab') == section['section_key']
+            ]
     
     conn.close()
     
@@ -527,6 +739,7 @@ def full_process_detail(fullprocess_number):
                          process=process,
                          custom_data=custom_data,
                          sections=sections,
+                         section_columns=section_columns,
                          is_popup=is_popup,
                          menu=MENU_CONFIG)
 
@@ -537,14 +750,26 @@ def register_full_process():
     try:
         # safety-instruction과 동일한 방식으로 form data 처리
         import json
+        from timezone_config import get_korean_time_str
         data = json.loads(request.form.get('data', '{}'))
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # fullprocess_number 생성 (자동 생성 로직 필요)
-        import datetime
-        now = datetime.datetime.now()
-        fullprocess_number = f"FP{now.strftime('%Y%m%d%H%M%S')}"
+        # fullprocess_number 생성 (Korean time 사용)
+        fullprocess_number = f"FP{get_korean_time_str('%Y%m%d%H%M%S')}"
+        
+        # full_process 테이블이 없으면 생성
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS full_process (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fullprocess_number TEXT UNIQUE NOT NULL,
+                custom_data TEXT,
+                created_at TEXT,
+                created_by TEXT,
+                updated_by TEXT,
+                is_deleted INTEGER DEFAULT 0
+            )
+        """)
         
         # custom_data 처리
         custom_data = data.get('custom_data', {})
@@ -554,11 +779,14 @@ def register_full_process():
         else:
             custom_data_json = custom_data
         
+        # 한국 시간으로 created_at 설정
+        created_at = get_korean_time_str('%Y-%m-%d %H:%M:%S')
+        
         # Full Process 등록
         cursor.execute("""
             INSERT INTO full_process (fullprocess_number, custom_data, created_at, created_by)
-            VALUES (?, ?, datetime('now'), ?)
-        """, (fullprocess_number, custom_data_json, session.get('user_id', 'system')))
+            VALUES (?, ?, ?, ?)
+        """, (fullprocess_number, custom_data_json, created_at, session.get('user_id', 'system')))
         
         conn.commit()
         
@@ -582,29 +810,35 @@ def update_full_process():
     """Full Process 수정"""
     conn = None
     try:
-        # safety-instruction과 동일한 방식으로 form data 처리
         import json
-        data = json.loads(request.form.get('data', '{}'))
-        fullprocess_number = data.get('fullprocess_number')
+        
+        # safety-instruction과 동일한 방식으로 FormData 받기
+        fullprocess_number = request.form.get('fullprocess_number')
+        detailed_content = request.form.get('detailed_content', '')
+        custom_data = request.form.get('custom_data', '{}')
         
         if not fullprocess_number:
             return jsonify({'success': False, 'message': 'Process 번호가 필요합니다.'}), 400
         
+        # JSON 파싱
+        try:
+            custom_data_dict = json.loads(custom_data) if custom_data != '{}' else {}
+        except ValueError:
+            return jsonify({"success": False, "message": "잘못된 데이터 형식입니다."}), 400
+        
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # custom_data 처리
-        custom_data = data.get('custom_data', {})
-        if isinstance(custom_data, dict):
-            import json
-            custom_data_json = json.dumps(custom_data, ensure_ascii=False)
-        else:
-            custom_data_json = custom_data
+        # custom_data에 detailed_content 포함
+        if detailed_content:
+            custom_data_dict['detailed_content'] = detailed_content
+        
+        custom_data_json = json.dumps(custom_data_dict, ensure_ascii=False)
         
         # Full Process 업데이트
         cursor.execute("""
             UPDATE full_process 
-            SET custom_data = ?, updated_at = datetime('now'), updated_by = ?
+            SET custom_data = ?, updated_by = ?
             WHERE fullprocess_number = ?
         """, (custom_data_json, session.get('user_id', 'system'), fullprocess_number))
         

@@ -17,11 +17,26 @@ class SectionConfigService:
         cursor = conn.cursor()
         
         try:
-            cursor.execute("""
-                SELECT * FROM section_config 
-                WHERE board_type = ? AND is_active = 1 
-                ORDER BY section_order
-            """, (self.board_type,))
+            # follow_sop과 full_process는 별도 테이블 사용
+            if self.board_type == 'follow_sop':
+                cursor.execute("""
+                    SELECT * FROM follow_sop_sections 
+                    WHERE is_active = 1 
+                    ORDER BY section_order
+                """)
+            elif self.board_type == 'full_process':
+                cursor.execute("""
+                    SELECT * FROM full_process_sections 
+                    WHERE is_active = 1 
+                    ORDER BY section_order
+                """)
+            else:
+                # safety_instruction 등은 기존 section_config 테이블 사용
+                cursor.execute("""
+                    SELECT * FROM section_config 
+                    WHERE board_type = ? AND is_active = 1 
+                    ORDER BY section_order
+                """, (self.board_type,))
             
             sections = [dict(row) for row in cursor.fetchall()]
             return sections

@@ -326,6 +326,17 @@ def init_db():
             )
         ''')
         
+        # Follow SOP sections 테이블 생성
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS follow_sop_sections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                section_key TEXT UNIQUE,
+                section_name TEXT,
+                section_order INTEGER,
+                is_active INTEGER DEFAULT 1
+            )
+        ''')
+        
         # Full Process 데이터 테이블 (동적 컬럼 데이터 저장용)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS full_process (
@@ -335,6 +346,17 @@ def init_db():
                 created_by TEXT,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_by TEXT
+            )
+        ''')
+        
+        # Full Process sections 테이블 생성
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS full_process_sections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                section_key TEXT UNIQUE,
+                section_name TEXT,
+                section_order INTEGER,
+                is_active INTEGER DEFAULT 1
             )
         ''')
     except Exception as _e:
@@ -386,7 +408,7 @@ def init_db():
         
         # 3. 임직원 데이터 동기화
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'EMPLOYEE_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'EMPLOYEE_EXTERNAL_QUERY'):
                 logging.info("임직원 데이터 동기화 시작...")
                 if partner_manager.sync_employees_from_external_db():
                     logging.info("임직원 데이터 동기화 완료")
@@ -397,7 +419,7 @@ def init_db():
         
         # 4. 부서 데이터 동기화
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'DEPARTMENT_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'DEPARTMENT_EXTERNAL_QUERY'):
                 logging.info("부서 데이터 동기화 시작...")
                 if partner_manager.sync_departments_from_external_db():
                     logging.info("부서 데이터 동기화 완료")
@@ -408,7 +430,7 @@ def init_db():
         
         # 5. 건물 데이터 동기화
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'BUILDING_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'BUILDING_EXTERNAL_QUERY'):
                 logging.info("건물 데이터 동기화 시작...")
                 if partner_manager.sync_buildings_from_external_db():
                     logging.info("건물 데이터 동기화 완료")
@@ -419,7 +441,7 @@ def init_db():
         
         # 6. 협력사 근로자 데이터 동기화
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'CONTRACTOR_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'CONTRACTOR_EXTERNAL_QUERY'):
                 logging.info("협력사 근로자 데이터 동기화 시작...")
                 if partner_manager.sync_contractors_from_external_db():
                     logging.info("협력사 근로자 데이터 동기화 완료")
@@ -477,7 +499,7 @@ def sync_all_master_data():
         
         # 3. 임직원 데이터 동기화
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'EMPLOYEE_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'EMPLOYEE_EXTERNAL_QUERY'):
                 logging.info("임직원 데이터 동기화 중...")
                 sync_results['임직원'] = partner_manager.sync_employees_from_external_db()
         except Exception as e:
@@ -485,7 +507,7 @@ def sync_all_master_data():
         
         # 4. 부서 데이터 동기화
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'DEPARTMENT_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'DEPARTMENT_EXTERNAL_QUERY'):
                 logging.info("부서 데이터 동기화 중...")
                 sync_results['부서'] = partner_manager.sync_departments_from_external_db()
         except Exception as e:
@@ -493,7 +515,7 @@ def sync_all_master_data():
         
         # 5. 건물 데이터 동기화
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'BUILDING_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'BUILDING_EXTERNAL_QUERY'):
                 logging.info("건물 데이터 동기화 중...")
                 sync_results['건물'] = partner_manager.sync_buildings_from_external_db()
         except Exception as e:
@@ -501,7 +523,7 @@ def sync_all_master_data():
         
         # 6. 협력사 근로자 데이터 동기화
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'CONTRACTOR_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'CONTRACTOR_EXTERNAL_QUERY'):
                 logging.info("협력사 근로자 데이터 동기화 중...")
                 sync_results['협력사 근로자'] = partner_manager.sync_contractors_from_external_db()
         except Exception as e:
@@ -525,19 +547,6 @@ def run_scheduler():
     while True:
         schedule.run_pending()
         time.sleep(60)  # 1분마다 스케줄 체크
-
-# 스케줄 설정 (매일 오전 7시)
-schedule.every().day.at("07:00").do(sync_all_master_data)
-
-# 스케줄러를 별도 스레드에서 실행
-scheduler_thread = threading.Thread(target=run_scheduler)
-scheduler_thread.daemon = True  # 메인 프로그램 종료 시 함께 종료
-scheduler_thread.start()
-
-logging.info("=" * 50)
-logging.info("자동 동기화 스케줄러 시작")
-logging.info("매일 오전 7시에 자동으로 데이터를 동기화합니다.")
-logging.info("=" * 50)
 
 def init_sample_data():
     """외부 DB 없을 때 샘플 데이터 생성"""
@@ -670,11 +679,6 @@ def init_sample_data():
     conn.close()
     logging.info("샘플 데이터 생성 완료")
 
-@app.before_request
-def before_request():
-    # 데이터 복구 페이지는 init_db 건너뛰기 (동기화 방지)
-    if request.path != '/data-recovery':
-        init_db()
 
 @app.route("/api/test-simple")
 def test_simple():
@@ -1050,10 +1054,10 @@ def safety_instruction_route():
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     
-    # 섹션 정보 가져오기
+    # 섹션 정보 가져오기 (safety_instruction 전용)
     sections = conn.execute("""
         SELECT * FROM section_config 
-        WHERE is_active = 1 
+        WHERE board_type = 'safety_instruction' AND is_active = 1 
         ORDER BY section_order
     """).fetchall()
     sections = [dict(row) for row in sections]
@@ -1083,11 +1087,11 @@ def safety_instruction_route():
         if col['column_type'] == 'dropdown':
             col['code_mapping'] = get_dropdown_options_for_display('safety_instruction', col['column_key'])
     
-    # 실제 DB에서 환경안전 지시서 조회
-    query = """
-        SELECT * FROM safety_instructions 
-        WHERE is_deleted = 0
-    """
+    # config.ini에서 캐시 테이블 쿼리 가져오기
+    base_query = db_config.config.get('SQL_QUERIES', 'SAFETY_INSTRUCTIONS_QUERY')
+    # WHERE 절 추가를 위해 쿼리 수정
+    query = base_query.replace("WHERE issue_number IS NOT NULL", 
+                               "WHERE issue_number IS NOT NULL AND (is_deleted = 0 OR is_deleted IS NULL)")
     params = []
     
     # 필터링 적용
@@ -1184,7 +1188,7 @@ def safety_instruction_route():
     
     # 템플릿에 전달
     return render_template('safety-instruction.html',
-                         accidents=safety_instructions,  # 템플릿 호환성 유지
+                         safety_instructions=safety_instructions,  # 고유 변수명 사용
                          total_count=total_count,
                          pagination=pagination,
                          dynamic_columns=dynamic_columns,
@@ -3933,6 +3937,36 @@ def admin_safety_instruction_columns():
                          menu=MENU_CONFIG,
                          sections=sections)
 
+@app.route("/admin/follow-sop-columns")
+@app.route("/admin/followsop-columns")  # 두 URL 모두 지원
+@require_admin_auth  
+def admin_follow_sop_columns():
+    """Follow SOP 컬럼 관리 페이지"""
+    # 섹션 정보 로드
+    from section_service import SectionConfigService
+    section_service = SectionConfigService('follow_sop', DB_PATH)
+    section_columns = section_service.get_sections_with_columns()
+    
+    return render_template('admin-followsop-columns.html', 
+                         menu=MENU_CONFIG,
+                         section_columns=section_columns,
+                         sections=section_columns)  # 하위 호환성
+
+@app.route("/admin/full-process-columns")
+@app.route("/admin/fullprocess-columns")  # 두 URL 모두 지원
+@require_admin_auth  
+def admin_full_process_columns():
+    """Full Process 컬럼 관리 페이지"""
+    # 섹션 정보 로드
+    from section_service import SectionConfigService
+    section_service = SectionConfigService('full_process', DB_PATH)
+    section_columns = section_service.get_sections_with_columns()
+    
+    return render_template('admin-fullprocess-columns.html', 
+                         menu=MENU_CONFIG,
+                         section_columns=section_columns,
+                         sections=section_columns)  # 하위 호환성
+
 @app.route("/admin/safety-instruction-columns-simplified")
 @require_admin_auth
 def admin_safety_instruction_columns_simplified():
@@ -3945,29 +3979,7 @@ def admin_change_request_columns():
     """기준정보 변경요청 컬럼 관리 페이지"""
     return render_template('admin-change-request-columns.html', menu=MENU_CONFIG)
 
-@app.route("/admin/followsop-columns")
-@require_admin_auth
-def admin_followsop_columns():
-    """Follow SOP 컬럼 관리 페이지"""
-    from section_service import SectionConfigService
-    section_service = SectionConfigService('followsop', DB_PATH)
-    sections = section_service.get_sections()
-    
-    return render_template('admin-followsop-columns.html', 
-                         menu=MENU_CONFIG,
-                         sections=sections)
-
-@app.route("/admin/fullprocess-columns")
-@require_admin_auth
-def admin_fullprocess_columns():
-    """Full Process 컬럼 관리 페이지"""
-    from section_service import SectionConfigService
-    section_service = SectionConfigService('fullprocess', DB_PATH)
-    sections = section_service.get_sections()
-    
-    return render_template('admin-fullprocess-columns.html', 
-                         menu=MENU_CONFIG,
-                         sections=sections)
+# 중복 라우트 제거됨 - 위에서 이미 처리
 
 @app.route("/admin/change-request-columns-simplified")
 @require_admin_auth
@@ -4517,7 +4529,7 @@ def search_departments():
                 SELECT d.dept_code, d.dept_name, 
                        p.dept_name as parent_name, d.dept_level
                 FROM departments_cache d
-                LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
+                LEFT JOIN departments_cache p ON d.parent_dept_code = p.dept_code
                 WHERE d.dept_name LIKE ? OR d.dept_code LIKE ?
                 ORDER BY d.dept_level, d.dept_name
                 LIMIT 50
@@ -4527,7 +4539,7 @@ def search_departments():
                 SELECT d.dept_code, d.dept_name, 
                        p.dept_name as parent_name, d.dept_level
                 FROM departments_cache d
-                LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
+                LEFT JOIN departments_cache p ON d.parent_dept_code = p.dept_code
                 ORDER BY d.dept_level, d.dept_name
                 LIMIT 50
             """)
@@ -4621,7 +4633,7 @@ def api_search():
                 from database_config import execute_SQL
                 
                 # config.ini에서 BUILDING_QUERY 가져오기
-                building_query = db_config.config.get('MASTER_DATA_QUERIES', 'BUILDING_QUERY')
+                building_query = db_config.config.get('MASTER_DATA_QUERIES', 'BUILDING_EXTERNAL_QUERY')
                 
                 # 검색어 조건 추가
                 if search_term:
@@ -4681,7 +4693,7 @@ def api_search():
                 from database_config import execute_SQL
                 
                 # config.ini에서 DEPARTMENT_QUERY 가져오기
-                department_query = db_config.config.get('MASTER_DATA_QUERIES', 'DEPARTMENT_QUERY')
+                department_query = db_config.config.get('MASTER_DATA_QUERIES', 'DEPARTMENT_EXTERNAL_QUERY')
                 
                 # 검색어 조건 추가
                 if search_term:
@@ -4712,7 +4724,7 @@ def api_search():
                             SELECT d.dept_code, d.dept_name, 
                                    p.dept_name as parent_name, d.dept_level
                             FROM departments_cache d
-                            LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
+                            LEFT JOIN departments_cache p ON d.parent_dept_code = p.dept_code
                             WHERE d.dept_code LIKE ?
                             ORDER BY d.dept_level, d.dept_name
                             LIMIT 50
@@ -4722,7 +4734,7 @@ def api_search():
                             SELECT d.dept_code, d.dept_name, 
                                    p.dept_name as parent_name, d.dept_level
                             FROM departments_cache d
-                            LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
+                            LEFT JOIN departments_cache p ON d.parent_dept_code = p.dept_code
                             WHERE d.dept_name LIKE ?
                             ORDER BY d.dept_level, d.dept_name
                             LIMIT 50
@@ -4732,7 +4744,7 @@ def api_search():
                         SELECT d.dept_code, d.dept_name, 
                                p.dept_name as parent_name, d.dept_level
                         FROM departments_cache d
-                        LEFT JOIN department_master p ON d.parent_dept_code = p.dept_code
+                        LEFT JOIN departments_cache p ON d.parent_dept_code = p.dept_code
                         ORDER BY d.dept_level, d.dept_name
                         LIMIT 50
                     """)
@@ -4751,7 +4763,7 @@ def api_search():
                 from database_config import execute_SQL
                 
                 # config.ini에서 CONTRACTOR_QUERY 가져오기
-                contractor_query = db_config.config.get('MASTER_DATA_QUERIES', 'CONTRACTOR_QUERY')
+                contractor_query = db_config.config.get('MASTER_DATA_QUERIES', 'CONTRACTOR_EXTERNAL_QUERY')
                 
                 # 검색어 조건 추가
                 if search_term:
@@ -4941,104 +4953,104 @@ def reorder_safety_instruction_sections():
         return jsonify({"success": False, "message": str(e)}), 500
 
 # ============= Follow SOP API 엔드포인트 =============
-@app.route("/api/followsop-columns", methods=["GET"])
+@app.route("/api/follow-sop-columns", methods=["GET"])
 def get_followsop_columns():
     """Follow SOP 페이지 동적 컬럼 설정 조회"""
     try:
-        column_service = ColumnConfigService('followsop', DB_PATH)
+        column_service = ColumnConfigService('follow_sop', DB_PATH)
         columns = column_service.list_columns()
         return jsonify(columns)
     except Exception as e:
         logging.error(f"Follow SOP 컬럼 조회 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/followsop-columns", methods=["POST"])
+@app.route("/api/follow-sop-columns", methods=["POST"])
 def add_followsop_column():
     """Follow SOP 페이지 동적 컬럼 추가"""
     try:
-        column_service = ColumnConfigService('followsop', DB_PATH)
+        column_service = ColumnConfigService('follow_sop', DB_PATH)
         result = column_service.add_column(request.json)
         return jsonify(result)
     except Exception as e:
         logging.error(f"Follow SOP 컬럼 추가 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/followsop-columns/<int:column_id>", methods=["PUT"])
+@app.route("/api/follow-sop-columns/<int:column_id>", methods=["PUT"])
 def update_followsop_column(column_id):
     """Follow SOP 페이지 동적 컬럼 수정"""
     try:
-        column_service = ColumnConfigService('followsop', DB_PATH)
+        column_service = ColumnConfigService('follow_sop', DB_PATH)
         result = column_service.update_column(column_id, request.json)
         return jsonify(result)
     except Exception as e:
         logging.error(f"Follow SOP 컬럼 수정 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/followsop-columns/<int:column_id>", methods=["DELETE"])
+@app.route("/api/follow-sop-columns/<int:column_id>", methods=["DELETE"])
 def delete_followsop_column(column_id):
     """Follow SOP 페이지 동적 컬럼 삭제 (비활성화)"""
     try:
-        column_service = ColumnConfigService('followsop', DB_PATH)
+        column_service = ColumnConfigService('follow_sop', DB_PATH)
         result = column_service.delete_column(column_id)
         return jsonify(result)
     except Exception as e:
         logging.error(f"Follow SOP 컬럼 삭제 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/followsop-sections", methods=["GET"])
+@app.route("/api/follow-sop-sections", methods=["GET"])
 def get_followsop_sections():
     """Follow SOP 섹션 목록 조회"""
     try:
         from section_service import SectionConfigService
-        section_service = SectionConfigService('followsop', DB_PATH)
+        section_service = SectionConfigService('follow_sop', DB_PATH)
         sections = section_service.get_sections()
         return jsonify({"success": True, "sections": sections})
     except Exception as e:
         logging.error(f"Follow SOP 섹션 조회 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/followsop-sections", methods=["POST"])
+@app.route("/api/follow-sop-sections", methods=["POST"])
 def add_followsop_section():
     """Follow SOP 섹션 추가"""
     try:
         from section_service import SectionConfigService
-        section_service = SectionConfigService('followsop', DB_PATH)
+        section_service = SectionConfigService('follow_sop', DB_PATH)
         result = section_service.add_section(request.json)
         return jsonify(result)
     except Exception as e:
         logging.error(f"Follow SOP 섹션 추가 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/followsop-sections/<int:section_id>", methods=["PUT"])
+@app.route("/api/follow-sop-sections/<int:section_id>", methods=["PUT"])
 def update_followsop_section(section_id):
     """Follow SOP 섹션 수정"""
     try:
         from section_service import SectionConfigService
-        section_service = SectionConfigService('followsop', DB_PATH)
+        section_service = SectionConfigService('follow_sop', DB_PATH)
         result = section_service.update_section(section_id, request.json)
         return jsonify(result)
     except Exception as e:
         logging.error(f"Follow SOP 섹션 수정 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/followsop-sections/<int:section_id>", methods=["DELETE"])
+@app.route("/api/follow-sop-sections/<int:section_id>", methods=["DELETE"])
 def delete_followsop_section(section_id):
     """Follow SOP 섹션 삭제"""
     try:
         from section_service import SectionConfigService
-        section_service = SectionConfigService('followsop', DB_PATH)
+        section_service = SectionConfigService('follow_sop', DB_PATH)
         result = section_service.delete_section(section_id)
         return jsonify(result)
     except Exception as e:
         logging.error(f"Follow SOP 섹션 삭제 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/followsop-sections/reorder", methods=["POST"])
+@app.route("/api/follow-sop-sections/reorder", methods=["POST"])
 def reorder_followsop_sections():
     """Follow SOP 섹션 순서 변경"""
     try:
         from section_service import SectionConfigService
-        section_service = SectionConfigService('followsop', DB_PATH)
+        section_service = SectionConfigService('follow_sop', DB_PATH)
         result = section_service.reorder_sections(request.json)
         return jsonify(result)
     except Exception as e:
@@ -5046,104 +5058,104 @@ def reorder_followsop_sections():
         return jsonify({"success": False, "message": str(e)}), 500
 
 # ============= Full Process API 엔드포인트 =============
-@app.route("/api/fullprocess-columns", methods=["GET"])
+@app.route("/api/full-process-columns", methods=["GET"])
 def get_fullprocess_columns():
     """Full Process 페이지 동적 컬럼 설정 조회"""
     try:
-        column_service = ColumnConfigService('fullprocess', DB_PATH)
+        column_service = ColumnConfigService('full_process', DB_PATH)
         columns = column_service.list_columns()
         return jsonify(columns)
     except Exception as e:
         logging.error(f"Full Process 컬럼 조회 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/fullprocess-columns", methods=["POST"])
+@app.route("/api/full-process-columns", methods=["POST"])
 def add_fullprocess_column():
     """Full Process 페이지 동적 컬럼 추가"""
     try:
-        column_service = ColumnConfigService('fullprocess', DB_PATH)
+        column_service = ColumnConfigService('full_process', DB_PATH)
         result = column_service.add_column(request.json)
         return jsonify(result)
     except Exception as e:
         logging.error(f"Full Process 컬럼 추가 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/fullprocess-columns/<int:column_id>", methods=["PUT"])
+@app.route("/api/full-process-columns/<int:column_id>", methods=["PUT"])
 def update_fullprocess_column(column_id):
     """Full Process 페이지 동적 컬럼 수정"""
     try:
-        column_service = ColumnConfigService('fullprocess', DB_PATH)
+        column_service = ColumnConfigService('full_process', DB_PATH)
         result = column_service.update_column(column_id, request.json)
         return jsonify(result)
     except Exception as e:
         logging.error(f"Full Process 컬럼 수정 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/fullprocess-columns/<int:column_id>", methods=["DELETE"])
+@app.route("/api/full-process-columns/<int:column_id>", methods=["DELETE"])
 def delete_fullprocess_column(column_id):
     """Full Process 페이지 동적 컬럼 삭제 (비활성화)"""
     try:
-        column_service = ColumnConfigService('fullprocess', DB_PATH)
+        column_service = ColumnConfigService('full_process', DB_PATH)
         result = column_service.delete_column(column_id)
         return jsonify(result)
     except Exception as e:
         logging.error(f"Full Process 컬럼 삭제 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/fullprocess-sections", methods=["GET"])
+@app.route("/api/full-process-sections", methods=["GET"])
 def get_fullprocess_sections():
     """Full Process 섹션 목록 조회"""
     try:
         from section_service import SectionConfigService
-        section_service = SectionConfigService('fullprocess', DB_PATH)
+        section_service = SectionConfigService('full_process', DB_PATH)
         sections = section_service.get_sections()
         return jsonify({"success": True, "sections": sections})
     except Exception as e:
         logging.error(f"Full Process 섹션 조회 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/fullprocess-sections", methods=["POST"])
+@app.route("/api/full-process-sections", methods=["POST"])
 def add_fullprocess_section():
     """Full Process 섹션 추가"""
     try:
         from section_service import SectionConfigService
-        section_service = SectionConfigService('fullprocess', DB_PATH)
+        section_service = SectionConfigService('full_process', DB_PATH)
         result = section_service.add_section(request.json)
         return jsonify(result)
     except Exception as e:
         logging.error(f"Full Process 섹션 추가 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/fullprocess-sections/<int:section_id>", methods=["PUT"])
+@app.route("/api/full-process-sections/<int:section_id>", methods=["PUT"])
 def update_fullprocess_section(section_id):
     """Full Process 섹션 수정"""
     try:
         from section_service import SectionConfigService
-        section_service = SectionConfigService('fullprocess', DB_PATH)
+        section_service = SectionConfigService('full_process', DB_PATH)
         result = section_service.update_section(section_id, request.json)
         return jsonify(result)
     except Exception as e:
         logging.error(f"Full Process 섹션 수정 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/fullprocess-sections/<int:section_id>", methods=["DELETE"])
+@app.route("/api/full-process-sections/<int:section_id>", methods=["DELETE"])
 def delete_fullprocess_section(section_id):
     """Full Process 섹션 삭제"""
     try:
         from section_service import SectionConfigService
-        section_service = SectionConfigService('fullprocess', DB_PATH)
+        section_service = SectionConfigService('full_process', DB_PATH)
         result = section_service.delete_section(section_id)
         return jsonify(result)
     except Exception as e:
         logging.error(f"Full Process 섹션 삭제 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/api/fullprocess-sections/reorder", methods=["POST"])
+@app.route("/api/full-process-sections/reorder", methods=["POST"])
 def reorder_fullprocess_sections():
     """Full Process 섹션 순서 변경"""
     try:
         from section_service import SectionConfigService
-        section_service = SectionConfigService('fullprocess', DB_PATH)
+        section_service = SectionConfigService('full_process', DB_PATH)
         result = section_service.reorder_sections(request.json)
         return jsonify(result)
     except Exception as e:
@@ -6646,5 +6658,19 @@ if __name__ == "__main__":
         print("JSON 동기화 건너뜀 (config: SYNC_ON_STARTUP=false)", flush=True)
         print("DB의 컬럼 설정을 그대로 사용합니다.", flush=True)
     
+    # 스케줄러는 실제 메인 프로세스에서만 시작(리로더 중복 방지)
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        # 스케줄 등록: 매일 07:00에 maybe_daily_sync() 호출
+        schedule.clear()  # 혹시 있을지 모르는 기존 잡 제거
+        schedule.every().day.at("07:00").do(maybe_daily_sync)
+        
+        scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+        scheduler_thread.start()
+        
+        logging.info("=" * 50)
+        logging.info("자동 동기화 스케줄러 시작")
+        logging.info("매일 오전 7시에 자동으로 데이터를 동기화합니다.")
+        logging.info("=" * 50)
+    
     print(f"partner-accident 라우트 등록됨: {'/partner-accident' in [rule.rule for rule in app.url_map.iter_rules()]}", flush=True)
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=app.debug)

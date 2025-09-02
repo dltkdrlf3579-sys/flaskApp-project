@@ -15,7 +15,7 @@
 <div class="page-header">
     <h2 class="page-title">Full Process 상세정보</h2>
     <div class="breadcrumb">
-        <a href="{{ url_for('page_view', url='safety-process') }}">Full Process</a>
+        <a href="{{ url_for('page_view', url='full-process') }}">Full Process</a>
         <span class="separator">></span>
         <span class="current">{{ process.fullprocess_number }}</span>
     </div>
@@ -56,7 +56,11 @@
                                 <label>{{ col.column_name }}</label>
                                 
                                 {% if col.column_key == 'fullprocess_number' %}
-                                    <!-- 발부번호는 수정 불가 -->
+                                    <!-- 평가번호는 수정 불가 -->
+                                    <div class="value">{{ col_value or '-' }}</div>
+                                    
+                                {% elif col.column_key == 'created_at' %}
+                                    <!-- 등록일은 수정 불가 -->
                                     <div class="value">{{ col_value or '-' }}</div>
                                     
                                 {% elif col.column_type == 'dropdown' %}
@@ -241,49 +245,32 @@ function updateFullProcess() {
     formData.append('fullprocess_number', issueNumber);
     
     // 상세내용 추가
-    const detailedContent = document.getElementById('detailed-content').innerHTML;
-    formData.append('detailed_content', detailedContent);
+    const detailedContent = document.getElementById('detailed-content');
+    if (detailedContent) {
+        formData.append('detailed_content', detailedContent.innerHTML);
+    }
     
     // 동적 필드 수집
     const dynamicData = collectDynamicFields();
     
-    // basic_info와 violation_info 분리
-    const basicInfo = {};
-    const violationInfo = {};
+    // 모든 데이터를 custom_data로 통합
     const customData = {};
     
-    // 섹션별로 데이터 분류
+    // 섹션별로 데이터 수집
     sections.forEach(section => {
         const cols = sectionColumns[section.section_key] || [];
         cols.forEach(col => {
             if (dynamicData[col.column_key] !== undefined) {
-                if (section.section_key === 'basic_info') {
-                    basicInfo[col.column_key] = dynamicData[col.column_key];
-                } else if (section.section_key === 'violation_info') {
-                    violationInfo[col.column_key] = dynamicData[col.column_key];
-                } else {
-                    customData[col.column_key] = dynamicData[col.column_key];
-                }
+                customData[col.column_key] = dynamicData[col.column_key];
             }
         });
     });
     
-    // FormData에 추가
-    formData.append('basic_info', JSON.stringify(basicInfo));
-    formData.append('violation_info', JSON.stringify(violationInfo));
+    // FormData에 custom_data 추가
     formData.append('custom_data', JSON.stringify(customData));
     
-    // 새 첨부파일 처리
-    newFiles.forEach((file, index) => {
-        formData.append('files', file);
-        const descInput = document.querySelectorAll('.new-file .file-desc-input')[index];
-        if (descInput) {
-            formData.append(`file_desc_${index}`, descInput.value);
-        }
-    });
-    
     // 서버로 전송
-    fetch('/update-safety-process', {
+    fetch('/update-full-process', {
         method: 'POST',
         body: formData
     })
@@ -295,7 +282,7 @@ function updateFullProcess() {
                 window.opener.location.reload();
                 window.close();
             } else {
-                window.location.href = '/safety-process';
+                window.location.href = '/full-process';
             }
         } else {
             alert('수정 실패: ' + (data.message || '알 수 없는 오류'));

@@ -33,7 +33,9 @@ class ColumnConfigService:
             'accident': 'accidents_cache',
             'safety_instruction': 'safety_instructions',
             'change_request': 'change_requests',
-            'partner_standards': 'partner_standards'
+            'partner_standards': 'partner_standards',
+            'follow_sop': 'follow_sop',
+            'full_process': 'full_process'
         }
         return table_map.get(self.board_type, f"{self.board_type}s")
     
@@ -52,7 +54,7 @@ class ColumnConfigService:
                 column_order INTEGER DEFAULT 999,
                 is_active INTEGER DEFAULT 1,
                 is_required INTEGER DEFAULT 0,
-                dropdown_values TEXT,  -- JSON 형식
+                dropdown_options TEXT,  -- JSON 형식
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -113,12 +115,12 @@ class ColumnConfigService:
         result = []
         for col in columns:
             column_dict = dict(col)
-            # dropdown_values JSON 파싱
-            if column_dict.get('dropdown_values'):
+            # dropdown_options JSON 파싱
+            if column_dict.get('dropdown_options'):
                 try:
-                    column_dict['dropdown_values'] = json.loads(column_dict['dropdown_values'])
+                    column_dict['dropdown_options'] = json.loads(column_dict['dropdown_options'])
                 except json.JSONDecodeError:
-                    column_dict['dropdown_values'] = []
+                    column_dict['dropdown_options'] = []
             result.append(column_dict)
         
         return result
@@ -143,11 +145,11 @@ class ColumnConfigService:
         
         if column:
             column_dict = dict(column)
-            if column_dict.get('dropdown_values'):
+            if column_dict.get('dropdown_options'):
                 try:
-                    column_dict['dropdown_values'] = json.loads(column_dict['dropdown_values'])
+                    column_dict['dropdown_options'] = json.loads(column_dict['dropdown_options'])
                 except json.JSONDecodeError:
-                    column_dict['dropdown_values'] = []
+                    column_dict['dropdown_options'] = []
             return column_dict
         
         return None
@@ -191,12 +193,12 @@ class ColumnConfigService:
                 cursor.execute(f"""
                     UPDATE {self.table_name}
                     SET column_name = ?, column_type = ?, is_active = 1, is_deleted = 0,
-                        dropdown_values = ?, column_span = ?, tab = ?, updated_at = CURRENT_TIMESTAMP
+                        dropdown_options = ?, column_span = ?, tab = ?, updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                 """, (
                     column_data['column_name'],
                     column_data.get('column_type', 'text'),
-                    json.dumps(column_data.get('dropdown_values', []), ensure_ascii=False) if column_data.get('dropdown_values') else None,
+                    json.dumps(column_data.get('dropdown_options', []), ensure_ascii=False) if column_data.get('dropdown_options') else None,
                     column_data.get('column_span', 1),
                     column_data.get('tab', 'additional'),
                     column_id
@@ -214,16 +216,16 @@ class ColumnConfigService:
             cursor.execute(f"SELECT MAX(column_order) FROM {self.table_name}")
             max_order = cursor.fetchone()[0] or 0
             
-            # dropdown_values JSON 변환
-            dropdown_values = column_data.get('dropdown_values', [])
-            if isinstance(dropdown_values, list):
-                dropdown_values = json.dumps(dropdown_values, ensure_ascii=False)
+            # dropdown_options JSON 변환
+            dropdown_options = column_data.get('dropdown_options', [])
+            if isinstance(dropdown_options, list):
+                dropdown_options = json.dumps(dropdown_options, ensure_ascii=False)
             
             # 컬럼 추가
             cursor.execute(f"""
                 INSERT INTO {self.table_name} 
                 (column_key, column_name, column_type, column_order, is_active, 
-                 is_required, dropdown_values, column_span, tab)
+                 is_required, dropdown_options, column_span, tab)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 column_key,
@@ -232,7 +234,7 @@ class ColumnConfigService:
                 max_order + 1,
                 column_data.get('is_active', 1),
                 column_data.get('is_required', 0),
-                dropdown_values,
+                dropdown_options,
                 column_data.get('column_span', 1),  # column_span 추가
                 column_data.get('tab', 'additional')  # tab 필드 추가 (기본값: additional)
             ))
@@ -296,18 +298,18 @@ class ColumnConfigService:
                 logging.info(f"컬럼 {action} 처리: {column_id}, is_deleted={column_data['is_deleted']}")
                 return {'success': True, 'message': f'컬럼이 {action} 처리되었습니다.'}
             
-            # dropdown_values JSON 변환
-            if 'dropdown_values' in column_data:
-                dropdown_values = column_data['dropdown_values']
-                if isinstance(dropdown_values, list):
-                    column_data['dropdown_values'] = json.dumps(dropdown_values, ensure_ascii=False)
+            # dropdown_options JSON 변환
+            if 'dropdown_options' in column_data:
+                dropdown_options = column_data['dropdown_options']
+                if isinstance(dropdown_options, list):
+                    column_data['dropdown_options'] = json.dumps(dropdown_options, ensure_ascii=False)
             
             # 업데이트할 필드 구성
             update_fields = []
             update_values = []
             
             allowed_fields = ['column_name', 'column_type', 'is_active', 
-                             'is_required', 'dropdown_values', 'column_order', 'column_span', 'tab']
+                             'is_required', 'dropdown_options', 'column_order', 'column_span', 'tab']
             
             for field in allowed_fields:
                 if field in column_data:

@@ -55,9 +55,12 @@
                 <tr>
                     <th class="checkbox-column"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
                     <th class="fixed-col">No</th>
+                    <!-- 하드코딩된 컬럼 헤더 -->
+                    <th>평가번호</th>
+                    <th>등록일</th>
                     {% for section in sections %}
                         {% for col in section_columns[section['section_key']] %}
-                            {% if col['column_key'] not in ['detailed_content', 'violation_content'] %}
+                            {% if col['column_key'] not in ['detailed_content', 'violation_content', 'fullprocess_number', 'registered_date'] %}
                             <th>{{ col['column_name'] }}</th>
                             {% endif %}
                         {% endfor %}
@@ -65,7 +68,7 @@
                 </tr>
             </thead>
             <tbody>
-                {% for item in accidents %}
+                {% for item in fullprocesses %}
                 <tr>
                     <td class="checkbox-column">
                         <input type="checkbox" class="accident-checkbox" value="{{ item.id }}" onchange="updateDeleteButton()">
@@ -73,9 +76,15 @@
                     <td class="fixed-col">
                         {{ item.no }}
                     </td>
+                    <!-- 하드코딩된 컬럼들 -->
+                    <td>
+                        <a href="javascript:void(0)" class="company-link" onclick="openFullProcessModal('{{ item.fullprocess_number }}')">{{ item.process_number or item.fullprocess_number or '-' }}</a>
+                    </td>
+                    <td>{{ item.start_date or item.created_at or '-' }}</td>
+                    
                     {% for section in sections %}
                         {% for col in section_columns[section['section_key']] %}
-                            {% if col['column_key'] not in ['detailed_content', 'violation_content'] %}
+                            {% if col['column_key'] not in ['detailed_content', 'violation_content', 'fullprocess_number', 'registered_date'] %}
                             <td>
                                 {% if col['column_key'] == 'fullprocess_number' %}
                                     <a href="javascript:void(0)" class="company-link" onclick="openFullProcessModal('{{ item.fullprocess_number }}')">{{ item.fullprocess_number or '-' }}</a>
@@ -128,13 +137,13 @@
         
         <!-- 이전 10페이지 -->
         {% if window_info.has_prev_window %}
-            <a href="{{ url_for('page_view', url='safety-instruction', page=window_info.prev_window_start, **search_params) }}" class="page-btn">&laquo; 이전</a>
+            <a href="{{ url_for('page_view', url='full-process', page=window_info.prev_window_start, **search_params) }}" class="page-btn">&laquo; 이전</a>
         {% endif %}
         
         <!-- 현재 윈도우의 페이지들 (최대 10개) -->
         {% for page in pagination.iter_pages() %}
             {% if page != pagination.page %}
-                <a href="{{ url_for('page_view', url='safety-instruction', page=page, **search_params) }}" class="page-btn">{{ page }}</a>
+                <a href="{{ url_for('page_view', url='full-process', page=page, **search_params) }}" class="page-btn">{{ page }}</a>
             {% else %}
                 <span class="page-btn active">{{ page }}</span>
             {% endif %}
@@ -142,7 +151,7 @@
         
         <!-- 다음 10페이지 -->
         {% if window_info.has_next_window %}
-            <a href="{{ url_for('page_view', url='safety-instruction', page=window_info.next_window_start, **search_params) }}" class="page-btn">다음 &raquo;</a>
+            <a href="{{ url_for('page_view', url='full-process', page=window_info.next_window_start, **search_params) }}" class="page-btn">다음 &raquo;</a>
         {% endif %}
     </div>
 </div>

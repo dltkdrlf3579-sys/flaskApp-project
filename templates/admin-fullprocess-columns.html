@@ -906,7 +906,7 @@ let editingId = null;
                 return;
             }
             
-            fetch('/api/fullprocess-sections', {
+            fetch('/api/full-process-sections', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -944,7 +944,7 @@ let editingId = null;
         }
         
         function loadColumns() {
-            fetch('/api/fullprocess-columns')
+            fetch('/api/full-process-columns')
                 .then(response => response.json())
                 .then(data => {
                     // 모든 컬럼을 표시 (비활성 포함)
@@ -1832,7 +1832,7 @@ let editingId = null;
                 for (const [sectionId, change] of Object.entries(sectionChanges)) {
                     if (!change.is_new) {
                         // 기존 섹션 이름 변경
-                        const response = await fetch(`/api/fullprocess-sections/${sectionId}`, {
+                        const response = await fetch(`/api/full-process-sections/${sectionId}`, {
                             method: 'PUT',
                             headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify({ section_name: change.section_name })
@@ -1861,7 +1861,7 @@ let editingId = null;
                     if (column._toDelete && !column._isNew) {
                         // 기존 컬럼 삭제 처리
                         console.log('삭제 처리 중:', column.id, column.column_name);
-                        const response = await fetch(`/api/fullprocess-columns/${column.id}`, {
+                        const response = await fetch(`/api/full-process-columns/${column.id}`, {
                             method: 'DELETE'
                         });
                         const result = await response.json();
@@ -1891,7 +1891,7 @@ let editingId = null;
                             table_name: column._tableName || null
                         };
                         console.log('추가 처리 중:', data);
-                        const response = await fetch('/api/fullprocess-columns', {
+                        const response = await fetch('/api/full-process-columns', {
                             method: 'POST',
                             headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify(data)
@@ -1919,7 +1919,7 @@ let editingId = null;
                             table_name: column._tableName || null
                         };
                         console.log('수정 처리 중:', column.id, data);
-                        const response = await fetch(`/api/fullprocess-columns/${column.id}`, {
+                        const response = await fetch(`/api/full-process-columns/${column.id}`, {
                             method: 'PUT',
                             headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify(data)
