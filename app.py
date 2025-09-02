@@ -1111,12 +1111,20 @@ def safety_instruction_route():
         query += " AND violation_date <= ?"
         params.append(filters['violation_date_to'])
     
+    # 전체 개수 조회 (ORDER BY 전에 실행)
+    # SELECT 절을 COUNT(*)로 교체 (컬럼 리스트가 있는 경우도 처리)
+    count_query = query
+    if "SELECT" in count_query.upper():
+        # FROM 앞까지의 SELECT 절을 COUNT(*)로 교체
+        from_index = count_query.upper().find("FROM")
+        if from_index > 0:
+            count_query = "SELECT COUNT(*) " + count_query[from_index:]
+    
+    result = conn.execute(count_query, params).fetchone()
+    total_count = int(result[0]) if result and result[0] is not None else 0
+    
     # 정렬 (최신순)
     query += " ORDER BY violation_date DESC, issue_number DESC"
-    
-    # 전체 개수 조회
-    count_query = query.replace("SELECT *", "SELECT COUNT(*)")
-    total_count = conn.execute(count_query, params).fetchone()[0]
     
     # 페이지네이션 적용
     query += f" LIMIT {per_page} OFFSET {(page - 1) * per_page}"
@@ -1530,42 +1538,8 @@ def update_safety_instruction():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # safety_instructions 테이블이 없으면 생성
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS safety_instructions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                issue_number TEXT UNIQUE,
-                violation_content TEXT,
-                detailed_content TEXT,
-                custom_data TEXT,
-                disciplined_person TEXT,
-                is_deleted INTEGER DEFAULT 0,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # safety_instruction_details 테이블 생성 (상세내용용)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS safety_instruction_details (
-                issue_number TEXT PRIMARY KEY,
-                detailed_content TEXT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # 테이블이 이미 있지만 필요한 컬럼이 없을 수 있으므로 추가
-        cursor.execute("PRAGMA table_info(safety_instructions)")
-        columns = [col[1] for col in cursor.fetchall()]
-        if 'violation_content' not in columns:
-            cursor.execute("ALTER TABLE safety_instructions ADD COLUMN violation_content TEXT")
-        if 'custom_data' not in columns:
-            cursor.execute("ALTER TABLE safety_instructions ADD COLUMN custom_data TEXT")
-        if 'detailed_content' not in columns:
-            cursor.execute("ALTER TABLE safety_instructions ADD COLUMN detailed_content TEXT")
-        
-        # 기존 지시서가 있는지 확인
-        cursor.execute("SELECT id FROM safety_instructions WHERE issue_number = ?", (issue_number,))
+        # safety_instructions_cache 테이블에서 기존 지시서가 있는지 확인
+        cursor.execute("SELECT issue_number FROM safety_instructions_cache WHERE issue_number = ?", (issue_number,))
         existing = cursor.fetchone()
         
         if existing:
@@ -1589,26 +1563,48 @@ def update_safety_instruction():
             update_values.append(pyjson.dumps(custom_data_dict))
             update_fields.append("detailed_content = ?")
             update_values.append(detailed_content)
-            update_fields.append("updated_at = CURRENT_TIMESTAMP")
             
             # WHERE 조건 값 추가
             update_values.append(issue_number)
             
             # UPDATE 쿼리 실행
             update_query = f"""
-                UPDATE safety_instructions 
+                UPDATE safety_instructions_cache 
                 SET {', '.join(update_fields)}
                 WHERE issue_number = ?
             """
             cursor.execute(update_query, update_values)
         else:
-            # 새로 생성 - violation_content 제외
-            cursor.execute("""
-                INSERT INTO safety_instructions (issue_number, custom_data, detailed_content)
-                VALUES (?, ?, ?)
-            """, (issue_number, pyjson.dumps(custom_data_dict), detailed_content))
+            # 새로 생성 (수정 API에서 새로 생성하는 경우는 드물지만 처리)
+            # 모든 필드를 병합
+            all_fields = {**basic_info_dict, **violation_info_dict}
+            
+            # 필드 이름과 값 준비
+            field_names = ['issue_number', 'custom_data', 'detailed_content', 'is_deleted']
+            field_values = [issue_number, pyjson.dumps(custom_data_dict), detailed_content, 0]
+            
+            for field, value in all_fields.items():
+                if field != 'issue_number':
+                    field_names.append(field)
+                    field_values.append(value)
+            
+            # INSERT 쿼리 실행
+            placeholders = ', '.join(['?' for _ in field_names])
+            insert_query = f"""
+                INSERT INTO safety_instructions_cache ({', '.join(field_names)})
+                VALUES ({placeholders})
+            """
+            cursor.execute(insert_query, field_values)
         
-        # 상세내용 업데이트
+        # 상세내용 업데이트 (safety_instruction_details 테이블)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS safety_instruction_details (
+                issue_number TEXT PRIMARY KEY,
+                detailed_content TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
         cursor.execute("""
             INSERT OR REPLACE INTO safety_instruction_details (issue_number, detailed_content, updated_at)
             VALUES (?, ?, CURRENT_TIMESTAMP)
@@ -3173,49 +3169,9 @@ def register_safety_instruction():
             korean_now = get_korean_time()
             year_month = f"{korean_now.year}-{korean_now.month:02d}"
         
-        # 환경안전 지시서 테이블이 없으면 생성
+        # 해당 년월의 마지막 발부번호 찾기 (cache 테이블에서)
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS safety_instructions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                issue_number TEXT UNIQUE NOT NULL,
-                issuer TEXT,
-                issuer_department TEXT,
-                classification TEXT,
-                employment_type TEXT,
-                primary_company TEXT,
-                primary_business_number TEXT,
-                subcontractor TEXT,
-                subcontractor_business_number TEXT,
-                disciplined_person TEXT,
-                gbm TEXT,
-                business_division TEXT,
-                team TEXT,
-                department TEXT,
-                violation_date TEXT,
-                discipline_date TEXT,
-                discipline_department TEXT,
-                discipline_type TEXT,
-                accident_type TEXT,
-                accident_grade TEXT,
-                safety_violation_grade TEXT,
-                violation_type TEXT,
-                violation_content TEXT,
-                access_ban_start_date TEXT,
-                access_ban_end_date TEXT,
-                period TEXT,
-                work_grade TEXT,
-                penalty_points INTEGER,
-                disciplined_person_id TEXT,
-                custom_data TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                is_deleted INTEGER DEFAULT 0
-            )
-        """)
-        
-        # 해당 년월의 마지막 발부번호 찾기
-        cursor.execute("""
-            SELECT issue_number FROM safety_instructions 
+            SELECT issue_number FROM safety_instructions_cache 
             WHERE issue_number LIKE ? 
             ORDER BY issue_number DESC 
             LIMIT 1
@@ -3231,26 +3187,26 @@ def register_safety_instruction():
         
         logging.info(f"새 환경안전 지시서 발부번호 생성: {generated_issue_number}")
         
-        # 환경안전 지시서 정보 등록
+        # safety_instructions_cache 테이블에 직접 등록
         cursor.execute("""
-            INSERT INTO safety_instructions (
+            INSERT OR REPLACE INTO safety_instructions_cache (
                 issue_number, issuer, issuer_department, classification, employment_type,
                 primary_company, primary_business_number, subcontractor, subcontractor_business_number,
-                disciplined_person, gbm, business_division, team, department,
-                violation_date, discipline_date, discipline_department, discipline_type,
+                disciplined_person, disciplined_person_id, gbm, business_division, team, department,
+                work_grade, violation_date, discipline_date, discipline_department, discipline_type,
                 accident_type, accident_grade, safety_violation_grade, violation_type,
-                violation_content, access_ban_start_date, access_ban_end_date, period,
-                work_grade, penalty_points, disciplined_person_id, custom_data, detailed_content
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                access_ban_start_date, access_ban_end_date, period, penalty_points,
+                violation_content, detailed_content, custom_data, is_deleted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
         """, (
             generated_issue_number, issuer, issuer_department, classification, employment_type,
             primary_company, primary_business_number, subcontractor, subcontractor_business_number,
-            disciplined_person, gbm, business_division, team, department,
-            violation_date, discipline_date, discipline_department, discipline_type,
+            disciplined_person, disciplined_person_id, gbm, business_division, team, department,
+            work_grade, violation_date, discipline_date, discipline_department, discipline_type,
             accident_type, accident_grade, safety_violation_grade, violation_type,
-            None, access_ban_start_date, access_ban_end_date, period,  # violation_content는 None으로 저장
-            work_grade, int(penalty_points) if penalty_points else None, disciplined_person_id,
-            pyjson.dumps(custom_data), detailed_content
+            access_ban_start_date, access_ban_end_date, period, 
+            int(penalty_points) if penalty_points else None,
+            None, detailed_content, pyjson.dumps(custom_data)  # violation_content는 None
         ))
         
         # 첨부파일 처리
@@ -3265,7 +3221,7 @@ def register_safety_instruction():
                     file_size INTEGER,
                     description TEXT,
                     upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (issue_number) REFERENCES safety_instructions (issue_number)
+                    FOREIGN KEY (issue_number) REFERENCES safety_instructions_cache (issue_number)
                 )
             """)
             
@@ -3284,7 +3240,7 @@ def register_safety_instruction():
                     # 첨부파일 정보 저장
                     description = attachment_data[i]['description'] if i < len(attachment_data) else ''
                     cursor.execute("""
-                        INSERT INTO safety_instruction_attachments (item_id, file_name, file_path, file_size, description)
+                        INSERT INTO safety_instruction_attachments (issue_number, file_name, file_path, file_size, description)
                         VALUES (?, ?, ?, ?, ?)
                     """, (generated_issue_number, filename, file_path, os.path.getsize(file_path), description))
         

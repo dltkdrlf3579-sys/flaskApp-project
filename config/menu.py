@@ -14,16 +14,17 @@ MENU_CONFIG = [
             {"title": "환경안전 지시서", "url": "safety-instruction"},
         ],
     },
-    {
-        "title": "작업안전",
-        "submenu": [
-            {"title": "Follow SOP", "url": "follow-sop"},
-        ],
-    },
-    {
-        "title": "안전문화",
-        "submenu": [
-            {"title": "FullProcess", "url": "full-process"},
-        ],
-    },
+    # 작업안전과 안전문화는 개발 중이라 임시로 숨김
+    # {
+    #     "title": "작업안전",
+    #     "submenu": [
+    #         {"title": "Follow SOP", "url": "follow-sop"},
+    #     ],
+    # },
+    # {
+    #     "title": "안전문화",
+    #     "submenu": [
+    #         {"title": "FullProcess", "url": "full-process"},
+    #     ],
+    # },
 ]
