@@ -488,7 +488,7 @@ def full_process_route():
             query_params.append(f"%{value}%")
     
     # WHERE 절 구성 (삭제되지 않은 항목만)
-    where_clauses.insert(0, "(p.is_deleted = 0 OR p.is_deleted IS NULL)")
+    # where_clauses.insert(0, "(p.is_deleted = 0 OR p.is_deleted IS NULL)")  # full_process 테이블에 is_deleted 컬럼 없음
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
     
     # 전체 건수 조회
