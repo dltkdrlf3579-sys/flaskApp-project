@@ -8,9 +8,8 @@ gpt/
 
 # 이미지 파일들만 제외
 static/images/
-static/icons/*.png
-static/icons/*.jpg
-static/logo*.png
+static/icons/
+static/logo-sample.png
 
 # Markdown 파일들 제외
 *.md
