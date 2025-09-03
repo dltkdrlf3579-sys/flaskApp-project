@@ -644,7 +644,6 @@ from flask import current_app
 
 boot_sync_done = False
 
-@app.before_first_request
 def boot_sync_once():
     """
     서버 프로세스가 어떤 방식으로 떠도(WSGI/리로더/워커), 첫 요청 들어올 때 1회 실행.
@@ -689,6 +688,13 @@ def boot_sync_once():
             current_app.logger.info("[BOOT] Initial sync skipped (flag off or external off)")
     except Exception as e:
         current_app.logger.error(f"[BOOT] Initial sync error: {e}")
+
+# Flask 2.3+ 호환 방식으로 첫 요청 훅 등록
+@app.before_request
+def check_first_request():
+    if not hasattr(app, '_first_request_done'):
+        app._first_request_done = True
+        boot_sync_once()
 
 @app.route("/api/test-simple")
 def test_simple():
