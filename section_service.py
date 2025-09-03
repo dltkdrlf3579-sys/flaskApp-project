@@ -9,6 +9,16 @@ class SectionConfigService:
     def __init__(self, board_type, db_path):
         self.board_type = board_type
         self.db_path = db_path
+        self.table_name = self._get_table_name()
+    
+    def _get_table_name(self):
+        """board_type에 따른 테이블 이름 반환"""
+        if self.board_type == 'follow_sop':
+            return 'follow_sop_sections'
+        elif self.board_type == 'full_process':
+            return 'full_process_sections'
+        else:
+            return 'section_config'
         
     def get_sections(self):
         """특정 보드 타입의 모든 활성 섹션 가져오기"""
@@ -21,20 +31,20 @@ class SectionConfigService:
             if self.board_type == 'follow_sop':
                 cursor.execute("""
                     SELECT * FROM follow_sop_sections 
-                    WHERE is_active = 1 
+                    WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
                     ORDER BY section_order
                 """)
             elif self.board_type == 'full_process':
                 cursor.execute("""
                     SELECT * FROM full_process_sections 
-                    WHERE is_active = 1 
+                    WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
                     ORDER BY section_order
                 """)
             else:
                 # safety_instruction 등은 기존 section_config 테이블 사용
                 cursor.execute("""
                     SELECT * FROM section_config 
-                    WHERE board_type = ? AND is_active = 1 
+                    WHERE board_type = ? AND is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
                     ORDER BY section_order
                 """, (self.board_type,))
             
@@ -64,7 +74,7 @@ class SectionConfigService:
             for section in sections:
                 cursor.execute(f"""
                     SELECT * FROM {table_name}
-                    WHERE tab = ? AND is_active = 1
+                    WHERE tab = ? AND is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
                     ORDER BY column_order
                 """, (section['section_key'],))
                 
@@ -95,32 +105,54 @@ class SectionConfigService:
         
         try:
             # 자동으로 section_key 생성 (custom_section_1, custom_section_2 등)
-            cursor.execute("""
-                SELECT COUNT(*) FROM section_config 
-                WHERE board_type = ? AND section_key LIKE 'custom_section_%'
-            """, (self.board_type,))
+            if self.table_name == 'section_config':
+                cursor.execute("""
+                    SELECT COUNT(*) FROM section_config 
+                    WHERE board_type = ? AND section_key LIKE 'custom_section_%'
+                """, (self.board_type,))
+            else:
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM {self.table_name} 
+                    WHERE section_key LIKE 'custom_section_%'
+                """)
             
             custom_count = cursor.fetchone()[0]
             section_key = f"custom_section_{custom_count + 1}"
             
             # 마지막 순서 가져오기
-            cursor.execute("""
-                SELECT MAX(section_order) FROM section_config 
-                WHERE board_type = ?
-            """, (self.board_type,))
+            if self.table_name == 'section_config':
+                cursor.execute("""
+                    SELECT MAX(section_order) FROM section_config 
+                    WHERE board_type = ?
+                """, (self.board_type,))
+            else:
+                cursor.execute(f"""
+                    SELECT MAX(section_order) FROM {self.table_name}
+                """)
             
             max_order = cursor.fetchone()[0] or 0
             
-            cursor.execute("""
-                INSERT INTO section_config 
-                (board_type, section_key, section_name, section_order, is_active)
-                VALUES (?, ?, ?, ?, 1)
-            """, (
-                self.board_type,
-                section_key,
-                section_data['section_name'],
-                max_order + 1
-            ))
+            if self.table_name == 'section_config':
+                cursor.execute("""
+                    INSERT INTO section_config 
+                    (board_type, section_key, section_name, section_order, is_active)
+                    VALUES (?, ?, ?, ?, 1)
+                """, (
+                    self.board_type,
+                    section_key,
+                    section_data['section_name'],
+                    max_order + 1
+                ))
+            else:
+                cursor.execute(f"""
+                    INSERT INTO {self.table_name} 
+                    (section_key, section_name, section_order, is_active)
+                    VALUES (?, ?, ?, 1)
+                """, (
+                    section_key,
+                    section_data['section_name'],
+                    max_order + 1
+                ))
             
             conn.commit()
             section_id = cursor.lastrowid
@@ -166,11 +198,19 @@ class SectionConfigService:
             update_fields.append('updated_at = CURRENT_TIMESTAMP')
             update_values.append(section_id)
             
-            query = f"""
-                UPDATE section_config 
-                SET {', '.join(update_fields)}
-                WHERE id = ?
-            """
+            if self.table_name == 'section_config':
+                update_values.append(self.board_type)
+                query = f"""
+                    UPDATE section_config 
+                    SET {', '.join(update_fields)}
+                    WHERE id = ? AND board_type = ?
+                """
+            else:
+                query = f"""
+                    UPDATE {self.table_name} 
+                    SET {', '.join(update_fields)}
+                    WHERE id = ?
+                """
             
             cursor.execute(query, update_values)
             conn.commit()
@@ -185,39 +225,24 @@ class SectionConfigService:
             conn.close()
     
     def delete_section(self, section_id):
-        """섹션 삭제 (컬럼이 없는 경우에만)"""
+        """섹션 삭제 (soft delete)"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
         try:
-            # 섹션 정보 가져오기
-            cursor.execute("""
-                SELECT section_key FROM section_config 
-                WHERE id = ? AND board_type = ?
-            """, (section_id, self.board_type))
-            
-            section = cursor.fetchone()
-            if not section:
-                return {'success': False, 'error': '섹션을 찾을 수 없습니다'}
-            
-            section_key = section[0]
-            
-            # 해당 섹션에 컬럼이 있는지 확인
-            table_name = f"{self.board_type}_column_config"
-            cursor.execute(f"""
-                SELECT COUNT(*) FROM {table_name} 
-                WHERE tab = ?
-            """, (section_key,))
-            
-            column_count = cursor.fetchone()[0]
-            if column_count > 0:
-                return {'success': False, 'error': f'해당 섹션에 {column_count}개의 컬럼이 있어 삭제할 수 없습니다'}
-            
-            # 섹션 삭제
-            cursor.execute("""
-                DELETE FROM section_config 
-                WHERE id = ? AND board_type = ?
-            """, (section_id, self.board_type))
+            # 섹션을 soft delete로 처리 (is_deleted = 1)
+            if self.table_name == 'section_config':
+                cursor.execute("""
+                    UPDATE section_config 
+                    SET is_deleted = 1
+                    WHERE id = ? AND board_type = ?
+                """, (section_id, self.board_type))
+            else:
+                cursor.execute(f"""
+                    UPDATE {self.table_name} 
+                    SET is_deleted = 1
+                    WHERE id = ?
+                """, (section_id,))
             
             conn.commit()
             return {'success': True}
@@ -236,11 +261,18 @@ class SectionConfigService:
         
         try:
             for section_id, order in section_orders.items():
-                cursor.execute("""
-                    UPDATE section_config 
-                    SET section_order = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ? AND board_type = ?
-                """, (order, section_id, self.board_type))
+                if self.table_name == 'section_config':
+                    cursor.execute("""
+                        UPDATE section_config 
+                        SET section_order = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ? AND board_type = ?
+                    """, (order, section_id, self.board_type))
+                else:
+                    cursor.execute(f"""
+                        UPDATE {self.table_name} 
+                        SET section_order = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """, (order, section_id))
             
             conn.commit()
             return {'success': True}

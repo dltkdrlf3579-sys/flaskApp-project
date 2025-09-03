@@ -317,17 +317,17 @@ class PartnerDataManager:
         conn.close()
     
     def sync_partners_from_external_db(self):
-        """외부 DB에서 협력사 마스터 데이터 동기화 (기존 성공 방식)"""
+        """외부 DB에서 협력사 마스터 데이터 동기화 (custom_data 보존)"""
         if not IQADB_AVAILABLE:
             logging.error("IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
             return False
         
         try:
-            # config.ini에서 PARTNERS_EXTERNAL_QUERY 가져오기 (외부 DB용)
-            query = self.config.get('MASTER_DATA_QUERIES', 'PARTNERS_EXTERNAL_QUERY')
+            # config.ini에서 PARTNERS_QUERY 가져오기
+            query = self.config.get('MASTER_DATA_QUERIES', 'PARTNERS_QUERY')
             print(f"[INFO] 실행할 쿼리: {query[:100]}...")
             
-            # ✨ 기존 성공 방식으로 데이터 조회
+            # 외부 DB에서 데이터 조회
             print("[INFO] IQADB_CONNECT310을 사용하여 데이터 조회 시작...")
             df = execute_SQL(query)
             print(f"[INFO] 데이터 조회 완료: {len(df)} 건")
@@ -348,8 +348,12 @@ class PartnerDataManager:
             # 트랜잭션 시작
             cursor.execute("BEGIN IMMEDIATE")
             
-            # 기존 is_deleted 값을 보존하지 않고 모두 새로 동기화
-            # 외부 DB의 데이터는 모두 활성 상태로 간주
+            # 기존 custom_data와 is_deleted 보존을 위해 백업
+            cursor.execute("""
+                CREATE TEMP TABLE partners_backup AS 
+                SELECT business_number, custom_data, is_deleted 
+                FROM partners_cache
+            """)
             
             # 기존 캐시 데이터 삭제
             cursor.execute("DELETE FROM partners_cache")
@@ -358,8 +362,6 @@ class PartnerDataManager:
             rows = []
             for _, row in df.iterrows():
                 business_number = row.get('business_number', '')
-                # 모든 외부 DB 데이터는 is_deleted = 0 (활성 상태)
-                is_deleted_value = 0
                 
                 rows.append((
                     business_number,
@@ -372,9 +374,8 @@ class PartnerDataManager:
                     row.get('address', ''),
                     row.get('average_age', None),
                     row.get('annual_revenue', None),
-                    row.get('transaction_count', ''),  # TEXT로 변경
-                    row.get('permanent_workers', None),  # 추가
-                    is_deleted_value  # 모든 데이터를 활성 상태로
+                    row.get('transaction_count', ''),
+                    row.get('permanent_workers', None)
                 ))
             
             # 배치 삽입
@@ -382,14 +383,33 @@ class PartnerDataManager:
                 INSERT INTO partners_cache (
                     business_number, company_name, partner_class, business_type_major,
                     business_type_minor, hazard_work_flag, representative, address,
-                    average_age, annual_revenue, transaction_count, permanent_workers, is_deleted
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    average_age, annual_revenue, transaction_count, permanent_workers,
+                    is_deleted, custom_data
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '{}')
             ''', rows)
+            
+            # 기존 custom_data와 is_deleted 복원
+            cursor.execute("""
+                UPDATE partners_cache 
+                SET custom_data = COALESCE(
+                    (SELECT custom_data FROM partners_backup 
+                     WHERE partners_backup.business_number = partners_cache.business_number),
+                    '{}'
+                ),
+                is_deleted = COALESCE(
+                    (SELECT is_deleted FROM partners_backup 
+                     WHERE partners_backup.business_number = partners_cache.business_number),
+                    0
+                )
+            """)
+            
+            # 임시 테이블 삭제
+            cursor.execute("DROP TABLE partners_backup")
             
             conn.commit()
             conn.close()
             
-            print(f"[SUCCESS] ✅ 협력사 데이터 {len(df)}건 동기화 완료 (모두 활성 상태)")
+            print(f"[SUCCESS] ✅ 협력사 데이터 {len(df)}건 동기화 완료 (custom_data 보존)")
             return True
             
         except Exception as e:
@@ -398,17 +418,17 @@ class PartnerDataManager:
             return False
     
     def sync_accidents_from_external_db(self):
-        """외부 DB에서 사고 데이터 동기화 (기존 성공 방식)"""
+        """외부 DB에서 사고 데이터 동기화 (custom_data 보존)"""
         if not IQADB_AVAILABLE:
             print("[ERROR] IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
             return False
         
         try:
-            # 외부 DB용 쿼리 사용 (MASTER_DATA_QUERIES > ACCIDENTS_EXTERNAL_QUERY)
-            query = self.config.get('MASTER_DATA_QUERIES', 'ACCIDENTS_EXTERNAL_QUERY')
+            # config.ini에서 ACCIDENTS_QUERY 가져오기
+            query = self.config.get('MASTER_DATA_QUERIES', 'ACCIDENTS_QUERY')
             print(f"[INFO] 실행할 사고 쿼리: {query[:100]}...")
             
-            # ✨ 기존 성공 방식으로 데이터 조회
+            # 외부 DB에서 데이터 조회
             print("[INFO] IQADB_CONNECT310을 사용하여 사고 데이터 조회 시작...")
             df = execute_SQL(query)
             df = _normalize_df(df)  # 컬럼명 정규화 (소문자화 & 공백 제거)
@@ -419,36 +439,32 @@ class PartnerDataManager:
                 return False
             
             # DataFrame을 SQLite에 저장
-            conn = sqlite3.connect(self.local_db_path)
+            conn = sqlite3.connect(self.local_db_path, timeout=30.0)
             cursor = conn.cursor()
             
-            # 디버그: DataFrame의 실제 컬럼명 확인
-            print(f"[DEBUG] DataFrame 컬럼명: {list(df.columns)}")
-            if not df.empty:
-                print(f"[DEBUG] 첫 번째 행 전체 데이터:")
-                first_row = df.iloc[0]
-                for col in df.columns:
-                    print(f"  - {col}: {first_row[col]}")
-                print(f"\n[DEBUG] row.get으로 접근 테스트:")
-                row_dict = first_row.to_dict()
-                print(f"  - accident_number: {row_dict.get('accident_number', 'NOT FOUND')}")
-                print(f"  - accident_name: {row_dict.get('accident_name', 'NOT FOUND')}")
-                print(f"  - accident_date: {row_dict.get('accident_date', 'NOT FOUND')}")
+            # PRAGMA 설정
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            
+            # 트랜잭션 시작
+            cursor.execute("BEGIN IMMEDIATE")
+            
+            # 기존 custom_data와 is_deleted 보존을 위해 백업
+            cursor.execute("""
+                CREATE TEMP TABLE accidents_backup AS 
+                SELECT accident_number, custom_data, is_deleted 
+                FROM accidents_cache
+                WHERE accident_number IS NOT NULL
+            """)
             
             # 기존 사고 캐시 데이터 삭제
             cursor.execute("DELETE FROM accidents_cache")
             
-            # DataFrame을 레코드 배열로 변환하여 SQLite에 삽입
-            # config.ini의 ACCIDENTS_QUERY 컬럼에 맞게 매핑 (14개 필드)
+            # 배치 삽입을 위한 데이터 준비
+            rows = []
             for _, row in df.iterrows():
-                cursor.execute('''
-                    INSERT INTO accidents_cache (
-                        accident_number, accident_name, workplace,
-                        accident_grade, major_category, injury_form, injury_type,
-                        accident_date, day_of_week, report_date, building, floor,
-                        location_category, location_detail
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', tuple(_to_sqlite_safe(dfv) for dfv in (
+                rows.append(tuple(_to_sqlite_safe(dfv) for dfv in (
                     row.get('accident_number', ''),
                     row.get('accident_name', ''),
                     row.get('workplace', ''),
@@ -465,10 +481,38 @@ class PartnerDataManager:
                     row.get('location_detail', '')
                 )))
             
+            # 배치 삽입
+            cursor.executemany('''
+                INSERT INTO accidents_cache (
+                    accident_number, accident_name, workplace,
+                    accident_grade, major_category, injury_form, injury_type,
+                    accident_date, day_of_week, report_date, building, floor,
+                    location_category, location_detail, custom_data, is_deleted
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', 0)
+            ''', rows)
+            
+            # 기존 custom_data와 is_deleted 복원
+            cursor.execute("""
+                UPDATE accidents_cache 
+                SET custom_data = COALESCE(
+                    (SELECT custom_data FROM accidents_backup 
+                     WHERE accidents_backup.accident_number = accidents_cache.accident_number),
+                    '{}'
+                ),
+                is_deleted = COALESCE(
+                    (SELECT is_deleted FROM accidents_backup 
+                     WHERE accidents_backup.accident_number = accidents_cache.accident_number),
+                    0
+                )
+            """)
+            
+            # 임시 테이블 삭제
+            cursor.execute("DROP TABLE accidents_backup")
+            
             conn.commit()
             conn.close()
             
-            print(f"[SUCCESS] ✅ 사고 데이터 {len(df)}건 동기화 완료")
+            print(f"[SUCCESS] ✅ 사고 데이터 {len(df)}건 동기화 완료 (custom_data 보존)")
             return True
             
         except Exception as e:
@@ -484,7 +528,7 @@ class PartnerDataManager:
         
         try:
             # config.ini에서 EMPLOYEE_EXTERNAL_QUERY 가져오기 (외부 DB용)
-            query = self.config.get('MASTER_DATA_QUERIES', 'EMPLOYEE_EXTERNAL_QUERY')
+            query = self.config.get('MASTER_DATA_QUERIES', 'EMPLOYEE_QUERY')
             print(f"[INFO] 실행할 임직원 쿼리: {query[:100]}...")
             
             # 외부 DB에서 데이터 조회
@@ -534,7 +578,7 @@ class PartnerDataManager:
         
         try:
             # config.ini에서 DEPARTMENT_EXTERNAL_QUERY 가져오기 (외부 DB용)
-            query = self.config.get('MASTER_DATA_QUERIES', 'DEPARTMENT_EXTERNAL_QUERY')
+            query = self.config.get('MASTER_DATA_QUERIES', 'DEPARTMENT_QUERY')
             print(f"[INFO] 실행할 부서 쿼리: {query[:100]}...")
             
             # 외부 DB에서 데이터 조회
@@ -585,7 +629,7 @@ class PartnerDataManager:
         
         try:
             # config.ini에서 BUILDING_EXTERNAL_QUERY 가져오기 (외부 DB용)
-            query = self.config.get('MASTER_DATA_QUERIES', 'BUILDING_EXTERNAL_QUERY')
+            query = self.config.get('MASTER_DATA_QUERIES', 'BUILDING_QUERY')
             print(f"[INFO] 실행할 건물 쿼리: {query[:100]}...")
             
             # 외부 DB에서 데이터 조회
@@ -636,7 +680,7 @@ class PartnerDataManager:
         
         try:
             # config.ini에서 CONTRACTOR_EXTERNAL_QUERY 가져오기 (외부 DB용)
-            query = self.config.get('MASTER_DATA_QUERIES', 'CONTRACTOR_EXTERNAL_QUERY')
+            query = self.config.get('MASTER_DATA_QUERIES', 'CONTRACTOR_QUERY')
             print(f"[INFO] 실행할 협력사 근로자 쿼리: {query[:100]}...")
             
             # 외부 DB에서 데이터 조회
@@ -687,7 +731,7 @@ class PartnerDataManager:
         
         try:
             # config.ini에서 SAFETY_INSTRUCTIONS_EXTERNAL_QUERY 가져오기 (외부 DB용)
-            query = self.config.get('MASTER_DATA_QUERIES', 'SAFETY_INSTRUCTIONS_EXTERNAL_QUERY')
+            query = self.config.get('MASTER_DATA_QUERIES', 'SAFETY_INSTRUCTIONS_QUERY')
             print(f"[INFO] 실행할 안전지시서 쿼리: {query[:100]}...")
             
             # 외부 DB에서 데이터 조회
@@ -921,32 +965,32 @@ def maybe_daily_sync(force=False):
         
         # 다른 마스터 데이터 동기화 (외부 쿼리 존재 여부로 체크)
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'EMPLOYEE_EXTERNAL_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'EMPLOYEE_QUERY'):
                 partner_manager.sync_employees_from_external_db()
         except Exception as e:
             print(f"[ERROR] 임직원 동기화 실패: {e}")
             
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'DEPARTMENT_EXTERNAL_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'DEPARTMENT_QUERY'):
                 partner_manager.sync_departments_from_external_db()
         except Exception as e:
             print(f"[ERROR] 부서 동기화 실패: {e}")
             
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'BUILDING_EXTERNAL_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'BUILDING_QUERY'):
                 partner_manager.sync_buildings_from_external_db()
         except Exception as e:
             print(f"[ERROR] 건물 동기화 실패: {e}")
             
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'CONTRACTOR_EXTERNAL_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'CONTRACTOR_QUERY'):
                 partner_manager.sync_contractors_from_external_db()
         except Exception as e:
             print(f"[ERROR] 협력사 근로자 동기화 실패: {e}")
             
         # 환경안전지시서는 최초 1회만 동기화 (이미 데이터가 있으면 절대 동기화 안 함)
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'SAFETY_INSTRUCTIONS_EXTERNAL_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'SAFETY_INSTRUCTIONS_QUERY'):
                 # 동기화 이력 테이블 확인/생성
                 cur.execute('''
                     CREATE TABLE IF NOT EXISTS safety_instructions_sync_history (

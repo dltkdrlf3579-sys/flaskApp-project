@@ -74,16 +74,16 @@
                                     <option value="">선택하세요</option>
                                     {% if col.column_key in basic_options %}
                                         {% for opt in basic_options[col.column_key] %}
-                                        <option value="{{ opt.option_code }}" 
-                                                {% if opt.option_code == col_value %}selected{% endif %}>
-                                            {{ opt.option_value }}
+                                        <option value="{{ opt.code }}" 
+                                                {% if opt.code == col_value %}selected{% endif %}>
+                                            {{ opt.value }}
                                         </option>
                                         {% endfor %}
                                     {% elif col.dropdown_options_mapped %}
                                         {% for opt in col.dropdown_options_mapped %}
-                                        <option value="{{ opt.option_code }}"
-                                                {% if opt.option_code == col_value %}selected{% endif %}>
-                                            {{ opt.option_value }}
+                                        <option value="{{ opt.code }}"
+                                                {% if opt.code == col_value %}selected{% endif %}>
+                                            {{ opt.value }}
                                         </option>
                                         {% endfor %}
                                     {% endif %}
@@ -114,10 +114,11 @@
                                        data-field="{{ col.column_key }}"
                                        data-section="{{ section.section_key }}"
                                        value="{{ col_value }}">
-                            {% elif col.column_type == 'linked' %}
+                            {% elif col.column_type in ['linked', 'linked_text', 'linked_dept'] %}
                                 <!-- 연결된 필드 (읽기 전용) -->
                                 <input type="text" 
-                                       class="{{ section.section_key }}-input" 
+                                       id="{{ col.column_key }}"
+                                       class="{{ section.section_key }}-input linked-field" 
                                        data-field="{{ col.column_key }}"
                                        data-section="{{ section.section_key }}"
                                        value="{{ col_value }}"
@@ -458,9 +459,22 @@ function openPersonSearch(fieldKey) {
     }
     
     window.receivePersonSelection = function(fieldKey, data) {
-        document.getElementById(fieldKey).value = data.employee_name || data.name || '';
+        const mainField = document.getElementById(fieldKey);
+        if (mainField) {
+            mainField.value = data.employee_name || data.name || '';
+        }
+        
+        // ID 필드 업데이트
         const idField = document.getElementById(fieldKey + '_id');
-        if (idField) idField.value = data.employee_id || data.id || '';
+        if (idField) {
+            idField.value = data.employee_id || data.id || '';
+        }
+        
+        // 부서 필드 업데이트 (귀책담당자 부서)
+        const deptField = document.getElementById(fieldKey + '_dept');
+        if (deptField) {
+            deptField.value = data.department_name || data.department || '';
+        }
     };
     
     popup.focus();
@@ -492,9 +506,80 @@ function openCompanySearch(fieldKey) {
     
     window.receiveCompanySelection = function(fieldKey, data) {
         document.getElementById(fieldKey).value = data.company_name || '';
-        const bnField = document.getElementById(fieldKey + '_business_number');
-        if (bnField) bnField.value = data.business_number || '';
+        
+        // 사업자번호 linked 필드들 업데이트 (다양한 패턴 지원)
+        const businessNumberFields = [
+            fieldKey + '_business_number',  // 기본 패턴
+            fieldKey + '_bizno'             // 실제 사용되는 패턴
+        ];
+        
+        businessNumberFields.forEach(fieldId => {
+            const bnField = document.getElementById(fieldId);
+            if (bnField) bnField.value = data.business_number || '';
+        });
     };
+    
+    popup.focus();
+}
+
+// 부서 검색 팝업 열기 함수  
+function openDepartmentSearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes',
+        'toolbar=no',
+        'menubar=no',
+        'location=no',
+        'status=no'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=department&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'departmentSearch', popupOptions);
+    
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    popup.focus();
+}
+
+// 협력사 검색 팝업 열기 함수
+function openContractorSearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes',
+        'toolbar=no',
+        'menubar=no',
+        'location=no',
+        'status=no'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=contractor&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'contractorSearch', popupOptions);
+    
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
     
     popup.focus();
 }
@@ -531,6 +616,64 @@ function openBuildingSearch(fieldKey) {
     
     popup.focus();
 }
+
+// 누락된 팝업 핸들러들 추가 (전역 스코프에서)
+window.receiveDepartmentSelection = function(fieldKey, data) {
+    const mainField = document.getElementById(fieldKey);
+    if (mainField) {
+        mainField.value = data.dept_name || data.department_name || '';
+        mainField.readOnly = true;
+        mainField.style.backgroundColor = '#f3f4f6';
+    }
+    
+    const codeField = document.getElementById(fieldKey + '_code');
+    if (codeField) {
+        codeField.value = data.dept_code || data.department_code || '';
+        codeField.readOnly = true;
+        codeField.style.backgroundColor = '#f3f4f6';
+    }
+    
+    // linked 필드들도 업데이트 (귀책담당자 등)
+    const linkedFields = ['_name', '_dept_code', '_dept_name'];
+    linkedFields.forEach(suffix => {
+        const field = document.getElementById(fieldKey + suffix);
+        if (field) {
+            let value = '';
+            if (suffix === '_name') value = data.dept_name || data.department_name || '';
+            else if (suffix === '_dept_code') value = data.dept_code || data.department_code || '';
+            else if (suffix === '_dept_name') value = data.dept_name || data.department_name || '';
+            
+            field.value = value;
+            field.readOnly = true;
+            field.style.backgroundColor = '#f3f4f6';
+        }
+    });
+};
+
+window.receiveContractorSelection = function(fieldKey, data) {
+    const mainField = document.getElementById(fieldKey);
+    if (mainField) {
+        mainField.value = data.worker_name || '';
+        mainField.readOnly = true;
+        mainField.style.backgroundColor = '#f3f4f6';
+    }
+    
+    // linked 필드들 업데이트 (귀책사 사업자번호 등)
+    const linkedFields = ['_id', '_company_name', '_business_number'];
+    linkedFields.forEach(suffix => {
+        const field = document.getElementById(fieldKey + suffix);
+        if (field) {
+            let value = '';
+            if (suffix === '_id') value = data.worker_id || '';
+            else if (suffix === '_company_name') value = data.company_name || '';
+            else if (suffix === '_business_number') value = data.business_number || '';
+            
+            field.value = value;
+            field.readOnly = true;
+            field.style.backgroundColor = '#f3f4f6';
+        }
+    });
+};
 </script>
 
 <style>

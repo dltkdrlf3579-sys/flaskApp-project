@@ -61,7 +61,7 @@ def follow_sop_route():
             query_params.append(f"%{value}%")
     
     # WHERE 절 구성 (삭제되지 않은 항목만)
-    # where_clauses.insert(0, "(s.is_deleted = 0 OR s.is_deleted IS NULL)")  # follow_sop 테이블에 is_deleted 컬럼 없음
+    where_clauses.insert(0, "(s.is_deleted = 0 OR s.is_deleted IS NULL)")
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
     
     # 전체 건수 조회
@@ -194,8 +194,8 @@ def follow_sop_register():
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
     
     # 기본정보 필드 추가 (하드코딩) - 자동 생성값 포함
-    now_str = get_korean_time_str('%Y%m%d%H%M%S')
-    work_req_no = f"SOP{now_str}"
+    from id_generator import generate_followsop_number
+    work_req_no = generate_followsop_number(DB_PATH)
     created_at = get_korean_time_str('%Y-%m-%d %H:%M:%S')
     
     basic_fields = [
@@ -322,8 +322,9 @@ def register_follow_sop():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # work_req_no 생성 (Korean time 사용)
-        work_req_no = f"SOP{get_korean_time_str('%Y%m%d%H%M%S')}"
+        # work_req_no 생성 (FS + yyMMddhhmm + 카운터)
+        from id_generator import generate_followsop_number
+        work_req_no = generate_followsop_number(DB_PATH)
         
         # follow_sop 테이블이 없으면 생성
         cursor.execute("""
@@ -488,7 +489,7 @@ def full_process_route():
             query_params.append(f"%{value}%")
     
     # WHERE 절 구성 (삭제되지 않은 항목만)
-    # where_clauses.insert(0, "(p.is_deleted = 0 OR p.is_deleted IS NULL)")  # full_process 테이블에 is_deleted 컬럼 없음
+    where_clauses.insert(0, "(p.is_deleted = 0 OR p.is_deleted IS NULL)")
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
     
     # 전체 건수 조회
@@ -622,8 +623,8 @@ def full_process_register():
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
     
     # 기본정보 필드 추가 (하드코딩) - 자동 생성값 포함
-    now_str = get_korean_time_str('%Y%m%d%H%M%S')
-    fullprocess_number = f"FP{now_str}"
+    from id_generator import generate_fullprocess_number
+    fullprocess_number = generate_fullprocess_number(DB_PATH)
     created_at = get_korean_time_str('%Y-%m-%d %H:%M:%S')
     
     basic_fields = [
@@ -741,8 +742,9 @@ def register_full_process():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # fullprocess_number 생성 (Korean time 사용)
-        fullprocess_number = f"FP{get_korean_time_str('%Y%m%d%H%M%S')}"
+        # fullprocess_number 생성 (FP + yyMMddhhmm + 카운터)
+        from id_generator import generate_fullprocess_number
+        fullprocess_number = generate_fullprocess_number(DB_PATH)
         
         # full_process 테이블이 없으면 생성
         cursor.execute("""

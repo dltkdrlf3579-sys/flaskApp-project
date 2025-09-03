@@ -1,0 +1,77 @@
+import sqlite3
+import logging
+from datetime import datetime
+from timezone_config import get_korean_time
+
+def generate_unique_id(prefix, db_path, table_name, id_column):
+    """
+    접두사 + yyMMddhhmm + 2자리 카운터 형식의 고유 ID 생성
+    
+    Args:
+        prefix: ID 접두사 (예: 'FS', 'FP', 'SI')
+        db_path: 데이터베이스 경로
+        table_name: 테이블명
+        id_column: ID 컬럼명
+    
+    Returns:
+        str: 생성된 고유 ID (예: FS2509021045001)
+    """
+    korean_time = get_korean_time()
+    base_id = korean_time.strftime('%y%m%d%H%M')  # yyMMddhhmm
+    
+    conn = sqlite3.connect(db_path, timeout=30.0)
+    conn.execute("PRAGMA journal_mode=WAL")
+    cursor = conn.cursor()
+    
+    try:
+        # 트랜잭션으로 안전하게 처리
+        cursor.execute("BEGIN EXCLUSIVE")
+        
+        # 같은 시간대의 기존 ID들 검색
+        pattern = f"{prefix}{base_id}%"
+        cursor.execute(f"""
+            SELECT {id_column} FROM {table_name} 
+            WHERE {id_column} LIKE ? 
+            ORDER BY {id_column} DESC 
+            LIMIT 1
+        """, (pattern,))
+        
+        result = cursor.fetchone()
+        
+        if result:
+            # 마지막 카운터 추출하여 +1
+            last_id = result[0]
+            last_counter = int(last_id[len(prefix) + 10:])  # 접두사 + 10자리 시간 제외
+            new_counter = last_counter + 1
+        else:
+            # 첫 번째 ID
+            new_counter = 1
+        
+        # 카운터가 99 이하면 2자리, 그 이상이면 3자리로 확장
+        if new_counter <= 99:
+            unique_id = f"{prefix}{base_id}{new_counter:02d}"
+        else:
+            unique_id = f"{prefix}{base_id}{new_counter:03d}"
+        
+        cursor.execute("COMMIT")
+        logging.info(f"고유 ID 생성: {unique_id}")
+        return unique_id
+        
+    except Exception as e:
+        cursor.execute("ROLLBACK")
+        logging.error(f"ID 생성 오류: {e}")
+        # 폴백: 타임스탬프 + 랜덤
+        import random
+        fallback_id = f"{prefix}{base_id}{random.randint(100,999)}"
+        logging.warning(f"폴백 ID 사용: {fallback_id}")
+        return fallback_id
+    finally:
+        conn.close()
+
+def generate_followsop_number(db_path):
+    """Follow SOP 점검번호 생성 (FS + yyMMddhhmm + 01)"""
+    return generate_unique_id('FS', db_path, 'follow_sop', 'work_req_no')
+
+def generate_fullprocess_number(db_path):
+    """Full Process 평가번호 생성 (FP + yyMMddhhmm + 01)"""
+    return generate_unique_id('FP', db_path, 'full_process', 'fullprocess_number')

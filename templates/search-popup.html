@@ -640,9 +640,32 @@ function confirmSelection() {
     const fieldKey = urlParams.get('field');
     const searchType = urlParams.get('type');
     
+    console.log('confirmSelection 호출됨');
+    console.log('searchConfig.callback:', searchConfig.callback);
+    console.log('selectedItem:', selectedItem);
+    console.log('fieldKey:', fieldKey);
+    console.log('searchType:', searchType);
+    
     // 부모 창에 데이터 전달
     if (window.opener) {
-        // 타입별로 다른 함수 호출
+        console.log('opener 존재함');
+        
+        // 먼저 전달된 동적 콜백을 최우선으로 확인
+        if (searchConfig.callback) {
+            console.log('callback exists in config:', searchConfig.callback);
+            console.log('callback function type:', typeof window.opener[searchConfig.callback]);
+            
+            if (typeof window.opener[searchConfig.callback] === 'function') {
+                console.log('콜백 함수 호출 시도:', searchConfig.callback);
+                window.opener[searchConfig.callback](selectedItem);
+                window.close();
+                return;
+            } else {
+                console.log('콜백 함수가 부모 창에 없음:', searchConfig.callback);
+            }
+        }
+        
+        // 동적 콜백이 없을 때만 타입별 기본 콜백 사용
         if (searchType === 'person') {
             if (window.opener.receivePersonSelection) {
                 window.opener.receivePersonSelection(fieldKey, selectedItem);
@@ -662,11 +685,6 @@ function confirmSelection() {
         } else if (searchType === 'contractor') {
             if (window.opener.receiveContractorSelection) {
                 window.opener.receiveContractorSelection(fieldKey, selectedItem);
-            }
-        } else {
-            // 기본 callback 사용
-            if (searchConfig.callback && window.opener[searchConfig.callback]) {
-                window.opener[searchConfig.callback](selectedItem);
             }
         }
     }

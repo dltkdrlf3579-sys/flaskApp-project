@@ -69,11 +69,11 @@
                                         <option value="">선택하세요</option>
                                         {% if col.column_key in basic_options %}
                                             {% for opt in basic_options[col.column_key] %}
-                                            <option value="{{ opt.option_code }}">{{ opt.option_value }}</option>
+                                            <option value="{{ opt.code }}">{{ opt.value }}</option>
                                             {% endfor %}
                                         {% elif col.dropdown_options_mapped %}
                                             {% for opt in col.dropdown_options_mapped %}
-                                            <option value="{{ opt.option_code }}">{{ opt.option_value }}</option>
+                                            <option value="{{ opt.code }}">{{ opt.value }}</option>
                                             {% endfor %}
                                         {% endif %}
                                     </select>

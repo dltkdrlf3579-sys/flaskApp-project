@@ -49,7 +49,7 @@ def generate_manual_accident_number(cursor):
     # 오늘 날짜의 마지막 번호 조회
     cursor.execute("""
         SELECT accident_number 
-        FROM accidents_cache 
+        FROM accidents 
         WHERE accident_number LIKE ?
         ORDER BY accident_number DESC
         LIMIT 1
@@ -314,17 +314,34 @@ def init_db():
         if 'is_deleted' not in columns:
             cursor.execute("ALTER TABLE full_process_column_config ADD COLUMN is_deleted INTEGER DEFAULT 0")
         
+        # Safety Instruction 테이블에 누락된 컬럼들 추가 (startup 보강)
+        cursor.execute("PRAGMA table_info(safety_instruction_column_config)")
+        safety_columns = [col[1] for col in cursor.fetchall()]
+        if 'is_deleted' not in safety_columns:
+            cursor.execute("ALTER TABLE safety_instruction_column_config ADD COLUMN is_deleted INTEGER DEFAULT 0")
+        if 'tab' not in safety_columns:
+            cursor.execute("ALTER TABLE safety_instruction_column_config ADD COLUMN tab TEXT")
+        if 'column_span' not in safety_columns:
+            cursor.execute("ALTER TABLE safety_instruction_column_config ADD COLUMN column_span INTEGER DEFAULT 1")
+        
         # Follow SOP 데이터 테이블 (동적 컬럼 데이터 저장용)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS follow_sop (
                 work_req_no TEXT PRIMARY KEY,
                 custom_data TEXT DEFAULT '{}',
+                is_deleted INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_by TEXT,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_by TEXT
             )
         ''')
+        
+        # Follow SOP 테이블에 is_deleted 컬럼 추가 (기존 테이블 업데이트)
+        cursor.execute("PRAGMA table_info(follow_sop)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if 'is_deleted' not in columns:
+            cursor.execute("ALTER TABLE follow_sop ADD COLUMN is_deleted INTEGER DEFAULT 0")
         
         # Follow SOP sections 테이블 생성
         cursor.execute('''
@@ -342,12 +359,19 @@ def init_db():
             CREATE TABLE IF NOT EXISTS full_process (
                 fullprocess_number TEXT PRIMARY KEY,
                 custom_data TEXT DEFAULT '{}',
+                is_deleted INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_by TEXT,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_by TEXT
             )
         ''')
+        
+        # Full Process 테이블에 is_deleted 컬럼 추가 (기존 테이블 업데이트)
+        cursor.execute("PRAGMA table_info(full_process)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if 'is_deleted' not in columns:
+            cursor.execute("ALTER TABLE full_process ADD COLUMN is_deleted INTEGER DEFAULT 0")
         
         # Full Process sections 테이블 생성
         cursor.execute('''
@@ -376,87 +400,19 @@ def init_db():
     conn.commit()
     conn.close()
     
-    # 외부 DB 연동이 활성화되고 시작 시 동기화가 설정된 경우에만 동기화
-    sync_on_startup = db_config.config.getboolean('DATABASE', 'SYNC_ON_STARTUP', fallback=False)
-    if db_config.external_db_enabled and sync_on_startup:
-        sync_success = True
-        
-        # 1. 협력사 데이터 동기화
+    # 샘플 데이터 초기화 (외부 DB 동기화 로직 제거)
+    init_sample_data()
+
+    # 외부 DB 동기화 실행 (EXTERNAL_DB_ENABLED=True일 때만)
+    if db_config.external_db_enabled:
+        logging.info("외부 DB 동기화 시작...")
         try:
-            logging.info("협력사 데이터 동기화 시작...")
-            if not partner_manager.sync_partners_from_external_db():
-                logging.warning("협력사 데이터 동기화 실패")
-                sync_success = False
-            else:
-                logging.info("협력사 데이터 동기화 완료")
+            from database_config import maybe_daily_sync
+            maybe_daily_sync(force=False)  # 하루에 한 번만 동기화
         except Exception as e:
-            logging.error(f"협력사 동기화 중 오류: {e}")
-            sync_success = False
-        
-        # 2. 사고 데이터 동기화 (ACCIDENTS_QUERY가 있을 때만)
-        try:
-            if partner_manager.config.has_option('SQL_QUERIES', 'ACCIDENTS_QUERY'):
-                logging.info("사고 데이터 동기화 시작...")
-                if partner_manager.sync_accidents_from_external_db():
-                    logging.info("사고 데이터 동기화 완료")
-                else:
-                    logging.warning("사고 데이터 동기화 실패 - 더미 데이터 사용")
-            else:
-                logging.info("ACCIDENTS_QUERY 미설정 - 사고 데이터는 더미 사용")
-        except Exception as e:
-            logging.warning(f"사고 동기화 중 오류: {e} - 더미 데이터 사용")
-        
-        # 3. 임직원 데이터 동기화
-        try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'EMPLOYEE_EXTERNAL_QUERY'):
-                logging.info("임직원 데이터 동기화 시작...")
-                if partner_manager.sync_employees_from_external_db():
-                    logging.info("임직원 데이터 동기화 완료")
-                else:
-                    logging.warning("임직원 데이터 동기화 실패")
-        except Exception as e:
-            logging.warning(f"임직원 동기화 중 오류: {e}")
-        
-        # 4. 부서 데이터 동기화
-        try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'DEPARTMENT_EXTERNAL_QUERY'):
-                logging.info("부서 데이터 동기화 시작...")
-                if partner_manager.sync_departments_from_external_db():
-                    logging.info("부서 데이터 동기화 완료")
-                else:
-                    logging.warning("부서 데이터 동기화 실패")
-        except Exception as e:
-            logging.warning(f"부서 동기화 중 오류: {e}")
-        
-        # 5. 건물 데이터 동기화
-        try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'BUILDING_EXTERNAL_QUERY'):
-                logging.info("건물 데이터 동기화 시작...")
-                if partner_manager.sync_buildings_from_external_db():
-                    logging.info("건물 데이터 동기화 완료")
-                else:
-                    logging.warning("건물 데이터 동기화 실패")
-        except Exception as e:
-            logging.warning(f"건물 동기화 중 오류: {e}")
-        
-        # 6. 협력사 근로자 데이터 동기화
-        try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'CONTRACTOR_EXTERNAL_QUERY'):
-                logging.info("협력사 근로자 데이터 동기화 시작...")
-                if partner_manager.sync_contractors_from_external_db():
-                    logging.info("협력사 근로자 데이터 동기화 완료")
-                else:
-                    logging.warning("협력사 근로자 데이터 동기화 실패")
-        except Exception as e:
-            logging.warning(f"협력사 근로자 동기화 중 오류: {e}")
-        
-        # 동기화 실패 시 샘플 데이터 사용
-        if not sync_success:
-            logging.info("일부 동기화 실패 - 샘플 데이터로 대체")
-            init_sample_data()
+            logging.error(f"외부 DB 동기화 실패: {e}")
     else:
-        # 외부 DB가 비활성화된 경우 샘플 데이터 생성
-        init_sample_data()
+        logging.info("EXTERNAL_DB_ENABLED=False - 샘플 데이터만 사용")
 
 def sync_all_master_data():
     """모든 마스터 데이터 동기화 함수 (스케줄러용)"""
@@ -499,7 +455,7 @@ def sync_all_master_data():
         
         # 3. 임직원 데이터 동기화
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'EMPLOYEE_EXTERNAL_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'EMPLOYEE_QUERY'):
                 logging.info("임직원 데이터 동기화 중...")
                 sync_results['임직원'] = partner_manager.sync_employees_from_external_db()
         except Exception as e:
@@ -507,7 +463,7 @@ def sync_all_master_data():
         
         # 4. 부서 데이터 동기화
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'DEPARTMENT_EXTERNAL_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'DEPARTMENT_QUERY'):
                 logging.info("부서 데이터 동기화 중...")
                 sync_results['부서'] = partner_manager.sync_departments_from_external_db()
         except Exception as e:
@@ -515,7 +471,7 @@ def sync_all_master_data():
         
         # 5. 건물 데이터 동기화
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'BUILDING_EXTERNAL_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'BUILDING_QUERY'):
                 logging.info("건물 데이터 동기화 중...")
                 sync_results['건물'] = partner_manager.sync_buildings_from_external_db()
         except Exception as e:
@@ -523,7 +479,7 @@ def sync_all_master_data():
         
         # 6. 협력사 근로자 데이터 동기화
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'CONTRACTOR_EXTERNAL_QUERY'):
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'CONTRACTOR_QUERY'):
                 logging.info("협력사 근로자 데이터 동기화 중...")
                 sync_results['협력사 근로자'] = partner_manager.sync_contractors_from_external_db()
         except Exception as e:
@@ -1054,10 +1010,11 @@ def safety_instruction_route():
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     
-    # 섹션 정보 가져오기 (safety_instruction 전용)
+    # 섹션 정보 가져오기 (safety_instruction 전용, 삭제되지 않은 것만)
     sections = conn.execute("""
         SELECT * FROM section_config 
         WHERE board_type = 'safety_instruction' AND is_active = 1 
+        AND (is_deleted = 0 OR is_deleted IS NULL)
         ORDER BY section_order
     """).fetchall()
     sections = [dict(row) for row in sections]
@@ -1088,7 +1045,7 @@ def safety_instruction_route():
             col['code_mapping'] = get_dropdown_options_for_display('safety_instruction', col['column_key'])
     
     # config.ini에서 캐시 테이블 쿼리 가져오기
-    base_query = db_config.config.get('SQL_QUERIES', 'SAFETY_INSTRUCTIONS_QUERY')
+    base_query = db_config.config.get('MASTER_DATA_QUERIES', 'SAFETY_INSTRUCTIONS_QUERY')
     # WHERE 절 추가를 위해 쿼리 수정
     query = base_query.replace("WHERE issue_number IS NOT NULL", 
                                "WHERE issue_number IS NOT NULL AND (is_deleted = 0 OR is_deleted IS NULL)")
@@ -1312,8 +1269,8 @@ def safety_instruction_detail(issue_number):
     instruction = None
     try:
         instruction = conn.execute("""
-            SELECT * FROM safety_instructions 
-            WHERE issue_number = ? AND is_deleted = 0
+            SELECT * FROM safety_instructions_cache 
+            WHERE issue_number = ? AND (is_deleted = 0 OR is_deleted IS NULL)
         """, (issue_number,)).fetchone()
     except sqlite3.OperationalError:
         # 테이블이 없는 경우 더미 데이터 사용
@@ -1993,7 +1950,7 @@ def change_request_detail(request_id):
         cursor = conn.cursor()
         dynamic_columns_rows = conn.execute("""
             SELECT * FROM change_request_column_config 
-            WHERE is_active = 1 
+            WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
             ORDER BY column_order
         """).fetchall()
         
@@ -2231,17 +2188,43 @@ def accident_detail(accident_id):
     """).fetchall()
     sections = [dict(row) for row in sections]
     
-    # 더미 데이터에서 해당 사고 찾기 (실제로는 DB에서 조회)
-    import random
+    # 실제 DB에서 사고 데이터 조회
+    accident = None
+    custom_data = {}
     
-    # 더미 사고 데이터 (partner_accident 함수와 동일한 데이터 생성)
-    dummy_accidents = []
-    for i in range(50):
-        # 사고번호 생성: K + 연월일 + 순서(3자리) - 고정된 값
-        months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-        days = [1, 5, 10, 15, 20, 25]
-        accident_date_fixed = f'2024-{months[i % 12]:02d}-{days[i % 6]:02d}'
-        accident_number = f'K{accident_date_fixed.replace("-", "")}{i+1:03d}'
+    # accidents_cache 테이블에서 조회
+    try:
+        accident_row = conn.execute("""
+            SELECT * FROM accidents_cache 
+            WHERE id = ? AND (is_deleted = 0 OR is_deleted IS NULL)
+        """, (accident_id,)).fetchone()
+        
+        if accident_row:
+            accident = dict(accident_row)
+            # custom_data JSON 파싱
+            if accident.get('custom_data'):
+                try:
+                    custom_data = json.loads(accident['custom_data'])
+                    # accident 딕셔너리에 custom_data 병합
+                    accident.update(custom_data)
+                except:
+                    custom_data = {}
+        else:
+            # DB에 없으면 더미 데이터 사용
+            dummy_accidents = []
+    except Exception as e:
+        logging.error(f"DB 조회 오류: {e}")
+        dummy_accidents = []
+        
+    # 더미 데이터 생성 (DB에 없는 경우)
+    if not accident:
+        dummy_accidents = []
+        for i in range(50):
+            # 사고번호 생성: K + 연월일 + 순서(3자리) - 고정된 값
+            months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+            days = [1, 5, 10, 15, 20, 25]
+            accident_date_fixed = f'2024-{months[i % 12]:02d}-{days[i % 6]:02d}'
+            accident_number = f'K{accident_date_fixed.replace("-", "")}{i+1:03d}'
         
         # 고정된 값들로 변경
         grades = ['경미', '중대', '치명']
@@ -3467,6 +3450,16 @@ def update_accident():
             except:
                 custom_data = {}
         
+        # 리스트 필드 정규화 (이중 JSON 인코딩 방지)
+        for key, value in custom_data.items():
+            if isinstance(value, str) and value.startswith('[') and value.endswith(']'):
+                try:
+                    # 이미 JSON 문자열인 리스트 필드를 배열로 변환
+                    custom_data[key] = pyjson.loads(value)
+                    print(f"List field {key} normalized from string to array")
+                except:
+                    pass
+        
         print(f"Files count: {len(files)}")
         print(f"Attachment data: {attachment_data}")
         
@@ -3877,11 +3870,128 @@ def admin_safety_instruction_codes():
     """환경안전 지시서 코드 관리 페이지"""
     return render_template('admin-safety-instruction-codes.html', menu=MENU_CONFIG)
 
+@app.route("/admin/fullprocess-codes")
+@require_admin_auth
+def admin_fullprocess_codes():
+    """Full Process 코드 관리 임베디드 페이지"""
+    column_key = request.args.get('column_key', '')
+    embedded = request.args.get('embedded', 'false') == 'true'
+    
+    return render_template('admin-fullprocess-codes.html', 
+                         column_key=column_key,
+                         embedded=embedded,
+                         menu=MENU_CONFIG)
+
+@app.route("/admin/followsop-codes")
+@require_admin_auth
+def admin_followsop_codes():
+    """Follow SOP 코드 관리 임베디드 페이지"""
+    column_key = request.args.get('column_key', '')
+    embedded = request.args.get('embedded', 'false') == 'true'
+    
+    return render_template('admin-followsop-codes.html', 
+                         column_key=column_key,
+                         embedded=embedded,
+                         menu=MENU_CONFIG)
+
 @app.route("/admin/person-master")
 @require_admin_auth
 def admin_person_master():
     """담당자 마스터 관리 페이지"""
     return render_template('admin-person-master.html', menu=MENU_CONFIG)
+
+# Follow SOP API 엔드포인트
+@app.route("/api/follow-sop-columns", methods=["GET"])
+def get_follow_sop_columns():
+    """Follow SOP 페이지 동적 컬럼 설정 조회"""
+    try:
+        column_service = ColumnConfigService('follow_sop', DB_PATH)
+        columns = column_service.list_columns()
+        return jsonify(columns)
+    except Exception as e:
+        logging.error(f"Follow SOP 컬럼 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/follow-sop-columns", methods=["POST"])
+def add_follow_sop_column():
+    """Follow SOP 페이지 동적 컬럼 추가"""
+    try:
+        if not request.json:
+            return jsonify({"success": False, "message": "JSON data required"}), 400
+            
+        column_service = ColumnConfigService('follow_sop', DB_PATH)
+        result = column_service.add_column(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 컬럼 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/follow-sop-columns/<int:column_id>", methods=["PUT"])
+def update_follow_sop_column(column_id):
+    """Follow SOP 페이지 동적 컬럼 수정"""
+    try:
+        column_service = ColumnConfigService('follow_sop', DB_PATH)
+        result = column_service.update_column(column_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 컬럼 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/follow-sop-columns/<int:column_id>", methods=["DELETE"])
+def delete_follow_sop_column(column_id):
+    """Follow SOP 페이지 동적 컬럼 삭제 (비활성화)"""
+    try:
+        column_service = ColumnConfigService('follow_sop', DB_PATH)
+        result = column_service.delete_column(column_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 컬럼 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+# Full Process API 엔드포인트
+@app.route("/api/full-process-columns", methods=["GET"])
+def get_full_process_columns():
+    """Full Process 페이지 동적 컬럼 설정 조회"""
+    try:
+        column_service = ColumnConfigService('full_process', DB_PATH)
+        columns = column_service.list_columns()
+        return jsonify(columns)
+    except Exception as e:
+        logging.error(f"Full Process 컬럼 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/full-process-columns", methods=["POST"])
+def add_full_process_column():
+    """Full Process 페이지 동적 컬럼 추가"""
+    try:
+        column_service = ColumnConfigService('full_process', DB_PATH)
+        result = column_service.add_column(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 컬럼 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/full-process-columns/<int:column_id>", methods=["PUT"])
+def update_full_process_column(column_id):
+    """Full Process 페이지 동적 컬럼 수정"""
+    try:
+        column_service = ColumnConfigService('full_process', DB_PATH)
+        result = column_service.update_column(column_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 컬럼 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/full-process-columns/<int:column_id>", methods=["DELETE"])
+def delete_full_process_column(column_id):
+    """Full Process 페이지 동적 컬럼 삭제 (비활성화)"""
+    try:
+        column_service = ColumnConfigService('full_process', DB_PATH)
+        result = column_service.delete_column(column_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 컬럼 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route("/admin/safety-instruction-columns")
 @require_admin_auth  
@@ -4190,7 +4300,7 @@ def change_request_register():
         conn.row_factory = sqlite3.Row
         dynamic_columns_rows = conn.execute("""
             SELECT * FROM change_request_column_config 
-            WHERE is_active = 1 
+            WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
             ORDER BY column_order
         """).fetchall()
         
@@ -4694,7 +4804,7 @@ def api_search():
                 from database_config import execute_SQL
                 
                 # config.ini에서 BUILDING_QUERY 가져오기
-                building_query = db_config.config.get('MASTER_DATA_QUERIES', 'BUILDING_EXTERNAL_QUERY')
+                building_query = db_config.config.get('MASTER_DATA_QUERIES', 'BUILDING_QUERY')
                 
                 # 검색어 조건 추가
                 if search_term:
@@ -4754,7 +4864,7 @@ def api_search():
                 from database_config import execute_SQL
                 
                 # config.ini에서 DEPARTMENT_QUERY 가져오기
-                department_query = db_config.config.get('MASTER_DATA_QUERIES', 'DEPARTMENT_EXTERNAL_QUERY')
+                department_query = db_config.config.get('MASTER_DATA_QUERIES', 'DEPARTMENT_QUERY')
                 
                 # 검색어 조건 추가
                 if search_term:
@@ -4824,7 +4934,7 @@ def api_search():
                 from database_config import execute_SQL
                 
                 # config.ini에서 CONTRACTOR_QUERY 가져오기
-                contractor_query = db_config.config.get('MASTER_DATA_QUERIES', 'CONTRACTOR_EXTERNAL_QUERY')
+                contractor_query = db_config.config.get('MASTER_DATA_QUERIES', 'CONTRACTOR_QUERY')
                 
                 # 검색어 조건 추가
                 if search_term:
@@ -5318,12 +5428,15 @@ def export_accidents_excel():
         conn = get_db_connection()
         conn.row_factory = sqlite3.Row
         
-        # 동적 컬럼 정보 가져오기 (활성화되고 삭제되지 않은 컬럼만)
+        # 동적 컬럼 정보 가져오기 (활성화되고 삭제되지 않은 컬럼만, 섹션도 활성화된 것만)
         dynamic_columns_rows = conn.execute("""
-            SELECT * FROM accident_column_config 
-            WHERE is_active = 1 
-            AND (is_deleted = 0 OR is_deleted IS NULL)
-            ORDER BY column_order
+            SELECT c.* FROM accident_column_config c
+            LEFT JOIN section_config s ON s.board_type = 'accident' AND s.section_key = c.tab
+            WHERE c.is_active = 1 
+            AND (c.is_deleted = 0 OR c.is_deleted IS NULL)
+            AND (s.is_active = 1 OR s.section_key IS NULL)
+            AND (s.is_deleted = 0 OR s.is_deleted IS NULL OR s.section_key IS NULL)
+            ORDER BY c.column_order
         """).fetchall()
         dynamic_columns = [dict(row) for row in dynamic_columns_rows]
         
@@ -5509,7 +5622,7 @@ def import_accidents():
             cursor.execute("""
                 SELECT column_key, column_name, column_type, dropdown_options
                 FROM accident_column_config 
-                WHERE is_active = 1 
+                WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
                 ORDER BY column_order
             """)
             dynamic_columns = cursor.fetchall()
@@ -5728,12 +5841,15 @@ def export_follow_sop_excel():
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # 동적 컬럼 정보 가져오기 (활성화되고 삭제되지 않은 컬럼만)
+        # 동적 컬럼 정보 가져오기 (활성화되고 삭제되지 않은 컬럼만, 섹션도 활성화된 것만)
         cursor.execute("""
-            SELECT * FROM follow_sop_column_config 
-            WHERE is_active = 1 
-            AND (is_deleted = 0 OR is_deleted IS NULL)
-            ORDER BY column_order
+            SELECT c.* FROM follow_sop_column_config c
+            LEFT JOIN follow_sop_sections s ON s.section_key = c.tab
+            WHERE c.is_active = 1 
+            AND (c.is_deleted = 0 OR c.is_deleted IS NULL)
+            AND (s.is_active = 1 OR s.section_key IS NULL)
+            AND (s.is_deleted = 0 OR s.is_deleted IS NULL OR s.section_key IS NULL)
+            ORDER BY c.column_order
         """)
         dynamic_columns = cursor.fetchall()
         
@@ -5860,12 +5976,15 @@ def export_full_process_excel():
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # 동적 컬럼 정보 가져오기 (활성화되고 삭제되지 않은 컬럼만)
+        # 동적 컬럼 정보 가져오기 (활성화되고 삭제되지 않은 컬럼만, 섹션도 활성화된 것만)
         cursor.execute("""
-            SELECT * FROM full_process_column_config 
-            WHERE is_active = 1 
-            AND (is_deleted = 0 OR is_deleted IS NULL)
-            ORDER BY column_order
+            SELECT c.* FROM full_process_column_config c
+            LEFT JOIN full_process_sections s ON s.section_key = c.tab
+            WHERE c.is_active = 1 
+            AND (c.is_deleted = 0 OR c.is_deleted IS NULL)
+            AND (s.is_active = 1 OR s.section_key IS NULL)
+            AND (s.is_deleted = 0 OR s.is_deleted IS NULL OR s.section_key IS NULL)
+            ORDER BY c.column_order
         """)
         dynamic_columns = cursor.fetchall()
         
@@ -5992,12 +6111,13 @@ def export_safety_instruction_excel():
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # 동적 컬럼 정보 가져오기 (활성화되고 삭제되지 않은 컬럼만)
+        # 동적 컬럼 정보 가져오기 (활성화되고 삭제되지 않은 컬럼만, 섹션도 활성화된 것만)
         cursor.execute("""
-            SELECT * FROM safety_instruction_column_config 
-            WHERE is_active = 1 
-            AND (is_deleted = 0 OR is_deleted IS NULL)
-            ORDER BY column_order
+            SELECT c.* FROM safety_instruction_column_config c
+            INNER JOIN section_config s ON s.board_type = 'safety_instruction' AND s.section_key = c.tab AND s.is_active = 1
+            WHERE c.is_active = 1 
+            AND (c.is_deleted = 0 OR c.is_deleted IS NULL)
+            ORDER BY c.column_order
         """)
         dynamic_columns = cursor.fetchall()
         
@@ -6031,13 +6151,15 @@ def export_safety_instruction_excel():
             cell.alignment = header_align
             col_idx += 1
         
-        # 동적 컬럼 - 삭제되지 않은 것만
+        # 동적 컬럼 - 삭제되지 않은 것만 (기본 필드 제외)
+        basic_column_keys = ['issue_number', 'issuer', 'violation_date', 'discipline_date', 'disciplined_person']
         for col in dynamic_columns:
-            cell = ws.cell(row=1, column=col_idx, value=col['column_name'])
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = header_align
-            col_idx += 1
+            if col['column_key'] not in basic_column_keys:
+                cell = ws.cell(row=1, column=col_idx, value=col['column_name'])
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_align
+                col_idx += 1
         
         # 데이터 작성
         for row_idx, row in enumerate(data, 2):
@@ -6065,19 +6187,21 @@ def export_safety_instruction_excel():
                 except:
                     custom_data = {}
             
-            # 동적 컬럼 데이터 - 먼저 실제 컬럼에서 찾고, 없으면 custom_data에서
+            # 동적 컬럼 데이터 - 기본 필드 제외하고 처리
+            basic_column_keys = ['issue_number', 'issuer', 'violation_date', 'discipline_date', 'disciplined_person']
             for col in dynamic_columns:
-                col_key = col['column_key']
-                # 먼저 실제 테이블 컬럼에서 값 찾기
-                value = row_dict.get(col_key, '')
-                # 없으면 custom_data에서 찾기
-                if not value and custom_data:
-                    value = custom_data.get(col_key, '')
-                # 팝업형 값(dict)이면 이름 추출
-                if isinstance(value, dict):
-                    value = value.get('name', str(value))
-                ws.cell(row=row_idx, column=col_idx, value=value)
-                col_idx += 1
+                if col['column_key'] not in basic_column_keys:
+                    col_key = col['column_key']
+                    # 먼저 실제 테이블 컬럼에서 값 찾기
+                    value = row_dict.get(col_key, '')
+                    # 없으면 custom_data에서 찾기
+                    if not value and custom_data:
+                        value = custom_data.get(col_key, '')
+                    # 팝업형 값(dict)이면 이름 추출
+                    if isinstance(value, dict):
+                        value = value.get('name', str(value))
+                    ws.cell(row=row_idx, column=col_idx, value=value)
+                    col_idx += 1
         
         # 컬럼 너비 자동 조정
         for column in ws.columns:

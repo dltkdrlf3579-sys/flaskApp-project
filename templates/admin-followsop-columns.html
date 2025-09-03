@@ -1841,7 +1841,22 @@ let editingId = null;
                 let successCount = 0;
                 let errorCount = 0;
                 
-                // 먼저 섹션 변경사항 저장
+                // 먼저 섹션 삭제 처리
+                for (const sectionId of sectionsToDelete) {
+                    const response = await fetch(`/api/follow-sop-sections/${sectionId}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    if (response.ok) {
+                        successCount++;
+                        console.log(`섹션 ID ${sectionId} 삭제 성공`);
+                    } else {
+                        errorCount++;
+                        console.error(`섹션 ID ${sectionId} 삭제 실패`);
+                    }
+                }
+                
+                // 섹션 변경사항 저장
                 for (const [sectionId, change] of Object.entries(sectionChanges)) {
                     if (!change.is_new) {
                         // 기존 섹션 이름 변경
@@ -1868,6 +1883,7 @@ let editingId = null;
                 
                 // 섹션 변경사항 초기화
                 sectionChanges = {};
+                sectionsToDelete = [];
                 
                 // 컬럼 변경사항 처리
                 for (const column of pendingColumns) {

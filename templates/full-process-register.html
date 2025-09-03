@@ -79,11 +79,11 @@
                                         <option value="">선택하세요</option>
                                         {% if col.column_key in basic_options %}
                                             {% for opt in basic_options[col.column_key] %}
-                                            <option value="{{ opt.option_code }}">{{ opt.option_value }}</option>
+                                            <option value="{{ opt.code }}">{{ opt.value }}</option>
                                             {% endfor %}
                                         {% elif col.dropdown_options_mapped %}
                                             {% for opt in col.dropdown_options_mapped %}
-                                            <option value="{{ opt.option_code }}">{{ opt.option_value }}</option>
+                                            <option value="{{ opt.code }}">{{ opt.value }}</option>
                                             {% endfor %}
                                         {% endif %}
                                     </select>
@@ -291,10 +291,18 @@ function registerFullProcess() {
         });
     });
     
-    // FormData에 추가
-    formData.append('basic_info', JSON.stringify(basicInfo));
-    formData.append('violation_info', JSON.stringify(violationInfo));
-    formData.append('custom_data', JSON.stringify(customData));
+    // 모든 데이터를 하나의 객체로 통합
+    const allData = {
+        ...basicInfo,
+        ...violationInfo,
+        ...customData,
+        detailed_content: detailedContent
+    };
+    
+    // FormData에 추가 (서버는 'data' 파라미터로 JSON을 기대)
+    formData.append('data', JSON.stringify({
+        custom_data: allData
+    }));
     
     // 첨부파일 처리
     const attachmentData = [];
@@ -316,7 +324,7 @@ function registerFullProcess() {
     }
     
     // 서버로 전송
-    fetch('/register-follow-sop', {
+    fetch('/register-full-process', {
         method: 'POST',
         body: formData
     })
