@@ -1077,37 +1077,72 @@ def maybe_daily_sync_master(force=False):
         conn.close()
         return
 
+    print("[INFO] 마스터 데이터 동기화 시작...")
+    
+    # 먼저 모든 캐시 테이블 구조 확인/생성 (init_local_tables 호출)
+    partner_manager.init_local_tables()
+    
     # sync 파트(쿼리 존재 시에만)
-    ok = False
+    success = False
+    
+    # 협력사 데이터 동기화
     try:
         if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'PARTNERS_QUERY'):
-            ok |= bool(partner_manager.sync_partners_from_external_db())
+            if partner_manager.sync_partners_from_external_db():
+                success = True
+                print("[SUCCESS] 협력사 데이터 동기화 완료")
+        else:
+            print("[INFO] PARTNERS_QUERY not found - skip")
     except Exception as e:
-        print(f"[ERROR] Partners sync: {e}")
+        print(f"[ERROR] 협력사 동기화 실패: {e}")
 
+    # 사고 데이터 동기화
     try:
         if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'ACCIDENTS_QUERY'):
-            ok |= bool(partner_manager.sync_accidents_from_external_db())
+            if partner_manager.sync_accidents_from_external_db():
+                success = True
+                print("[SUCCESS] 사고 데이터 동기화 완료")
+        else:
+            print("[INFO] ACCIDENTS_QUERY not found - skip")
     except Exception as e:
-        print(f"[ERROR] Accidents sync: {e}")
+        print(f"[ERROR] 사고 동기화 실패: {e}")
 
-    # 나머지 마스터(존재하면)
-    for key, func in [
-        ('EMPLOYEE_QUERY', partner_manager.sync_employees_from_external_db),
-        ('DEPARTMENT_QUERY', partner_manager.sync_departments_from_external_db),
-        ('BUILDING_QUERY', partner_manager.sync_buildings_from_external_db),
-        ('CONTRACTOR_QUERY', partner_manager.sync_contractors_from_external_db),
-    ]:
-        try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', key):
-                func()
-        except Exception as e:
-            print(f"[ERROR] {key} sync: {e}")
+    # 다른 마스터 데이터 동기화 (외부 쿼리 존재 여부로 체크)
+    try:
+        if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'EMPLOYEE_QUERY'):
+            partner_manager.sync_employees_from_external_db()
+            print("[SUCCESS] 임직원 데이터 동기화 완료")
+    except Exception as e:
+        print(f"[ERROR] 임직원 동기화 실패: {e}")
+        
+    try:
+        if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'DEPARTMENT_QUERY'):
+            partner_manager.sync_departments_from_external_db()
+            print("[SUCCESS] 부서 데이터 동기화 완료")
+    except Exception as e:
+        print(f"[ERROR] 부서 동기화 실패: {e}")
+        
+    try:
+        if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'BUILDING_QUERY'):
+            partner_manager.sync_buildings_from_external_db()
+            print("[SUCCESS] 건물 데이터 동기화 완료")
+    except Exception as e:
+        print(f"[ERROR] 건물 동기화 실패: {e}")
+        
+    try:
+        if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'CONTRACTOR_QUERY'):
+            partner_manager.sync_contractors_from_external_db()
+            print("[SUCCESS] 협력사 근로자 데이터 동기화 완료")
+    except Exception as e:
+        print(f"[ERROR] 협력사 근로자 동기화 실패: {e}")
 
-    if ok or force:
+    # 동기화 성공 시 마지막 동기화 시간 업데이트
+    if success or force:
         cur.execute("INSERT OR REPLACE INTO master_sync_state (id, last_master_sync) VALUES (1, datetime('now'))")
         conn.commit()
         print(f"[SUCCESS] 마스터 데이터 동기화 완료: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    else:
+        print("[WARNING] 모든 동기화 실패")
     
     conn.close()
 
