@@ -10,8 +10,16 @@ static/
 # Markdown 파일들 제외
 *.md
 nul
-# Claude 설정 폴더 제외
+
+# IDE 및 에디터 설정 폴더 제외
+.vscode/
+.serena/
 .claude/
+
+# 백업 폴더들 제외
+backup/
+columns/backup/
+*backup*/
 
 # 아이콘 파일 제외
 static/icons/excel-icon.svg
