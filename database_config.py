@@ -317,7 +317,7 @@ class PartnerDataManager:
         conn.close()
     
     def sync_partners_from_external_db(self):
-        """외부 DB에서 협력사 마스터 데이터 동기화 (custom_data 보존)"""
+        """외부 DB에서 협력사 마스터 데이터 동기화"""
         if not IQADB_AVAILABLE:
             logging.error("IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
             return False
@@ -348,10 +348,10 @@ class PartnerDataManager:
             # 트랜잭션 시작
             cursor.execute("BEGIN IMMEDIATE")
             
-            # 기존 custom_data와 is_deleted 보존을 위해 백업
+            # 기존 is_deleted 보존을 위해 백업 (custom_data는 없음)
             cursor.execute("""
                 CREATE TEMP TABLE partners_backup AS 
-                SELECT business_number, custom_data, is_deleted 
+                SELECT business_number, is_deleted 
                 FROM partners_cache
             """)
             
@@ -378,25 +378,20 @@ class PartnerDataManager:
                     row.get('permanent_workers', None)
                 ))
             
-            # 배치 삽입
+            # 배치 삽입 (custom_data 컬럼 제거)
             cursor.executemany('''
                 INSERT INTO partners_cache (
                     business_number, company_name, partner_class, business_type_major,
                     business_type_minor, hazard_work_flag, representative, address,
                     average_age, annual_revenue, transaction_count, permanent_workers,
-                    is_deleted, custom_data
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '{}')
+                    is_deleted
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
             ''', rows)
             
-            # 기존 custom_data와 is_deleted 복원
+            # 기존 is_deleted 복원
             cursor.execute("""
                 UPDATE partners_cache 
-                SET custom_data = COALESCE(
-                    (SELECT custom_data FROM partners_backup 
-                     WHERE partners_backup.business_number = partners_cache.business_number),
-                    '{}'
-                ),
-                is_deleted = COALESCE(
+                SET is_deleted = COALESCE(
                     (SELECT is_deleted FROM partners_backup 
                      WHERE partners_backup.business_number = partners_cache.business_number),
                     0
@@ -409,7 +404,7 @@ class PartnerDataManager:
             conn.commit()
             conn.close()
             
-            print(f"[SUCCESS] ✅ 협력사 데이터 {len(df)}건 동기화 완료 (custom_data 보존)")
+            print(f"[SUCCESS] ✅ 협력사 데이터 {len(df)}건 동기화 완료")
             return True
             
         except Exception as e:
