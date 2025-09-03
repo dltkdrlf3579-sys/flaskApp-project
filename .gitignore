@@ -5,7 +5,12 @@ __pycache__/
 venv/
 uploads/
 gpt/
-static/
+
+# 이미지 파일들만 제외
+static/images/
+static/icons/*.png
+static/icons/*.jpg
+static/logo*.png
 
 # Markdown 파일들 제외
 *.md
@@ -20,9 +25,6 @@ nul
 backup/
 columns/backup/
 *backup*/
-
-# 아이콘 파일 제외
-static/icons/excel-icon.svg
 
 # 데이터베이스 파일 포함 (GitHub에 업로드)
 # portal.db는 이제 GitHub에 포함됩니다
