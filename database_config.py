@@ -1037,4 +1037,125 @@ def maybe_daily_sync(force=False):
         print("[INFO] 동기화 스킵 (24시간 미경과)")
     
     conn.close()
+
+def _ensure_boot_sync_tables(conn):
+    """
+    부트 동기화 진행 여부를 기록할 테이블 보장.
+    - master_sync_state: 마지막 마스터 동기화 시각
+    - content_sync_state: 각 컨텐츠(안전지시서 등) 최초 동기화 여부
+    """
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS master_sync_state(
+          id INTEGER PRIMARY KEY CHECK(id=1),
+          last_master_sync DATETIME
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS content_sync_state(
+          name TEXT PRIMARY KEY,
+          first_sync_done INTEGER DEFAULT 0,
+          first_sync_at DATETIME
+        )
+    """)
+    conn.commit()
+
+def maybe_daily_sync_master(force=False):
+    """
+    마스터 데이터(협력사, 사고, 임직원, 부서, 건물, 협력사근로자): 매일 1회.
+    - [MASTER_DATA_QUERIES]에 쿼리가 정의된 항목만 수행.
+    """
+    import pandas as pd
+    conn = sqlite3.connect(db_config.local_db_path)
+    _ensure_boot_sync_tables(conn)
+    cur = conn.cursor()
+
+    need = True
+    if not force:
+        row = cur.execute("SELECT last_master_sync FROM master_sync_state WHERE id=1").fetchone()
+        if row and row[0]:
+            last = pd.to_datetime(row[0])
+            need = (pd.Timestamp.now() - last) > pd.Timedelta(days=1)
+
+    if not need and not force:
+        print("[INFO] Master daily sync skipped (< 24h)")
+        conn.close()
+        return
+
+    # sync 파트(쿼리 존재 시에만)
+    ok = False
+    try:
+        if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'PARTNERS_QUERY'):
+            ok |= bool(partner_manager.sync_partners_from_external_db())
+    except Exception as e:
+        print(f"[ERROR] Partners sync: {e}")
+
+    try:
+        if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'ACCIDENTS_QUERY'):
+            ok |= bool(partner_manager.sync_accidents_from_external_db())
+    except Exception as e:
+        print(f"[ERROR] Accidents sync: {e}")
+
+    # 나머지 마스터(존재하면)
+    for key, func in [
+        ('EMPLOYEE_QUERY', partner_manager.sync_employees_from_external_db),
+        ('DEPARTMENT_QUERY', partner_manager.sync_departments_from_external_db),
+        ('BUILDING_QUERY', partner_manager.sync_buildings_from_external_db),
+        ('CONTRACTOR_QUERY', partner_manager.sync_contractors_from_external_db),
+    ]:
+        try:
+            if partner_manager.config.has_option('MASTER_DATA_QUERIES', key):
+                func()
+        except Exception as e:
+            print(f"[ERROR] {key} sync: {e}")
+
+    if ok or force:
+        cur.execute("INSERT OR REPLACE INTO master_sync_state (id, last_master_sync) VALUES (1, datetime('now'))")
+        conn.commit()
+        print(f"[SUCCESS] 마스터 데이터 동기화 완료: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    conn.close()
+
+def maybe_one_time_sync_content(force=False):
+    """
+    컨텐츠 데이터(환경안전지시서 등): 최초 1회만. CONTENT_DATA_QUERIES 섹션 기준.
+    - 안전지시서(safety_instructions_cache): 최초 1회만 채움
+    - 필요 시 FOLLOWSOP/FULLPROCESS 등 확장(키 존재하면)
+    """
+    conn = sqlite3.connect(db_config.local_db_path)
+    _ensure_boot_sync_tables(conn)
+    cur = conn.cursor()
+
+    def _do_once(name, runner):
+        # 상태 조회
+        row = cur.execute("SELECT first_sync_done FROM content_sync_state WHERE name=?", (name,)).fetchone()
+        done = (row and row[0] == 1)
+        if done and not force:
+            print(f"[INFO] Content '{name}' already synced (once).")
+            return
+        # 실행
+        ok = runner()
+        if ok or force:
+            cur.execute("""
+                INSERT OR REPLACE INTO content_sync_state(name, first_sync_done, first_sync_at)
+                VALUES (?, 1, datetime('now'))
+            """, (name,))
+            conn.commit()
+
+    # 안전지시서(쿼리 존재 시에만 수행)
+    if partner_manager.config.has_section('CONTENT_DATA_QUERIES') and \
+       partner_manager.config.has_option('CONTENT_DATA_QUERIES', 'SAFETY_INSTRUCTIONS_QUERY'):
+        def run_safety():
+            try:
+                return partner_manager.sync_safety_instructions_from_external_db()
+            except Exception as e:
+                print(f"[ERROR] SAFETY_INSTRUCTIONS sync: {e}")
+                return False
+        _do_once('safety_instructions', run_safety)
+
+    # 선택: FollowSOP / FullProcess (쿼리 정의 시에만)
+    # 같은 패턴으로 확장 가능:
+    # if config.has_option('CONTENT_DATA_QUERIES', 'FOLLOWSOP_QUERY'): _do_once('followsop', run_followsop)
+
+    conn.close()
 partner_manager.db_config = db_config  # 순환 참조 해결

@@ -400,8 +400,9 @@ def init_db():
     conn.commit()
     conn.close()
     
-    # 샘플 데이터 초기화 (외부 DB 동기화 로직 제거)
-    init_sample_data()
+    # 샘플 데이터 초기화 (SEED_DUMMY=true일 때만)
+    if db_config.config.getboolean('DEFAULT', 'SEED_DUMMY', fallback=False):
+        init_sample_data()
 
     # 외부 DB 동기화 실행 (EXTERNAL_DB_ENABLED=True일 때만)
     if db_config.external_db_enabled:
@@ -635,6 +636,59 @@ def init_sample_data():
     conn.close()
     logging.info("샘플 데이터 생성 완료")
 
+
+# ======================================================================
+# 부트 동기화 훅 - 첫 요청시 한번만 실행
+# ======================================================================
+from flask import current_app
+
+boot_sync_done = False
+
+@app.before_first_request
+def boot_sync_once():
+    """
+    서버 프로세스가 어떤 방식으로 떠도(WSGI/리로더/워커), 첫 요청 들어올 때 1회 실행.
+    - 마스터 데이터: 매일 1회
+    - 컨텐츠 데이터: 최초 1회(또는 force)
+    """
+    global boot_sync_done
+    if boot_sync_done:
+        return
+    boot_sync_done = True
+
+    try:
+        from database_config import maybe_daily_sync_master, maybe_one_time_sync_content, db_config
+
+        ext_on = db_config.config.getboolean('DATABASE', 'EXTERNAL_DB_ENABLED', fallback=False)
+        init_on = db_config.config.getboolean('DATABASE', 'INITIAL_SYNC_ON_FIRST_REQUEST', fallback=False)
+        current_app.logger.info(f"[BOOT] EXTERNAL_DB_ENABLED={ext_on}, INITIAL_SYNC_ON_FIRST_REQUEST={init_on}")
+
+        # 필수 키 점검(빠르게 조기 경보)
+        req_master = ['PARTNERS_QUERY','ACCIDENTS_QUERY','EMPLOYEE_QUERY','DEPARTMENT_QUERY','BUILDING_QUERY','CONTRACTOR_QUERY']
+        missing_master = [k for k in req_master if not db_config.config.has_option('MASTER_DATA_QUERIES', k)]
+        if missing_master:
+            current_app.logger.warning(f"[BOOT] MASTER_DATA_QUERIES missing keys: {missing_master}")
+
+        # 컨텐츠 쿼리는 옵션(있으면 사용)
+        if not db_config.config.has_section('CONTENT_DATA_QUERIES'):
+            current_app.logger.info("[BOOT] CONTENT_DATA_QUERIES section not found (skip content one-time sync)")
+
+        if ext_on and init_on:
+            # 1) 마스터: 매일 체크 → 필요 시 동기화
+            if db_config.config.getboolean('DATABASE', 'MASTER_DATA_DAILY', fallback=True):
+                current_app.logger.info("[BOOT] Master daily sync check...")
+                maybe_daily_sync_master(force=False)  # 24시간 경과 시에만
+                current_app.logger.info("[BOOT] Master daily sync done/kept")
+
+            # 2) 컨텐츠: 최초 1회만
+            if db_config.config.getboolean('DATABASE', 'CONTENT_DATA_ONCE', fallback=True):
+                current_app.logger.info("[BOOT] Content one-time sync check...")
+                maybe_one_time_sync_content(force=False)  # 최초 1회만
+                current_app.logger.info("[BOOT] Content one-time sync done/kept")
+        else:
+            current_app.logger.info("[BOOT] Initial sync skipped (flag off or external off)")
+    except Exception as e:
+        current_app.logger.error(f"[BOOT] Initial sync error: {e}")
 
 @app.route("/api/test-simple")
 def test_simple():
@@ -3816,6 +3870,49 @@ def admin_logout():
     """관리자 로그아웃"""
     session.pop('admin_authenticated', None)
     return redirect(url_for('index'))
+
+# ======================================================================
+# Admin 동기화 관리 엔드포인트
+# ======================================================================
+
+@app.route('/admin/sync-now', methods=['POST'])
+def admin_sync_now():
+    """수동 강제 동기화 엔드포인트"""
+    try:
+        from database_config import maybe_daily_sync_master, maybe_one_time_sync_content
+        
+        sync_type = request.json.get('type', 'all')
+        
+        if sync_type == 'master' or sync_type == 'all':
+            maybe_daily_sync_master(force=True)
+        
+        if sync_type == 'content' or sync_type == 'all':
+            maybe_one_time_sync_content(force=True)
+            
+        return jsonify({'success': True, 'message': f'Sync completed ({sync_type})'})
+    except Exception as e:
+        logging.error(f"Manual sync failed: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/admin/cache-counts', methods=['GET'])
+def admin_cache_counts():
+    """캐시 테이블 레코드 수 확인 엔드포인트"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        tables = ['partners_cache','accidents_cache','safety_instructions_cache',
+                 'departments_cache','buildings_cache','contractors_cache','employees_cache']
+        counts = {}
+        for t in tables:
+            try:
+                cur.execute(f"SELECT COUNT(*) FROM {t}")
+                counts[t] = cur.fetchone()[0]
+            except Exception:
+                counts[t] = 'table not found'
+        conn.close()
+        return jsonify({'success': True, 'counts': counts})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 # 이 라우트는 아래에 더 완전한 버전이 있으므로 제거됨
 
