@@ -63,8 +63,10 @@
                                     <div class="value" style="color: #6b7280; font-style: italic;">자동으로 입력됩니다</div>
                                     
                                 {% elif col.column_key == 'created_at' %}
-                                    <!-- 등록일은 이미 날짜 필드에서 처리 -->
-                                    <!-- 이 부분은 실행되지 않아야 함 -->
+                                    <!-- 등록일 표시 (읽기 전용) -->
+                                    <div class="value" style="color: #6b7280; font-weight: 500;">
+                                        {{ col.default_value or today_date }}
+                                    </div>
                                     
                                 {% elif col.is_readonly %}
                                     <!-- 읽기 전용 필드 -->

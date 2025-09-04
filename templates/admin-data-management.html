@@ -143,8 +143,11 @@
     
     <div class="admin-tabs">
         <ul>
-            <li><a href="#partner" class="tab-link active" onclick="switchTab('partner')">협력사</a></li>
+            <li><a href="#partner" class="tab-link active" onclick="switchTab('partner')">협력사 정보</a></li>
             <li><a href="#accident" class="tab-link" onclick="switchTab('accident')">사고</a></li>
+            <li><a href="#safety-instruction" class="tab-link" onclick="switchTab('safety-instruction')">환경안전 지시서</a></li>
+            <li><a href="#follow-sop" class="tab-link" onclick="switchTab('follow-sop')">Follow SOP</a></li>
+            <li><a href="#full-process" class="tab-link" onclick="switchTab('full-process')">Full Process</a></li>
         </ul>
     </div>
     
@@ -189,6 +192,69 @@
             </div>
         </div>
     </div>
+    
+    <!-- Safety Instruction 탭 -->
+    <div id="safety-instruction-tab" class="tab-content">
+        <div class="recovery-section">
+            <div class="recovery-header">
+                <h3 class="recovery-title">환경안전 지시서 데이터 복구</h3>
+                <button class="btn btn-sm btn-secondary" onclick="loadSafetyInstructionData()">
+                    <i class="bi bi-arrow-clockwise"></i> 새로고침
+                </button>
+            </div>
+            
+            <div class="info-box">
+                <i class="bi bi-info-circle"></i>
+                삭제된 환경안전 지시서 데이터를 관리할 수 있습니다.
+            </div>
+            
+            <div id="safety-instruction-data-list">
+                <p class="no-data">로딩 중...</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Follow SOP 탭 -->
+    <div id="follow-sop-tab" class="tab-content">
+        <div class="recovery-section">
+            <div class="recovery-header">
+                <h3 class="recovery-title">Follow SOP 데이터 복구</h3>
+                <button class="btn btn-sm btn-secondary" onclick="loadFollowSopData()">
+                    <i class="bi bi-arrow-clockwise"></i> 새로고침
+                </button>
+            </div>
+            
+            <div class="info-box">
+                <i class="bi bi-info-circle"></i>
+                삭제된 Follow SOP 데이터를 관리할 수 있습니다.
+            </div>
+            
+            <div id="follow-sop-data-list">
+                <p class="no-data">로딩 중...</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Full Process 탭 -->
+    <div id="full-process-tab" class="tab-content">
+        <div class="recovery-section">
+            <div class="recovery-header">
+                <h3 class="recovery-title">Full Process 데이터 복구</h3>
+                <button class="btn btn-sm btn-secondary" onclick="loadFullProcessData()">
+                    <i class="bi bi-arrow-clockwise"></i> 새로고침
+                </button>
+            </div>
+            
+            <div class="info-box">
+                <i class="bi bi-info-circle"></i>
+                삭제된 Full Process 데이터를 관리할 수 있습니다.
+            </div>
+            
+            <div id="full-process-data-list">
+                <p class="no-data">로딩 중...</p>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -211,6 +277,12 @@ function switchTab(tabName) {
         loadDeletedAccidents();
     } else if (tabName === 'partner') {
         loadDeletedPartners();
+    } else if (tabName === 'safety-instruction') {
+        loadSafetyInstructionData();
+    } else if (tabName === 'follow-sop') {
+        loadFollowSopData();
+    } else if (tabName === 'full-process') {
+        loadFullProcessData();
     }
 }
 
@@ -377,12 +449,109 @@ function refreshPartnerData() {
     loadDeletedPartners();
 }
 
+// Safety Instruction 데이터 로드
+function loadSafetyInstructionData() {
+    fetch('/api/safety-instruction/deleted')
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('safety-instruction-data-list');
+            if (data.success && data.items && data.items.length > 0) {
+                let html = `<table class="data-table"><thead><tr><th>Issue Number</th><th>Disciplined Person</th><th>Created</th><th>Action</th></tr></thead><tbody>`;
+                data.items.forEach(item => {
+                    html += `<tr><td>${item.issue_number || '-'}</td><td>${item.disciplined_person || '-'}</td><td>${item.created_at || '-'}</td><td><button class="btn-restore" onclick="restoreItem('safety-instruction', '${item.id}')">Restore</button></td></tr>`;
+                });
+                html += '</tbody></table>';
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '<p class="no-data">No deleted safety instruction data.</p>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading safety instruction data:', error);
+            document.getElementById('safety-instruction-data-list').innerHTML = '<p class="no-data">Error loading data.</p>';
+        });
+}
+
+// Follow SOP 데이터 로드
+function loadFollowSopData() {
+    fetch('/api/follow-sop/deleted')
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('follow-sop-data-list');
+            if (data.success && data.items && data.items.length > 0) {
+                let html = `<table class="data-table"><thead><tr><th>Work Req No</th><th>Created By</th><th>Created</th><th>Action</th></tr></thead><tbody>`;
+                data.items.forEach(item => {
+                    html += `<tr><td>${item.work_req_no || '-'}</td><td>${item.created_by || '-'}</td><td>${item.created_at || '-'}</td><td><button class="btn-restore" onclick="restoreItem('follow-sop', '${item.work_req_no}')">Restore</button></td></tr>`;
+                });
+                html += '</tbody></table>';
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '<p class="no-data">No deleted follow SOP data.</p>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading follow SOP data:', error);
+            document.getElementById('follow-sop-data-list').innerHTML = '<p class="no-data">Error loading data.</p>';
+        });
+}
+
+// Full Process 데이터 로드
+function loadFullProcessData() {
+    fetch('/api/full-process/deleted')
+        .then(response => response.json())
+        .then(data => {
+            const container = document.getElementById('full-process-data-list');
+            if (data.success && data.items && data.items.length > 0) {
+                let html = `<table class="data-table"><thead><tr><th>Number</th><th>Created By</th><th>Created</th><th>Action</th></tr></thead><tbody>`;
+                data.items.forEach(item => {
+                    html += `<tr><td>${item.fullprocess_number || '-'}</td><td>${item.created_by || '-'}</td><td>${item.created_at || '-'}</td><td><button class="btn-restore" onclick="restoreItem('full-process', '${item.fullprocess_number}')">Restore</button></td></tr>`;
+                });
+                html += '</tbody></table>';
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '<p class="no-data">No deleted full process data.</p>';
+            }
+        })
+        .catch(error => {
+            console.error('Error loading full process data:', error);
+            document.getElementById('full-process-data-list').innerHTML = '<p class="no-data">Error loading data.</p>';
+        });
+}
+
+// 공통 복구 함수
+function restoreItem(boardType, itemId) {
+    if (!confirm(`Restore this ${boardType} item?`)) {
+        return;
+    }
+    
+    fetch(`/api/${boardType}/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [itemId] })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`${boardType} item restored successfully.`);
+            // 해당 탭 데이터 새로고침
+            if (boardType === 'safety-instruction') loadSafetyInstructionData();
+            else if (boardType === 'follow-sop') loadFollowSopData();
+            else if (boardType === 'full-process') loadFullProcessData();
+        } else {
+            alert('Restore failed: ' + data.message);
+        }
+    })
+    .catch(error => {
+        alert('Error during restore.');
+        console.error(error);
+    });
+}
+
 // 페이지 로드 시 적절한 탭 활성화 및 데이터 로드
 window.addEventListener('DOMContentLoaded', () => {
-    if (window.location.hash === '#accident') {
-        switchTab('accident');
-    } else if (window.location.hash === '#partner') {
-        switchTab('partner');
+    const hash = window.location.hash.substring(1); // # 제거
+    if (['accident', 'partner', 'safety-instruction', 'follow-sop', 'full-process'].includes(hash)) {
+        switchTab(hash);
     } else {
         // 기본적으로 협력사 탭 데이터 로드
         loadDeletedPartners();

@@ -1083,6 +1083,7 @@ def partner_accident():
                          menu=MENU_CONFIG)
 
 @app.route("/safety-instruction")
+
 def safety_instruction_route():
     """환경안전 지시서 페이지 라우트"""
     from common_mapping import smart_apply_mappings
@@ -1136,8 +1137,8 @@ def safety_instruction_route():
         if col['column_type'] == 'dropdown':
             col['code_mapping'] = get_dropdown_options_for_display('safety_instruction', col['column_key'])
     
-    # 로컬 캐시 테이블에서 직접 조회
-    base_query = "SELECT * FROM safety_instructions_cache WHERE 1=1"
+    # 로컬 캐시 테이블에서 직접 조회 (삭제되지 않은 것만)
+    base_query = "SELECT * FROM safety_instructions_cache WHERE (is_deleted = 0 OR is_deleted IS NULL)"
     query = base_query
     params = []
     
@@ -1241,15 +1242,13 @@ def safety_instruction_route():
     pagination = Pagination(page, per_page, total_count)
     conn.close()
     
-    # 템플릿에 전달
     return render_template('safety-instruction.html',
-                         safety_instructions=safety_instructions,  # 고유 변수명 사용
-                         total_count=total_count,
-                         pagination=pagination,
-                         dynamic_columns=dynamic_columns,
+                         safety_instructions=safety_instructions,
                          sections=sections,
                          section_columns=section_columns,
-                         menu=MENU_CONFIG)
+                         dynamic_columns=dynamic_columns,
+                         filters=filters,
+                         pagination=pagination)
 
 @app.route("/safety-instruction-register")
 def safety_instruction_register():
@@ -1375,67 +1374,67 @@ def safety_instruction_detail(issue_number):
         logging.info("safety_instructions 테이블이 없음 - 더미 데이터 사용")
         instruction = None
     
-    if not instruction:
-        # 더미 데이터에서 찾기 (개발 중이므로)
-        # safety-instruction 라우트와 동일한 더미 데이터 사용
-        month_counters = {}
-        all_instructions = []
+    # if not instruction:
+    #     # 더미 데이터에서 찾기 (개발 중이므로)
+    #     # safety-instruction 라우트와 동일한 더미 데이터 사용
+    #     month_counters = {}
+    #     all_instructions = []
         
-        for i in range(30):
-            year = 2024
-            month = (i % 12) + 1
-            year_month = f'{year}-{month:02d}'
+    #     for i in range(30):
+    #         year = 2024
+    #         month = (i % 12) + 1
+    #         year_month = f'{year}-{month:02d}'
             
-            if year_month not in month_counters:
-                month_counters[year_month] = 0
-            month_counters[year_month] += 1
+    #         if year_month not in month_counters:
+    #             month_counters[year_month] = 0
+    #         month_counters[year_month] += 1
             
-            dummy_issue_number = f'{year_month}-{month_counters[year_month]:02d}'
+    #         dummy_issue_number = f'{year_month}-{month_counters[year_month]:02d}'
             
-            if dummy_issue_number == issue_number:
-                classifications = ['환경', '안전', '보건', '품질']
-                employment_types = ['정규직', '계약직', '파견직', '임시직']
-                discipline_types = ['경고', '견책', '정직', '출입정지']
-                violation_types = ['작업절차위반', '안전장비미착용', '무단작업', '환경오염']
-                accident_types = ['추락', '협착', '절단', '화재', '누출']
-                grades = ['경미', '일반', '중대', '치명']
+    #         if dummy_issue_number == issue_number:
+    #             classifications = ['환경', '안전', '보건', '품질']
+    #             employment_types = ['정규직', '계약직', '파견직', '임시직']
+    #             discipline_types = ['경고', '견책', '정직', '출입정지']
+    #             violation_types = ['작업절차위반', '안전장비미착용', '무단작업', '환경오염']
+    #             accident_types = ['추락', '협착', '절단', '화재', '누출']
+    #             grades = ['경미', '일반', '중대', '치명']
                 
-                instruction_data = {
-                    'id': i + 1,
-                    'issue_number': dummy_issue_number,
-                    'issuer': f'발행인{i+1}',
-                    'issuer_department': f'안전관리팀{(i % 3) + 1}',
-                    'classification': classifications[i % 4],
-                    'employment_type': employment_types[i % 4],
-                    'primary_company': f'협력사{(i % 20) + 1}',
-                    'primary_business_number': f'{1000000000 + i * 11111}',
-                    'subcontractor': f'하도급사{(i % 10) + 1}' if i % 3 == 0 else '-',
-                    'subcontractor_business_number': f'{2000000000 + i * 22222}' if i % 3 == 0 else '-',
-                    'disciplined_person': f'징계자{i+1}',
-                    'gbm': f'GBM{(i % 5) + 1}',
-                    'business_division': f'사업부{(i % 4) + 1}',
-                    'team': f'팀{(i % 8) + 1}',
-                    'department': f'부서{(i % 6) + 1}',
-                    'violation_date': f'2024-{(i % 12) + 1:02d}-{(i % 28) + 1:02d}',
-                    'discipline_date': f'2024-{(i % 12) + 1:02d}-{((i % 28) + 2):02d}',
-                    'discipline_department': f'징계발의부서{(i % 3) + 1}',
-                    'discipline_type': discipline_types[i % 4],
-                    'accident_type': accident_types[i % 5],
-                    'accident_grade': grades[i % 4],
-                    'safety_violation_grade': grades[i % 4],
-                    'violation_type': violation_types[i % 4],
-                    'violation_content': f'위반내용 상세설명 {i+1}번 항목',
-                    'access_ban_start_date': f'2024-{(i % 12) + 1:02d}-{((i % 28) + 3):02d}' if i % 4 == 0 else '-',
-                    'access_ban_end_date': f'2024-{(i % 12) + 1:02d}-{((i % 28) + 10):02d}' if i % 4 == 0 else '-',
-                    'period': f'{(i % 30) + 1}일' if i % 4 == 0 else '-',
-                    'work_grade': f'등급{(i % 5) + 1}',
-                    'penalty_points': (i % 10) + 1,
-                    'disciplined_person_id': f'EMP{1000 + i}',
-                    'custom_data': '{}',
-                    'created_at': f'2024-{(i % 12) + 1:02d}-{(i % 28) + 1:02d} 09:00:00'
-                }
-                instruction = instruction_data
-                break
+    #             instruction_data = {
+    #                 'id': i + 1,
+    #                 'issue_number': dummy_issue_number,
+    #                 'issuer': f'발행인{i+1}',
+    #                 'issuer_department': f'안전관리팀{(i % 3) + 1}',
+    #                 'classification': classifications[i % 4],
+    #                 'employment_type': employment_types[i % 4],
+    #                 'primary_company': f'협력사{(i % 20) + 1}',
+    #                 'primary_business_number': f'{1000000000 + i * 11111}',
+    #                 'subcontractor': f'하도급사{(i % 10) + 1}' if i % 3 == 0 else '-',
+    #                 'subcontractor_business_number': f'{2000000000 + i * 22222}' if i % 3 == 0 else '-',
+    #                 'disciplined_person': f'징계자{i+1}',
+    #                 'gbm': f'GBM{(i % 5) + 1}',
+    #                 'business_division': f'사업부{(i % 4) + 1}',
+    #                 'team': f'팀{(i % 8) + 1}',
+    #                 'department': f'부서{(i % 6) + 1}',
+    #                 'violation_date': f'2024-{(i % 12) + 1:02d}-{(i % 28) + 1:02d}',
+    #                 'discipline_date': f'2024-{(i % 12) + 1:02d}-{((i % 28) + 2):02d}',
+    #                 'discipline_department': f'징계발의부서{(i % 3) + 1}',
+    #                 'discipline_type': discipline_types[i % 4],
+    #                 'accident_type': accident_types[i % 5],
+    #                 'accident_grade': grades[i % 4],
+    #                 'safety_violation_grade': grades[i % 4],
+    #                 'violation_type': violation_types[i % 4],
+    #                 'violation_content': f'위반내용 상세설명 {i+1}번 항목',
+    #                 'access_ban_start_date': f'2024-{(i % 12) + 1:02d}-{((i % 28) + 3):02d}' if i % 4 == 0 else '-',
+    #                 'access_ban_end_date': f'2024-{(i % 12) + 1:02d}-{((i % 28) + 10):02d}' if i % 4 == 0 else '-',
+    #                 'period': f'{(i % 30) + 1}일' if i % 4 == 0 else '-',
+    #                 'work_grade': f'등급{(i % 5) + 1}',
+    #                 'penalty_points': (i % 10) + 1,
+    #                 'disciplined_person_id': f'EMP{1000 + i}',
+    #                 'custom_data': '{}',
+    #                 'created_at': f'2024-{(i % 12) + 1:02d}-{(i % 28) + 1:02d} 09:00:00'
+    #             }
+    #             instruction = instruction_data
+    #             break
     
     if not instruction:
         logging.warning(f"환경안전 지시서를 찾을 수 없습니다: {issue_number}")
@@ -2354,47 +2353,47 @@ def accident_detail(accident_id):
         dummy_accidents = []
         
     # 더미 데이터 생성 (DB에 없는 경우)
-    if not accident:
-        dummy_accidents = []
-        for i in range(50):
-            # 사고번호 생성: K + 연월일 + 순서(3자리) - 고정된 값
-            months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-            days = [1, 5, 10, 15, 20, 25]
-            accident_date_fixed = f'2024-{months[i % 12]:02d}-{days[i % 6]:02d}'
-            accident_number = f'K{accident_date_fixed.replace("-", "")}{i+1:03d}'
+    # if not accident:
+    #     dummy_accidents = []
+    #     for i in range(50):
+    #         # 사고번호 생성: K + 연월일 + 순서(3자리) - 고정된 값
+    #         months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    #         days = [1, 5, 10, 15, 20, 25]
+    #         accident_date_fixed = f'2024-{months[i % 12]:02d}-{days[i % 6]:02d}'
+    #         accident_number = f'K{accident_date_fixed.replace("-", "")}{i+1:03d}'
         
-        # 고정된 값들로 변경
-        grades = ['경미', '중대', '치명']
-        types = ['추락', '협착', '절단', '화재']
-        disaster_types = ['안전사고', '보건사고']
-        disaster_forms = ['낙하', '충돌', '전도']
-        days_of_week = ['월', '화', '수', '목', '금', '토', '일']
+    #     # 고정된 값들로 변경
+    #     grades = ['경미', '중대', '치명']
+    #     types = ['추락', '협착', '절단', '화재']
+    #     disaster_types = ['안전사고', '보건사고']
+    #     disaster_forms = ['낙하', '충돌', '전도']
+    #     days_of_week = ['월', '화', '수', '목', '금', '토', '일']
         
-        # 새로운 필드 추가
-        major_categories = ['제조업', '건설업', 'IT업', '서비스업', '운수업']
-        location_categories = ['사무실', '생산현장', '창고', '야외', '기타']
+    #     # 새로운 필드 추가
+    #     major_categories = ['제조업', '건설업', 'IT업', '서비스업', '운수업']
+    #     location_categories = ['사무실', '생산현장', '창고', '야외', '기타']
         
-        dummy_accidents.append({
-            'id': i + 1,
-            'accident_number': accident_number,
-            'accident_name': f'사고사례{i+1:03d}',
-            'accident_date': accident_date_fixed,
-            'accident_grade': grades[i % 3],
-            'major_category': major_categories[i % 5],  # 대분류 추가
-            'accident_type': types[i % 4],
-            'disaster_type': disaster_types[i % 2],
-            'disaster_form': disaster_forms[i % 3],
-            'injury_form': disaster_forms[i % 3],  # 재해형태
-            'injury_type': disaster_types[i % 2],  # 재해유형
-            'workplace': f'사업장{(i % 5) + 1}',
-            'building': f'건물{(i % 10) + 1}',
-            'floor': f'{(i % 20) + 1}층',
-            'location_category': location_categories[i % 5],  # 장소구분 추가
-            'location_detail': f'상세위치{i+1:03d}',  # 세부장소
-            'created_at': accident_date_fixed,  # 등록일 추가
-            'day_of_week': days_of_week[i % 7],
-            'accident_content': f'사고내용{i+1}에 대한 상세 설명입니다.'
-        })
+    #     dummy_accidents.append({
+    #         'id': i + 1,
+    #         'accident_number': accident_number,
+    #         'accident_name': f'사고사례{i+1:03d}',
+    #         'accident_date': accident_date_fixed,
+    #         'accident_grade': grades[i % 3],
+    #         'major_category': major_categories[i % 5],  # 대분류 추가
+    #         'accident_type': types[i % 4],
+    #         'disaster_type': disaster_types[i % 2],
+    #         'disaster_form': disaster_forms[i % 3],
+    #         'injury_form': disaster_forms[i % 3],  # 재해형태
+    #         'injury_type': disaster_types[i % 2],  # 재해유형
+    #         'workplace': f'사업장{(i % 5) + 1}',
+    #         'building': f'건물{(i % 10) + 1}',
+    #         'floor': f'{(i % 20) + 1}층',
+    #         'location_category': location_categories[i % 5],  # 장소구분 추가
+    #         'location_detail': f'상세위치{i+1:03d}',  # 세부장소
+    #         'created_at': accident_date_fixed,  # 등록일 추가
+    #         'day_of_week': days_of_week[i % 7],
+    #         'accident_content': f'사고내용{i+1}에 대한 상세 설명입니다.'
+    #     })
     
     # DB에서 실제 사고 데이터 가져오기
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
@@ -4831,6 +4830,123 @@ def get_deleted_partners():
     
     return jsonify({"success": True, "partners": deleted_partners})
 
+@app.route("/api/safety-instruction/deleted")
+def get_deleted_safety_instructions():
+    """삭제된 안전교육 목록 API"""
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    
+    deleted_items = conn.execute("""
+        SELECT * FROM safety_instructions_cache 
+        WHERE is_deleted = 1
+        ORDER BY created_at DESC
+    """).fetchall()
+    
+    conn.close()
+    return jsonify({"success": True, "items": [dict(row) for row in deleted_items]})
+
+
+@app.route("/api/follow-sop/deleted") 
+def get_deleted_follow_sop():
+    """삭제된 Follow SOP 목록 API"""
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    
+    deleted_items = conn.execute("""
+        SELECT * FROM followsop_cache 
+        WHERE is_deleted = 1
+        ORDER BY id DESC
+    """).fetchall()
+    
+    conn.close()
+    return jsonify({"success": True, "items": [dict(row) for row in deleted_items]})
+
+
+@app.route("/api/full-process/deleted")
+def get_deleted_full_process():
+    """삭제된 Full Process 목록 API"""
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    
+    deleted_items = conn.execute("""
+        SELECT * FROM fullprocess_cache 
+        WHERE is_deleted = 1
+        ORDER BY id DESC
+    """).fetchall()
+    
+    conn.close()
+    return jsonify({"success": True, "items": [dict(row) for row in deleted_items]})
+
+
+@app.route("/api/safety-instruction/restore", methods=['POST'])
+def restore_safety_instructions():
+    """안전교육 복구 API"""
+    try:
+        data = request.get_json()
+        ids = data.get('ids', [])
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        for item_id in ids:
+            cursor.execute("UPDATE safety_instructions SET is_deleted = 0 WHERE id = ?", (item_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True, "message": f"복구 완료: {len(ids)}개 항목"})
+        
+    except Exception as e:
+        logging.error(f"Error restoring safety instructions: {str(e)}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/follow-sop/restore", methods=['POST'])
+def restore_follow_sop():
+    """Follow SOP 복구 API"""
+    try:
+        data = request.get_json()
+        ids = data.get('ids', [])
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        for item_id in ids:
+            cursor.execute("UPDATE follow_sop SET is_deleted = 0 WHERE work_req_no = ?", (item_id,))
+            cursor.execute("UPDATE followsop_cache SET is_deleted = 0 WHERE work_req_no = ?", (item_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True, "message": f"복구 완료: {len(ids)}개 항목"})
+        
+    except Exception as e:
+        logging.error(f"Error restoring follow SOP: {str(e)}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/full-process/restore", methods=['POST'])
+def restore_full_process():
+    """Full Process 복구 API"""
+    try:
+        data = request.get_json()
+        ids = data.get('ids', [])
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        for item_id in ids:
+            cursor.execute("UPDATE fullprocess_cache SET is_deleted = 0 WHERE fullprocess_number = ?", (item_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True, "message": f"복구 완료: {len(ids)}개 항목"})
+        
+    except Exception as e:
+        logging.error(f"Error restoring full process: {str(e)}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
 @app.route('/api/<board_type>/delete', methods=['POST'])
 def delete_items(board_type):
     """범용 소프트 삭제 API - 각 게시판의 primary key를 사용"""
@@ -4961,10 +5077,10 @@ def delete_follow_sop():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # follow_sop 테이블에서 소프트 삭제 (work_req_no 기준)
+        # followsop_cache 테이블에서 소프트 삭제 (work_req_no 기준)
         placeholders = ','.join('?' * len(ids))
         cursor.execute(f"""
-            UPDATE follow_sop 
+            UPDATE followsop_cache 
             SET is_deleted = 1 
             WHERE work_req_no IN ({placeholders})
         """, ids)
@@ -4995,10 +5111,10 @@ def delete_full_process():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # full_process 테이블에서 소프트 삭제 (fullprocess_number 기준)
+        # fullprocess_cache 테이블에서 소프트 삭제 (fullprocess_number 기준)
         placeholders = ','.join('?' * len(ids))
         cursor.execute(f"""
-            UPDATE full_process 
+            UPDATE fullprocess_cache 
             SET is_deleted = 1 
             WHERE fullprocess_number IN ({placeholders})
         """, ids)

@@ -1041,15 +1041,7 @@ function updateDeleteButton() {
 
 // 비밀번호 확인 후 선택된 협력사 삭제
 function deleteSelectedWithPassword() {
-    const password = prompt('삭제 비밀번호를 입력하세요:');
-    if (password === null) return;
-    
-    if (password !== 'admin123') {
-        alert('비밀번호가 틀렸습니다.');
-        return;
-    }
-    
-    deleteSelected();
+    PwModal.show(deleteSelected);
 }
 
 // 선택된 협력사 삭제

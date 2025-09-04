@@ -222,7 +222,7 @@ class PartnerDataManager:
             CREATE TABLE IF NOT EXISTS departments_cache (
                 dept_code TEXT PRIMARY KEY,
                 dept_name TEXT,
-                parent_dept_code TEXT,
+                parent_dept_code TEXT
             )
         ''')
         
