@@ -82,7 +82,13 @@
                         {{ accident.no }}
                     </td>
                     <!-- Primary Key와 등록일만 하드코딩 -->
-                    <td>{{ accident.accident_number or '-' }}</td>
+                    <td>
+                        <a href="javascript:void(0)" 
+                           onclick="window.open('/accident-detail/{{ accident.id }}?popup=1', 'accidentDetail', 'width=1200,height=800,scrollbars=yes,resizable=yes')"
+                           style="color: #2f5fd3; text-decoration: underline; cursor: pointer;">
+                            {{ accident.accident_number or '-' }}
+                        </a>
+                    </td>
                     <td>{{ accident.created_at | date_only if accident.created_at else '-' }}</td>
                     
                     <!-- 나머지 dynamic columns -->
