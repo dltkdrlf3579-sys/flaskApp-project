@@ -8,6 +8,7 @@ import pandas as pd
 from datetime import datetime, timedelta, date
 from decimal import Decimal
 import numpy as np
+import json
 
 # 설정 파일 로드
 config = configparser.ConfigParser()
@@ -272,36 +273,10 @@ class PartnerDataManager:
         # 안전지시서 캐시 테이블
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS safety_instructions_cache (
-                issue_number TEXT PRIMARY KEY,
-                issuer TEXT,
-                issuer_department TEXT,
-                classification TEXT,
-                employment_type TEXT,
-                primary_company TEXT,
-                primary_business_number TEXT,
-                subcontractor TEXT,
-                subcontractor_business_number TEXT,
-                disciplined_person TEXT,
-                disciplined_person_id TEXT,
-                gbm TEXT,
-                business_division TEXT,
-                team TEXT,
-                department TEXT,
-                work_grade TEXT,
-                violation_date TEXT,
-                discipline_date TEXT,
-                discipline_department TEXT,
-                discipline_type TEXT,
-                accident_type TEXT,
-                accident_grade TEXT,
-                safety_violation_grade TEXT,
-                violation_type TEXT,
-                access_ban_start_date TEXT,
-                access_ban_end_date TEXT,
-                period TEXT,
-                penalty_points TEXT,
-                violation_content TEXT,
-                detailed_content TEXT,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                issue_number TEXT UNIQUE,
+                created_at DATETIME,
+                custom_data TEXT DEFAULT '{}',
                 is_deleted INTEGER DEFAULT 0,
                 synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
@@ -753,55 +728,29 @@ class PartnerDataManager:
             # 기존 캐시 데이터 삭제
             cursor.execute("DELETE FROM safety_instructions_cache")
             
-            # 배치 삽입을 위한 데이터 준비
+            # 배치 삽입을 위한 데이터 준비 (동적 컬럼 방식)
             rows = []
             for _, row in df.iterrows():
+                # 모든 데이터를 custom_data에 JSON으로 저장
+                row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+                custom_data = json.dumps(row_dict, ensure_ascii=False)
+                
+                # issue_number와 created_at 추출 (컬럼명이 한글일 수 있음)
+                issue_number = row.get('issue_number', '') or row.get('발부번호', '') or ''
+                created_at = row.get('created_at', '') or row.get('작성일자', '') or row.get('등록일', '') or ''
+                
                 rows.append((
-                    row.get('issue_number', ''),
-                    row.get('issuer', ''),
-                    row.get('issuer_department', ''),
-                    row.get('classification', ''),
-                    row.get('employment_type', ''),
-                    row.get('primary_company', ''),
-                    row.get('primary_business_number', ''),
-                    row.get('subcontractor', ''),
-                    row.get('subcontractor_business_number', ''),
-                    row.get('disciplined_person', ''),
-                    row.get('disciplined_person_id', ''),
-                    row.get('gbm', ''),
-                    row.get('business_division', ''),
-                    row.get('team', ''),
-                    row.get('department', ''),
-                    row.get('work_grade', ''),
-                    row.get('violation_date', ''),
-                    row.get('discipline_date', ''),
-                    row.get('discipline_department', ''),
-                    row.get('discipline_type', ''),
-                    row.get('accident_type', ''),
-                    row.get('accident_grade', ''),
-                    row.get('safety_violation_grade', ''),
-                    row.get('violation_type', ''),
-                    row.get('access_ban_start_date', ''),
-                    row.get('access_ban_end_date', ''),
-                    row.get('period', ''),
-                    row.get('penalty_points', ''),
-                    row.get('violation_content', ''),
-                    row.get('detailed_content', ''),
+                    issue_number,
+                    created_at,
+                    custom_data,
                     0  # is_deleted = 0
                 ))
             
             # 배치 삽입
             cursor.executemany('''
                 INSERT INTO safety_instructions_cache (
-                    issue_number, issuer, issuer_department, classification,
-                    employment_type, primary_company, primary_business_number,
-                    subcontractor, subcontractor_business_number, disciplined_person,
-                    disciplined_person_id, gbm, business_division, team, department,
-                    work_grade, violation_date, discipline_date, discipline_department,
-                    discipline_type, accident_type, accident_grade, safety_violation_grade,
-                    violation_type, access_ban_start_date, access_ban_end_date, period,
-                    penalty_points, violation_content, detailed_content, is_deleted
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    issue_number, created_at, custom_data, is_deleted
+                ) VALUES (?, ?, ?, ?)
             ''', rows)
             
             conn.commit()
@@ -812,6 +761,184 @@ class PartnerDataManager:
             
         except Exception as e:
             print(f"[ERROR] ❌ 안전지시서 데이터 동기화 실패: {e}")
+            traceback.print_exc()
+            return False
+    
+    def sync_followsop_from_external_db(self):
+        """외부 DB에서 FollowSOP 데이터 동기화 (동적 컬럼 방식)"""
+        if not IQADB_AVAILABLE:
+            print("[ERROR] IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
+            return False
+        
+        try:
+            # config.ini에서 외부 DB용 쿼리 가져오기
+            if self.config.has_option('CONTENT_DATA_QUERIES', 'FOLLOWSOP_QUERY'):
+                query = self.config.get('CONTENT_DATA_QUERIES', 'FOLLOWSOP_QUERY')
+            elif self.config.has_option('MASTER_DATA_QUERIES', 'FOLLOWSOP_QUERY'):
+                query = self.config.get('MASTER_DATA_QUERIES', 'FOLLOWSOP_QUERY')
+            else:
+                print("[WARNING] FOLLOWSOP_QUERY가 config.ini에 정의되지 않았습니다.")
+                return False
+                
+            print(f"[INFO] 실행할 FollowSOP 쿼리: {query[:100]}...")
+            
+            # 외부 DB에서 데이터 조회
+            print("[INFO] IQADB_CONNECT310을 사용하여 FollowSOP 데이터 조회 시작...")
+            df = execute_SQL(query)
+            print(f"[INFO] FollowSOP 데이터 조회 완료: {len(df)} 건")
+            
+            if df.empty:
+                print("[WARNING] 조회된 FollowSOP 데이터가 없습니다.")
+                return False
+            
+            # SQLite에 저장
+            conn = sqlite3.connect(self.local_db_path, timeout=30.0)
+            cursor = conn.cursor()
+            
+            # PRAGMA 설정
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            
+            # followsop_cache 테이블 생성 (없으면)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS followsop_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    work_req_no TEXT UNIQUE,
+                    custom_data TEXT DEFAULT '{}',
+                    sync_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # 트랜잭션 시작
+            cursor.execute("BEGIN IMMEDIATE")
+            
+            # 기존 캐시 데이터 삭제
+            cursor.execute("DELETE FROM followsop_cache")
+            
+            # 배치 삽입을 위한 데이터 준비 (동적 컬럼 방식)
+            print(f"[DEBUG] FollowSOP DataFrame 컬럼: {list(df.columns)}")
+            rows = []
+            for idx, row in df.iterrows():
+                # 모든 데이터를 custom_data에 JSON으로 저장
+                row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+                custom_data = json.dumps(row_dict, ensure_ascii=False)
+                
+                # work_req_no 추출 (컬럼명이 한글일 수 있음)
+                work_req_no = (row.get('work_req_no', '') or 
+                              row.get('작업요청번호', '') or 
+                              row.get('work_request_number', '') or 
+                              str(idx))  # 없으면 인덱스 사용
+                
+                if idx == 0:  # 첫 번째 행만 디버깅
+                    print(f"[DEBUG] work_req_no: {work_req_no}")
+                    print(f"[DEBUG] custom_data 길이: {len(custom_data)}")
+                
+                rows.append((work_req_no, custom_data))
+            
+            # 배치 삽입
+            cursor.executemany('''
+                INSERT OR REPLACE INTO followsop_cache (work_req_no, custom_data) 
+                VALUES (?, ?)
+            ''', rows)
+            
+            conn.commit()
+            conn.close()
+            
+            print(f"[SUCCESS] ✅ FollowSOP 데이터 {len(df)}건 동기화 완료")
+            return True
+            
+        except Exception as e:
+            print(f"[ERROR] ❌ FollowSOP 데이터 동기화 실패: {e}")
+            traceback.print_exc()
+            return False
+    
+    def sync_fullprocess_from_external_db(self):
+        """외부 DB에서 FullProcess 데이터 동기화 (동적 컬럼 방식)"""
+        if not IQADB_AVAILABLE:
+            print("[ERROR] IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
+            return False
+        
+        try:
+            # config.ini에서 외부 DB용 쿼리 가져오기
+            if self.config.has_option('CONTENT_DATA_QUERIES', 'FULLPROCESS_QUERY'):
+                query = self.config.get('CONTENT_DATA_QUERIES', 'FULLPROCESS_QUERY')
+            elif self.config.has_option('MASTER_DATA_QUERIES', 'FULLPROCESS_QUERY'):
+                query = self.config.get('MASTER_DATA_QUERIES', 'FULLPROCESS_QUERY')
+            else:
+                print("[WARNING] FULLPROCESS_QUERY가 config.ini에 정의되지 않았습니다.")
+                return False
+                
+            print(f"[INFO] 실행할 FullProcess 쿼리: {query[:100]}...")
+            
+            # 외부 DB에서 데이터 조회
+            print("[INFO] IQADB_CONNECT310을 사용하여 FullProcess 데이터 조회 시작...")
+            df = execute_SQL(query)
+            print(f"[INFO] FullProcess 데이터 조회 완료: {len(df)} 건")
+            
+            if df.empty:
+                print("[WARNING] 조회된 FullProcess 데이터가 없습니다.")
+                return False
+            
+            # SQLite에 저장
+            conn = sqlite3.connect(self.local_db_path, timeout=30.0)
+            cursor = conn.cursor()
+            
+            # PRAGMA 설정
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            
+            # fullprocess_cache 테이블 생성 (없으면)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS fullprocess_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fullprocess_number TEXT UNIQUE,
+                    custom_data TEXT DEFAULT '{}',
+                    sync_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # 트랜잭션 시작
+            cursor.execute("BEGIN IMMEDIATE")
+            
+            # 기존 캐시 데이터 삭제
+            cursor.execute("DELETE FROM fullprocess_cache")
+            
+            # 배치 삽입을 위한 데이터 준비 (동적 컬럼 방식)
+            print(f"[DEBUG] FullProcess DataFrame 컬럼: {list(df.columns)}")
+            rows = []
+            for idx, row in df.iterrows():
+                # 모든 데이터를 custom_data에 JSON으로 저장
+                row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+                custom_data = json.dumps(row_dict, ensure_ascii=False)
+                
+                # fullprocess_number 추출 (컬럼명이 한글일 수 있음)
+                fullprocess_number = (row.get('fullprocess_number', '') or 
+                                     row.get('프로세스번호', '') or 
+                                     row.get('process_number', '') or 
+                                     str(idx))  # 없으면 인덱스 사용
+                
+                if idx == 0:  # 첫 번째 행만 디버깅
+                    print(f"[DEBUG] fullprocess_number: {fullprocess_number}")
+                    print(f"[DEBUG] custom_data 길이: {len(custom_data)}")
+                
+                rows.append((fullprocess_number, custom_data))
+            
+            # 배치 삽입
+            cursor.executemany('''
+                INSERT OR REPLACE INTO fullprocess_cache (fullprocess_number, custom_data) 
+                VALUES (?, ?)
+            ''', rows)
+            
+            conn.commit()
+            conn.close()
+            
+            print(f"[SUCCESS] ✅ FullProcess 데이터 {len(df)}건 동기화 완료")
+            return True
+            
+        except Exception as e:
+            print(f"[ERROR] ❌ FullProcess 데이터 동기화 실패: {e}")
             traceback.print_exc()
             return False
     
@@ -1183,9 +1310,27 @@ def maybe_one_time_sync_content(force=False):
                 return False
         _do_once('safety_instructions', run_safety)
 
-    # 선택: FollowSOP / FullProcess (쿼리 정의 시에만)
-    # 같은 패턴으로 확장 가능:
-    # if config.has_option('CONTENT_DATA_QUERIES', 'FOLLOWSOP_QUERY'): _do_once('followsop', run_followsop)
+    # FollowSOP 동기화 (쿼리 존재 시에만 수행)
+    if (partner_manager.config.has_option('CONTENT_DATA_QUERIES', 'FOLLOWSOP_QUERY') or 
+        partner_manager.config.has_option('MASTER_DATA_QUERIES', 'FOLLOWSOP_QUERY')):
+        def run_followsop():
+            try:
+                return partner_manager.sync_followsop_from_external_db()
+            except Exception as e:
+                print(f"[ERROR] FOLLOWSOP sync: {e}")
+                return False
+        _do_once('followsop', run_followsop)
+    
+    # FullProcess 동기화 (쿼리 존재 시에만 수행)
+    if (partner_manager.config.has_option('CONTENT_DATA_QUERIES', 'FULLPROCESS_QUERY') or 
+        partner_manager.config.has_option('MASTER_DATA_QUERIES', 'FULLPROCESS_QUERY')):
+        def run_fullprocess():
+            try:
+                return partner_manager.sync_fullprocess_from_external_db()
+            except Exception as e:
+                print(f"[ERROR] FULLPROCESS sync: {e}")
+                return False
+        _do_once('fullprocess', run_fullprocess)
 
     conn.close()
 partner_manager.db_config = db_config  # 순환 참조 해결
