@@ -50,7 +50,11 @@
                     {% for col in chunk %}
                         {% if col %}
                             {% set span = col.column_span|default(1)|int %}
-                            {% set col_value = instruction[col.column_key] | default('', true) %}
+                            {% if col.column_key == 'created_at' %}
+                                {% set col_value = instruction.created_at | date_only if instruction.created_at else '' %}
+                            {% else %}
+                                {% set col_value = instruction[col.column_key] | default('', true) %}
+                            {% endif %}
                             
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
                                 <label>{{ col.column_name }}</label>

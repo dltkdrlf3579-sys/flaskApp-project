@@ -725,8 +725,10 @@ class PartnerDataManager:
             return False
         
         try:
-            # config.ini에서 SAFETY_INSTRUCTIONS_EXTERNAL_QUERY 가져오기 (외부 DB용)
-            query = self.config.get('MASTER_DATA_QUERIES', 'SAFETY_INSTRUCTIONS_QUERY')
+            # config.ini에서 외부 DB용 쿼리 가져오기
+            query = self.config.get('CONTENT_DATA_QUERIES', 'SAFETY_INSTRUCTIONS_QUERY') \
+                if self.config.has_option('CONTENT_DATA_QUERIES', 'SAFETY_INSTRUCTIONS_QUERY') \
+                else self.config.get('MASTER_DATA_QUERIES', 'SAFETY_INSTRUCTIONS_QUERY')
             print(f"[INFO] 실행할 안전지시서 쿼리: {query[:100]}...")
             
             # 외부 DB에서 데이터 조회

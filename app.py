@@ -1134,11 +1134,9 @@ def safety_instruction_route():
         if col['column_type'] == 'dropdown':
             col['code_mapping'] = get_dropdown_options_for_display('safety_instruction', col['column_key'])
     
-    # config.ini에서 캐시 테이블 쿼리 가져오기
-    base_query = db_config.config.get('CONTENT_DATA_QUERIES', 'SAFETY_INSTRUCTIONS_QUERY')
-    # WHERE 절 추가를 위해 쿼리 수정
-    query = base_query.replace("WHERE issue_number IS NOT NULL", 
-                               "WHERE issue_number IS NOT NULL AND (is_deleted = 0 OR is_deleted IS NULL)")
+    # 로컬 캐시 테이블에서 직접 조회
+    base_query = "SELECT * FROM safety_instructions_cache WHERE 1=1"
+    query = base_query
     params = []
     
     # 필터링 적용
