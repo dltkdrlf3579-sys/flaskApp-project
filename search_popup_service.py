@@ -67,7 +67,7 @@ class SearchPopupService:
                 'use_cache': True  # 로컬 테이블 사용
             },
             'department': {
-                'table': 'department_master',  # master 테이블 사용 (cache가 비어있음)
+                'table': 'departments_cache',  # cache 테이블 사용
                 'search_fields': [
                     {'field': 'dept_name', 'label': '부서명'},
                     {'field': 'dept_code', 'label': '부서코드'}
@@ -82,7 +82,7 @@ class SearchPopupService:
                 'use_cache': True  # 로컬 테이블 사용
             },
             'building': {
-                'table': 'building_master',  # master 테이블 사용 (cache가 비어있음)
+                'table': 'buildings_cache',  # cache 테이블 사용
                 'search_fields': [
                     {'field': 'building_name', 'label': '건물명'},
                     {'field': 'building_code', 'label': '건물코드'}

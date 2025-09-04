@@ -2597,7 +2597,6 @@ def accident_detail(accident_id):
                 SELECT DISTINCT building_code as option_code, 
                        building_name as option_value
                 FROM buildings_cache 
-                WHERE is_active = 1
                 ORDER BY building_name
             """)
             building_rows = cursor.fetchall()
