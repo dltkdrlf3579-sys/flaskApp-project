@@ -1083,7 +1083,6 @@ def partner_accident():
                          menu=MENU_CONFIG)
 
 @app.route("/safety-instruction")
-
 def safety_instruction_route():
     """환경안전 지시서 페이지 라우트"""
     from common_mapping import smart_apply_mappings
@@ -1244,11 +1243,13 @@ def safety_instruction_route():
     
     return render_template('safety-instruction.html',
                          safety_instructions=safety_instructions,
+                         total_count=total_count,
                          sections=sections,
                          section_columns=section_columns,
                          dynamic_columns=dynamic_columns,
                          filters=filters,
-                         pagination=pagination)
+                         pagination=pagination,
+                         menu=MENU_CONFIG)
 
 @app.route("/safety-instruction-register")
 def safety_instruction_register():
