@@ -222,7 +222,6 @@ class PartnerDataManager:
                 dept_code TEXT PRIMARY KEY,
                 dept_name TEXT,
                 parent_dept_code TEXT,
-                dept_level INTEGER
             )
         ''')
         
@@ -596,13 +595,12 @@ class PartnerDataManager:
             for _, row in df.iterrows():
                 cursor.execute('''
                     INSERT INTO departments_cache (
-                        dept_code, dept_name, parent_dept_code, dept_level
-                    ) VALUES (?, ?, ?, ?)
+                        dept_code, dept_name, parent_dept_code
+                    ) VALUES (?, ?, ?)
                 ''', (
                     row.get('dept_code', ''),
                     row.get('dept_name', ''),
                     row.get('parent_dept_code', ''),
-                    row.get('dept_level', None)
                 ))
             
             conn.commit()

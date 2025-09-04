@@ -4940,20 +4940,20 @@ def search_departments():
         if search_term:
             cursor.execute("""
                 SELECT d.dept_code, d.dept_name, 
-                       p.dept_name as parent_name, d.dept_level
+                       p.dept_name as parent_name
                 FROM departments_cache d
                 LEFT JOIN departments_cache p ON d.parent_dept_code = p.dept_code
                 WHERE d.dept_name LIKE ? OR d.dept_code LIKE ?
-                ORDER BY d.dept_level, d.dept_name
+                ORDER BY d.dept_name
                 LIMIT 50
             """, (f'%{search_term}%', f'%{search_term}%'))
         else:
             cursor.execute("""
                 SELECT d.dept_code, d.dept_name, 
-                       p.dept_name as parent_name, d.dept_level
+                       p.dept_name as parent_name
                 FROM departments_cache d
                 LEFT JOIN departments_cache p ON d.parent_dept_code = p.dept_code
-                ORDER BY d.dept_level, d.dept_name
+                ORDER BY d.dept_name
                 LIMIT 50
             """)
         
@@ -4963,7 +4963,7 @@ def search_departments():
                 'dept_code': row[0],
                 'dept_name': row[1],
                 'parent_name': row[2] or '',
-                'dept_level': row[3] or 0
+                'parent_dept_code': d.parent_dept_code or ''
             })
         
         conn.close()
@@ -5139,7 +5139,7 @@ def api_search():
                             FROM departments_cache d
                             LEFT JOIN departments_cache p ON d.parent_dept_code = p.dept_code
                             WHERE d.dept_code LIKE ?
-                            ORDER BY d.dept_level, d.dept_name
+                            ORDER BY d.dept_name
                             LIMIT 50
                         """, (f'%{search_term}%',))
                     else:
@@ -5149,7 +5149,7 @@ def api_search():
                             FROM departments_cache d
                             LEFT JOIN departments_cache p ON d.parent_dept_code = p.dept_code
                             WHERE d.dept_name LIKE ?
-                            ORDER BY d.dept_level, d.dept_name
+                            ORDER BY d.dept_name
                             LIMIT 50
                         """, (f'%{search_term}%',))
                 else:
@@ -5158,7 +5158,7 @@ def api_search():
                                p.dept_name as parent_name, d.dept_level
                         FROM departments_cache d
                         LEFT JOIN departments_cache p ON d.parent_dept_code = p.dept_code
-                        ORDER BY d.dept_level, d.dept_name
+                        ORDER BY d.dept_name
                         LIMIT 50
                     """)
                 
@@ -5167,7 +5167,7 @@ def api_search():
                         'dept_code': row[0],
                         'dept_name': row[1],
                         'parent_name': row[2] or '',
-                        'dept_level': row[3] or 0
+                        'parent_dept_code': d.parent_dept_code or ''
                     })
                 
         elif search_type == 'contractor':
