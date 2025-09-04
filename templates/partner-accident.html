@@ -94,7 +94,7 @@
                     <!-- 나머지 dynamic columns -->
                     {% for col in dynamic_columns %}
                         {% if col.column_key == 'accident_name' %}
-                            <!-- 사고명 컬럼 제거됨 -->
+                            <td>-</td>
                         {% elif col.column_type == 'dropdown' %}
                             <td>{{ accident[col.column_key + '_label'] or accident[col.column_key] or accident.get(col.column_key, '-') }}</td>
                         {% else %}
