@@ -102,12 +102,12 @@ window.receiveCompanySelection = function(fieldKey, data) {
         mainField.value = data.company_name || '';
     }
     
-    // _business_number 필드 업데이트
-    const bnField = document.getElementById(fieldKey + '_business_number');
-    if (bnField) {
-        bnField.value = data.business_number || '';
-        bnField.setAttribute('readonly', true);
-        bnField.style.backgroundColor = '#f8f9fa';
+    // _bizno 필드 업데이트 (통일된 접미사)
+    const biznoField = document.getElementById(fieldKey + '_bizno');
+    if (biznoField) {
+        biznoField.value = data.business_number || '';
+        biznoField.setAttribute('readonly', true);
+        biznoField.style.backgroundColor = '#f8f9fa';
     }
 };
 
@@ -266,6 +266,14 @@ window.receiveContractorSelection = function(fieldKey, data) {
         companyField.value = data.company_name || data.company || '';
         companyField.setAttribute('readonly', true);
         companyField.style.backgroundColor = '#f8f9fa';
+    }
+    
+    // _bizno 필드 업데이트 (통일된 접미사)
+    const biznoField = document.getElementById(fieldKey + '_bizno');
+    if (biznoField) {
+        biznoField.value = data.business_number || '';
+        biznoField.setAttribute('readonly', true);
+        biznoField.style.backgroundColor = '#f8f9fa';
     }
 };
 

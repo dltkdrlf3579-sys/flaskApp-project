@@ -130,13 +130,13 @@
                                                data-section="{{ section.section_key }}"
                                                placeholder="클릭하여 선택"
                                                readonly>
-                                        <button class="btn btn-sm btn-primary" 
+                                        <button class="btn btn-sm btn-outline-secondary" 
                                                 onclick="{% if col.column_type == 'popup_person' %}openPersonSearch{% elif col.column_type == 'popup_company' %}openCompanySearch{% elif col.column_type == 'popup_building' %}openBuildingSearch{% elif col.column_type == 'popup_department' %}openDepartmentSearch{% elif col.column_type == 'popup_contractor' %}openContractorSearch{% else %}openPopup{% endif %}('{{ col.column_key }}')">
                                             검색
                                         </button>
                                     </div>
                                     
-                                {% elif col.column_type == 'table' or col.input_type == 'table' %}
+                                {% elif col.input_type == 'table' %}
                                     <!-- 테이블 검색 필드 -->
                                     <div class="input-group">
                                         <input type="text" 
@@ -152,7 +152,7 @@
                                                id="{{ col.column_key }}_id" 
                                                data-field="{{ col.column_key }}_id">
                                         <button class="btn btn-sm btn-primary" 
-                                                onclick="openPopup('{{ col.column_key }}')">
+                                                onclick="openTableSearch('{{ col.column_key }}')">
                                             검색
                                         </button>
                                     </div>
@@ -193,7 +193,10 @@
         <div class="section-content">
             <div class="content-editor">
                 <div id="detailed-content" 
-                     class="editable-content"></div>
+                     class="editable-content"
+                     contenteditable="true"
+                     style="min-height: 300px; padding: 15px; border: 1px solid #d1d5db; border-radius: 4px; background: white;">
+                </div>
             </div>
         </div>
     </div>
@@ -266,8 +269,7 @@ function registerFollowSop() {
     const formData = new FormData();
     
     // 상세내용 추가
-    // 상세내용 처리 - CKEditor 데이터 가져오기
-    const detailedContent = window.RichText ? window.RichText.getData() : '';
+    const detailedContent = document.getElementById('detailed-content').innerHTML;
     formData.append('detailed_content', detailedContent);
     
     // 동적 필드 수집
@@ -647,9 +649,5 @@ function openTableSearch(fieldKey) {
 {% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
 {{ attachment_styles() }}
 {{ attachment_scripts() }}
-
-
-<!-- Content Editor 스크립트 추가 -->
-<script src="/static/js/content-editor.js"></script>
 
 {% endblock %}

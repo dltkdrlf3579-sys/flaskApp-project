@@ -259,7 +259,7 @@ class PartnerDataManager:
                 injury_type TEXT,
                 accident_date TEXT,
                 day_of_week TEXT,
-                report_date TEXT,
+                created_at TEXT,
                 building TEXT,
                 floor TEXT,
                 location_category TEXT,
@@ -469,7 +469,7 @@ class PartnerDataManager:
                     row.get('injury_type', ''),
                     row.get('accident_date', ''),
                     row.get('day_of_week', ''),
-                    row.get('report_date', ''),
+                    row.get('created_at', ''),
                     row.get('building', ''),
                     row.get('floor', ''),
                     row.get('location_category', ''),
@@ -481,7 +481,7 @@ class PartnerDataManager:
                 INSERT INTO accidents_cache (
                     accident_number, accident_name, workplace,
                     accident_grade, major_category, injury_form, injury_type,
-                    accident_date, day_of_week, report_date, building, floor,
+                    accident_date, day_of_week, created_at, building, floor,
                     location_category, location_detail, custom_data, is_deleted
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', 0)
             ''', rows)

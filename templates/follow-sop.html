@@ -54,10 +54,9 @@
             <thead>
                 <tr>
                     <th class="checkbox-column"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
-                    <th class="fixed-col">No</th>
-                    <!-- 하드코딩된 컬럼 헤더 -->
+                    <th class="fixed-col" style="width: 60px;">No</th>
+                    <!-- 하드코딩된 컬럼 헤더 (work_req_no만) -->
                     <th>점검번호</th>
-                    <th>등록일</th>
                     {% for section in sections %}
                         {% for col in section_columns[section['section_key']] %}
                             {% if col['column_key'] not in ['detailed_content', 'violation_content', 'work_req_no', 'registered_date'] %}
@@ -73,20 +72,21 @@
                     <td class="checkbox-column">
                         <input type="checkbox" class="accident-checkbox" value="{{ followsop.work_req_no }}" onchange="updateDeleteButton()">
                     </td>
-                    <td class="fixed-col">
+                    <td class="fixed-col" style="width: 60px;">
                         {{ followsop.no }}
                     </td>
-                    <!-- 하드코딩된 컬럼들 -->
+                    <!-- 하드코딩된 컬럼 (work_req_no만) -->
                     <td>
                         <a href="javascript:void(0)" class="company-link" onclick="openFollowSopModal('{{ followsop.work_req_no }}')">{{ followsop.work_req_no or '-' }}</a>
                     </td>
-                    <td>{{ followsop.created_at or '-' }}</td>
                     
                     {% for section in sections %}
                         {% for col in section_columns[section['section_key']] %}
-                            {% if col['column_key'] not in ['detailed_content', 'violation_content', 'work_req_no', 'created_at', 'registered_date'] %}
+                            {% if col['column_key'] not in ['detailed_content', 'violation_content', 'work_req_no', 'registered_date'] %}
                             <td>
-                                {% if col['column_type'] == 'dropdown' %}
+                                {% if col['column_key'] == 'created_at' %}
+                                    {{ (followsop.created_at|date_only) if followsop.created_at else '-' }}
+                                {% elif col['column_type'] == 'dropdown' %}
                                     {% set field_label = col['column_key'] + '_label' %}
                                     {% if followsop.custom_mapped and col['column_key'] in followsop.custom_mapped %}
                                         {{ followsop.custom_mapped[col['column_key']] or '-' }}
@@ -392,7 +392,8 @@
     z-index: 2;
     background: #f1f5f9;
     box-shadow: 2px 0 4px rgba(0,0,0,0.05);
-    min-width: 80px;
+    min-width: 60px;
+    width: 60px;
 }
 .data-table td {
     padding: 12px 16px;
@@ -407,7 +408,8 @@
     z-index: 1;
     background: white;
     box-shadow: 2px 0 4px rgba(0,0,0,0.05);
-    min-width: 80px;
+    min-width: 60px;
+    width: 60px;
 }
 .data-table tbody tr:hover {
     background: #f9fafb;
@@ -803,15 +805,7 @@ function updateDeleteButton() {
 
 // 비밀번호 확인 후 선택한 항목 삭제
 function deleteSelectedWithPassword() {
-    const password = prompt('삭제 비밀번호를 입력하세요:');
-    if (password === null) return;
-    
-    if (password !== 'admin123') {
-        alert('비밀번호가 틀렸습니다.');
-        return;
-    }
-    
-    deleteSelected();
+    PwModal.show(deleteSelected);
 }
 
 // 선택한 항목 삭제
@@ -851,4 +845,8 @@ function deleteSelected() {
     });
 }
 </script>
+
+<!-- 비밀번호 모달 포함 -->
+{% include 'includes/password_modal.html' %}
+
 {% endblock %}

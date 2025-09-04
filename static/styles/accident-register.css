@@ -128,6 +128,7 @@
     flex: 1;
 }
 
+/* .input-group button 규칙 제거 - Bootstrap 버튼과 충돌
 .input-group button {
     padding: 8px 12px;
     background: #f3f4f6;
@@ -139,7 +140,7 @@
 
 .input-group button:hover {
     background: #e5e7eb;
-}
+} */
 
 /* 첨부파일 섹션 */
 .attachments-section {

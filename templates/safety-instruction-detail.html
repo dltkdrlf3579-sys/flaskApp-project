@@ -110,16 +110,19 @@
                                            
                                 {% elif col.column_type == 'popup' %}
                                     <!-- 팝업 필드 -->
+                                    <!-- ⚠️ IMPORTANT: btn-primary 유지, 아이콘 없이 "검색" 텍스트만 -->
+                                    <!-- DO NOT CHANGE to btn-outline-secondary or add icons -->
                                     <div class="input-group">
                                         <input type="text" 
+                                               id="{{ col.column_key }}"
                                                class="{{ section.section_key|replace('_', '-') }}-input" 
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                value="{{ col_value }}"
                                                readonly>
-                                        <button class="btn btn-sm btn-outline-secondary" 
+                                        <button class="btn btn-sm btn-primary" 
                                                 onclick="openPopup('{{ col.column_key }}')">
-                                            <i class="bi bi-search"></i>
+                                            검색
                                         </button>
                                     </div>
                                     

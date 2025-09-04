@@ -66,6 +66,31 @@ def generate_manual_accident_number(cursor):
 
 app = Flask(__name__, static_folder='static')
 
+# Jinja2 템플릿 필터 정의
+@app.template_filter('date_only')
+def date_only_filter(datetime_str):
+    """날짜시간 문자열에서 날짜만 추출 (YYYY-MM-DD)"""
+    if not datetime_str:
+        return ''
+    # 2025-08-27 14:29:03 → 2025-08-27
+    datetime_str = str(datetime_str)
+    return datetime_str.split(' ')[0] if ' ' in datetime_str else datetime_str
+
+@app.template_filter('date_korean')
+def date_korean_filter(datetime_str):
+    """날짜를 한국식 표기로 변환 (YYYY년 MM월 DD일)"""
+    if not datetime_str:
+        return ''
+    datetime_str = str(datetime_str)
+    date_part = datetime_str.split(' ')[0] if ' ' in datetime_str else datetime_str
+    try:
+        parts = date_part.split('-')
+        if len(parts) == 3:
+            return f"{parts[0]}년 {parts[1]}월 {parts[2]}일"
+    except:
+        pass
+    return date_part
+
 # 메뉴 설정
 menu = MENU_CONFIG
 
@@ -951,7 +976,7 @@ def partner_accident():
     # 사고 목록 조회
     query = """
         SELECT * FROM accidents_cache 
-        WHERE is_deleted = 0
+        WHERE (is_deleted = 0 OR is_deleted IS NULL)
     """
     params = []
     
@@ -993,6 +1018,11 @@ def partner_accident():
             try:
                 import json as pyjson
                 custom_data = pyjson.loads(accident['custom_data'])
+                
+                # accident_name이 이미 있으면 custom_data의 빈 값으로 덮어쓰지 않음
+                if 'accident_name' in custom_data and not custom_data['accident_name']:
+                    del custom_data['accident_name']
+                
                 accident.update(custom_data)  # 최상위 레벨에 병합
             except Exception as e:
                 logging.error(f"custom_data 파싱 오류: {e}")
@@ -1105,7 +1135,7 @@ def safety_instruction_route():
             col['code_mapping'] = get_dropdown_options_for_display('safety_instruction', col['column_key'])
     
     # config.ini에서 캐시 테이블 쿼리 가져오기
-    base_query = db_config.config.get('MASTER_DATA_QUERIES', 'SAFETY_INSTRUCTIONS_QUERY')
+    base_query = db_config.config.get('CONTENT_DATA_QUERIES', 'SAFETY_INSTRUCTIONS_QUERY')
     # WHERE 절 추가를 위해 쿼리 수정
     query = base_query.replace("WHERE issue_number IS NOT NULL", 
                                "WHERE issue_number IS NOT NULL AND (is_deleted = 0 OR is_deleted IS NULL)")
@@ -1275,6 +1305,9 @@ def safety_instruction_register():
     
     for field in basic_fields:
         codes = code_service.list(field)
+        # 템플릿이 기대하는 형식으로 변환 (option_code -> code, option_value -> value)
+        if codes and len(codes) > 0 and 'option_code' in codes[0]:
+            codes = [{'code': c['option_code'], 'value': c['option_value']} for c in codes]
         basic_options[field] = codes
         logging.info(f"드롭다운 옵션 로드: {field} -> {len(codes)}개")
     
@@ -1305,6 +1338,10 @@ def safety_instruction_register():
     # 팝업 모드인지 확인
     is_popup = request.args.get('popup') == '1'
     
+    # 현재 날짜 추가 (한국 시간)
+    from timezone_config import get_korean_time
+    today_date = get_korean_time().strftime('%Y-%m-%d')
+    
     return render_template('safety-instruction-register.html',
                          dynamic_columns=dynamic_columns,
                          sections=sections,  # 섹션 정보 추가
@@ -1313,6 +1350,7 @@ def safety_instruction_register():
                          violation_info_columns=violation_info_columns,  # 하위 호환성
                          additional_columns=additional_columns,  # 하위 호환성
                          basic_options=basic_options,  # basic_options 추가
+                         today_date=today_date,  # 오늘 날짜 추가
                          menu=MENU_CONFIG,
                          is_popup=is_popup)
 
@@ -1497,6 +1535,9 @@ def safety_instruction_detail(issue_number):
     
     for field in basic_fields:
         codes = code_service.list(field)
+        # 템플릿이 기대하는 형식으로 변환 (option_code -> code, option_value -> value)
+        if codes and len(codes) > 0 and 'option_code' in codes[0]:
+            codes = [{'code': c['option_code'], 'value': c['option_value']} for c in codes]
         basic_options[field] = codes
         logging.info(f"드롭다운 옵션 로드: {field} -> {len(codes)}개")
     
@@ -1987,7 +2028,23 @@ def change_request_detail(request_id):
     
     if request_row:
         # 실제 DB 데이터 사용
-        request_data = type('obj', (object,), dict(request_row))()
+        request_dict = dict(request_row)
+        
+        # change_request_details 테이블에서 detailed_content 조회
+        cursor.execute("""
+            SELECT detailed_content FROM change_request_details 
+            WHERE request_number = ?
+        """, (request_dict.get('request_number', ''),))
+        detail_row = cursor.fetchone()
+        
+        if detail_row:
+            request_dict['detailed_content'] = detail_row['detailed_content']
+            logging.info(f"detailed_content 로드 완료: 길이={len(detail_row['detailed_content']) if detail_row['detailed_content'] else 0}")
+        else:
+            request_dict['detailed_content'] = ''
+            logging.info("detailed_content가 없음")
+        
+        request_data = type('obj', (object,), request_dict)()
         logging.info(f"DB에서 변경요청 데이터 로드: ID={request_id}")
     else:
         # DB에 없으면 기본값
@@ -1995,7 +2052,8 @@ def change_request_detail(request_id):
             'id': request_id,
             'change_reason': '',
             'approval_comments': '',
-            'custom_data': '{}'
+            'custom_data': '{}',
+            'detailed_content': ''
         })()
         logging.info(f"변경요청 데이터 없음, 기본값 사용: ID={request_id}")
     
@@ -2092,7 +2150,7 @@ def update_change_request():
     try:
         request_id = request.form.get('request_id')  # ID 받기
         request_number = request.form.get('request_number')  # 실제 request_number도 받기
-        change_content = request.form.get('change_content', '')
+        change_reason = request.form.get('change_reason', '')  # change_content 대신 change_reason
         detailed_content = request.form.get('detailed_content', '')  # 추가
         custom_data = request.form.get('custom_data', '{}')
         
@@ -2145,11 +2203,30 @@ def update_change_request():
             # custom_data에서 status 추출
             status_value = custom_data_dict.get('status', existing[2])  # 기존 상태 유지
             
-            cursor.execute("""
+            # custom_data에서 각 컬럼 값 추출
+            update_query = """
                 UPDATE partner_change_requests 
-                SET status = ?, custom_data = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (status_value, pyjson.dumps(custom_data_dict), request_id))
+                SET status = ?, 
+                    custom_data = ?, 
+                    updated_at = CURRENT_TIMESTAMP
+            """
+            
+            params = [status_value, pyjson.dumps(custom_data_dict)]
+            
+            # 동적으로 컬럼 업데이트 추가
+            for key, value in custom_data_dict.items():
+                if key != 'status':  # status는 이미 처리됨
+                    # 컬럼이 존재하는지 확인
+                    cursor.execute("PRAGMA table_info(partner_change_requests)")
+                    columns = [col[1] for col in cursor.fetchall()]
+                    if key in columns:
+                        update_query += f", {key} = ?"
+                        params.append(value)
+            
+            update_query += " WHERE id = ?"
+            params.append(request_id)
+            
+            cursor.execute(update_query, params)
             
             logging.info(f"partner_change_requests 업데이트: ID={request_id}, status={status_value}")
         else:
@@ -2314,7 +2391,7 @@ def accident_detail(accident_id):
             'floor': f'{(i % 20) + 1}층',
             'location_category': location_categories[i % 5],  # 장소구분 추가
             'location_detail': f'상세위치{i+1:03d}',  # 세부장소
-            'report_date': accident_date_fixed,  # 등록일 추가
+            'created_at': accident_date_fixed,  # 등록일 추가
             'day_of_week': days_of_week[i % 7],
             'accident_content': f'사고내용{i+1}에 대한 상세 설명입니다.'
         })
@@ -2351,10 +2428,10 @@ def accident_detail(accident_id):
     else:
         accident = dict(accident)  # Row를 dict로 변환
         
-        # ACC 사고의 경우 report_date가 없으면 오늘 날짜로 설정
+        # ACC 사고의 경우 created_at가 없으면 오늘 날짜로 설정
         if accident.get('accident_number', '').startswith('ACC'):
-            if not accident.get('report_date'):
-                accident['report_date'] = get_korean_time().strftime('%Y-%m-%d')
+            if not accident.get('created_at'):
+                accident['created_at'] = get_korean_time().strftime('%Y-%m-%d')
     
     if not accident:
         logging.warning(f"사고를 찾을 수 없습니다: {accident_id}")
@@ -2510,6 +2587,9 @@ def accident_detail(accident_id):
         
         for field in basic_fields:
             codes = code_service.list(field)
+            # 템플릿이 기대하는 형식으로 변환 (option_code -> code, option_value -> value)
+            if codes and len(codes) > 0 and 'option_code' in codes[0]:
+                codes = [{'code': c['option_code'], 'value': c['option_value']} for c in codes]
             basic_options[field] = codes
             logging.info(f"드롭다운 옵션 로드: {field} -> {len(codes)}개")
         
@@ -2721,6 +2801,9 @@ def accident_register():
     
     for field in basic_fields:
         codes = code_service.list(field)
+        # 템플릿이 기대하는 형식으로 변환 (option_code -> code, option_value -> value)
+        if codes and len(codes) > 0 and 'option_code' in codes[0]:
+            codes = [{'code': c['option_code'], 'value': c['option_value']} for c in codes]
         basic_options[field] = codes
         logging.info(f"드롭다운 옵션 로드: {field} -> {len(codes)}개")
     
@@ -2769,6 +2852,10 @@ def accident_register():
     # 팝업 모드인지 확인
     is_popup = request.args.get('popup') == '1'
     
+    # 현재 날짜 추가 (한국 시간)
+    from timezone_config import get_korean_time
+    today_date = get_korean_time().strftime('%Y-%m-%d')
+    
     return render_template('accident-register.html',
                          dynamic_columns=dynamic_columns,
                          sections=sections,  # 섹션 정보 추가
@@ -2777,6 +2864,7 @@ def accident_register():
                          violation_info_columns=violation_info_columns,  # 하위 호환성
                          additional_columns=additional_columns,  # 하위 호환성
                          basic_options=basic_options,  # basic_options 추가
+                         today_date=today_date,  # 오늘 날짜 추가
                          menu=MENU_CONFIG,
                          is_popup=is_popup)
 
@@ -2927,6 +3015,7 @@ def register_accident():
         # 기본정보 필드들 받기 (ACCIDENTS_QUERY와 동일한 14개 필드 + α)
         accident_number = ''  # 자동생성
         accident_name = request.form.get('accident_name', '')
+        print(f"[DEBUG] accident_name received: '{accident_name}'")  # 디버깅
         workplace = request.form.get('workplace', '')
         accident_grade = request.form.get('accident_grade', '')
         major_category = request.form.get('major_category', '')
@@ -2935,7 +3024,7 @@ def register_accident():
         accident_date = request.form.get('accident_date', '')
         day_of_week = request.form.get('day_of_week', '')
         # 등록일은 항상 오늘 날짜(한국 시간)로 설정
-        report_date = get_korean_time().strftime('%Y-%m-%d')
+        created_at = get_korean_time().strftime('%Y-%m-%d')
         building = request.form.get('building', '')
         floor = request.form.get('floor', '')
         location_category = request.form.get('location_category', '')
@@ -3033,7 +3122,7 @@ def register_accident():
             ('day_of_week', 'TEXT'),
             ('major_category', 'TEXT'),
             ('location_category', 'TEXT'),
-            ('report_date', 'TEXT'),
+            ('created_at', 'TEXT'),
             ('custom_data', 'TEXT')
         ]
         
@@ -3048,6 +3137,7 @@ def register_accident():
         else:
             accident_datetime = get_korean_time().strftime('%Y-%m-%d %H:%M')
         
+        print(f"[DEBUG] Inserting accident with name: '{accident_name or f'사고_{accident_number}'}'")  # 디버깅
         cursor.execute("""
             INSERT INTO accidents_cache (
                 accident_number,
@@ -3059,7 +3149,7 @@ def register_accident():
                 injury_type,
                 accident_date,
                 day_of_week,
-                report_date,
+                created_at,
                 building,
                 floor,
                 location_category,
@@ -3076,7 +3166,7 @@ def register_accident():
             injury_type or '',
             accident_date or korean_now.strftime('%Y-%m-%d'),
             day_of_week or '',
-            report_date or korean_now.strftime('%Y-%m-%d'),
+            created_at or korean_now.strftime('%Y-%m-%d'),
             building or '',
             floor or '',
             location_category or '',
@@ -3354,8 +3444,26 @@ def update_partner():
         
         business_number = request.form.get('business_number')
         detailed_content = request.form.get('detailed_content')
-        deleted_attachments = pyjson.loads(request.form.get('deleted_attachments', '[]'))
-        attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
+        
+        # 안전하게 JSON 파싱
+        try:
+            deleted_attachments = pyjson.loads(request.form.get('deleted_attachments', '[]'))
+        except:
+            deleted_attachments = []
+        
+        try:
+            attachment_data_raw = request.form.get('attachment_data', '[]')
+            if isinstance(attachment_data_raw, str):
+                attachment_data = pyjson.loads(attachment_data_raw)
+            else:
+                attachment_data = attachment_data_raw
+            # 리스트가 아닌 경우 빈 리스트로
+            if not isinstance(attachment_data, list):
+                attachment_data = []
+        except Exception as e:
+            logging.warning(f"attachment_data 파싱 실패: {e}")
+            attachment_data = []
+        
         files = request.files.getlist('files')
         
         print(f"Business Number: {business_number}")
@@ -3389,12 +3497,16 @@ def update_partner():
         
         # 3. 기존 첨부파일 정보 업데이트
         for attachment in attachment_data:
-            if attachment['id'] and not attachment.get('isNew'):
-                cursor.execute("""
-                    UPDATE partner_attachments 
-                    SET description = ? 
-                    WHERE id = ?
-                """, (attachment['description'], attachment['id']))
+            # attachment가 딕셔너리인지 확인
+            if isinstance(attachment, dict):
+                if attachment.get('id') and not attachment.get('isNew'):
+                    cursor.execute("""
+                        UPDATE partner_attachments 
+                        SET description = ? 
+                        WHERE id = ?
+                    """, (attachment.get('description', ''), attachment['id']))
+            else:
+                logging.warning(f"attachment가 딕셔너리가 아님: {type(attachment)}")
         
         # 4. 새 파일 업로드 처리
         import os
@@ -3403,7 +3515,7 @@ def update_partner():
             os.makedirs(upload_folder)
             
         # 새 파일들과 새 첨부파일 데이터 매칭
-        new_attachments = [a for a in attachment_data if a.get('isNew')]
+        new_attachments = [a for a in attachment_data if isinstance(a, dict) and a.get('isNew')]
         print(f"New attachments: {new_attachments}")
         
         for i, file in enumerate(files):
@@ -3429,9 +3541,9 @@ def update_partner():
                     filename,  # 원본 파일명으로 저장
                     file_path,
                     os.path.getsize(file_path),
-                    attachment_info['description']
+                    attachment_info.get('description', '')
                 ))
-                logging.info(f"첨부파일 추가: {filename} - {attachment_info['description']}")
+                logging.info(f"첨부파일 추가: {filename} - {attachment_info.get('description', '')}")
         
         # 커밋 전 확인
         check_result = cursor.execute("SELECT COUNT(*) FROM partner_attachments WHERE business_number = ?", (business_number,)).fetchone()
@@ -3482,6 +3594,12 @@ def update_accident():
         # json already imported globally
         
         accident_number = request.form.get('accident_number')
+        
+        # K 사고는 수정 불가 (외부 시스템 데이터)
+        if accident_number and accident_number.startswith('K'):
+            from flask import jsonify
+            return jsonify({"success": False, "message": "K 사고는 수정할 수 없습니다. (외부 시스템 데이터)"}), 403
+        
         detailed_content = request.form.get('detailed_content', '')
         custom_data = request.form.get('custom_data', '{}')  # Phase 2: 동적 컬럼 데이터
         base_fields = request.form.get('base_fields', '{}')  # ACC 사고일 때 기본정보
@@ -3493,8 +3611,16 @@ def update_accident():
             deleted_attachments = []
         
         try:
-            attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
-        except:
+            attachment_data_raw = request.form.get('attachment_data', '[]')
+            if isinstance(attachment_data_raw, str):
+                attachment_data = pyjson.loads(attachment_data_raw)
+            else:
+                attachment_data = attachment_data_raw
+            # 리스트가 아닌 경우 빈 리스트로
+            if not isinstance(attachment_data, list):
+                attachment_data = []
+        except Exception as e:
+            logging.warning(f"attachment_data 파싱 실패: {e}")
             attachment_data = []
         files = request.files.getlist('files')
         
@@ -3558,7 +3684,7 @@ def update_accident():
         # Phase 2: 동적 컬럼 데이터 저장 (accidents_cache 테이블에 custom_data 업데이트)
         # accidents_cache는 'accident_number' 컬럼을 사용
         
-        # ACC 사고일 때만 기본정보 업데이트
+        # ACC 사고일 때만 기본정보 업데이트 (K 사고는 수정 불가)
         is_direct_entry = accident_number.startswith('ACC')
         if is_direct_entry and base_fields != '{}':
             try:
@@ -3569,7 +3695,7 @@ def update_accident():
                 allowed_fields = [
                     'accident_name', 'accident_date', 'workplace', 'accident_grade',
                     'major_category', 'injury_form', 'injury_type', 'building', 'floor',
-                    'location_category', 'location_detail', 'report_date', 'day_of_week'
+                    'location_category', 'location_detail', 'created_at', 'day_of_week'
                 ]
                 
                 # 업데이트할 필드와 값 준비
@@ -3617,6 +3743,7 @@ def update_accident():
             else:
                 custom_data_str = custom_data
             
+            # FormData에서 직접 받은 필드들 사용 (하드코딩 제거)
             # 새 레코드 생성 (업체 정보는 선택적)
             # 비공식/직접등록 사고
             korean_date = get_korean_time().strftime('%Y-%m-%d')
@@ -3624,10 +3751,21 @@ def update_accident():
                 INSERT INTO accidents_cache (
                     accident_number, accident_name, custom_data, accident_date,
                     workplace, accident_grade, major_category, injury_form, 
-                    injury_type, report_date
+                    injury_type, created_at
                 )
-                VALUES (?, ?, ?, ?, '', '', '', '', '', ?)
-            """, (accident_number, f"사고_{accident_number}", custom_data_str, korean_date, korean_date))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                accident_number, 
+                request.form.get('accident_name', f"사고_{accident_number}"),
+                custom_data_str, 
+                request.form.get('accident_date', korean_date),
+                request.form.get('workplace', ''),
+                request.form.get('accident_grade', ''),
+                request.form.get('major_category', ''),
+                request.form.get('injury_form', ''),
+                request.form.get('injury_type', ''),
+                korean_date
+            ))
             logging.info(f"새 사고 레코드 생성 (직접등록) 및 동적 컬럼 데이터 저장: {accident_number}")
         
         # 2. 사고 첨부파일 처리 - item_id 사용
@@ -3638,12 +3776,16 @@ def update_accident():
         
         # 4. 기존 첨부파일 정보 업데이트
         for attachment in attachment_data:
-            if attachment['id'] and not attachment.get('isNew'):
-                cursor.execute("""
-                    UPDATE accident_attachments 
-                    SET description = ? 
-                    WHERE id = ?
-                """, (attachment['description'], attachment['id']))
+            # attachment가 딕셔너리인지 확인
+            if isinstance(attachment, dict):
+                if attachment.get('id') and not attachment.get('isNew'):
+                    cursor.execute("""
+                        UPDATE accident_attachments 
+                        SET description = ? 
+                        WHERE id = ?
+                    """, (attachment.get('description', ''), attachment['id']))
+            else:
+                logging.warning(f"attachment가 딕셔너리가 아님: {type(attachment)}")
         
         # 5. 새 파일 업로드 처리
         import os
@@ -3652,7 +3794,7 @@ def update_accident():
             os.makedirs(upload_folder)
             
         # 새 파일들과 새 첨부파일 데이터 매칭
-        new_attachments = [a for a in attachment_data if a.get('isNew')]
+        new_attachments = [a for a in attachment_data if isinstance(a, dict) and a.get('isNew')]
         print(f"New attachments: {new_attachments}")
         
         for i, file in enumerate(files):
@@ -3678,9 +3820,9 @@ def update_accident():
                     filename,  # 원본 파일명으로 저장
                     file_path,
                     os.path.getsize(file_path),
-                    attachment_info['description']
+                    attachment_info.get('description', '')
                 ))
-                logging.info(f"첨부파일 추가: {filename} - {attachment_info['description']}")
+                logging.info(f"첨부파일 추가: {filename} - {attachment_info.get('description', '')}")
         
         # 커밋 전 확인
         check_result = cursor.execute("SELECT COUNT(*) FROM accident_attachments WHERE item_id = ?", (accident_number,)).fetchone()
@@ -5615,7 +5757,7 @@ def export_accidents_excel():
             ws.cell(row=row_idx, column=7, value=accident.get('injury_type', ''))
             ws.cell(row=row_idx, column=8, value=accident.get('accident_date', ''))
             ws.cell(row=row_idx, column=9, value=accident.get('day_of_week', ''))
-            ws.cell(row=row_idx, column=10, value=accident.get('report_date', ''))
+            ws.cell(row=row_idx, column=10, value=accident.get('created_at', ''))
             ws.cell(row=row_idx, column=11, value=accident.get('building', ''))
             ws.cell(row=row_idx, column=12, value=accident.get('floor', ''))
             ws.cell(row=row_idx, column=13, value=accident.get('location_category', ''))

@@ -198,12 +198,21 @@ def follow_sop_register():
     work_req_no = generate_followsop_number(DB_PATH)
     created_at = get_korean_time_str('%Y-%m-%d %H:%M:%S')
     
+    # work_req_no는 column_config에 없으므로 하드코딩
     basic_fields = [
         {'column_key': 'work_req_no', 'column_name': '점검번호', 'column_type': 'text', 
-         'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info', 'default_value': work_req_no},
-        {'column_key': 'created_at', 'column_name': '등록일', 'column_type': 'datetime', 
-         'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info', 'default_value': created_at}
+         'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info', 'default_value': work_req_no}
     ]
+    
+    # created_at이 column_config에 있으면 거기서 가져오고 default_value만 설정
+    for col in dynamic_columns:
+        if col['column_key'] == 'created_at':
+            col['default_value'] = created_at
+            break
+    
+    # basic_info의 dynamic_columns 추가
+    basic_info_dynamic = [col for col in dynamic_columns if col.get('tab') == 'basic_info']
+    basic_fields.extend(basic_info_dynamic)
     
     # 섹션별로 컬럼 분류
     section_columns = {'basic_info': basic_fields}
@@ -223,10 +232,15 @@ def follow_sop_register():
     # 팝업 여부 확인
     is_popup = request.args.get('popup') == '1'
     
+    # 현재 날짜 추가 (한국 시간)
+    from timezone_config import get_korean_time
+    today_date = get_korean_time().strftime('%Y-%m-%d')
+    
     return render_template('follow-sop-register.html',
                          dynamic_columns=dynamic_columns,
                          sections=sections,
                          section_columns=section_columns,  # 중요! 이것이 누락되어 있었음
+                         today_date=today_date,  # 오늘 날짜 추가
                          is_popup=is_popup,
                          menu=MENU_CONFIG)
 
@@ -277,13 +291,15 @@ def follow_sop_detail(work_req_no):
     """)
     dynamic_columns = [dict(row) for row in cursor.fetchall()]
     
-    # 기본정보 필드 추가 (하드코딩)
+    # 기본정보 필드 추가 (work_req_no만 하드코딩, created_at은 column_config에서 가져옴)
     basic_fields = [
         {'column_key': 'work_req_no', 'column_name': '점검번호', 'column_type': 'text', 
-         'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info'},
-        {'column_key': 'created_at', 'column_name': '등록일', 'column_type': 'datetime', 
          'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info'}
     ]
+    
+    # basic_info 섹션의 dynamic_columns 추가 (created_at 포함)
+    basic_info_dynamic = [col for col in dynamic_columns if col.get('tab') == 'basic_info']
+    basic_fields.extend(basic_info_dynamic)
     
     # 섹션별로 컬럼 분류
     section_columns = {'basic_info': basic_fields}
@@ -647,10 +663,15 @@ def full_process_register():
     # 팝업 여부 확인
     is_popup = request.args.get('popup') == '1'
     
+    # 현재 날짜 추가 (한국 시간)
+    from timezone_config import get_korean_time
+    today_date = get_korean_time().strftime('%Y-%m-%d')
+    
     return render_template('full-process-register.html',
                          dynamic_columns=dynamic_columns,
                          sections=sections,
                          section_columns=section_columns,  # 중요! 이것이 누락되어 있었음
+                         today_date=today_date,  # 오늘 날짜 추가
                          is_popup=is_popup,
                          menu=MENU_CONFIG)
 

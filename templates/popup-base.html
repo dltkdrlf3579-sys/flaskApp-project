@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}PORTAL{% endblock %}</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css" rel="stylesheet">
     {% block head %}{% endblock %}
     <style>
         * {
@@ -80,8 +83,85 @@
             max-height: calc(100vh - 110px);
         }
         
+        /* 버튼 스타일 보강 */
+        .btn {
+            display: inline-block;
+            font-weight: 400;
+            text-align: center;
+            vertical-align: middle;
+            user-select: none;
+            border: 1px solid transparent;
+            padding: 0.375rem 0.75rem;
+            font-size: 1rem;
+            line-height: 1.5;
+            border-radius: 0.25rem;
+            transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out;
+        }
+        
+        .btn-sm {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.875rem;
+            line-height: 1.5;
+            border-radius: 0.2rem;
+        }
+        
+        .btn-primary {
+            color: #fff !important;
+            background-color: #2f5fd3 !important;
+            border-color: #2f5fd3 !important;
+        }
+        
+        .btn-primary:hover {
+            color: #fff !important;
+            background-color: #1d4ed8 !important;
+            border-color: #1d4ed8 !important;
+        }
+        
+        /* input-group 스타일 보강 */
+        .input-group {
+            position: relative;
+            display: flex;
+            flex-wrap: nowrap;
+            align-items: stretch;
+            width: 100%;
+            gap: 8px;
+        }
+        
+        .input-group > input {
+            position: relative;
+            flex: 1 1 auto;
+            width: 1%;
+            min-width: 0;
+            padding: 0.375rem 0.75rem;
+            font-size: 0.875rem;
+            line-height: 1.5;
+            border: 1px solid #d1d5db;
+            border-radius: 0.25rem;
+            background-color: #f9fafb;
+        }
+        
+        .input-group > input[readonly] {
+            background-color: #f3f4f6;
+            cursor: not-allowed;
+        }
+        
+        .input-group > .btn {
+            position: relative;
+            z-index: 2;
+            flex-shrink: 0;
+        }
+        
+        /* CKEditor 높이 설정 */
+        .ck-editor__editable {
+            min-height: 300px !important;
+            max-height: 650px !important;
+            overflow-y: auto !important;
+        }
+        
         {% block style %}{% endblock %}
     </style>
+    <!-- 공통 팝업 핸들러 -->
+    <script src="{{ url_for('static', filename='js/popup-handler.js') }}"></script>
 </head>
 <body>
     <div class="popup-container">
@@ -93,5 +173,127 @@
             {% block content %}{% endblock %}
         </div>
     </div>
+    
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- CKEditor 5 CDN -->
+    <script src="https://cdn.ckeditor.com/ckeditor5/40.0.0/classic/ckeditor.js"></script>
+    
+    <!-- RichText Utility -->
+    <script>
+    window.RichText = {
+        editor: null,
+        initialized: false,
+        
+        init: function() {
+            // 중복 초기화 방지
+            if (this.initialized) {
+                console.log('⚠️ CKEditor가 이미 초기화되었습니다.');
+                return;
+            }
+            
+            const element = document.getElementById('detailed-content');
+            if (!element) {
+                console.log('detailed-content 요소를 찾을 수 없습니다.');
+                return;
+            }
+            
+            // element가 이미 CKEditor에 의해 처리되었는지 확인
+            if (element.classList.contains('ck-editor__editable')) {
+                console.log('⚠️ 요소가 이미 CKEditor로 초기화되었습니다.');
+                return;
+            }
+            
+            console.log('✅ CKEditor 5 초기화 시작');
+            
+            // CKEditor 5 초기화
+            ClassicEditor
+                .create(element, {
+                    toolbar: [
+                        'heading', '|',
+                        'bold', 'italic', 'underline', 'strikethrough', '|',
+                        'bulletedList', 'numberedList', '|',
+                        'outdent', 'indent', '|',
+                        'link', 'blockQuote', 'insertTable', '|',
+                        'undo', 'redo', '|',
+                        'fontColor', 'fontBackgroundColor', '|',
+                        'alignment'
+                    ],
+                    heading: {
+                        options: [
+                            { model: 'paragraph', title: '본문', class: 'ck-heading_paragraph' },
+                            { model: 'heading1', view: 'h1', title: '제목 1', class: 'ck-heading_heading1' },
+                            { model: 'heading2', view: 'h2', title: '제목 2', class: 'ck-heading_heading2' },
+                            { model: 'heading3', view: 'h3', title: '제목 3', class: 'ck-heading_heading3' }
+                        ]
+                    },
+                    language: 'ko',
+                    placeholder: '상세내용을 입력하세요.',
+                    table: {
+                        contentToolbar: [
+                            'tableColumn', 'tableRow', 'mergeTableCells',
+                            'tableProperties', 'tableCellProperties'
+                        ]
+                    }
+                })
+                .then(editor => {
+                    window.RichText.editor = editor;
+                    window.RichText.initialized = true;
+                    console.log('✅ CKEditor 5 초기화 완료');
+                    
+                    // 기존 내용이 있으면 설정
+                    let existingContent = element.getAttribute('data-content') || element.innerHTML || '';
+                    if (existingContent) {
+                        try {
+                            // data-content가 JSON 형태로 인코딩된 경우 파싱
+                            if (existingContent.startsWith('"') && existingContent.endsWith('"')) {
+                                existingContent = JSON.parse(existingContent);
+                            }
+                        } catch (e) {
+                            // JSON 파싱 실패시 그대로 사용
+                            console.log('Content is not JSON encoded, using as is');
+                        }
+                        editor.setData(existingContent);
+                        console.log('✅ 기존 내용 로드 완료:', existingContent.length + ' characters');
+                    }
+                })
+                .catch(error => {
+                    console.error('CKEditor 5 초기화 실패:', error);
+                });
+        },
+        
+        getData: function() {
+            if (this.editor) {
+                return this.editor.getData();
+            }
+            // Fallback: contenteditable div의 내용 반환
+            const element = document.getElementById('detailed-content');
+            return element ? element.innerHTML : '';
+        },
+        
+        setData: function(content) {
+            if (this.editor) {
+                this.editor.setData(content);
+            } else {
+                const element = document.getElementById('detailed-content');
+                if (element) {
+                    element.innerHTML = content;
+                }
+            }
+        }
+    };
+    
+    // DOM 준비시 자동 초기화
+    document.addEventListener('DOMContentLoaded', function() {
+        // 약간의 지연을 두어 모든 스타일과 스크립트가 로드된 후 초기화
+        setTimeout(function() {
+            if (document.getElementById('detailed-content')) {
+                console.log('🚀 CKEditor 자동 초기화 시작');
+                window.RichText.init();
+            }
+        }, 100);
+    });
+    </script>
 </body>
 </html>

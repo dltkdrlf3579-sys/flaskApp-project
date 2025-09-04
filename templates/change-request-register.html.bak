@@ -125,20 +125,6 @@
                                 <button class="btn btn-sm btn-primary" onclick="openCompanyPopup('{{ col.column_key }}')">선택</button>
                             </div>
                         
-                        {% elif col.column_type == 'table' or col.input_type == 'table' %}
-                            <!-- 테이블 검색 필드 -->
-                            <div class="input-group">
-                                <input type="text" 
-                                       class="dynamic-input" 
-                                       data-column-key="{{ col.column_key }}"
-                                       data-input-type="table"
-                                       value=""
-                                       placeholder="검색하여 선택"
-                                       readonly
-                                       style="background-color: #f8f9fa;">
-                                <button class="btn btn-sm btn-primary" onclick="openPopup('{{ col.column_key }}')">검색</button>
-                            </div>
-                        
                         {% else %}
                             <input type="text" 
                                    class="dynamic-input" 
@@ -786,9 +772,5 @@ if (typeof window !== 'undefined') {
 {% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
 {{ attachment_styles() }}
 {{ attachment_scripts() }}
-
-
-<!-- Content Editor 스크립트 추가 -->
-<script src="/static/js/content-editor.js"></script>
 
 {% endblock %}

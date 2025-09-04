@@ -54,7 +54,7 @@
             <thead>
                 <tr>
                     <th class="checkbox-column"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
-                    <th class="fixed-col">No</th>
+                    <th class="fixed-col" style="width: 60px;">No</th>
                     {% for section in sections %}
                         {% for col in section_columns[section['section_key']] %}
                             {% if col['column_key'] not in ['detailed_content', 'violation_content'] %}
@@ -70,7 +70,7 @@
                     <td class="checkbox-column">
                         <input type="checkbox" class="accident-checkbox" value="{{ item.issue_number }}" onchange="updateDeleteButton()">
                     </td>
-                    <td class="fixed-col">
+                    <td class="fixed-col" style="width: 60px;">
                         {{ item.no }}
                     </td>
                     {% for section in sections %}
@@ -90,6 +90,8 @@
                                     {% else %}
                                         -
                                     {% endif %}
+                                {% elif col['column_key'] == 'created_at' %}
+                                    {{ (item.created_at|date_only) if item.created_at else '-' }}
                                 {% else %}
                                     {% if item.custom_mapped and col['column_key'] in item.custom_mapped %}
                                         {{ item.custom_mapped[col['column_key']] or '-' }}
@@ -385,7 +387,8 @@
     z-index: 2;
     background: #f1f5f9;
     box-shadow: 2px 0 4px rgba(0,0,0,0.05);
-    min-width: 80px;
+    min-width: 60px;
+    width: 60px;
 }
 .data-table td {
     padding: 12px 16px;
@@ -400,7 +403,8 @@
     z-index: 1;
     background: white;
     box-shadow: 2px 0 4px rgba(0,0,0,0.05);
-    min-width: 80px;
+    min-width: 60px;
+    width: 60px;
 }
 .data-table tbody tr:hover {
     background: #f9fafb;
@@ -796,21 +800,16 @@ function updateDeleteButton() {
 
 // 비밀번호 확인 후 선택한 항목 삭제
 function deleteSelectedWithPassword() {
-    const password = prompt('삭제 비밀번호를 입력하세요:');
-    if (password === null) return;
-    
-    if (password !== 'admin123') {
-        alert('비밀번호가 틀렸습니다.');
-        return;
-    }
-    
-    deleteSelected();
+    PwModal.show(deleteSelected);
 }
 
 // 선택한 항목 삭제
 function deleteSelected() {
+    console.log('deleteSelected called!');
     const checkboxes = document.querySelectorAll('.accident-checkbox:checked');
+    console.log('Found checkboxes:', checkboxes.length);
     const ids = Array.from(checkboxes).map(cb => cb.value);
+    console.log('IDs to delete:', ids);
     
     if (ids.length === 0) {
         alert('삭제할 항목을 선택해주세요.');
@@ -844,4 +843,8 @@ function deleteSelected() {
     });
 }
 </script>
+
+<!-- 비밀번호 모달 포함 -->
+{% include 'includes/password_modal.html' %}
+
 {% endblock %}

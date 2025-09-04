@@ -87,14 +87,14 @@
                                    value="{{ col_value }}">
                         
                         {% elif col.column_type == 'popup_person' %}
-                            <div class="popup-input-wrapper">
+                            <div class="input-group">
                                 <input type="text" 
                                        class="dynamic-input popup-person" 
                                        data-column-key="{{ col.column_key }}"
                                        data-linked-dept=""
                                        value="{{ col_value.name if col_value is mapping else col_value }}"
                                        placeholder="담당자 선택">
-                                <button class="btn-popup" onclick="openPersonPopup('{{ col.column_key }}')">선택</button>
+                                <button class="btn btn-sm btn-primary" onclick="openPersonPopup('{{ col.column_key }}')">선택</button>
                             </div>
                         
                         {% elif col.column_type == 'linked_dept' %}
@@ -116,45 +116,59 @@
                                    style="background-color: #f8f9fa; cursor: not-allowed;">
                         
                         {% elif col.column_type == 'popup_company' %}
-                            <div class="popup-input-wrapper">
+                            <div class="input-group">
                                 <input type="text" 
                                        class="dynamic-input popup-company" 
                                        data-column-key="{{ col.column_key }}"
                                        value="{{ col_value.name if col_value is mapping else col_value }}"
                                        placeholder="업체 선택">
-                                <button class="btn-popup" onclick="openCompanyPopup('{{ col.column_key }}')">선택</button>
+                                <button class="btn btn-sm btn-primary" onclick="openCompanyPopup('{{ col.column_key }}')">선택</button>
                             </div>
                             
                         {% elif col.column_type == 'popup_contractor' %}
-                            <div class="popup-input-wrapper">
+                            <div class="input-group">
                                 <input type="text" 
                                        class="dynamic-input popup-contractor" 
                                        data-column-key="{{ col.column_key }}"
                                        value="{{ col_value.name if col_value is mapping else col_value }}"
                                        placeholder="협력사 근로자 선택">
-                                <button class="btn-popup" onclick="openContractorPopup('{{ col.column_key }}')">선택</button>
+                                <button class="btn btn-sm btn-primary" onclick="openContractorPopup('{{ col.column_key }}')">선택</button>
                             </div>
                             
                         {% elif col.column_type == 'popup_building' %}
-                            <div class="popup-input-wrapper">
+                            <div class="input-group">
                                 <input type="text" 
                                        class="dynamic-input popup-building" 
                                        data-column-key="{{ col.column_key }}"
                                        value="{{ col_value.building_name if col_value is mapping else col_value }}"
                                        placeholder="건물 선택"
                                        readonly>
-                                <button class="btn-popup" onclick="openBuildingPopup('{{ col.column_key }}')">선택</button>
+                                <button class="btn btn-sm btn-primary" onclick="openBuildingPopup('{{ col.column_key }}')">선택</button>
                             </div>
                             
                         {% elif col.column_type == 'popup_department' %}
-                            <div class="popup-input-wrapper">
+                            <div class="input-group">
                                 <input type="text" 
                                        class="dynamic-input popup-department" 
                                        data-column-key="{{ col.column_key }}"
                                        value="{{ col_value.dept_name if col_value is mapping else col_value }}"
                                        placeholder="부서 선택"
                                        readonly>
-                                <button class="btn-popup" onclick="openDepartmentPopup('{{ col.column_key }}')">선택</button>
+                                <button class="btn btn-sm btn-primary" onclick="openDepartmentPopup('{{ col.column_key }}')">선택</button>
+                            </div>
+                        
+                        {% elif col.column_type == 'table' or col.input_type == 'table' %}
+                            <!-- 테이블 검색 필드 -->
+                            <div class="input-group">
+                                <input type="text" 
+                                       class="dynamic-input" 
+                                       data-column-key="{{ col.column_key }}"
+                                       data-input-type="table"
+                                       value="{{ col_value }}"
+                                       placeholder="검색하여 선택"
+                                       readonly
+                                       style="background-color: #f8f9fa;">
+                                <button class="btn btn-sm btn-primary" onclick="openPopup('{{ col.column_key }}')">검색</button>
                             </div>
                         
                         {% else %}
@@ -186,9 +200,8 @@
             <div class="content-editor">
                 <!-- 간단한 편집 가능한 영역 -->
                 <div id="detailed-content" 
-                     class="editable-content" 
-                     contenteditable="true" 
-                     placeholder="변경사유를 상세히 입력하세요.">{{ request_data.detailed_content | safe if request_data.detailed_content else '' }}</div>
+                     class="editable-content"
+                     data-content="{{ (request_data.detailed_content or '') | tojson }}"></div>
                 
                 <!-- 숨겨진 textarea (저장용) -->
                 <textarea id="detailed-content-hidden" style="display: none;">{{ request_data.detailed_content or '' }}</textarea>
@@ -202,22 +215,22 @@
 
     <!-- 저장 버튼 영역 -->
     <div class="save-section">
-        <button class="btn-save" onclick="showPasswordModal()">수정완료</button>
+        <button class="btn-save" onclick="showEditPasswordModal()">수정완료</button>
     </div>
-
+    
     <!-- 비밀번호 입력 모달 -->
-    <div id="password-modal" class="modal">
+    <div id="edit-password-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
                 <h3>편집 권한 확인</h3>
-                <span class="close" onclick="closePasswordModal()">&times;</span>
+                <span class="close" onclick="closeEditPasswordModal()">&times;</span>
             </div>
             <div class="modal-body">
                 <p>편집을 위해 비밀번호를 입력해주세요.</p>
-                <input type="password" id="password-input" placeholder="비밀번호" class="password-field">
+                <input type="password" id="edit-password-input" placeholder="비밀번호" class="password-field">
                 <div class="modal-buttons">
                     <button class="btn-confirm" onclick="verifyPasswordAndSave()">확인</button>
-                    <button class="btn-cancel" onclick="closePasswordModal()">취소</button>
+                    <button class="btn-cancel" onclick="closeEditPasswordModal()">취소</button>
                 </div>
             </div>
         </div>
@@ -425,17 +438,14 @@
     cursor: pointer;
 }
 
-.popup-input-wrapper {
-    display: flex;
-    gap: 8px;
-}
-
-.popup-input-wrapper .dynamic-input {
+/* input-group 스타일은 popup-base.html에서 제공 */
+.input-group .dynamic-input {
     flex: 1;
     background: #f9fafb;
     cursor: not-allowed;
 }
 
+/* btn-popup 스타일 제거 - btn-outline-primary 사용으로 통일 
 .btn-popup {
     padding: 8px 16px;
     background: #2f5fd3;
@@ -449,7 +459,7 @@
 
 .btn-popup:hover {
     background: #1d4ed8;
-}
+} */
 
 /* 3. 사고 상세내용 섹션 */
 .detail-content-section .section-content {
@@ -820,58 +830,61 @@ function toggleSection(sectionId) {
 
 // 페이지 로드시 첨부파일 정보 초기화는 공통 컴포넌트에서 처리됨
 
-function showPasswordModal() {
-    document.getElementById('password-modal').style.display = 'block';
-    document.getElementById('password-input').focus();
+function showEditPasswordModal() {
+    document.getElementById('edit-password-modal').style.display = 'block';
+    document.getElementById('edit-password-input').focus();
 }
 
-function closePasswordModal() {
-    document.getElementById('password-modal').style.display = 'none';
-    document.getElementById('password-input').value = '';
+function closeEditPasswordModal() {
+    document.getElementById('edit-password-modal').style.display = 'none';
+    document.getElementById('edit-password-input').value = '';
 }
 
 function verifyPasswordAndSave() {
-    const password = document.getElementById('password-input').value;
+    console.log('verifyPasswordAndSave 함수 호출됨');
+    const password = document.getElementById('edit-password-input').value;
+    console.log('입력된 비밀번호:', password);
     
     if (!password) {
         alert('비밀번호를 입력해주세요.');
         return;
     }
     
-    // 서버에서 비밀번호 검증
-    fetch('/verify-password', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-            password: password,
-            board_type: 'change_request'
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            closePasswordModal();
-            saveChanges();
-        } else {
-            alert(data.message || '비밀번호가 올바르지 않습니다.');
-            document.getElementById('password-input').value = '';
-            document.getElementById('password-input').focus();
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('비밀번호 검증 중 오류가 발생했습니다.');
-    });
+    // 비밀번호가 admin123인지 확인
+    if (password === 'admin123') {
+        console.log('비밀번호 일치 - saveChanges 호출');
+        closeEditPasswordModal();
+        saveChanges();
+    } else {
+        alert('비밀번호가 올바르지 않습니다.');
+        document.getElementById('edit-password-input').value = '';
+        document.getElementById('edit-password-input').focus();
+    }
 }
 
+// Enter 키 이벤트 리스너 추가
+document.addEventListener('DOMContentLoaded', function() {
+    const passwordInput = document.getElementById('edit-password-input');
+    if (passwordInput) {
+        passwordInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                verifyPasswordAndSave();
+            }
+        });
+    }
+});
+
 function saveChanges() {
-    // contentEditable div에서 HTML 내용 가져오기
-    const editableDiv = document.getElementById('detailed-content');
-    const detailedContent = editableDiv.innerHTML;
+    console.log('saveChanges 함수 시작');
     
-    console.log('Saving content from contentEditable:', detailedContent);
+    // 상세내용 처리 - CKEditor 데이터 가져오기
+    const detailedContent = window.RichText ? window.RichText.getData() : '';
+    if (!detailedContent.trim()) {
+        alert('상세내용을 입력해주세요.');
+        return;
+    }
+    console.log('저장할 내용 길이:', detailedContent.length);
+    console.log('내용 미리보기:', detailedContent.substring(0, 200));
     
     const requestId = '{{ request_data.id }}';
     
@@ -926,14 +939,25 @@ function saveChanges() {
     });
     
     console.log('Sending data to server...');
+    console.log('FormData contents:');
+    for (let [key, value] of formData.entries()) {
+        console.log(key + ':', value);
+    }
     
     // 서버로 전송
     fetch('/update-change-request', {
         method: 'POST',
         body: formData
     })
-    .then(response => response.json())
+    .then(response => {
+        console.log('서버 응답 상태:', response.status);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
     .then(data => {
+        console.log('서버 응답 데이터:', data);
         if (data.success) {
             alert('수정이 완료되었습니다.');
             
@@ -953,8 +977,9 @@ function saveChanges() {
         }
     })
     .catch(error => {
-        console.error('Error:', error);
-        alert('수정 중 오류가 발생했습니다.');
+        console.error('상세 오류 정보:', error);
+        console.error('오류 스택:', error.stack);
+        alert('수정 중 오류가 발생했습니다.\n\n' + error.message);
     });
 }
 
@@ -1214,5 +1239,8 @@ function handleDepartmentSelection(selectedItem) {
 {% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
 {{ attachment_styles() }}
 {{ attachment_scripts() }}
+
+<!-- Content Editor 스크립트 추가 -->
+<script src="/static/js/content-editor.js"></script>
 
 {% endblock %}

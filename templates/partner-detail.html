@@ -100,9 +100,8 @@
             <div class="content-editor">
                 <!-- 간단한 편집 가능한 영역 -->
                 <div id="detailed-content" 
-                     class="editable-content" 
-                     contenteditable="true" 
-                     placeholder="사고에 대한 상세 내용을 입력하세요.">{{ partner.detailed_content | safe if partner.detailed_content else '' }}</div>
+                     class="editable-content"
+                     data-content="{{ (partner.detailed_content or '') | tojson }}"></div>
                 
                 <!-- 숨겨진 textarea (저장용) -->
                 <textarea id="detailed-content-hidden" style="display: none;">{{ partner.detailed_content or '' }}</textarea>
@@ -116,22 +115,22 @@
 
     <!-- 저장 버튼 영역 -->
     <div class="save-section">
-        <button class="btn-save" onclick="showPasswordModal()">수정완료</button>
+        <button class="btn-save" onclick="showEditPasswordModal()">수정완료</button>
     </div>
 
     <!-- 비밀번호 입력 모달 -->
-    <div id="password-modal" class="modal">
+    <div id="edit-password-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
                 <h3>편집 권한 확인</h3>
-                <span class="close" onclick="closePasswordModal()">&times;</span>
+                <span class="close" onclick="closeEditPasswordModal()">&times;</span>
             </div>
             <div class="modal-body">
                 <p>편집을 위해 비밀번호를 입력해주세요.</p>
-                <input type="password" id="password-input" placeholder="비밀번호" class="password-field">
+                <input type="password" id="edit-password-input" placeholder="비밀번호" class="password-field">
                 <div class="modal-buttons">
                     <button class="btn-confirm" onclick="verifyPasswordAndSave()">확인</button>
-                    <button class="btn-cancel" onclick="closePasswordModal()">취소</button>
+                    <button class="btn-cancel" onclick="closeEditPasswordModal()">취소</button>
                 </div>
             </div>
         </div>
@@ -831,25 +830,37 @@ function updateRowNumbers() {
     });
 }
 
-function showPasswordModal() {
-    document.getElementById('password-modal').style.display = 'block';
-    document.getElementById('password-input').focus();
+function showEditPasswordModal() {
+    console.log('showEditPasswordModal called!');
+    const modal = document.getElementById('edit-password-modal');
+    if (!modal) {
+        alert('비밀번호 모달을 찾을 수 없습니다.');
+        console.error('Modal not found: edit-password-modal');
+        return;
+    }
+    modal.style.display = 'block';
     
-    // Enter 키 이벤트 추가
-    document.getElementById('password-input').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            verifyPasswordAndSave();
-        }
-    });
+    const input = document.getElementById('edit-password-input');
+    if (input) {
+        input.focus();
+        // Enter 키 이벤트 추가
+        input.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                verifyPasswordAndSave();
+            }
+        });
+    } else {
+        console.error('Password input not found: edit-password-input');
+    }
 }
 
-function closePasswordModal() {
-    document.getElementById('password-modal').style.display = 'none';
-    document.getElementById('password-input').value = '';
+function closeEditPasswordModal() {
+    document.getElementById('edit-password-modal').style.display = 'none';
+    document.getElementById('edit-password-input').value = '';
 }
 
 function verifyPasswordAndSave() {
-    const password = document.getElementById('password-input').value;
+    const password = document.getElementById('edit-password-input').value;
     
     if (!password) {
         alert('비밀번호를 입력해주세요.');
@@ -870,12 +881,12 @@ function verifyPasswordAndSave() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            closePasswordModal();
+            closeEditPasswordModal();
             saveChanges();
         } else {
             alert(data.message || '비밀번호가 올바르지 않습니다.');
-            document.getElementById('password-input').value = '';
-            document.getElementById('password-input').focus();
+            document.getElementById('edit-password-input').value = '';
+            document.getElementById('edit-password-input').focus();
         }
     })
     .catch(error => {
@@ -884,7 +895,7 @@ function verifyPasswordAndSave() {
     });
 }
 
-function saveChanges() {
+function saveChanges_OLD_REMOVE() {
     // textarea에서 데이터 수집
     const detailedContent = document.getElementById('detailed-content').value;
     const businessNumber = '{{ partner.business_number }}';
@@ -1054,8 +1065,8 @@ function insertAtCursor(element) {
 // 저장 함수 수정
 function saveChanges() {
     // contentEditable div에서 HTML 내용 가져오기
-    const editableDiv = document.getElementById('detailed-content');
-    const detailedContent = editableDiv.innerHTML;
+    // 상세내용 처리 - CKEditor 데이터 가져오기
+    const detailedContent = window.RichText ? window.RichText.getData() : '';
     
     console.log('Saving content from contentEditable:', detailedContent);
     

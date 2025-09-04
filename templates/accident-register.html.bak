@@ -135,7 +135,7 @@
                                                data-section="{{ section.section_key }}"
                                                placeholder="클릭하여 선택"
                                                readonly>
-                                        <button class="btn btn-sm btn-primary" 
+                                        <button class="btn btn-sm btn-outline-secondary" 
                                                 onclick="openPopup('{{ col.column_key }}')">
                                             검색
                                         </button>
@@ -231,24 +231,6 @@
                                         </button>
                                     </div>
                                     
-                                {% elif col.column_type == 'table' or col.input_type == 'table' %}
-                                    <!-- 테이블 검색 필드 -->
-                                    <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key }}-input" 
-                                               data-field="{{ col.column_key }}"
-                                               data-section="{{ section.section_key }}"
-                                               data-input-type="table"
-                                               placeholder="검색하여 선택"
-                                               readonly
-                                               style="background-color: #f8f9fa;">
-                                        <button class="btn btn-sm btn-primary" 
-                                                onclick="openPopup('{{ col.column_key }}')">
-                                            검색
-                                        </button>
-                                    </div>
-                                            
                                 {% elif col.column_type == 'textarea' %}
                                     <!-- 텍스트영역 필드 -->
                                     <textarea id="{{ col.column_key }}" 
@@ -303,7 +285,9 @@
             <div class="content-editor">
                 <!-- 간단한 편집 가능한 영역 -->
                 <div id="detailed-content" 
-                     class="editable-content"></div>
+                     class="editable-content" 
+                     contenteditable="true" 
+                     placeholder="사고 상세내용을 입력하세요."></div>
                 
                 <!-- 숨겨진 textarea (저장용) -->
                 <textarea id="detailed-content-hidden" style="display: none;"></textarea>
@@ -404,8 +388,9 @@ function registerAccident() {
     console.log('=== 등록 시작 ===');
     const formData = new FormData();
     
-    // 상세내용 처리 - CKEditor 데이터 가져오기
-    const detailedContent = window.RichText ? window.RichText.getData() : '';
+    // 상세내용 처리
+    const editableDiv = document.getElementById('detailed-content');
+    const detailedContent = editableDiv ? editableDiv.innerHTML : '';
     formData.append('detailed_content', detailedContent);
     console.log('상세내용:', detailedContent);
     
@@ -435,25 +420,15 @@ function registerAccident() {
         }
     }
     
-    // base_fields 처리 (기본 섹션)
-    const baseFields = {};
-    const basicColumns = sectionColumns['basic'] || [];
-    basicColumns.forEach(col => {
-        if (dynamicData[col.column_key] !== undefined) {
-            baseFields[col.column_key] = dynamicData[col.column_key];
-        }
-    });
-    formData.append('base_fields', JSON.stringify(baseFields));
-    
-    // custom_data 처리 (기본 섹션 제외한 나머지)
+    // custom_data 처리 (모든 동적 컬럼 포함)
     const customData = {};
     
     // 모든 섹션의 동적 컬럼 데이터를 custom_data에 포함
     sections.forEach(section => {
         const columns = sectionColumns[section.section_key] || [];
         columns.forEach(col => {
-            // 기본 섹션의 필드는 제외
-            if (section.section_key !== 'basic' && dynamicData[col.column_key] !== undefined) {
+            // 기본 섹션의 필드는 제외 (이미 개별 필드로 전송됨)
+            if (section.section_key !== 'basic' && dynamicData[col.column_key]) {
                 let value = dynamicData[col.column_key];
                 
                 // 리스트 필드 처리 - custom_data 구성 시점에서 한 번 더 확인
@@ -1317,9 +1292,5 @@ input[data-field$="_dept"][readonly] {
 {% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
 {{ attachment_styles() }}
 {{ attachment_scripts() }}
-
-
-<!-- Content Editor 스크립트 추가 -->
-<script src="/static/js/content-editor.js"></script>
 
 {% endblock %}

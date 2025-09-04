@@ -62,21 +62,11 @@
             <thead>
                 <tr>
                     <th class="checkbox-column"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
-                    <th class="fixed-col" style="width: 45px;">No</th>
-                    <th>사고명</th>
+                    <th class="fixed-col" style="width: 60px;">No</th>
+                    <!-- Primary Key와 등록일만 하드코딩 -->
                     <th>사고번호</th>
-                    <th>재해날짜</th>
-                    <th>사고등급</th>
-                    <th>사고분류</th>
-                    <th>재해유형</th>
-                    <th>재해형태</th>
-                    <th>사업장</th>
-                    <th>건물</th>
-                    <th>층</th>
-                    <th>상세위치</th>
-                    <th>건물타입</th>
-                    <th>요일</th>
-                    <th>사고내용</th>
+                    <th>등록일</th>
+                    <!-- 나머지는 dynamic_columns -->
                     {% for col in dynamic_columns %}
                     <th>{{ col.column_name }}</th>
                     {% endfor %}
@@ -88,38 +78,31 @@
                     <td class="checkbox-column">
                         <input type="checkbox" class="accident-checkbox" value="{{ accident.id }}" onchange="updateDeleteButton()">
                     </td>
-                    <td class="fixed-col" style="width: 45px;">
+                    <td class="fixed-col" style="width: 60px;">
                         {{ accident.no }}
                     </td>
-                    <td>
-                        <a href="javascript:void(0)" class="company-link" onclick="openAccidentModal('{{ accident.id }}')">{{ accident.accident_name }}</a>
-                    </td>
-                    <td>{{ accident.accident_number }}</td>
-                    <td>{{ accident.accident_date }}</td>
-                    <td>{{ accident.accident_grade_label or accident.accident_grade or '-' }}</td>
-                    <td>{{ accident.major_category_label or accident.major_category or accident.accident_type or '-' }}</td>
-                    <td>{{ accident.injury_type_label or accident.injury_type or accident.disaster_type or '-' }}</td>
-                    <td>{{ accident.injury_form_label or accident.injury_form or accident.disaster_form or '-' }}</td>
-                    <td>{{ accident.workplace_label or accident.workplace or '-' }}</td>
-                    <td>{{ accident.building_label or accident.building or '-' }}</td>
-                    <td>{{ accident.floor_label or accident.floor or '-' }}</td>
-                    <td>{{ accident.location_detail or '-' }}</td>
-                    <td>{{ accident.location_category_label or accident.location_category or '-' }}</td>
-                    <td>{{ accident.day_of_week or '-' }}</td>
-                    <td>{{ accident.accident_content or '-' }}</td>
-                    {% if accident.custom_mapped %}
-                        {% for col in dynamic_columns %}
-                        <td>{{ accident.custom_mapped.get(col.column_key, '-') }}</td>
-                        {% endfor %}
-                    {% else %}
-                        {% for col in dynamic_columns %}
-                        <td>-</td>
-                        {% endfor %}
-                    {% endif %}
+                    <!-- Primary Key와 등록일만 하드코딩 -->
+                    <td>{{ accident.accident_number or '-' }}</td>
+                    <td>{{ accident.created_at | date_only if accident.created_at else '-' }}</td>
+                    
+                    <!-- 나머지 dynamic columns -->
+                    {% for col in dynamic_columns %}
+                        {% if col.column_key == 'accident_name' %}
+                            <td>
+                                <a href="javascript:void(0)" class="company-link" onclick="openAccidentModal('{{ accident.id }}')">
+                                    {{ accident.accident_name or accident.get('accident_name', '-') }}
+                                </a>
+                            </td>
+                        {% elif col.column_type == 'dropdown' %}
+                            <td>{{ accident[col.column_key + '_label'] or accident[col.column_key] or accident.get(col.column_key, '-') }}</td>
+                        {% else %}
+                            <td>{{ accident[col.column_key] or accident.get(col.column_key, '-') }}</td>
+                        {% endif %}
+                    {% endfor %}
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="{{ 16 + dynamic_columns|length }}" class="no-data">검색 결과가 없습니다.</td>
+                    <td colspan="{{ 2 + dynamic_columns|length }}" class="no-data">검색 결과가 없습니다.</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -393,9 +376,9 @@
     min-width: 200px;
 }
 /* No 컬럼 전용 스타일 */
-.data-table th.fixed-col[style*="45px"] {
-    min-width: 45px !important;
-    width: 45px !important;
+.data-table th.fixed-col[style*="60px"] {
+    min-width: 60px !important;
+    width: 60px !important;
 }
 .data-table td {
     padding: 12px 16px;
@@ -413,9 +396,9 @@
     min-width: 200px;
 }
 /* No 컬럼 td 전용 스타일 */
-.data-table td.fixed-col[style*="45px"] {
-    min-width: 45px !important;
-    width: 45px !important;
+.data-table td.fixed-col[style*="60px"] {
+    min-width: 60px !important;
+    width: 60px !important;
 }
 .data-table tbody tr:hover {
     background: #f9fafb;
@@ -763,15 +746,7 @@ function updateDeleteButton() {
 
 // 비밀번호 확인 후 선택한 항목 삭제
 function deleteSelectedWithPassword() {
-    const password = prompt('삭제 비밀번호를 입력하세요:');
-    if (password === null) return;
-    
-    if (password !== 'admin123') {
-        alert('비밀번호가 틀렸습니다.');
-        return;
-    }
-    
-    deleteSelected();
+    PwModal.show(deleteSelected);
 }
 
 // 선택한 항목 삭제
@@ -811,4 +786,8 @@ function deleteSelected() {
     });
 }
 </script>
+
+<!-- 비밀번호 모달 포함 -->
+{% include 'includes/password_modal.html' %}
+
 {% endblock %}

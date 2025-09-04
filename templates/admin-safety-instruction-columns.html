@@ -83,6 +83,7 @@
         .column-type.type-text { background: #e3f2fd; color: #1976d2; }
         .column-type.type-dropdown { background: #f3e5f5; color: #7b1fa2; }
         .column-type.type-date { background: #fff3e0; color: #f57c00; }
+        .column-type.type-table { background: #e0f2f1; color: #00695c; }
         .column-type.type-popup_person { background: #e8f5e9; color: #388e3c; }
         .column-type.type-popup_company { background: #fce4ec; color: #c2185b; }
         
@@ -1828,7 +1829,31 @@ let editingId = null;
                 let successCount = 0;
                 let errorCount = 0;
                 
-                // 먼저 섹션 변경사항 저장
+                // 먼저 섹션 삭제 처리
+                for (const sectionId of sectionsToDelete) {
+                    try {
+                        const response = await fetch(`/api/safety-instruction-sections/${sectionId}`, {
+                            method: 'DELETE',
+                            headers: {'Content-Type': 'application/json'}
+                        });
+                        
+                        if (response.ok) {
+                            successCount++;
+                            console.log(`섹션 ID ${sectionId} 삭제 성공`);
+                        } else {
+                            errorCount++;
+                            console.error(`섹션 ID ${sectionId} 삭제 실패`);
+                        }
+                    } catch (error) {
+                        errorCount++;
+                        console.error(`섹션 ID ${sectionId} 삭제 중 오류:`, error);
+                    }
+                }
+                
+                // 섹션 삭제 목록 초기화
+                sectionsToDelete = [];
+                
+                // 섹션 변경사항 저장
                 for (const [sectionId, change] of Object.entries(sectionChanges)) {
                     if (!change.is_new) {
                         // 기존 섹션 이름 변경

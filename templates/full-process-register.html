@@ -58,13 +58,13 @@
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
                                 <label>{{ col.column_name }}</label>
                                 
-                                {% if col.column_key == 'work_req_no' %}
-                                    <!-- 점검번호는 자동 생성 -->
-                                    <div class="value">{{ col.default_value if col.default_value else '자동 생성됩니다' }}</div>
+                                {% if col.column_key == 'fullprocess_number' %}
+                                    <!-- 평가번호는 자동 생성 -->
+                                    <div class="value" style="color: #6b7280; font-style: italic;">자동으로 입력됩니다</div>
                                     
                                 {% elif col.column_key == 'created_at' %}
-                                    <!-- 등록일은 자동 생성 -->
-                                    <div class="value">{{ col.default_value if col.default_value else '자동 생성됩니다' }}</div>
+                                    <!-- 등록일은 이미 날짜 필드에서 처리 -->
+                                    <!-- 이 부분은 실행되지 않아야 함 -->
                                     
                                 {% elif col.is_readonly %}
                                     <!-- 읽기 전용 필드 -->
@@ -94,7 +94,12 @@
                                            id="{{ col.column_key }}" 
                                            class="{{ section.section_key|replace('_', '-') }}-input" 
                                            data-field="{{ col.column_key }}"
-                                           data-section="{{ section.section_key }}">
+                                           data-section="{{ section.section_key }}"
+                                           value="{{ (col.default_value|date_only) if col.default_value else (today_date if col.column_key == 'created_at' else '') }}"
+                                           {% if col.column_key == 'created_at' %}
+                                           readonly
+                                           style="background-color: #f3f4f6;"
+                                           {% endif %}>
                                            
                                 {% elif col.column_type == 'number' %}
                                     <!-- 숫자 필드 -->
@@ -105,7 +110,7 @@
                                            data-section="{{ section.section_key }}"
                                            placeholder="{{ col.column_name }} 입력">
                                            
-                                {% elif col.column_type == 'linked' %}
+                                {% elif col.column_type == 'linked' or col.column_type == 'linked_text' %}
                                     <!-- 연결된 필드 (읽기 전용) -->
                                     <input type="text" 
                                            id="{{ col.column_key }}" 
@@ -115,7 +120,7 @@
                                            readonly
                                            style="background-color: #f3f4f6;">
                                            
-                                {% elif col.column_type == 'popup' %}
+                                {% elif col.column_type and col.column_type.startswith('popup') %}
                                     <!-- 팝업 필드 -->
                                     <div class="input-group">
                                         <input type="text" 
@@ -125,13 +130,13 @@
                                                data-section="{{ section.section_key }}"
                                                placeholder="클릭하여 선택"
                                                readonly>
-                                        <button class="btn btn-sm btn-outline-secondary" 
-                                                onclick="openPopup('{{ col.column_key }}')">
-                                            <i class="bi bi-search"></i>
+                                        <button class="btn btn-sm btn-primary" 
+                                                onclick="{% if col.column_type == 'popup_person' %}openPersonSearch{% elif col.column_type == 'popup_company' %}openCompanySearch{% elif col.column_type == 'popup_building' %}openBuildingSearch{% elif col.column_type == 'popup_department' %}openDepartmentSearch{% elif col.column_type == 'popup_contractor' %}openContractorSearch{% else %}openPopup{% endif %}('{{ col.column_key }}')">
+                                            검색
                                         </button>
                                     </div>
                                     
-                                {% elif col.input_type == 'table' %}
+                                {% elif col.column_type == 'table' or col.input_type == 'table' %}
                                     <!-- 테이블 검색 필드 -->
                                     <div class="input-group">
                                         <input type="text" 
@@ -146,9 +151,9 @@
                                         <input type="hidden" 
                                                id="{{ col.column_key }}_id" 
                                                data-field="{{ col.column_key }}_id">
-                                        <button class="btn btn-sm btn-outline-primary" 
-                                                onclick="openTableSearch('{{ col.column_key }}')">
-                                            <i class="bi bi-search"></i> 검색
+                                        <button class="btn btn-sm btn-primary" 
+                                                onclick="openPopup('{{ col.column_key }}')">
+                                            검색
                                         </button>
                                     </div>
                                     
@@ -188,9 +193,7 @@
         <div class="section-content">
             <div class="content-editor">
                 <div id="detailed-content" 
-                     class="editable-content"
-                     contenteditable="true"
-                     style="min-height: 300px; padding: 15px; border: 1px solid #d1d5db; border-radius: 4px; background: white;">
+                     class="editable-content"></div>
                 </div>
             </div>
         </div>
@@ -264,7 +267,8 @@ function registerFullProcess() {
     const formData = new FormData();
     
     // 상세내용 추가
-    const detailedContent = document.getElementById('detailed-content').innerHTML;
+    // 상세내용 처리 - CKEditor 데이터 가져오기
+    const detailedContent = window.RichText ? window.RichText.getData() : '';
     formData.append('detailed_content', detailedContent);
     
     // 동적 필드 수집
@@ -652,5 +656,9 @@ function openTableSearch(fieldKey) {
 {% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
 {{ attachment_styles() }}
 {{ attachment_scripts() }}
+
+
+<!-- Content Editor 스크립트 추가 -->
+<script src="/static/js/content-editor.js"></script>
 
 {% endblock %}

@@ -33,15 +33,18 @@
             </button>
         </div>
         <div class="section-content" id="{% if section.section_key == 'basic_info' %}basic-info{% elif section.section_key == 'violation_info' %}violation-info{% elif section.section_key == 'additional' %}additional{% else %}{{ section.section_key|replace('_', '-') }}{% endif %}-content">
+            <!-- DEBUG: {{ section.section_key }} has {{ section_columns[section.section_key]|length if section.section_key in section_columns else 0 }} columns -->
             <div class="info-table">
-                {% set all_columns = section_columns[section.section_key] %}
+                {% set all_columns = section_columns[section.section_key] if section.section_key in section_columns else [] %}
                 <!-- detailed_content와 violation_content는 제외 -->
+                <!-- DEBUG: all_columns = {{ all_columns|length }} items -->
                 {% set columns = [] %}
                 {% for col in all_columns %}
                     {% if col.column_key not in ['detailed_content', 'violation_content'] %}
                         {% set _ = columns.append(col) %}
                     {% endif %}
                 {% endfor %}
+                <!-- DEBUG: filtered columns = {{ columns|length }} items -->
                 {% set columns_per_row = 4 %}
                 
                 <!-- batch 방식으로 4개씩 묶어서 처리 -->
@@ -51,6 +54,7 @@
                         {% if col %}
                             {% set span = col.column_span|default(1)|int %}
                             {% set col_value = sop[col.column_key] | default('', true) %}
+                            <!-- DEBUG: {{ col.column_key }} ({{ col.column_type }}) = {{ col_value }} -->
                             
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
                                 <label>{{ col.column_name }}</label>
@@ -61,7 +65,7 @@
                                     
                                 {% elif col.column_key == 'created_at' %}
                                     <!-- 등록일은 수정 불가 -->
-                                    <div class="value">{{ col_value or '-' }}</div>
+                                    <div class="value">{{ (col_value|date_only) if col_value else '-' }}</div>
                                     
                                 {% elif col.column_type == 'dropdown' %}
                                     <!-- 드롭다운 필드 -->
@@ -102,9 +106,10 @@
                                            data-section="{{ section.section_key }}"
                                            value="{{ col_value }}">
                                            
-                                {% elif col.column_type == 'linked' %}
+                                {% elif col.column_type == 'linked' or col.column_type == 'linked_text' %}
                                     <!-- 연결된 필드 (읽기 전용) -->
                                     <input type="text" 
+                                           id="{{ col.column_key }}"
                                            class="{{ section.section_key|replace('_', '-') }}-input" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
@@ -112,18 +117,36 @@
                                            readonly
                                            style="background-color: #f3f4f6;">
                                            
-                                {% elif col.column_type == 'popup' %}
+                                {% elif col.column_type and col.column_type.startswith('popup') %}
                                     <!-- 팝업 필드 -->
                                     <div class="input-group">
                                         <input type="text" 
+                                               id="{{ col.column_key }}"
                                                class="{{ section.section_key|replace('_', '-') }}-input" 
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                value="{{ col_value }}"
                                                readonly>
-                                        <button class="btn btn-sm btn-outline-secondary" 
+                                        <button class="btn btn-sm btn-primary" 
+                                                onclick="{% if col.column_type == 'popup_person' %}openPersonSearch{% elif col.column_type == 'popup_company' %}openCompanySearch{% elif col.column_type == 'popup_building' %}openBuildingSearch{% elif col.column_type == 'popup_department' %}openDepartmentSearch{% elif col.column_type == 'popup_contractor' %}openContractorSearch{% else %}openPopup{% endif %}('{{ col.column_key }}')">
+                                            검색
+                                        </button>
+                                    </div>
+                                    
+                                {% elif col.column_type == 'table' or col.input_type == 'table' %}
+                                    <!-- 테이블 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="table"
+                                               value="{{ col_value }}"
+                                               readonly>
+                                        <button class="btn btn-sm btn-primary" 
                                                 onclick="openPopup('{{ col.column_key }}')">
-                                            <i class="bi bi-search"></i>
+                                            검색
                                         </button>
                                     </div>
                                     
@@ -160,11 +183,12 @@
         <div class="section-content">
             <div class="content-editor">
                 <div id="detailed-content" 
-                     class="editable-content"
+                     class="editable-content" 
                      contenteditable="true"
-                     style="min-height: 300px; padding: 15px; border: 1px solid #d1d5db; border-radius: 4px; background: white;">
-                    {{ sop.detailed_content | safe if sop.detailed_content else '' }}
-                </div>
+                     placeholder="상세내용을 입력하세요.">{{ sop.detailed_content | safe if sop.detailed_content else '' }}</div>
+                
+                <!-- 숨겨진 textarea (저장용) -->
+                <textarea id="detailed-content-hidden" style="display: none;">{{ sop.detailed_content or '' }}</textarea>
             </div>
         </div>
     </div>
@@ -178,7 +202,10 @@
         <button class="btn-save" onclick="updateFollowSop()">수정완료</button>
         <button class="btn-cancel" onclick="window.close()">취소</button>
     </div>
+    
 </div>
+
+{% include 'includes/password_modal.html' %}
 
 <!-- 스타일 -->
 <link rel="stylesheet" href="/static/styles/accident-register.css">
@@ -244,11 +271,10 @@ function updateFollowSop() {
     // 발부번호
     formData.append('work_req_no', issueNumber);
     
-    // 상세내용 추가
-    const detailedContent = document.getElementById('detailed-content');
-    if (detailedContent) {
-        formData.append('detailed_content', detailedContent.innerHTML);
-    }
+    // 상세내용 처리
+    const editableDiv = document.getElementById('detailed-content');
+    const detailedContent = editableDiv ? editableDiv.innerHTML : '';
+    formData.append('detailed_content', detailedContent);
     
     // 동적 필드 수집
     const dynamicData = collectDynamicFields();
@@ -294,12 +320,77 @@ function updateFollowSop() {
     });
 }
 
-// 팝업 열기 함수
+
+// 테이블 팝업 열기 함수
 function openPopup(fieldKey) {
-    // 팝업 구현 (필요시 추가)
-    alert('팝업 기능은 추가 구현이 필요합니다.');
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    // 현재 필드 키 저장
+    window.currentFieldKey = fieldKey;
+    
+    // 컬럼 설정에서 테이블 정보 가져오기
+    let fieldConfig = null;
+    sections.forEach(section => {
+        const cols = sectionColumns[section.section_key] || [];
+        const found = cols.find(col => col.column_key === fieldKey);
+        if (found) fieldConfig = found;
+    });
+    
+    if (!fieldConfig || !fieldConfig.input_type_config) {
+        alert('테이블 설정을 찾을 수 없습니다.');
+        return;
+    }
+    
+    const tableConfig = JSON.parse(fieldConfig.input_type_config);
+    const popupUrl = `/search-popup?type=table&field=${fieldKey}&table=${tableConfig.table_name}&callback=receiveTableSelection`;
+    const popup = window.open(popupUrl, 'tableSearch', popupOptions);
+    
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    popup.focus();
 }
+
+// 테이블 선택 결과 수신 함수
+window.receiveTableSelection = function(selectedItem) {
+    const fieldKey = window.currentFieldKey;
+    if (!fieldKey) return;
+    
+    const mainField = document.getElementById(fieldKey);
+    if (mainField) {
+        mainField.value = selectedItem.display_value || selectedItem.name || '';
+    }
+    
+    // _id 필드가 있으면 업데이트
+    const idField = document.getElementById(fieldKey + '_id');
+    if (idField && selectedItem.id) {
+        idField.value = selectedItem.id;
+    }
+};
+
+// 비밀번호 모달을 위한 업데이트 함수 설정
+window.updateFunction = updateFollowSop;
 </script>
+
+<!-- 비밀번호 모달 -->
+{% include 'includes/password_modal.html' %}
+
+<!-- 팝업 핸들러 스크립트 -->
+<script src="/static/js/popup-handler.js"></script>
 
 <style>
 /* 그리드 레이아웃 핵심 스타일 */
@@ -404,17 +495,7 @@ function openPopup(fieldKey) {
     flex: 1;
 }
 
-.input-group button {
-    padding: 4px 8px;
-    background: #f3f4f6;
-    border: 1px solid #d1d5db;
-    border-radius: 4px;
-    cursor: pointer;
-}
-
-.input-group button:hover {
-    background: #e5e7eb;
-}
+/* Bootstrap input-group button styles will be used - removed duplicate definitions */
 
 /* 첨부파일 섹션 */
 .attachments-section .section-header {
@@ -474,30 +555,29 @@ function openPopup(fieldKey) {
     text-align: center;
 }
 
-.btn-save {
-    padding: 10px 30px;
-    background: #3b82f6;
-    color: white;
+/* 저장/취소 버튼 스타일 */
+.btn-save, .btn-cancel {
+    padding: 10px 24px;
     border: none;
-    border-radius: 6px;
+    border-radius: 4px;
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-save {
+    background: #2f5fd3;
+    color: white;
 }
 
 .btn-save:hover {
-    background: #2563eb;
+    background: #1d4ed8;
 }
 
 .btn-cancel {
-    padding: 10px 30px;
     background: #6b7280;
     color: white;
-    border: none;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
     margin-left: 10px;
 }
 
@@ -515,19 +595,30 @@ function openPopup(fieldKey) {
 }
 
 .editable-content {
-    min-height: 300px;
-    padding: 15px;
-    border: 1px solid #d1d5db;
+    width: 100%;
+    min-height: 400px;
+    padding: 20px;
+    border: 1px solid #e1e5e9;
     border-radius: 4px;
-    background: white;
     font-size: 14px;
     line-height: 1.6;
+    color: #333;
+    font-family: inherit;
+    box-sizing: border-box;
+    background: white;
     outline: none;
+    overflow-y: auto;
 }
 
 .editable-content:focus {
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+.editable-content:empty:before {
+    content: attr(placeholder);
+    color: #999;
+    font-style: italic;
 }
 
 .editable-content p {
@@ -565,5 +656,8 @@ function openPopup(fieldKey) {
 {% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
 {{ attachment_styles() }}
 {{ attachment_scripts() }}
+
+<!-- Content Editor 스크립트 추가 -->
+<script src="/static/js/content-editor.js"></script>
 
 {% endblock %}

@@ -61,7 +61,7 @@
                                     
                                 {% elif col.column_key == 'created_at' %}
                                     <!-- 등록일은 수정 불가 -->
-                                    <div class="value">{{ col_value or '-' }}</div>
+                                    <div class="value">{{ (col_value|date_only) if col_value else '-' }}</div>
                                     
                                 {% elif col.column_type == 'dropdown' %}
                                     <!-- 드롭다운 필드 -->
@@ -102,9 +102,10 @@
                                            data-section="{{ section.section_key }}"
                                            value="{{ col_value }}">
                                            
-                                {% elif col.column_type == 'linked' %}
+                                {% elif col.column_type == 'linked' or col.column_type == 'linked_text' %}
                                     <!-- 연결된 필드 (읽기 전용) -->
                                     <input type="text" 
+                                           id="{{ col.column_key }}"
                                            class="{{ section.section_key|replace('_', '-') }}-input" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
@@ -112,18 +113,35 @@
                                            readonly
                                            style="background-color: #f3f4f6;">
                                            
-                                {% elif col.column_type == 'popup' %}
+                                {% elif col.column_type and col.column_type.startswith('popup') %}
                                     <!-- 팝업 필드 -->
                                     <div class="input-group">
                                         <input type="text" 
+                                               id="{{ col.column_key }}"
                                                class="{{ section.section_key|replace('_', '-') }}-input" 
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                value="{{ col_value }}"
                                                readonly>
-                                        <button class="btn btn-sm btn-outline-secondary" 
+                                        <button class="btn btn-sm btn-primary" 
+                                                onclick="{% if col.column_type == 'popup_person' %}openPersonSearch{% elif col.column_type == 'popup_company' %}openCompanySearch{% elif col.column_type == 'popup_building' %}openBuildingSearch{% elif col.column_type == 'popup_department' %}openDepartmentSearch{% elif col.column_type == 'popup_contractor' %}openContractorSearch{% else %}openPopup{% endif %}('{{ col.column_key }}')">
+                                            검색
+                                        </button>
+                                    </div>
+                                    
+                                {% elif col.column_type == 'table' or col.input_type == 'table' %}
+                                    <!-- 테이블 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="table"
+                                               value="{{ col_value }}"
+                                               readonly>
+                                        <button class="btn btn-sm btn-primary" 
                                                 onclick="openPopup('{{ col.column_key }}')">
-                                            <i class="bi bi-search"></i>
+                                            검색
                                         </button>
                                     </div>
                                     
@@ -161,10 +179,7 @@
             <div class="content-editor">
                 <div id="detailed-content" 
                      class="editable-content"
-                     contenteditable="true"
-                     style="min-height: 300px; padding: 15px; border: 1px solid #d1d5db; border-radius: 4px; background: white;">
-                    {{ process.detailed_content | safe if process.detailed_content else '' }}
-                </div>
+                     data-content="{{ (process.detailed_content or '') | tojson }}"></div>
             </div>
         </div>
     </div>
@@ -175,8 +190,8 @@
 
     <!-- 저장 버튼 영역 -->
     <div class="save-section">
-        <button class="btn-save" onclick="updateFullProcess()">수정완료</button>
-        <button class="btn-cancel" onclick="window.close()">취소</button>
+        <button class="btn btn-primary" onclick="showPasswordModalForUpdate()">수정완료</button>
+        <button class="btn btn-secondary" onclick="window.close()">취소</button>
     </div>
 </div>
 
@@ -247,7 +262,9 @@ function updateFullProcess() {
     // 상세내용 추가
     const detailedContent = document.getElementById('detailed-content');
     if (detailedContent) {
-        formData.append('detailed_content', detailedContent.innerHTML);
+        // 상세내용 처리 - CKEditor 데이터 가져오기
+        const content = window.RichText ? window.RichText.getData() : '';
+        formData.append('detailed_content', content);
     }
     
     // 동적 필드 수집
@@ -299,7 +316,151 @@ function openPopup(fieldKey) {
     // 팝업 구현 (필요시 추가)
     alert('팝업 기능은 추가 구현이 필요합니다.');
 }
+
+// 담당자 검색 팝업 열기 함수
+function openPersonSearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=person&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'personSearch', popupOptions);
+    
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    popup.focus();
+}
+
+// 업체 검색 팝업 열기 함수
+function openCompanySearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=company&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'companySearch', popupOptions);
+    
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    popup.focus();
+}
+
+// 건물 검색 팝업 열기 함수
+function openBuildingSearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=building&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'buildingSearch', popupOptions);
+    
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    popup.focus();
+}
+
+// 부서 검색 팝업 열기 함수  
+function openDepartmentSearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=department&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'departmentSearch', popupOptions);
+    
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    popup.focus();
+}
+
+// 협력사 검색 팝업 열기 함수
+function openContractorSearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=contractor&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'contractorSearch', popupOptions);
+    
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    popup.focus();
+}
+
+// 비밀번호 모달을 위한 업데이트 함수 설정
+window.updateFunction = updateFullProcess;
 </script>
+
+<!-- 비밀번호 모달 -->
+{% include 'includes/password_modal.html' %}
+
+<!-- 팝업 핸들러 스크립트 -->
+<script src="/static/js/popup-handler.js"></script>
 
 <style>
 /* 그리드 레이아웃 핵심 스타일 */
@@ -404,17 +565,7 @@ function openPopup(fieldKey) {
     flex: 1;
 }
 
-.input-group button {
-    padding: 4px 8px;
-    background: #f3f4f6;
-    border: 1px solid #d1d5db;
-    border-radius: 4px;
-    cursor: pointer;
-}
-
-.input-group button:hover {
-    background: #e5e7eb;
-}
+/* Bootstrap input-group button styles will be used - removed duplicate definitions */
 
 /* 첨부파일 섹션 */
 .attachments-section .section-header {
@@ -474,36 +625,7 @@ function openPopup(fieldKey) {
     text-align: center;
 }
 
-.btn-save {
-    padding: 10px 30px;
-    background: #3b82f6;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-}
-
-.btn-save:hover {
-    background: #2563eb;
-}
-
-.btn-cancel {
-    padding: 10px 30px;
-    background: #6b7280;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    margin-left: 10px;
-}
-
-.btn-cancel:hover {
-    background: #4b5563;
-}
+/* Bootstrap button styles will be used - removed duplicate definitions */
 
 /* 상세내용 섹션 */
 .detail-content-section .section-content {
@@ -565,5 +687,8 @@ function openPopup(fieldKey) {
 {% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
 {{ attachment_styles() }}
 {{ attachment_scripts() }}
+
+<!-- Content Editor 스크립트 추가 -->
+<script src="/static/js/content-editor.js"></script>
 
 {% endblock %}
