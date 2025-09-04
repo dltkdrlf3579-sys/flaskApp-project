@@ -88,7 +88,11 @@
                                            class="{{ section.section_key|replace('_', '-') }}-input" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
-                                           value="{{ col_value }}">
+                                           value="{{ col_value }}"
+                                           {% if col.column_key == 'created_at' %}
+                                           readonly
+                                           style="background-color: #f3f4f6;"
+                                           {% endif %}>
                                            
                                 {% elif col.column_type == 'number' %}
                                     <!-- 숫자 필드 -->
