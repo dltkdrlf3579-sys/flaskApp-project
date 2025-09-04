@@ -85,7 +85,7 @@
                     <td>
                         <a href="javascript:void(0)" 
                            onclick="window.open('/accident-detail/{{ accident.id }}?popup=1', 'accidentDetail', 'width=1200,height=800,scrollbars=yes,resizable=yes')"
-                           style="color: #2f5fd3; text-decoration: underline; cursor: pointer;">
+                           style="color: #2f5fd3; text-decoration: none; cursor: pointer; font-weight: bold;">
                             {{ accident.accident_number or '-' }}
                         </a>
                     </td>
@@ -94,11 +94,7 @@
                     <!-- 나머지 dynamic columns -->
                     {% for col in dynamic_columns %}
                         {% if col.column_key == 'accident_name' %}
-                            <td>
-                                <a href="javascript:void(0)" class="company-link" onclick="openAccidentModal('{{ accident.id }}')">
-                                    {{ accident.accident_name or accident.get('accident_name', '-') }}
-                                </a>
-                            </td>
+                            <!-- 사고명 컬럼 제거됨 -->
                         {% elif col.column_type == 'dropdown' %}
                             <td>{{ accident[col.column_key + '_label'] or accident[col.column_key] or accident.get(col.column_key, '-') }}</td>
                         {% else %}

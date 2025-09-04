@@ -1,0 +1,98 @@
+{% macro render_popup_field(column, section_key, field_value='', mode='edit') %}
+{#
+통합 팝업 필드 컴포넌트
+모든 게시판에서 공통으로 사용하는 팝업 필드 렌더링
+
+Args:
+    column: 컬럼 설정 객체 (column_key, column_type, column_name 등)
+    section_key: 섹션 키 (CSS 클래스용)
+    field_value: 필드 초기값
+    mode: 'edit' | 'view' 모드
+#}
+
+{% set popup_type = column.column_type %}
+{% set field_key = column.column_key %}
+{% set field_name = column.column_name %}
+
+<!-- 팝업 필드: {{ popup_type }} -->
+<div class="popup-field-wrapper" data-popup-type="{{ popup_type }}" data-field-key="{{ field_key }}">
+    
+    {% if mode == 'view' %}
+        <!-- 읽기 전용 모드 -->
+        <div class="value">{{ field_value or '-' }}</div>
+        
+    {% else %}
+        <!-- 편집 모드 -->
+        <div class="input-group popup-input-group">
+            <!-- 메인 입력 필드 -->
+            <input type="text" 
+                   id="{{ field_key }}"
+                   class="{{ section_key|replace('_', '-') }}-input popup-main-field" 
+                   data-field="{{ field_key }}"
+                   data-section="{{ section_key }}"
+                   data-popup-type="{{ popup_type }}"
+                   value="{{ field_value }}"
+                   readonly
+                   style="background-color: #f8f9fa;">
+            
+            <!-- 검색 버튼 -->
+            <button class="btn btn-sm btn-primary popup-search-btn" 
+                    type="button"
+                    data-field-key="{{ field_key }}"
+                    data-popup-type="{{ popup_type }}"
+                    onclick="openUniversalPopup('{{ field_key }}', '{{ popup_type }}')">
+                검색
+            </button>
+        </div>
+        
+        <!-- 연관 필드들 (동적 생성) -->
+        <div class="popup-linked-fields" data-field-key="{{ field_key }}">
+            <!-- 동적으로 생성될 연관 필드들 (ID, 부서, 사업자번호 등) -->
+        </div>
+    {% endif %}
+</div>
+
+{% endmacro %}
+
+{% macro render_table_popup_field(column, section_key, field_value='', mode='edit') %}
+{#
+테이블 검색 팝업 필드 컴포넌트
+
+Args:
+    column: 컬럼 설정 객체 (input_type_config에 테이블 설정 포함)
+    section_key: 섹션 키
+    field_value: 필드 초기값
+    mode: 'edit' | 'view' 모드
+#}
+
+{% set field_key = column.column_key %}
+{% set field_name = column.column_name %}
+
+<!-- 테이블 팝업 필드 -->
+<div class="table-popup-field-wrapper" data-field-key="{{ field_key }}">
+    
+    {% if mode == 'view' %}
+        <div class="value">{{ field_value or '-' }}</div>
+    {% else %}
+        <div class="input-group table-input-group">
+            <input type="text" 
+                   id="{{ field_key }}"
+                   class="{{ section_key|replace('_', '-') }}-input table-main-field" 
+                   data-field="{{ field_key }}"
+                   data-section="{{ section_key }}"
+                   data-input-type="table"
+                   value="{{ field_value }}"
+                   readonly
+                   style="background-color: #f8f9fa;">
+            
+            <button class="btn btn-sm btn-primary table-search-btn" 
+                    type="button"
+                    data-field-key="{{ field_key }}"
+                    onclick="openTablePopup('{{ field_key }}')">
+                검색
+            </button>
+        </div>
+    {% endif %}
+</div>
+
+{% endmacro %}
