@@ -2,6 +2,8 @@ import os
 import logging
 from datetime import datetime
 import pytz
+from pathlib import Path
+import shutil
 from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, Response
 from timezone_config import KST, get_korean_time, get_korean_time_str
 from werkzeug.utils import secure_filename
@@ -3917,6 +3919,28 @@ def download_attachment(attachment_id):
         logging.error(f"파일 다운로드 중 오류: {e}")
         return f"Download error: {str(e)}", 500
 
+@app.route("/uploads/partners/<path:filename>")
+def serve_partner_upload(filename):
+    """D:/uploads/partners 폴더의 파일을 정적으로 서빙"""
+    try:
+        from flask import send_from_directory
+        upload_directory = Path(r"D:/uploads/partners").resolve()
+        
+        # 보안: 파일명에 .. 경로 탐색 방지
+        safe_filename = secure_filename(filename)
+        file_path = upload_directory / safe_filename
+        
+        if not file_path.exists():
+            logging.warning(f"File not found: {file_path}")
+            return "File not found", 404
+            
+        logging.info(f"Serving file: {file_path}")
+        return send_from_directory(str(upload_directory), safe_filename)
+        
+    except Exception as e:
+        logging.error(f"Error serving file {filename}: {str(e)}")
+        return f"Error: {str(e)}", 500
+
 @app.route("/partner-attachments/<business_number>")
 def get_partner_attachments(business_number):
     """협력사 첨부파일 목록 가져오기"""
@@ -3931,6 +3955,176 @@ def get_partner_attachments(business_number):
     
     from flask import jsonify
     return jsonify([dict(attachment) for attachment in attachments])
+
+@app.route("/api/auto-upload-partner-files", methods=['POST'])
+def auto_upload_partner_files():
+    """협력사 사업자번호에 대한 HTML 파일 자동 생성 및 업로드"""
+    try:
+        data = request.get_json()
+        business_number = data.get('business_number')
+        file_paths = data.get('file_paths', [])
+        
+        if not business_number:
+            return jsonify({"error": "business_number is required"}), 400
+            
+        if not file_paths:
+            return jsonify({"error": "file_paths is required"}), 400
+        
+        # 협력사 정보 확인
+        partner = partner_manager.get_partner_by_business_number(business_number)
+        if not partner:
+            return jsonify({"error": f"Partner not found: {business_number}"}), 404
+        
+        # 업로드 폴더 (D드라이브 고정)
+        upload_folder = Path(r"D:\uploads\partners")
+        upload_folder.mkdir(parents=True, exist_ok=True)
+        
+        uploaded_files = []
+        skipped = []  # 업로드 실패한 파일 추적
+        conn = get_db_connection()
+        
+        for file_path in file_paths:
+            try:
+                # 절대경로로 변환
+                file_path = Path(file_path).expanduser().resolve()
+                if not file_path.exists():
+                    logging.warning(f"File not found: {file_path}")
+                    skipped.append(str(file_path))
+                    continue
+                
+                # 파일명 안전화
+                safe_name = secure_filename(file_path.name) or "file"
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                new_filename = f"{business_number}_{timestamp}_{safe_name}"
+                dest_path = upload_folder / new_filename
+                
+                # 파일 복사
+                shutil.copy2(file_path, dest_path)
+                
+                # DB에 저장 (기존 컬럼만 사용)
+                cursor = conn.cursor()
+                # 한국 시간으로 년도와 월 정보, 회사명 가져오기
+                korean_time = get_korean_time()
+                year = korean_time.strftime("%Y")
+                month = korean_time.strftime("%m")
+                company_name = partner.get('company_name', '협력사')
+                
+                cursor.execute("""
+                    INSERT INTO partner_attachments 
+                    (business_number, filename, original_filename, upload_date, file_size)
+                    VALUES (?, ?, ?, datetime('now'), ?)
+                """, (
+                    business_number,
+                    new_filename,
+                    f"{company_name}_{year}년_{month}월_통합레포트.html",  # 예: "삼성전자_2025년_01월_통합레포트.html"
+                    dest_path.stat().st_size
+                ))
+                
+                uploaded_files.append({
+                    "original_path": str(file_path),
+                    "uploaded_filename": new_filename,
+                    "file_size": dest_path.stat().st_size
+                })
+                
+                logging.info(f"File uploaded: {file_path.name} → {new_filename}")
+                
+            except Exception as e:
+                logging.error(f"Error processing file {file_path}: {str(e)}")
+                skipped.append(str(file_path))
+                continue
+        
+        conn.commit()
+        conn.close()
+        
+        # 응답 상태 코드 설정 (200: 모두 성공, 207: 일부 성공, 400: 모두 실패)
+        status = 200 if uploaded_files and not skipped else (207 if uploaded_files and skipped else 400)
+        
+        return jsonify({
+            "success": bool(uploaded_files),
+            "business_number": business_number,
+            "uploaded_files": uploaded_files,
+            "skipped": skipped,  # 실패한 파일 목록
+            "total_uploaded": len(uploaded_files),
+            "total_skipped": len(skipped)
+        }), status
+        
+    except Exception as e:
+        logging.error(f"Error in auto_upload_partner_files: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/generate-partner-html/<business_number>", methods=['POST'])
+def generate_partner_html(business_number):
+    """협력사 상세 정보를 HTML로 생성하여 첨부파일로 저장"""
+    try:
+        # 협력사 정보 조회
+        partner = partner_manager.get_partner_by_business_number(business_number)
+        if not partner:
+            return jsonify({"error": f"Partner not found: {business_number}"}), 404
+        
+        # HTML 템플릿 렌더링
+        html_content = render_template('partner-detail.html', 
+                                     partner=partner, 
+                                     attachments=[],
+                                     menu=MENU_CONFIG, 
+                                     is_popup=False,
+                                     board_type='partner')
+        
+        # HTML을 완전한 문서로 변환
+        if "<html" not in html_content.lower():
+            html_content = f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{partner.get('company_name', '')} - 협력사 상세정보</title>
+</head>
+<body>
+{html_content}
+</body>
+</html>"""
+        
+        # 업로드 폴더 (D드라이브 고정)
+        upload_folder = Path(r"D:\uploads\partners")
+        upload_folder.mkdir(parents=True, exist_ok=True)
+        
+        # 파일명 생성
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{business_number}_{timestamp}_report.html"
+        file_path = upload_folder / filename
+        
+        # HTML 파일 저장
+        file_path.write_text(html_content, encoding="utf-8")
+        
+        # DB에 저장 (기존 컬럼만 사용)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO partner_attachments 
+            (business_number, filename, original_filename, upload_date, file_size)
+            VALUES (?, ?, ?, datetime('now'), ?)
+        """, (
+            business_number,
+            filename,
+            f"{partner.get('company_name', business_number)}_상세정보.html",
+            file_path.stat().st_size
+        ))
+        conn.commit()
+        conn.close()
+        
+        logging.info(f"HTML report generated for {business_number}: {filename}")
+        
+        return jsonify({
+            "success": True,
+            "business_number": business_number,
+            "filename": filename,
+            "file_size": file_path.stat().st_size,
+            "message": "HTML 리포트가 생성되어 첨부파일로 저장되었습니다."
+        })
+        
+    except Exception as e:
+        logging.error(f"Error generating HTML for {business_number}: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 # ===== Phase 1: 동적 컬럼 관리 API =====
 
