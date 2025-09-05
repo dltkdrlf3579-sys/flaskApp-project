@@ -57,12 +57,12 @@ def follow_sop_route():
     
     if company_name:
         search_params['company_name'] = company_name
-        where_clauses.append("s.company_name_1cha LIKE ?")
+        where_clauses.append("JSON_EXTRACT(s.custom_data, '$.company_name_1cha') LIKE ?")
         query_params.append(f"%{company_name}%")
     
     if business_number:
         search_params['business_number'] = business_number
-        where_clauses.append("s.company_name_1cha_bizno LIKE ?")
+        where_clauses.append("JSON_EXTRACT(s.custom_data, '$.company_name_1cha_bizno') LIKE ?")
         query_params.append(f"%{business_number}%")
     
     # WHERE 절 구성 (삭제되지 않은 항목만)
@@ -505,12 +505,12 @@ def full_process_route():
     
     if company_name:
         search_params['company_name'] = company_name
-        where_clauses.append("p.company_1cha LIKE ?")
+        where_clauses.append("JSON_EXTRACT(p.custom_data, '$.company_1cha') LIKE ?")
         query_params.append(f"%{company_name}%")
     
     if business_number:
         search_params['business_number'] = business_number
-        where_clauses.append("p.company_1cha_bizno LIKE ?")
+        where_clauses.append("JSON_EXTRACT(p.custom_data, '$.company_1cha_bizno') LIKE ?")
         query_params.append(f"%{business_number}%")
     
     # WHERE 절 구성 (삭제되지 않은 항목만)
