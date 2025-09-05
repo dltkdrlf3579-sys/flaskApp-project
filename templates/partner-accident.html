@@ -28,15 +28,19 @@
 <!-- 검색 영역 -->
 <div class="search-section">
     <form method="GET" class="search-form">
-        <div class="search-fields">
-            <div class="search-group range-group">
+        <!-- 재해날짜는 첫 번째 줄에 단독으로 배치 -->
+        <div class="search-fields" style="margin-bottom: 16px;">
+            <div class="search-group range-group" style="flex: 1; max-width: 600px;">
                 <label>재해날짜</label>
-                <div class="range-inputs">
-                    <input type="date" name="accident_date_start" value="{{ request.args.get('accident_date_start', '') }}" placeholder="시작일">
-                    <span class="range-separator">~</span>
-                    <input type="date" name="accident_date_end" value="{{ request.args.get('accident_date_end', '') }}" placeholder="종료일">
+                <div class="range-inputs" style="width: 100%;">
+                    <input type="date" name="accident_date_start" value="{{ request.args.get('accident_date_start', '') }}" placeholder="시작일" style="width: 200px;">
+                    <span class="range-separator" style="margin: 0 15px;">~</span>
+                    <input type="date" name="accident_date_end" value="{{ request.args.get('accident_date_end', '') }}" placeholder="종료일" style="width: 200px;">
                 </div>
             </div>
+        </div>
+        <!-- 사업장과 사고등급은 두 번째 줄에 나란히 배치 -->
+        <div class="search-fields">
             <div class="search-group">
                 <label>사업장</label>
                 <input type="text" name="workplace" value="{{ request.args.get('workplace', '') }}" placeholder="사업장을 입력하세요">
