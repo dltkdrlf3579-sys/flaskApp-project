@@ -6,7 +6,6 @@ def follow_sop_route():
     import math
     import sqlite3
     from section_service import SectionConfigService
-    from datetime import datetime
     
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
@@ -90,30 +89,13 @@ def follow_sop_route():
     items = []
     for idx, row in enumerate(cursor.fetchall()):
         item = dict(row)
-        # 실제 점검번호가 있으면 사용, 없으면 created_at 기반으로 FS 형태 생성
-        if item.get('work_req_no'):
+        # 실제 점검번호가 있으면 사용 (SOP, FS 등 어떤 형태든)
+        if item.get('work_req_no') and str(item['work_req_no']).strip():
             item['no'] = item['work_req_no']
         else:
-            # created_at을 기반으로 FS 형태의 번호 생성
-            created_at = item.get('created_at')
-            if created_at:
-                try:
-                    if isinstance(created_at, str):
-                        # 문자열인 경우 파싱 (yyyy-mm-dd 또는 yyyy-mm-dd hh:mm:ss)
-                        if len(created_at) == 10:  # yyyy-mm-dd
-                            dt = datetime.strptime(created_at, '%Y-%m-%d')
-                        else:  # yyyy-mm-dd hh:mm:ss
-                            dt = datetime.strptime(created_at[:19], '%Y-%m-%d %H:%M:%S')
-                    else:
-                        dt = created_at
-                    
-                    # FS + yyMMddhhmm + 순번 형태로 생성 (간단한 방식)
-                    base_id = dt.strftime('%y%m%d%H%M')
-                    item['no'] = f"FS{base_id}{(idx + 1):02d}"
-                except:
-                    item['no'] = f"FS{total_count - ((page - 1) * per_page) - idx:06d}"
-            else:
-                item['no'] = f"FS{total_count - ((page - 1) * per_page) - idx:06d}"
+            # 번호가 없을 때만 생성 (현재 시간 기준)
+            from id_generator import generate_followsop_number
+            item['no'] = generate_followsop_number(DB_PATH)
         
         # custom_data JSON 파싱 및 플래트닝
         if item.get('custom_data'):
@@ -469,7 +451,6 @@ def full_process_route():
     import math
     import sqlite3
     from section_service import SectionConfigService
-    from datetime import datetime
     
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
@@ -553,30 +534,13 @@ def full_process_route():
     items = []
     for idx, row in enumerate(cursor.fetchall()):
         item = dict(row)
-        # 실제 프로세스번호가 있으면 사용, 없으면 created_at 기반으로 FP 형태 생성
-        if item.get('fullprocess_number'):
+        # 실제 프로세스번호가 있으면 사용 (FP 등 어떤 형태든)
+        if item.get('fullprocess_number') and str(item['fullprocess_number']).strip():
             item['no'] = item['fullprocess_number']
         else:
-            # created_at을 기반으로 FP 형태의 번호 생성
-            created_at = item.get('created_at')
-            if created_at:
-                try:
-                    if isinstance(created_at, str):
-                        # 문자열인 경우 파싱 (yyyy-mm-dd 또는 yyyy-mm-dd hh:mm:ss)
-                        if len(created_at) == 10:  # yyyy-mm-dd
-                            dt = datetime.strptime(created_at, '%Y-%m-%d')
-                        else:  # yyyy-mm-dd hh:mm:ss
-                            dt = datetime.strptime(created_at[:19], '%Y-%m-%d %H:%M:%S')
-                    else:
-                        dt = created_at
-                    
-                    # FP + yyMMddhhmm + 순번 형태로 생성 (간단한 방식)
-                    base_id = dt.strftime('%y%m%d%H%M')
-                    item['no'] = f"FP{base_id}{(idx + 1):02d}"
-                except:
-                    item['no'] = f"FP{total_count - ((page - 1) * per_page) - idx:06d}"
-            else:
-                item['no'] = f"FP{total_count - ((page - 1) * per_page) - idx:06d}"
+            # 번호가 없을 때만 생성 (현재 시간 기준)
+            from id_generator import generate_fullprocess_number
+            item['no'] = generate_fullprocess_number(DB_PATH)
         
         # custom_data JSON 파싱 및 플래트닝
         if item.get('custom_data'):
