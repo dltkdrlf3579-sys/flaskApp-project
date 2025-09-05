@@ -511,7 +511,7 @@ def full_process_route():
     # 전체 건수 조회
     count_query = f"""
         SELECT COUNT(*) 
-        FROM fullprocess_cache p
+        FROM full_process p
         WHERE {where_sql}
     """
     
@@ -521,9 +521,9 @@ def full_process_route():
     # 데이터 조회
     query = f"""
         SELECT p.* 
-        FROM fullprocess_cache p
+        FROM full_process p
         WHERE {where_sql}
-        ORDER BY p.sync_date DESC
+        ORDER BY p.created_at DESC
         LIMIT ? OFFSET ?
     """
     
@@ -688,7 +688,7 @@ def full_process_detail(fullprocess_number):
     
     # Full Process 정보 조회
     cursor.execute("""
-        SELECT * FROM fullprocess_cache
+        SELECT * FROM full_process
         WHERE fullprocess_number = ?
     """, (fullprocess_number,))
     

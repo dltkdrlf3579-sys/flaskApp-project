@@ -733,14 +733,12 @@ class PartnerDataManager:
             for _, row in df.iterrows():
                 # 모든 데이터를 custom_data에 JSON으로 저장
                 row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
-                # 날짜 타입들을 안전하게 문자열로 변환 (pandas, numpy, datetime 모두 처리)
+                # 날짜 타입들을 안전하게 문자열로 변환 (GPT 지침에 따른 정확한 numpy 감지)
                 for k, v in row_dict.items():
-                    if pd.isna(v):
-                        row_dict[k] = None
-                    elif hasattr(v, 'strftime'):  # datetime, date, pandas.Timestamp 등
+                    if isinstance(v, (pd.Timestamp, datetime, date)) or str(type(v)).endswith(("numpy.datetime64'>", "numpy.timedelta64'>")):
                         row_dict[k] = str(v)
-                    elif hasattr(v, 'item'):  # numpy datetime64 등
-                        row_dict[k] = str(v.item()) if hasattr(v.item(), 'strftime') else str(v)
+                    elif pd.isna(v):
+                        row_dict[k] = None
                 custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
                 
                 # issue_number와 created_at 추출 (컬럼명이 한글일 수 있음)
@@ -830,14 +828,12 @@ class PartnerDataManager:
             for idx, row in df.iterrows():
                 # 모든 데이터를 custom_data에 JSON으로 저장
                 row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
-                # 날짜 타입들을 안전하게 문자열로 변환 (pandas, numpy, datetime 모두 처리)
+                # 날짜 타입들을 안전하게 문자열로 변환 (GPT 지침에 따른 정확한 numpy 감지)
                 for k, v in row_dict.items():
-                    if pd.isna(v):
-                        row_dict[k] = None
-                    elif hasattr(v, 'strftime'):  # datetime, date, pandas.Timestamp 등
+                    if isinstance(v, (pd.Timestamp, datetime, date)) or str(type(v)).endswith(("numpy.datetime64'>", "numpy.timedelta64'>")):
                         row_dict[k] = str(v)
-                    elif hasattr(v, 'item'):  # numpy datetime64 등
-                        row_dict[k] = str(v.item()) if hasattr(v.item(), 'strftime') else str(v)
+                    elif pd.isna(v):
+                        row_dict[k] = None
                 custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
                 
                 # work_req_no 추출 (컬럼명이 한글일 수 있음)
@@ -857,6 +853,17 @@ class PartnerDataManager:
                 INSERT OR REPLACE INTO followsop_cache (work_req_no, custom_data) 
                 VALUES (?, ?)
             ''', rows)
+            
+            # GPT 지침: 캐시→본테이블 이관 (UPSERT)
+            cursor.execute('''
+                INSERT OR REPLACE INTO follow_sop (work_req_no, custom_data, created_at, is_deleted)
+                SELECT
+                  c.work_req_no,
+                  c.custom_data,
+                  COALESCE(json_extract(c.custom_data, '$.created_at'), c.sync_date),
+                  0
+                FROM followsop_cache c
+            ''')
             
             conn.commit()
             conn.close()
@@ -927,14 +934,12 @@ class PartnerDataManager:
             for idx, row in df.iterrows():
                 # 모든 데이터를 custom_data에 JSON으로 저장
                 row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
-                # 날짜 타입들을 안전하게 문자열로 변환 (pandas, numpy, datetime 모두 처리)
+                # 날짜 타입들을 안전하게 문자열로 변환 (GPT 지침에 따른 정확한 numpy 감지)
                 for k, v in row_dict.items():
-                    if pd.isna(v):
-                        row_dict[k] = None
-                    elif hasattr(v, 'strftime'):  # datetime, date, pandas.Timestamp 등
+                    if isinstance(v, (pd.Timestamp, datetime, date)) or str(type(v)).endswith(("numpy.datetime64'>", "numpy.timedelta64'>")):
                         row_dict[k] = str(v)
-                    elif hasattr(v, 'item'):  # numpy datetime64 등
-                        row_dict[k] = str(v.item()) if hasattr(v.item(), 'strftime') else str(v)
+                    elif pd.isna(v):
+                        row_dict[k] = None
                 custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
                 
                 # fullprocess_number 추출 (컬럼명이 한글일 수 있음)
@@ -954,6 +959,17 @@ class PartnerDataManager:
                 INSERT OR REPLACE INTO fullprocess_cache (fullprocess_number, custom_data) 
                 VALUES (?, ?)
             ''', rows)
+            
+            # GPT 지침: 캐시→본테이블 이관 (UPSERT)
+            cursor.execute('''
+                INSERT OR REPLACE INTO full_process (fullprocess_number, custom_data, created_at, is_deleted)
+                SELECT
+                  c.fullprocess_number,
+                  c.custom_data,
+                  COALESCE(json_extract(c.custom_data, '$.created_at'), c.sync_date),
+                  0
+                FROM fullprocess_cache c
+            ''')
             
             conn.commit()
             conn.close()

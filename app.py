@@ -6582,9 +6582,9 @@ def export_full_process_excel():
         
         # Full Process 데이터 조회
         cursor.execute("""
-            SELECT * FROM fullprocess_cache 
+            SELECT * FROM full_process 
             WHERE (is_deleted = 0 OR is_deleted IS NULL)
-            ORDER BY sync_date DESC
+            ORDER BY created_at DESC
         """)
         data = cursor.fetchall()
         
