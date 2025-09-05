@@ -146,6 +146,19 @@ def follow_sop_route():
                         yield None
                     yield num
                     last = num
+        
+        def get_window_info(self):
+            """페이지네이션 윈도우 정보 반환"""
+            return {
+                'start_page': max(1, self.page - 2),
+                'end_page': min(self.total_pages, self.page + 2),
+                'current_page': self.page,
+                'total_pages': self.total_pages,
+                'has_prev': self.has_prev,
+                'has_next': self.has_next,
+                'prev_num': self.prev_num,
+                'next_num': self.next_num
+            }
     
     pagination = Pagination(page=page, per_page=per_page, total_count=total_count)
     
@@ -590,6 +603,19 @@ def full_process_route():
                         yield None
                     yield num
                     last = num
+        
+        def get_window_info(self):
+            """페이지네이션 윈도우 정보 반환"""
+            return {
+                'start_page': max(1, self.page - 2),
+                'end_page': min(self.total_pages, self.page + 2),
+                'current_page': self.page,
+                'total_pages': self.total_pages,
+                'has_prev': self.has_prev,
+                'has_next': self.has_next,
+                'prev_num': self.prev_num,
+                'next_num': self.next_num
+            }
     
     pagination = Pagination(page=page, per_page=per_page, total_count=total_count)
     
