@@ -29,19 +29,19 @@
 <div class="search-section">
     <form method="GET" class="search-form">
         <div class="search-fields">
-            <div class="search-group range-group" style="flex: 2; min-width: 450px;">
+            <div class="search-group range-group">
                 <label>재해날짜</label>
-                <div class="range-inputs" style="display: flex; align-items: center; gap: 12px;">
-                    <input type="date" name="accident_date_start" value="{{ request.args.get('accident_date_start', '') }}" placeholder="시작일" style="width: 160px; flex-shrink: 0;">
-                    <span class="range-separator" style="font-weight: bold;">~</span>
-                    <input type="date" name="accident_date_end" value="{{ request.args.get('accident_date_end', '') }}" placeholder="종료일" style="width: 160px; flex-shrink: 0;">
+                <div class="range-inputs">
+                    <input type="date" name="accident_date_start" value="{{ request.args.get('accident_date_start', '') }}" placeholder="시작일">
+                    <span class="range-separator">~</span>
+                    <input type="date" name="accident_date_end" value="{{ request.args.get('accident_date_end', '') }}" placeholder="종료일">
                 </div>
             </div>
-            <div class="search-group" style="flex: 1;">
+            <div class="search-group">
                 <label>사업장</label>
                 <input type="text" name="workplace" value="{{ request.args.get('workplace', '') }}" placeholder="사업장을 입력하세요">
             </div>
-            <div class="search-group" style="flex: 1;">
+            <div class="search-group">
                 <label>사고등급</label>
                 <input type="text" name="accident_grade" value="{{ request.args.get('accident_grade', '') }}" placeholder="사고등급을 입력하세요">
             </div>
