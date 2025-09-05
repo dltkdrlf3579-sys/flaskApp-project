@@ -139,33 +139,32 @@ def follow_sop_route():
             self.per_page = per_page
             self.total_count = total_count
             self.pages = math.ceil(total_count / per_page) if total_count > 0 else 1
+            self.has_prev = page > 1
+            self.prev_num = page - 1 if self.has_prev else None
+            self.has_next = page < self.pages
+            self.next_num = page + 1 if self.has_next else None
             
-        @property
-        def prev_num(self):
-            return self.page - 1 if self.page > 1 else None
+        def iter_pages(self, window_size=10):
+            start = ((self.page - 1) // window_size) * window_size + 1
+            end = min(start + window_size - 1, self.pages)
+            for num in range(start, end + 1):
+                yield num
         
-        @property
-        def next_num(self):
-            return self.page + 1 if self.page < self.pages else None
-        
-        @property
-        def has_prev(self):
-            return self.page > 1
-        
-        @property
-        def has_next(self):
-            return self.page < self.pages
-        
-        def iter_pages(self, left_edge=2, left_current=2, right_current=3, right_edge=2):
-            last = 0
-            for num in range(1, self.pages + 1):
-                if num <= left_edge or \
-                   (self.page - left_current - 1 < num < self.page + right_current) or \
-                   num > self.pages - right_edge:
-                    if last + 1 != num:
-                        yield None
-                    yield num
-                    last = num
+        def get_window_info(self, window_size=10):
+            start = ((self.page - 1) // window_size) * window_size + 1
+            end = min(start + window_size - 1, self.pages)
+            has_prev_window = start > 1
+            has_next_window = end < self.pages
+            prev_window_start = max(1, start - window_size)
+            next_window_start = min(end + 1, self.pages)
+            return {
+                'start': start,
+                'end': end,
+                'has_prev_window': has_prev_window,
+                'has_next_window': has_next_window,
+                'prev_window_start': prev_window_start,
+                'next_window_start': next_window_start
+            }
     
     pagination = Pagination(page=page, per_page=per_page, total_count=total_count)
     
@@ -603,33 +602,32 @@ def full_process_route():
             self.per_page = per_page
             self.total_count = total_count
             self.pages = math.ceil(total_count / per_page) if total_count > 0 else 1
+            self.has_prev = page > 1
+            self.prev_num = page - 1 if self.has_prev else None
+            self.has_next = page < self.pages
+            self.next_num = page + 1 if self.has_next else None
             
-        @property
-        def prev_num(self):
-            return self.page - 1 if self.page > 1 else None
+        def iter_pages(self, window_size=10):
+            start = ((self.page - 1) // window_size) * window_size + 1
+            end = min(start + window_size - 1, self.pages)
+            for num in range(start, end + 1):
+                yield num
         
-        @property
-        def next_num(self):
-            return self.page + 1 if self.page < self.pages else None
-        
-        @property
-        def has_prev(self):
-            return self.page > 1
-        
-        @property
-        def has_next(self):
-            return self.page < self.pages
-        
-        def iter_pages(self, left_edge=2, left_current=2, right_current=3, right_edge=2):
-            last = 0
-            for num in range(1, self.pages + 1):
-                if num <= left_edge or \
-                   (self.page - left_current - 1 < num < self.page + right_current) or \
-                   num > self.pages - right_edge:
-                    if last + 1 != num:
-                        yield None
-                    yield num
-                    last = num
+        def get_window_info(self, window_size=10):
+            start = ((self.page - 1) // window_size) * window_size + 1
+            end = min(start + window_size - 1, self.pages)
+            has_prev_window = start > 1
+            has_next_window = end < self.pages
+            prev_window_start = max(1, start - window_size)
+            next_window_start = min(end + 1, self.pages)
+            return {
+                'start': start,
+                'end': end,
+                'has_prev_window': has_prev_window,
+                'has_next_window': has_next_window,
+                'prev_window_start': prev_window_start,
+                'next_window_start': next_window_start
+            }
     
     pagination = Pagination(page=page, per_page=per_page, total_count=total_count)
     
