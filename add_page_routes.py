@@ -89,7 +89,8 @@ def follow_sop_route():
     items = []
     for idx, row in enumerate(cursor.fetchall()):
         item = dict(row)
-        item['no'] = total_count - ((page - 1) * per_page) - idx  # 번호 추가
+        # 실제 점검번호를 번호로 표시 (순번 대신)
+        item['no'] = item.get('work_req_no', total_count - ((page - 1) * per_page) - idx)
         
         # custom_data JSON 파싱 및 플래튼
         if item.get('custom_data'):
@@ -149,6 +150,10 @@ def follow_sop_route():
         
         def get_window_info(self):
             """페이지네이션 윈도우 정보 반환"""
+            window_size = 10
+            current_window_start = ((self.page - 1) // window_size) * window_size + 1
+            current_window_end = min(current_window_start + window_size - 1, self.total_pages)
+            
             return {
                 'start_page': max(1, self.page - 2),
                 'end_page': min(self.total_pages, self.page + 2),
@@ -157,7 +162,13 @@ def follow_sop_route():
                 'has_prev': self.has_prev,
                 'has_next': self.has_next,
                 'prev_num': self.prev_num,
-                'next_num': self.next_num
+                'next_num': self.next_num,
+                'has_prev_window': current_window_start > 1,
+                'has_next_window': current_window_end < self.total_pages,
+                'prev_window_start': max(1, current_window_start - window_size),
+                'next_window_start': min(self.total_pages, current_window_end + 1),
+                'current_window_start': current_window_start,
+                'current_window_end': current_window_end
             }
     
     pagination = Pagination(page=page, per_page=per_page, total_count=total_count)
@@ -546,7 +557,8 @@ def full_process_route():
     items = []
     for idx, row in enumerate(cursor.fetchall()):
         item = dict(row)
-        item['no'] = total_count - ((page - 1) * per_page) - idx  # 번호 추가
+        # 실제 프로세스번호를 번호로 표시 (순번 대신)
+        item['no'] = item.get('fullprocess_number', total_count - ((page - 1) * per_page) - idx)
         
         # custom_data JSON 파싱 및 플래튼
         if item.get('custom_data'):
@@ -606,6 +618,10 @@ def full_process_route():
         
         def get_window_info(self):
             """페이지네이션 윈도우 정보 반환"""
+            window_size = 10
+            current_window_start = ((self.page - 1) // window_size) * window_size + 1
+            current_window_end = min(current_window_start + window_size - 1, self.total_pages)
+            
             return {
                 'start_page': max(1, self.page - 2),
                 'end_page': min(self.total_pages, self.page + 2),
@@ -614,7 +630,13 @@ def full_process_route():
                 'has_prev': self.has_prev,
                 'has_next': self.has_next,
                 'prev_num': self.prev_num,
-                'next_num': self.next_num
+                'next_num': self.next_num,
+                'has_prev_window': current_window_start > 1,
+                'has_next_window': current_window_end < self.total_pages,
+                'prev_window_start': max(1, current_window_start - window_size),
+                'next_window_start': min(self.total_pages, current_window_end + 1),
+                'current_window_start': current_window_start,
+                'current_window_end': current_window_end
             }
     
     pagination = Pagination(page=page, per_page=per_page, total_count=total_count)
