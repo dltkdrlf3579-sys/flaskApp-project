@@ -89,10 +89,15 @@ def follow_sop_route():
     items = []
     for idx, row in enumerate(cursor.fetchall()):
         item = dict(row)
-        # 실제 점검번호를 번호로 표시 (순번 대신)
-        item['no'] = item.get('work_req_no', total_count - ((page - 1) * per_page) - idx)
+        # 실제 점검번호가 있으면 사용, 없으면 FS 형태로 생성
+        if item.get('work_req_no'):
+            item['no'] = item['work_req_no']
+        else:
+            # FS 형태의 번호 생성 (기존 id_generator 패턴 사용)
+            from id_generator import generate_unique_id
+            item['no'] = generate_unique_id('FS')
         
-        # custom_data JSON 파싱 및 플래튼
+        # custom_data JSON 파싱 및 플래트닝
         if item.get('custom_data'):
             try:
                 import json
@@ -109,25 +114,21 @@ def follow_sop_route():
         from common_mapping import smart_apply_mappings
         items = smart_apply_mappings(items, 'follow_sop', dynamic_columns, DB_PATH)
     
-    # 페이지네이션 객체 생성
+    # 페이지네이션 객체 생성 (app.py와 동일한 구조)
     class Pagination:
         def __init__(self, page, per_page, total_count):
             self.page = page
             self.per_page = per_page
             self.total_count = total_count
-            self.total_pages = math.ceil(total_count / per_page) if per_page > 0 else 0
+            self.pages = math.ceil(total_count / per_page) if total_count > 0 else 1
             
-        @property
-        def pages(self):
-            return list(range(1, self.total_pages + 1))
-        
         @property
         def prev_num(self):
             return self.page - 1 if self.page > 1 else None
         
         @property
         def next_num(self):
-            return self.page + 1 if self.page < self.total_pages else None
+            return self.page + 1 if self.page < self.pages else None
         
         @property
         def has_prev(self):
@@ -135,41 +136,18 @@ def follow_sop_route():
         
         @property
         def has_next(self):
-            return self.page < self.total_pages
+            return self.page < self.pages
         
         def iter_pages(self, left_edge=2, left_current=2, right_current=3, right_edge=2):
             last = 0
-            for num in range(1, self.total_pages + 1):
+            for num in range(1, self.pages + 1):
                 if num <= left_edge or \
                    (self.page - left_current - 1 < num < self.page + right_current) or \
-                   num > self.total_pages - right_edge:
+                   num > self.pages - right_edge:
                     if last + 1 != num:
                         yield None
                     yield num
                     last = num
-        
-        def get_window_info(self):
-            """페이지네이션 윈도우 정보 반환"""
-            window_size = 10
-            current_window_start = ((self.page - 1) // window_size) * window_size + 1
-            current_window_end = min(current_window_start + window_size - 1, self.total_pages)
-            
-            return {
-                'start_page': max(1, self.page - 2),
-                'end_page': min(self.total_pages, self.page + 2),
-                'current_page': self.page,
-                'total_pages': self.total_pages,
-                'has_prev': self.has_prev,
-                'has_next': self.has_next,
-                'prev_num': self.prev_num,
-                'next_num': self.next_num,
-                'has_prev_window': current_window_start > 1,
-                'has_next_window': current_window_end < self.total_pages,
-                'prev_window_start': max(1, current_window_start - window_size),
-                'next_window_start': min(self.total_pages, current_window_end + 1),
-                'current_window_start': current_window_start,
-                'current_window_end': current_window_end
-            }
     
     pagination = Pagination(page=page, per_page=per_page, total_count=total_count)
     
@@ -557,10 +535,15 @@ def full_process_route():
     items = []
     for idx, row in enumerate(cursor.fetchall()):
         item = dict(row)
-        # 실제 프로세스번호를 번호로 표시 (순번 대신)
-        item['no'] = item.get('fullprocess_number', total_count - ((page - 1) * per_page) - idx)
+        # 실제 프로세스번호가 있으면 사용, 없으면 FP 형태로 생성
+        if item.get('fullprocess_number'):
+            item['no'] = item['fullprocess_number']
+        else:
+            # FP 형태의 번호 생성 (기존 id_generator 패턴 사용)
+            from id_generator import generate_unique_id
+            item['no'] = generate_unique_id('FP')
         
-        # custom_data JSON 파싱 및 플래튼
+        # custom_data JSON 파싱 및 플래트닝
         if item.get('custom_data'):
             try:
                 import json
@@ -577,25 +560,21 @@ def full_process_route():
         from common_mapping import smart_apply_mappings
         items = smart_apply_mappings(items, 'full_process', dynamic_columns, DB_PATH)
     
-    # 페이지네이션 객체 생성
+    # 페이지네이션 객체 생성 (app.py와 동일한 구조)
     class Pagination:
         def __init__(self, page, per_page, total_count):
             self.page = page
             self.per_page = per_page
             self.total_count = total_count
-            self.total_pages = math.ceil(total_count / per_page) if per_page > 0 else 0
+            self.pages = math.ceil(total_count / per_page) if total_count > 0 else 1
             
-        @property
-        def pages(self):
-            return list(range(1, self.total_pages + 1))
-        
         @property
         def prev_num(self):
             return self.page - 1 if self.page > 1 else None
         
         @property
         def next_num(self):
-            return self.page + 1 if self.page < self.total_pages else None
+            return self.page + 1 if self.page < self.pages else None
         
         @property
         def has_prev(self):
@@ -603,41 +582,18 @@ def full_process_route():
         
         @property
         def has_next(self):
-            return self.page < self.total_pages
+            return self.page < self.pages
         
         def iter_pages(self, left_edge=2, left_current=2, right_current=3, right_edge=2):
             last = 0
-            for num in range(1, self.total_pages + 1):
+            for num in range(1, self.pages + 1):
                 if num <= left_edge or \
                    (self.page - left_current - 1 < num < self.page + right_current) or \
-                   num > self.total_pages - right_edge:
+                   num > self.pages - right_edge:
                     if last + 1 != num:
                         yield None
                     yield num
                     last = num
-        
-        def get_window_info(self):
-            """페이지네이션 윈도우 정보 반환"""
-            window_size = 10
-            current_window_start = ((self.page - 1) // window_size) * window_size + 1
-            current_window_end = min(current_window_start + window_size - 1, self.total_pages)
-            
-            return {
-                'start_page': max(1, self.page - 2),
-                'end_page': min(self.total_pages, self.page + 2),
-                'current_page': self.page,
-                'total_pages': self.total_pages,
-                'has_prev': self.has_prev,
-                'has_next': self.has_next,
-                'prev_num': self.prev_num,
-                'next_num': self.next_num,
-                'has_prev_window': current_window_start > 1,
-                'has_next_window': current_window_end < self.total_pages,
-                'prev_window_start': max(1, current_window_start - window_size),
-                'next_window_start': min(self.total_pages, current_window_end + 1),
-                'current_window_start': current_window_start,
-                'current_window_end': current_window_end
-            }
     
     pagination = Pagination(page=page, per_page=per_page, total_count=total_count)
     
