@@ -4863,6 +4863,45 @@ def get_deleted_follow_sop():
     return jsonify({"success": True, "items": [dict(row) for row in deleted_items]})
 
 
+@app.route("/api/full-process")
+def get_full_process():
+    """Full Process 목록 API (일반 데이터)"""
+    try:
+        conn = get_db_connection()
+        conn.row_factory = sqlite3.Row
+        
+        # 삭제되지 않은 Full Process 목록 조회
+        items = conn.execute("""
+            SELECT * FROM fullprocess_cache 
+            WHERE is_deleted = 0 OR is_deleted IS NULL
+            ORDER BY id DESC
+        """).fetchall()
+        
+        conn.close()
+        
+        # 결과를 딕셔너리 리스트로 변환
+        result = []
+        for item in items:
+            item_dict = dict(item)
+            # custom_data를 JSON으로 파싱
+            if item_dict.get('custom_data'):
+                try:
+                    import json
+                    custom_data = json.loads(item_dict['custom_data'])
+                    item_dict.update(custom_data)  # custom_data의 내용을 최상위로 병합
+                except json.JSONDecodeError:
+                    pass
+            result.append(item_dict)
+        
+        return jsonify({
+            "success": True,
+            "data": result,
+            "total": len(result)
+        })
+        
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
 @app.route("/api/full-process/deleted")
 def get_deleted_full_process():
     """삭제된 Full Process 목록 API"""

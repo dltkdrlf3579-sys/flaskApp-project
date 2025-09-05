@@ -822,6 +822,12 @@ class PartnerDataManager:
             for idx, row in df.iterrows():
                 # 모든 데이터를 custom_data에 JSON으로 저장
                 row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+                # 날짜 객체를 문자열로 변환
+                for k, v in row_dict.items():
+                    if isinstance(v, (datetime, date)):
+                        row_dict[k] = str(v)
+                    elif pd.isna(v):
+                        row_dict[k] = None
                 custom_data = json.dumps(row_dict, ensure_ascii=False)
                 
                 # work_req_no 추출 (컬럼명이 한글일 수 있음)
@@ -911,6 +917,12 @@ class PartnerDataManager:
             for idx, row in df.iterrows():
                 # 모든 데이터를 custom_data에 JSON으로 저장
                 row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+                # 날짜 객체를 문자열로 변환
+                for k, v in row_dict.items():
+                    if isinstance(v, (datetime, date)):
+                        row_dict[k] = str(v)
+                    elif pd.isna(v):
+                        row_dict[k] = None
                 custom_data = json.dumps(row_dict, ensure_ascii=False)
                 
                 # fullprocess_number 추출 (컬럼명이 한글일 수 있음)
