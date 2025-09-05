@@ -32,12 +32,12 @@
             <div class="search-group range-group">
                 <label>재해날짜</label>
                 <div class="range-inputs">
-                    <input type="date" name="accident_date_start" value="{{ request.args.get('accident_date_start', '') }}" placeholder="시작일" style="width: 140px;">
+                    <input type="date" name="accident_date_start" value="{{ request.args.get('accident_date_start', '') }}" placeholder="시작일">
                     <span class="range-separator">~</span>
-                    <input type="date" name="accident_date_end" value="{{ request.args.get('accident_date_end', '') }}" placeholder="종료일" style="width: 140px;">
+                    <input type="date" name="accident_date_end" value="{{ request.args.get('accident_date_end', '') }}" placeholder="종료일">
                 </div>
             </div>
-            <div class="search-group">
+            <div class="search-group" style="margin-left: 50px;">
                 <label>사업장</label>
                 <input type="text" name="workplace" value="{{ request.args.get('workplace', '') }}" placeholder="사업장을 입력하세요">
             </div>
