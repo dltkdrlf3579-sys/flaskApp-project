@@ -733,7 +733,15 @@ class PartnerDataManager:
             for _, row in df.iterrows():
                 # 모든 데이터를 custom_data에 JSON으로 저장
                 row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
-                custom_data = json.dumps(row_dict, ensure_ascii=False)
+                # 날짜 타입들을 안전하게 문자열로 변환 (pandas, numpy, datetime 모두 처리)
+                for k, v in row_dict.items():
+                    if pd.isna(v):
+                        row_dict[k] = None
+                    elif hasattr(v, 'strftime'):  # datetime, date, pandas.Timestamp 등
+                        row_dict[k] = str(v)
+                    elif hasattr(v, 'item'):  # numpy datetime64 등
+                        row_dict[k] = str(v.item()) if hasattr(v.item(), 'strftime') else str(v)
+                custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
                 
                 # issue_number와 created_at 추출 (컬럼명이 한글일 수 있음)
                 issue_number = row.get('issue_number', '') or row.get('발부번호', '') or ''
@@ -822,13 +830,15 @@ class PartnerDataManager:
             for idx, row in df.iterrows():
                 # 모든 데이터를 custom_data에 JSON으로 저장
                 row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
-                # 날짜 객체를 문자열로 변환
+                # 날짜 타입들을 안전하게 문자열로 변환 (pandas, numpy, datetime 모두 처리)
                 for k, v in row_dict.items():
-                    if isinstance(v, (datetime, date)):
-                        row_dict[k] = str(v)
-                    elif pd.isna(v):
+                    if pd.isna(v):
                         row_dict[k] = None
-                custom_data = json.dumps(row_dict, ensure_ascii=False)
+                    elif hasattr(v, 'strftime'):  # datetime, date, pandas.Timestamp 등
+                        row_dict[k] = str(v)
+                    elif hasattr(v, 'item'):  # numpy datetime64 등
+                        row_dict[k] = str(v.item()) if hasattr(v.item(), 'strftime') else str(v)
+                custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
                 
                 # work_req_no 추출 (컬럼명이 한글일 수 있음)
                 work_req_no = (row.get('work_req_no', '') or 
@@ -917,13 +927,15 @@ class PartnerDataManager:
             for idx, row in df.iterrows():
                 # 모든 데이터를 custom_data에 JSON으로 저장
                 row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
-                # 날짜 객체를 문자열로 변환
+                # 날짜 타입들을 안전하게 문자열로 변환 (pandas, numpy, datetime 모두 처리)
                 for k, v in row_dict.items():
-                    if isinstance(v, (datetime, date)):
-                        row_dict[k] = str(v)
-                    elif pd.isna(v):
+                    if pd.isna(v):
                         row_dict[k] = None
-                custom_data = json.dumps(row_dict, ensure_ascii=False)
+                    elif hasattr(v, 'strftime'):  # datetime, date, pandas.Timestamp 등
+                        row_dict[k] = str(v)
+                    elif hasattr(v, 'item'):  # numpy datetime64 등
+                        row_dict[k] = str(v.item()) if hasattr(v.item(), 'strftime') else str(v)
+                custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
                 
                 # fullprocess_number 추출 (컬럼명이 한글일 수 있음)
                 fullprocess_number = (row.get('fullprocess_number', '') or 
