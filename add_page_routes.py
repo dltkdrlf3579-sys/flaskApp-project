@@ -91,16 +91,14 @@ def follow_sop_route():
     query_params.extend([per_page, (page - 1) * per_page])
     cursor.execute(query, query_params)
     
+    # 페이지네이션 계산을 위한 offset
+    offset = (page - 1) * per_page
+    
     items = []
     for idx, row in enumerate(cursor.fetchall()):
         item = dict(row)
-        # 실제 점검번호가 있으면 사용 (SOP, FS 등 어떤 형태든)
-        if item.get('work_req_no') and str(item['work_req_no']).strip():
-            item['no'] = item['work_req_no']
-        else:
-            # 번호가 없을 때만 생성 (현재 시간 기준)
-            from id_generator import generate_followsop_number
-            item['no'] = generate_followsop_number(DB_PATH)
+        # No 칼럼은 역순 번호로 설정 (총 개수에서 역순)
+        item['no'] = total_count - offset - idx
         
         # custom_data JSON 파싱 및 플래트닝
         if item.get('custom_data'):
@@ -541,16 +539,14 @@ def full_process_route():
     query_params.extend([per_page, (page - 1) * per_page])
     cursor.execute(query, query_params)
     
+    # 페이지네이션 계산을 위한 offset  
+    offset = (page - 1) * per_page
+    
     items = []
     for idx, row in enumerate(cursor.fetchall()):
         item = dict(row)
-        # 실제 프로세스번호가 있으면 사용 (FP 등 어떤 형태든)
-        if item.get('fullprocess_number') and str(item['fullprocess_number']).strip():
-            item['no'] = item['fullprocess_number']
-        else:
-            # 번호가 없을 때만 생성 (현재 시간 기준)
-            from id_generator import generate_fullprocess_number
-            item['no'] = generate_fullprocess_number(DB_PATH)
+        # No 칼럼은 역순 번호로 설정 (총 개수에서 역순)
+        item['no'] = total_count - offset - idx
         
         # custom_data JSON 파싱 및 플래트닝
         if item.get('custom_data'):
