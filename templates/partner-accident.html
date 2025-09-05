@@ -28,24 +28,20 @@
 <!-- 검색 영역 -->
 <div class="search-section">
     <form method="GET" class="search-form">
-        <!-- 재해날짜는 첫 번째 줄에 단독으로 배치 -->
-        <div class="search-fields" style="margin-bottom: 16px;">
-            <div class="search-group range-group" style="flex: 1; max-width: 600px;">
+        <div class="search-fields">
+            <div class="search-group range-group" style="flex: 2; min-width: 450px;">
                 <label>재해날짜</label>
-                <div class="range-inputs" style="width: 100%;">
-                    <input type="date" name="accident_date_start" value="{{ request.args.get('accident_date_start', '') }}" placeholder="시작일" style="width: 200px;">
-                    <span class="range-separator" style="margin: 0 15px;">~</span>
-                    <input type="date" name="accident_date_end" value="{{ request.args.get('accident_date_end', '') }}" placeholder="종료일" style="width: 200px;">
+                <div class="range-inputs" style="display: flex; align-items: center; gap: 12px;">
+                    <input type="date" name="accident_date_start" value="{{ request.args.get('accident_date_start', '') }}" placeholder="시작일" style="width: 160px; flex-shrink: 0;">
+                    <span class="range-separator" style="font-weight: bold;">~</span>
+                    <input type="date" name="accident_date_end" value="{{ request.args.get('accident_date_end', '') }}" placeholder="종료일" style="width: 160px; flex-shrink: 0;">
                 </div>
             </div>
-        </div>
-        <!-- 사업장과 사고등급은 두 번째 줄에 나란히 배치 -->
-        <div class="search-fields">
-            <div class="search-group">
+            <div class="search-group" style="flex: 1;">
                 <label>사업장</label>
                 <input type="text" name="workplace" value="{{ request.args.get('workplace', '') }}" placeholder="사업장을 입력하세요">
             </div>
-            <div class="search-group">
+            <div class="search-group" style="flex: 1;">
                 <label>사고등급</label>
                 <input type="text" name="accident_grade" value="{{ request.args.get('accident_grade', '') }}" placeholder="사고등급을 입력하세요">
             </div>
