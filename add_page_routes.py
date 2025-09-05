@@ -52,13 +52,18 @@ def follow_sop_route():
     query_params = []
     
     # 기본 검색 필드들
-    search_fields = ['company_name', 'business_number']
-    for field in search_fields:
-        value = request.args.get(field, '').strip()
-        if value:
-            search_params[field] = value
-            where_clauses.append(f"s.{field} LIKE ?")
-            query_params.append(f"%{value}%")
+    company_name = request.args.get('company_name', '').strip()
+    business_number = request.args.get('business_number', '').strip()
+    
+    if company_name:
+        search_params['company_name'] = company_name
+        where_clauses.append("s.company_name_1cha LIKE ?")
+        query_params.append(f"%{company_name}%")
+    
+    if business_number:
+        search_params['business_number'] = business_number
+        where_clauses.append("s.company_name_1cha_bizno LIKE ?")
+        query_params.append(f"%{business_number}%")
     
     # WHERE 절 구성 (삭제되지 않은 항목만)
     where_clauses.insert(0, "(s.is_deleted = 0 OR s.is_deleted IS NULL)")
@@ -497,13 +502,18 @@ def full_process_route():
     query_params = []
     
     # 기본 검색 필드들
-    search_fields = ['company_name', 'business_number']
-    for field in search_fields:
-        value = request.args.get(field, '').strip()
-        if value:
-            search_params[field] = value
-            where_clauses.append(f"p.{field} LIKE ?")
-            query_params.append(f"%{value}%")
+    company_name = request.args.get('company_name', '').strip()
+    business_number = request.args.get('business_number', '').strip()
+    
+    if company_name:
+        search_params['company_name'] = company_name
+        where_clauses.append("p.company_1cha LIKE ?")
+        query_params.append(f"%{company_name}%")
+    
+    if business_number:
+        search_params['business_number'] = business_number
+        where_clauses.append("p.company_1cha_bizno LIKE ?")
+        query_params.append(f"%{business_number}%")
     
     # WHERE 절 구성 (삭제되지 않은 항목만)
     where_clauses.insert(0, "(p.is_deleted = 0 OR p.is_deleted IS NULL)")

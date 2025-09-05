@@ -936,10 +936,10 @@ def partner_accident():
     
     # 검색 조건
     filters = {
-        'company_name': request.args.get('company_name', '').strip(),
-        'business_number': request.args.get('business_number', '').strip(),
-        'accident_date_from': request.args.get('accident_date_from'),
-        'accident_date_to': request.args.get('accident_date_to')
+        'accident_date_start': request.args.get('accident_date_start'),
+        'accident_date_end': request.args.get('accident_date_end'),
+        'workplace': request.args.get('workplace', '').strip(),
+        'accident_grade': request.args.get('accident_grade', '').strip()
     }
     
     conn = get_db_connection()
@@ -983,21 +983,21 @@ def partner_accident():
     params = []
     
     # 필터링 적용
-    if filters['company_name']:
-        query += " AND (workplace LIKE ? OR company_name LIKE ?)"
-        params.extend([f"%{filters['company_name']}%", f"%{filters['company_name']}%"])
-    
-    if filters['business_number']:
-        query += " AND business_number LIKE ?"
-        params.append(f"%{filters['business_number']}%")
-    
-    if filters['accident_date_from']:
+    if filters['accident_date_start']:
         query += " AND accident_date >= ?"
-        params.append(filters['accident_date_from'])
+        params.append(filters['accident_date_start'])
     
-    if filters['accident_date_to']:
+    if filters['accident_date_end']:
         query += " AND accident_date <= ?"
-        params.append(filters['accident_date_to'])
+        params.append(filters['accident_date_end'])
+    
+    if filters['workplace']:
+        query += " AND workplace LIKE ?"
+        params.append(f"%{filters['workplace']}%")
+    
+    if filters['accident_grade']:
+        query += " AND accident_grade LIKE ?"
+        params.append(f"%{filters['accident_grade']}%")
     
     query += " ORDER BY accident_date DESC, accident_number DESC"
     
