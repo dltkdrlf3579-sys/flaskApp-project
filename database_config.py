@@ -854,7 +854,7 @@ class PartnerDataManager:
                 VALUES (?, ?)
             ''', rows)
             
-            # GPT 지침: 캐시→본테이블 이관 (UPSERT)
+            # GPT 지침: 캐시→본테이블 이관 (UPSERT) - 동기화된 데이터는 무조건 활성화  
             cursor.execute('''
                 INSERT OR REPLACE INTO follow_sop (work_req_no, custom_data, created_at, is_deleted)
                 SELECT
@@ -863,6 +863,12 @@ class PartnerDataManager:
                   COALESCE(json_extract(c.custom_data, '$.created_at'), c.sync_date),
                   0
                 FROM followsop_cache c
+            ''')
+            
+            # 추가: 동기화된 데이터는 강제로 활성화 (삭제 상태 해제)
+            cursor.execute('''
+                UPDATE follow_sop SET is_deleted = 0 
+                WHERE work_req_no IN (SELECT work_req_no FROM followsop_cache)
             ''')
             
             conn.commit()
@@ -960,7 +966,7 @@ class PartnerDataManager:
                 VALUES (?, ?)
             ''', rows)
             
-            # GPT 지침: 캐시→본테이블 이관 (UPSERT)
+            # GPT 지침: 캐시→본테이블 이관 (UPSERT) - 동기화된 데이터는 무조건 활성화
             cursor.execute('''
                 INSERT OR REPLACE INTO full_process (fullprocess_number, custom_data, created_at, is_deleted)
                 SELECT
@@ -969,6 +975,12 @@ class PartnerDataManager:
                   COALESCE(json_extract(c.custom_data, '$.created_at'), c.sync_date),
                   0
                 FROM fullprocess_cache c
+            ''')
+            
+            # 추가: 동기화된 데이터는 강제로 활성화 (삭제 상태 해제)
+            cursor.execute('''
+                UPDATE full_process SET is_deleted = 0 
+                WHERE fullprocess_number IN (SELECT fullprocess_number FROM fullprocess_cache)
             ''')
             
             conn.commit()
