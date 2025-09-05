@@ -4854,9 +4854,9 @@ def get_deleted_follow_sop():
     conn.row_factory = sqlite3.Row
     
     deleted_items = conn.execute("""
-        SELECT * FROM followsop_cache 
+        SELECT * FROM follow_sop 
         WHERE is_deleted = 1
-        ORDER BY id DESC
+        ORDER BY created_at DESC
     """).fetchall()
     
     conn.close()
@@ -4872,9 +4872,9 @@ def get_full_process():
         
         # 삭제되지 않은 Full Process 목록 조회
         items = conn.execute("""
-            SELECT * FROM fullprocess_cache 
+            SELECT * FROM full_process 
             WHERE is_deleted = 0 OR is_deleted IS NULL
-            ORDER BY id DESC
+            ORDER BY created_at DESC
         """).fetchall()
         
         conn.close()
@@ -4909,9 +4909,9 @@ def get_deleted_full_process():
     conn.row_factory = sqlite3.Row
     
     deleted_items = conn.execute("""
-        SELECT * FROM fullprocess_cache 
+        SELECT * FROM full_process 
         WHERE is_deleted = 1
-        ORDER BY id DESC
+        ORDER BY created_at DESC
     """).fetchall()
     
     conn.close()
@@ -4953,7 +4953,7 @@ def restore_follow_sop():
         
         for item_id in ids:
             cursor.execute("UPDATE follow_sop SET is_deleted = 0 WHERE work_req_no = ?", (item_id,))
-            cursor.execute("UPDATE followsop_cache SET is_deleted = 0 WHERE work_req_no = ?", (item_id,))
+            # Cache table is no longer used for display, only update main table
         
         conn.commit()
         conn.close()
@@ -4976,7 +4976,7 @@ def restore_full_process():
         cursor = conn.cursor()
         
         for item_id in ids:
-            cursor.execute("UPDATE fullprocess_cache SET is_deleted = 0 WHERE fullprocess_number = ?", (item_id,))
+            cursor.execute("UPDATE full_process SET is_deleted = 0 WHERE fullprocess_number = ?", (item_id,))
         
         conn.commit()
         conn.close()
@@ -5117,10 +5117,10 @@ def delete_follow_sop():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # followsop_cache 테이블에서 소프트 삭제 (work_req_no 기준)
+        # follow_sop 테이블에서 소프트 삭제 (work_req_no 기준)
         placeholders = ','.join('?' * len(ids))
         cursor.execute(f"""
-            UPDATE followsop_cache 
+            UPDATE follow_sop 
             SET is_deleted = 1 
             WHERE work_req_no IN ({placeholders})
         """, ids)
@@ -5151,10 +5151,10 @@ def delete_full_process():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # fullprocess_cache 테이블에서 소프트 삭제 (fullprocess_number 기준)
+        # full_process 테이블에서 소프트 삭제 (fullprocess_number 기준)
         placeholders = ','.join('?' * len(ids))
         cursor.execute(f"""
-            UPDATE fullprocess_cache 
+            UPDATE full_process 
             SET is_deleted = 1 
             WHERE fullprocess_number IN ({placeholders})
         """, ids)
