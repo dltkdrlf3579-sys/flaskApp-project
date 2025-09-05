@@ -93,9 +93,9 @@ def follow_sop_route():
         if item.get('work_req_no'):
             item['no'] = item['work_req_no']
         else:
-            # FS 형태의 번호 생성 (기존 id_generator 패턴 사용)
-            from id_generator import generate_unique_id
-            item['no'] = generate_unique_id('FS')
+            # 기존 함수 사용해서 FS 형태의 번호 생성
+            from id_generator import generate_followsop_number
+            item['no'] = generate_followsop_number(DB_PATH)
         
         # custom_data JSON 파싱 및 플래트닝
         if item.get('custom_data'):
@@ -539,9 +539,9 @@ def full_process_route():
         if item.get('fullprocess_number'):
             item['no'] = item['fullprocess_number']
         else:
-            # FP 형태의 번호 생성 (기존 id_generator 패턴 사용)
-            from id_generator import generate_unique_id
-            item['no'] = generate_unique_id('FP')
+            # 기존 함수 사용해서 FP 형태의 번호 생성
+            from id_generator import generate_fullprocess_number
+            item['no'] = generate_fullprocess_number(DB_PATH)
         
         # custom_data JSON 파싱 및 플래트닝
         if item.get('custom_data'):
