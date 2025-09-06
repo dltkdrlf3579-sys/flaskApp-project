@@ -166,7 +166,7 @@ def follow_sop_route():
 def follow_sop_register():
     """Follow SOP 등록 페이지"""
     import sqlite3
-    from timezone_config import get_korean_time_str
+    from timezone_config import get_korean_time_str, get_korean_time
     logging.info("Follow SOP 등록 페이지 접근")
     
     conn = get_db_connection()
@@ -199,8 +199,11 @@ def follow_sop_register():
     
     # 기본정보 필드 추가 (하드코딩) - 자동 생성값 포함
     from id_generator import generate_followsop_number
-    work_req_no = generate_followsop_number(DB_PATH)
-    created_at = get_korean_time_str('%Y-%m-%d %H:%M:%S')
+    from datetime import datetime
+    created_at_dt = get_korean_time()
+    created_at = created_at_dt.strftime('%Y-%m-%d %H:%M:%S')
+    # created_at 기준으로 번호 생성
+    work_req_no = generate_followsop_number(DB_PATH, created_at_dt)
     
     # work_req_no는 column_config에 없으므로 하드코딩
     basic_fields = [
@@ -337,14 +340,15 @@ def register_follow_sop():
     try:
         # safety-instruction과 동일한 방식으로 form data 처리
         import json
-        from timezone_config import get_korean_time_str
+        from timezone_config import get_korean_time_str, get_korean_time
         data = json.loads(request.form.get('data', '{}'))
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # work_req_no 생성 (FS + yyMMddhhmm + 카운터)
+        # created_at 기준으로 work_req_no 생성 (FS + yyMMddhhmm + 카운터)
         from id_generator import generate_followsop_number
-        work_req_no = generate_followsop_number(DB_PATH)
+        created_at_dt = get_korean_time()
+        work_req_no = generate_followsop_number(DB_PATH, created_at_dt)
         
         # follow_sop 테이블이 없으면 생성
         cursor.execute("""
@@ -367,8 +371,8 @@ def register_follow_sop():
         else:
             custom_data_json = custom_data
         
-        # 한국 시간으로 created_at 설정
-        created_at = get_korean_time_str('%Y-%m-%d %H:%M:%S')
+        # 번호 생성에 사용한 동일한 시간으로 created_at 설정
+        created_at = created_at_dt.strftime('%Y-%m-%d %H:%M:%S')
         
         # Follow SOP 등록
         cursor.execute("""
@@ -614,7 +618,7 @@ def full_process_route():
 def full_process_register():
     """Full Process 등록 페이지"""
     import sqlite3
-    from timezone_config import get_korean_time_str
+    from timezone_config import get_korean_time_str, get_korean_time
     logging.info("Full Process 등록 페이지 접근")
     
     conn = get_db_connection()
@@ -648,8 +652,11 @@ def full_process_register():
     
     # 기본정보 필드 추가 (하드코딩) - 자동 생성값 포함
     from id_generator import generate_fullprocess_number
-    fullprocess_number = generate_fullprocess_number(DB_PATH)
-    created_at = get_korean_time_str('%Y-%m-%d %H:%M:%S')
+    from datetime import datetime
+    created_at_dt = get_korean_time()
+    created_at = created_at_dt.strftime('%Y-%m-%d %H:%M:%S')
+    # created_at 기준으로 번호 생성
+    fullprocess_number = generate_fullprocess_number(DB_PATH, created_at_dt)
     
     basic_fields = [
         {'column_key': 'fullprocess_number', 'column_name': '평가번호', 'column_type': 'text', 
@@ -766,14 +773,15 @@ def register_full_process():
     try:
         # safety-instruction과 동일한 방식으로 form data 처리
         import json
-        from timezone_config import get_korean_time_str
+        from timezone_config import get_korean_time_str, get_korean_time
         data = json.loads(request.form.get('data', '{}'))
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # fullprocess_number 생성 (FP + yyMMddhhmm + 카운터)
+        # created_at 기준으로 fullprocess_number 생성 (FP + yyMMddhhmm + 카운터)
         from id_generator import generate_fullprocess_number
-        fullprocess_number = generate_fullprocess_number(DB_PATH)
+        created_at_dt = get_korean_time()
+        fullprocess_number = generate_fullprocess_number(DB_PATH, created_at_dt)
         
         # full_process 테이블이 없으면 생성
         cursor.execute("""
@@ -796,8 +804,8 @@ def register_full_process():
         else:
             custom_data_json = custom_data
         
-        # 한국 시간으로 created_at 설정
-        created_at = get_korean_time_str('%Y-%m-%d %H:%M:%S')
+        # 번호 생성에 사용한 동일한 시간으로 created_at 설정
+        created_at = created_at_dt.strftime('%Y-%m-%d %H:%M:%S')
         
         # Full Process 등록
         cursor.execute("""

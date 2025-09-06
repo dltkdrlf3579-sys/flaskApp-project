@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 from timezone_config import get_korean_time
 
-def generate_unique_id(prefix, db_path, table_name, id_column):
+def generate_unique_id(prefix, db_path, table_name, id_column, base_datetime=None):
     """
     접두사 + yyMMddhhmm + 2자리 카운터 형식의 고유 ID 생성
     
@@ -12,11 +12,18 @@ def generate_unique_id(prefix, db_path, table_name, id_column):
         db_path: 데이터베이스 경로
         table_name: 테이블명
         id_column: ID 컬럼명
+        base_datetime: 기준 시간 (없으면 현재 한국 시간 사용)
     
     Returns:
         str: 생성된 고유 ID (예: FS2509021045001)
     """
-    korean_time = get_korean_time()
+    if base_datetime:
+        # 전달받은 시간 사용 (created_at 기반)
+        korean_time = base_datetime
+    else:
+        # 기본값: 현재 한국 시간
+        korean_time = get_korean_time()
+    
     base_id = korean_time.strftime('%y%m%d%H%M')  # yyMMddhhmm
     
     conn = sqlite3.connect(db_path, timeout=30.0)
@@ -68,10 +75,10 @@ def generate_unique_id(prefix, db_path, table_name, id_column):
     finally:
         conn.close()
 
-def generate_followsop_number(db_path):
+def generate_followsop_number(db_path, base_datetime=None):
     """Follow SOP 점검번호 생성 (FS + yyMMddhhmm + 01)"""
-    return generate_unique_id('FS', db_path, 'follow_sop', 'work_req_no')
+    return generate_unique_id('FS', db_path, 'follow_sop', 'work_req_no', base_datetime)
 
-def generate_fullprocess_number(db_path):
+def generate_fullprocess_number(db_path, base_datetime=None):
     """Full Process 평가번호 생성 (FP + yyMMddhhmm + 01)"""
-    return generate_unique_id('FP', db_path, 'full_process', 'fullprocess_number')
+    return generate_unique_id('FP', db_path, 'full_process', 'fullprocess_number', base_datetime)

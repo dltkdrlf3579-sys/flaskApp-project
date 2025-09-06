@@ -968,10 +968,8 @@ function saveChanges() {
             }
             {% endif %}
             
-            // 약간의 지연 후 현재 창 새로고침 (캐시 무시)
-            setTimeout(() => {
-                window.location.href = window.location.href + '&t=' + new Date().getTime();
-            }, 100);
+            // 현재 창 새로고침 (캐시 무시)
+            window.location.href = window.location.href + '&t=' + new Date().getTime();
         } else {
             alert('수정 중 오류가 발생했습니다: ' + data.message);
         }

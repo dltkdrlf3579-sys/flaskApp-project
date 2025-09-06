@@ -202,6 +202,14 @@
     min-width: 150px;
 }
 
+/* No 컬럼 스타일 */
+th.fixed-col[style*="width: 60px"], 
+td.fixed-col[style*="width: 60px"] {
+    min-width: 60px !important;
+    max-width: 60px !important;
+    width: 60px !important;
+}
+
 .data-table th.fixed-col {
     z-index: 15;
     background: #f8f9fa;

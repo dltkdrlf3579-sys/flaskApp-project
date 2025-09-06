@@ -25,5 +25,10 @@ backup/
 columns/backup/
 *backup*/
 
-# 데이터베이스 파일 포함 (GitHub에 업로드)
-# portal.db는 이제 GitHub에 포함됩니다
+# 데이터베이스 파일 제외
+portal.db
+portal.db-wal
+portal.db-shm
+*.db
+*.db-wal
+*.db-shm

@@ -529,7 +529,7 @@ function registerAccident() {
     .then(data => {
         console.log('서버 응답 데이터:', data);
         if (data.success) {
-            alert('사고가 성공적으로 등록되었습니다. 사고번호: ' + data.accident_number);
+            alert('사고가 성공적으로 등록되었습니다.);
             console.log('등록 성공! Console을 확인하세요.');
             
             // 팝업창 닫기

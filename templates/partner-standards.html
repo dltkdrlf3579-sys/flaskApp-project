@@ -223,6 +223,14 @@
     min-width: 150px;
 }
 
+/* No 컬럼 스타일 */
+th.fixed-col[style*="width: 60px"], 
+td.fixed-col[style*="width: 60px"] {
+    min-width: 60px !important;
+    max-width: 60px !important;
+    width: 60px !important;
+}
+
 .data-table th.fixed-col {
     z-index: 15;
     background: #f8f9fa;
@@ -325,9 +333,8 @@
         <table class="data-table">
             <thead>
                 <tr>
-                    <th class="checkbox-column">
-                        <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)">
-                    </th>
+                    <th class="checkbox-column"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
+                    <th class="fixed-col" style="width: 60px;">No</th>
                     {% for column in dynamic_columns %}
                         {% if column.table_display %}
                             <th {% if column.key == 'company_name' %}class="fixed-col"{% endif %}>{{ column.name }}</th>
@@ -341,6 +348,7 @@
                     <td class="checkbox-column">
                         <input type="checkbox" class="row-checkbox" value="{{ partner.business_number }}" onchange="updateDeleteButton()">
                     </td>
+                    <td class="fixed-col" style="width: 60px;">{{ partner.no }}</td>
                     {% for column in dynamic_columns %}
                         {% if column.table_display %}
                             <td {% if column.key == 'company_name' %}class="fixed-col"{% endif %}>
@@ -363,7 +371,7 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="{{ dynamic_columns|length + 1 }}" class="no-data">검색 결과가 없습니다.</td>
+                    <td colspan="{{ dynamic_columns|length + 2 }}" class="no-data">검색 결과가 없습니다.</td>
                 </tr>
                 {% endfor %}
             </tbody>

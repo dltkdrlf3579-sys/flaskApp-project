@@ -9,6 +9,8 @@ from timezone_config import KST, get_korean_time, get_korean_time_str
 from werkzeug.utils import secure_filename
 from config.menu import MENU_CONFIG
 from database_config import db_config, partner_manager
+import re
+import base64
 import sqlite3
 import math
 from board_services import ColumnService, CodeService, ItemService
@@ -1281,10 +1283,6 @@ def safety_instruction_register():
             code_options = get_dropdown_options_for_display('safety_instruction', col['column_key'])
             # 코드-값 매핑 방식 사용 (DB dropdown_option_codes_v2 테이블)
             col['dropdown_options_mapped'] = code_options if code_options else []
-            if code_options:
-                logging.info(f"  - {col['column_name']} ({col['column_key']}): 코드-값 매핑 {len(code_options)}개 옵션")
-            else:
-                logging.info(f"  - {col['column_name']} ({col['column_key']}): 드롭다운 옵션 없음")
     
     # 기본정보 드롭다운 옵션 로드 (accident-register와 동일한 패턴)
     basic_options = {}
@@ -1462,10 +1460,6 @@ def safety_instruction_detail(issue_number):
             code_options = get_dropdown_options_for_display('safety_instruction', col['column_key'])
             # 코드-값 매핑 방식 사용 (DB dropdown_option_codes_v2 테이블)
             col['dropdown_options_mapped'] = code_options if code_options else []
-            if code_options:
-                logging.info(f"  - {col['column_name']} ({col['column_key']}): 코드-값 매핑 {len(code_options)}개 옵션")
-            else:
-                logging.info(f"  - {col['column_name']} ({col['column_key']}): 드롭다운 옵션 없음")
     
     # 섹션 정보 로드
     from section_service import SectionConfigService
@@ -1770,11 +1764,19 @@ def partner_standards():
         })
     
     # 새로운 데이터 매니저를 통해 협력사 목록 조회
-    partners, total_count = partner_manager.get_all_partners(
+    partners_rows, total_count = partner_manager.get_all_partners(
         page=page, 
         per_page=per_page, 
         filters=filters
     )
+    
+    # Row 객체를 딕셔너리로 변환하고 No 컬럼 추가 (역순 번호)
+    offset = (page - 1) * per_page
+    partners = []
+    for i, row in enumerate(partners_rows):
+        partner = dict(row)
+        partner['no'] = total_count - offset - i
+        partners.append(partner)
     
     # 페이지네이션 정보
     class Pagination:
@@ -1834,7 +1836,8 @@ def partner_change_request():
     # 검색 조건
     filters = {
         'requester_name': request.args.get('requester_name', '').strip(),
-        'company_name': request.args.get('company_name', '').strip()
+        'company_name': request.args.get('company_name', '').strip(),
+        'business_number': request.args.get('business_number', '').strip()
     }
     
     # 실제 데이터베이스에서 조회
@@ -2494,10 +2497,6 @@ def accident_detail(accident_id):
             code_options = get_dropdown_options_for_display('accident', col['column_key'])
             # 코드-값 매핑 방식 사용 (DB dropdown_option_codes_v2 테이블)
             col['dropdown_options_mapped'] = code_options if code_options else []
-            if code_options:
-                logging.info(f"  - {col['column_name']} ({col['column_key']}): 코드-값 매핑 {len(code_options)}개 옵션")
-            else:
-                logging.info(f"  - {col['column_name']} ({col['column_key']}): 드롭다운 옵션 없음")
     
     # 섹션별로 컬럼 그룹핑 - safety-instruction과 동일한 방식
     section_columns = {}
@@ -2659,11 +2658,6 @@ def get_dropdown_options_for_display(board_type, column_key):
         
         # v2에서만 조회 (v1 폴백 제거)
         
-        logging.info(f"[DEBUG] get_dropdown_options_for_display({column_key}): {len(codes) if codes else 0}개 행 조회됨")
-        if codes:
-            for c in codes:
-                logging.info(f"  - {c['option_code']}: {c['option_value']}")
-        
         conn.close()
         
         if codes:
@@ -2776,10 +2770,6 @@ def accident_register():
             code_options = get_dropdown_options_for_display('accident', col['column_key'])
             # 코드-값 매핑 방식 사용 (DB dropdown_option_codes_v2 테이블)
             col['dropdown_options_mapped'] = code_options if code_options else []
-            if code_options:
-                logging.info(f"  - {col['column_name']} ({col['column_key']}): 코드-값 매핑 {len(code_options)}개 옵션")
-            else:
-                logging.info(f"  - {col['column_name']} ({col['column_key']}): 드롭다운 옵션 없음")
     
     # 기본정보 드롭다운 옵션 로드 (safety-instruction과 동일한 패턴)
     basic_options = {}
@@ -3953,8 +3943,11 @@ def get_partner_attachments(business_number):
     """, (business_number,)).fetchall()
     conn.close()
     
+    # 첨부파일 목록을 딕셔너리로 변환
+    result = [dict(attachment) for attachment in attachments]
+    
     from flask import jsonify
-    return jsonify([dict(attachment) for attachment in attachments])
+    return jsonify(result)
 
 @app.route("/api/auto-upload-partner-files", methods=['POST'])
 def auto_upload_partner_files():
@@ -3976,7 +3969,7 @@ def auto_upload_partner_files():
             return jsonify({"error": f"Partner not found: {business_number}"}), 404
         
         # 업로드 폴더 (D드라이브 고정)
-        upload_folder = Path(r"D:\uploads\partners")
+        upload_folder = Path(r"C:\Users\sanggil\flask-portal\uploads")
         upload_folder.mkdir(parents=True, exist_ok=True)
         
         uploaded_files = []
@@ -3992,8 +3985,10 @@ def auto_upload_partner_files():
                     skipped.append(str(file_path))
                     continue
                 
-                # 파일명 안전화
-                safe_name = secure_filename(file_path.name) or "file"
+                # 파일명 안전화 (한글 유지)
+                original_name = file_path.name
+                # 위험한 문자만 제거, 한글은 유지
+                safe_name = re.sub(r'[<>:"/\\|?*]', '_', original_name) if original_name else "file"
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 new_filename = f"{business_number}_{timestamp}_{safe_name}"
                 dest_path = upload_folder / new_filename
@@ -4007,17 +4002,24 @@ def auto_upload_partner_files():
                 korean_time = get_korean_time()
                 year = korean_time.strftime("%Y")
                 month = korean_time.strftime("%m")
-                company_name = partner.get('company_name', '협력사')
+                try:
+                    company_name = partner['company_name'] or '협력사'
+                except (KeyError, TypeError):
+                    company_name = '협력사'
+                
+                # 표시용 한글 파일명 생성 (base64 인코딩 제거)
+                korean_filename = f"{company_name}_{year}년_{month}월_통합레포트.html"
                 
                 cursor.execute("""
-                    INSERT INTO partner_attachments 
-                    (business_number, filename, original_filename, upload_date, file_size)
-                    VALUES (?, ?, ?, datetime('now'), ?)
+                    INSERT INTO partner_attachments
+                    (business_number, file_name, file_path, file_size, upload_date, description)
+                    VALUES (?, ?, ?, ?, datetime('now'), ?)
                 """, (
                     business_number,
-                    new_filename,
-                    f"{company_name}_{year}년_{month}월_통합레포트.html",  # 예: "삼성전자_2025년_01월_통합레포트.html"
-                    dest_path.stat().st_size
+                    korean_filename,        # 한글 표시명 (인코딩 없이 그대로)
+                    str(dest_path),         # file_path (실제 파일 경로)
+                    dest_path.stat().st_size, # file_size
+                    "자동 업로드"            # description (설명)
                 ))
                 
                 uploaded_files.append({
@@ -4027,7 +4029,7 @@ def auto_upload_partner_files():
                 })
                 
                 logging.info(f"File uploaded: {file_path.name} → {new_filename}")
-                
+  
             except Exception as e:
                 logging.error(f"Error processing file {file_path}: {str(e)}")
                 skipped.append(str(file_path))
@@ -4760,10 +4762,8 @@ def change_request_register():
             # 프런트엔드 호환성을 위해 형식 변환
             if code_options:
                 col['dropdown_options_mapped'] = [{"code": opt["code"], "value": opt["value"]} for opt in code_options]
-                logging.info(f"  - {col['column_name']} ({col['column_key']}): {len(code_options)}개 옵션")
             else:
                 col['dropdown_options_mapped'] = []
-                logging.info(f"  - {col['column_name']} ({col['column_key']}): 드롭다운 옵션 없음")
     
     logging.info(f"변경요청 동적 컬럼 {len(dynamic_columns)}개 로드됨")
     
