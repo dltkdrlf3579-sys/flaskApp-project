@@ -3975,6 +3975,43 @@ def auto_upload_partner_files():
         uploaded_files = []
         skipped = []  # 업로드 실패한 파일 추적
         conn = get_db_connection()
+        conn.row_factory = sqlite3.Row  # Row 객체 사용 설정
+        cursor = conn.cursor()
+        
+        # 자동 업로드 설명 문구 정의
+        auto_upload_desc = "통합레포트 자동업로드(매월 삭제 및 최신월 레포트로 교체됩니다)"
+        
+        # 기존 파일들 삭제 (자동 업로드된 파일만 삭제)
+        deleted_count = 0
+        try:
+            # 기존 자동 업로드 파일 정보 조회 (정확한 설명 문구만)
+            existing_files = cursor.execute("""
+                SELECT file_path FROM partner_attachments 
+                WHERE business_number = ? AND description = ?
+            """, (business_number, auto_upload_desc)).fetchall()
+            
+            # 파일 시스템에서 삭제
+            for file_row in existing_files:
+                old_file_path = Path(file_row['file_path'])
+                if old_file_path.exists():
+                    try:
+                        old_file_path.unlink()
+                        logging.info(f"Deleted old file: {old_file_path}")
+                    except Exception as e:
+                        logging.warning(f"Failed to delete old file {old_file_path}: {e}")
+            
+            # DB에서 삭제 (정확한 설명 문구만)
+            cursor.execute("""
+                DELETE FROM partner_attachments 
+                WHERE business_number = ? AND description = ?
+            """, (business_number, auto_upload_desc))
+            conn.commit()
+            deleted_count = len(existing_files)
+            logging.info(f"Deleted {deleted_count} old files for {business_number}")
+            
+        except Exception as e:
+            logging.error(f"Error deleting old files: {e}")
+            # 기존 파일 삭제 실패해도 계속 진행
         
         for file_path in file_paths:
             try:
@@ -3997,7 +4034,6 @@ def auto_upload_partner_files():
                 shutil.copy2(file_path, dest_path)
                 
                 # DB에 저장 (기존 컬럼만 사용)
-                cursor = conn.cursor()
                 # 한국 시간으로 년도와 월 정보, 회사명 가져오기
                 korean_time = get_korean_time()
                 year = korean_time.strftime("%Y")
@@ -4019,7 +4055,7 @@ def auto_upload_partner_files():
                     korean_filename,        # 한글 표시명 (인코딩 없이 그대로)
                     str(dest_path),         # file_path (실제 파일 경로)
                     dest_path.stat().st_size, # file_size
-                    "자동 업로드"            # description (설명)
+                    auto_upload_desc        # description (자동 업로드 설명)
                 ))
                 
                 uploaded_files.append({
@@ -4046,8 +4082,10 @@ def auto_upload_partner_files():
             "business_number": business_number,
             "uploaded_files": uploaded_files,
             "skipped": skipped,  # 실패한 파일 목록
+            "deleted_count": deleted_count,  # 삭제된 기존 파일 개수
             "total_uploaded": len(uploaded_files),
-            "total_skipped": len(skipped)
+            "total_skipped": len(skipped),
+            "message": f"기존 {deleted_count}개 파일 삭제 후 {len(uploaded_files)}개 새 파일 업로드"
         }), status
         
     except Exception as e:
