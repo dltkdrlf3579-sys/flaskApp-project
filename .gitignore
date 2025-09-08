@@ -32,3 +32,35 @@ portal.db-shm
 *.db
 *.db-wal
 *.db-shm
+
+# HTML 리포트 파일들 제외
+*.html
+!templates/**/*.html
+
+# 테스트 및 마이그레이션 임시 파일들 제외
+test_*.py
+*_test.py
+migrate_*.py
+phase*.py
+phase*.sql
+fix_*.py
+check_*.py
+emergency_migrate.py
+complete_migration_fix.py
+complete_migration_fix.sql
+recreate_*.py
+setup_*.py
+smoke_test_*.py
+rollback_*.sql
+verify_*.py
+*_backup
+*.backup
+
+# 설정 백업 파일들
+config.ini.*_backup
+app.py.backup
+
+# 기타 임시 파일들
+wsgi.py
+run_production.bat
+*.bat

@@ -33,6 +33,17 @@
         </div>
         <div class="section-content" id="basic-info-content">
             <div class="info-table">
+                <!-- partner_standards_id와 created_at 추가 -->
+                <div class="info-row">
+                    <div class="info-cell span-1">
+                        <label>ID</label>
+                        <input type="text" value="{{ partner.partner_standards_id or '-' }}" readonly style="background-color: #f3f4f6;">
+                    </div>
+                    <div class="info-cell span-1">
+                        <label>등록일</label>
+                        <input type="text" value="{{ (partner.created_at|date_only) if partner.created_at else '-' }}" readonly style="background-color: #f3f4f6;">
+                    </div>
+                </div>
                 <div class="info-row">
                     <div class="info-cell">
                         <label>사업자번호</label>
@@ -98,13 +109,12 @@
         </div>
         <div class="section-content">
             <div class="content-editor">
-                <!-- 간단한 편집 가능한 영역 -->
-                <div id="detailed-content" 
-                     class="editable-content"
-                     data-content="{{ (partner.detailed_content or '') | tojson }}"></div>
-                
-                <!-- 숨겨진 textarea (저장용) -->
-                <textarea id="detailed-content-hidden" style="display: none;">{{ partner.detailed_content or '' }}</textarea>
+                <!-- CKEditor textarea -->
+                <textarea id="detailed-content" 
+                          name="detailed_content"
+                          placeholder="상세내용을 입력하세요."
+                          rows="10"
+                          style="width: 100%; min-height: 400px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;">{{ partner.detailed_content | striptags if partner.detailed_content else '' }}</textarea>
             </div>
         </div>
     </div>
@@ -867,32 +877,15 @@ function verifyPasswordAndSave() {
         return;
     }
     
-    // 서버에서 비밀번호 검증 (협력사 게시판)
-    fetch('/verify-password', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-            password: password,
-            board_type: '{{ board_type }}' 
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            closeEditPasswordModal();
-            saveChanges();
-        } else {
-            alert(data.message || '비밀번호가 올바르지 않습니다.');
-            document.getElementById('edit-password-input').value = '';
-            document.getElementById('edit-password-input').focus();
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('비밀번호 검증 중 오류가 발생했습니다.');
-    });
+    // 비밀번호가 admin123인지 확인
+    if (password === 'admin123') {
+        closeEditPasswordModal();
+        saveChanges();
+    } else {
+        alert('비밀번호가 올바르지 않습니다.');
+        document.getElementById('edit-password-input').value = '';
+        document.getElementById('edit-password-input').focus();
+    }
 }
 
 function saveChanges_OLD_REMOVE() {
@@ -1065,8 +1058,17 @@ function insertAtCursor(element) {
 // 저장 함수 수정
 function saveChanges() {
     // contentEditable div에서 HTML 내용 가져오기
-    // 상세내용 처리 - CKEditor 데이터 가져오기
-    const detailedContent = window.RichText ? window.RichText.getData() : '';
+    // CKEditor 또는 textarea에서 값 가져오기
+    const contentTextarea = document.getElementById('detailed-content');
+    let detailedContent = '';
+    
+    if (window.RichText && typeof window.RichText.getData === 'function') {
+        detailedContent = window.RichText.getData();
+    } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
+        detailedContent = window.editorInstance.getData();
+    } else if (contentTextarea) {
+        detailedContent = contentTextarea.value || '';
+    }
     
     console.log('Saving content from contentEditable:', detailedContent);
     
@@ -1111,7 +1113,16 @@ function saveChanges() {
     .then(data => {
         if (data.success) {
             alert('수정이 완료되었습니다.');
-            location.reload();
+            
+            // 팝업 모드인 경우 부모 창 새로고침
+            {% if is_popup %}
+            if (window.opener && !window.opener.closed) {
+                window.opener.location.reload();
+            }
+            {% endif %}
+            
+            // 현재 창 새로고침 (캐시 무시)
+            window.location.href = window.location.href + '&t=' + new Date().getTime();
         } else {
             alert('수정 중 오류가 발생했습니다: ' + data.message);
         }

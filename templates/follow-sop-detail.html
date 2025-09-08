@@ -35,6 +35,20 @@
         <div class="section-content" id="{% if section.section_key == 'basic_info' %}basic-info{% elif section.section_key == 'violation_info' %}violation-info{% elif section.section_key == 'additional' %}additional{% else %}{{ section.section_key|replace('_', '-') }}{% endif %}-content">
             <!-- DEBUG: {{ section.section_key }} has {{ section_columns[section.section_key]|length if section.section_key in section_columns else 0 }} columns -->
             <div class="info-table">
+                <!-- 점검번호와 등록일 추가 (첫 번째 섹션에만) -->
+                {% if loop.index == 1 %}
+                <div class="info-row">
+                    <div class="info-cell span-1">
+                        <label>점검번호</label>
+                        <input type="text" value="{{ sop.work_req_no or '-' }}" readonly style="background-color: #f3f4f6;">
+                    </div>
+                    <div class="info-cell span-1">
+                        <label>등록일</label>
+                        <input type="text" value="{{ (sop.created_at|date_only) if sop.created_at else '-' }}" readonly style="background-color: #f3f4f6;">
+                    </div>
+                </div>
+                {% endif %}
+                
                 {% set all_columns = section_columns[section.section_key] if section.section_key in section_columns else [] %}
                 <!-- detailed_content와 violation_content는 제외 -->
                 <!-- DEBUG: all_columns = {{ all_columns|length }} items -->
@@ -53,11 +67,22 @@
                     {% for col in chunk %}
                         {% if col %}
                             {% set span = col.column_span|default(1)|int %}
+                            {% if col.column_type == 'list' %}
+                                {% set span = 4 %}
+                            {% endif %}
                             {% set col_value = sop[col.column_key] | default('', true) %}
                             <!-- DEBUG: {{ col.column_key }} ({{ col.column_type }}) = {{ col_value }} -->
                             
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
+                                {% if col.column_type != 'list' %}
                                 <label>{{ col.column_name }}</label>
+                                {% endif %}
+                                {% if col.column_type == 'list' %}
+                                    <!-- 리스트 필드는 항상 custom_data에서 가져오기 -->
+                                    {% set col_value = custom_data.get(col.column_key, '[]') if custom_data else '[]' %}
+                                {% else %}
+                                    {% set col_value = sop[col.column_key] | default('', true) %}
+                                {% endif %}
                                 
                                 {% if col.column_key == 'work_req_no' %}
                                     <!-- 점검번호는 수정 불가 -->
@@ -150,6 +175,10 @@
                                         </button>
                                     </div>
                                     
+                                {% elif col.column_type == 'list' %}
+                                    <!-- 리스트 필드 -->
+                                    {% from 'includes/list_field_v3.html' import render_list_field %}
+                                    {{ render_list_field(col, col_value, section, mode='edit') }}
                                 {% elif col.column_type == 'textarea' %}
                                     <!-- 텍스트영역 필드 -->
                                     <textarea class="{{ section.section_key|replace('_', '-') }}-input" 
@@ -182,13 +211,11 @@
         </div>
         <div class="section-content">
             <div class="content-editor">
+                <!-- 에디터 초기화를 위한 data-content 패턴 적용 -->
                 <div id="detailed-content" 
                      class="editable-content" 
-                     contenteditable="true"
-                     placeholder="상세내용을 입력하세요.">{{ sop.detailed_content | safe if sop.detailed_content else '' }}</div>
-                
-                <!-- 숨겨진 textarea (저장용) -->
-                <textarea id="detailed-content-hidden" style="display: none;">{{ sop.detailed_content or '' }}</textarea>
+                     data-content="{{ (sop.detailed_content or '') | tojson }}"
+                     placeholder="상세내용을 입력하세요.">{{ sop.detailed_content | striptags if sop.detailed_content else '' }}</div>
             </div>
         </div>
     </div>
@@ -199,13 +226,10 @@
 
     <!-- 저장 버튼 영역 -->
     <div class="save-section">
-        <button class="btn-save" onclick="updateFollowSop()">수정완료</button>
-        <button class="btn-cancel" onclick="window.close()">취소</button>
+        <button class="btn-save" onclick="showEditPasswordModal()">수정완료</button>
     </div>
     
 </div>
-
-{% include 'includes/password_modal.html' %}
 
 <!-- 스타일 -->
 <link rel="stylesheet" href="/static/styles/accident-register.css">
@@ -257,7 +281,28 @@ function collectDynamicFields() {
                 value = input.value;
             }
             
-            data[fieldKey] = value;
+            // 리스트 필드 처리 - 더 간단하고 확실한 방법
+            // 1. data-field-type 체크 또는 2. JSON 배열 문자열 체크
+            if ((input.getAttribute('data-field-type') === 'list' || 
+                 (typeof value === 'string' && value.trim().startsWith('['))) && value) {
+                console.log(`🔍 리스트 필드 감지: ${fieldKey}`);
+                try {
+                    const parsed = JSON.parse(value);
+                    if (Array.isArray(parsed)) {
+                        data[fieldKey] = parsed;
+                        console.log(`✅ 리스트 필드 파싱 성공: ${fieldKey} = ${parsed.length}개 항목`);
+                        console.log(`📋 리스트 내용:`, parsed);
+                    } else {
+                        data[fieldKey] = value;
+                        console.log(`⚠️ 리스트가 아닌 데이터: ${fieldKey}`);
+                    }
+                } catch(e) {
+                    data[fieldKey] = value;
+                    console.log(`❌ 리스트 필드 파싱 실패: ${fieldKey}`, e);
+                }
+            } else {
+                data[fieldKey] = value;
+            }
         });
     });
     
@@ -268,32 +313,58 @@ function collectDynamicFields() {
 function updateFollowSop() {
     const formData = new FormData();
     
-    // 발부번호
+    // work_req_no (중요: issue_number가 아닌 work_req_no)
     formData.append('work_req_no', issueNumber);
     
-    // 상세내용 처리
-    const editableDiv = document.getElementById('detailed-content');
-    const detailedContent = editableDiv ? editableDiv.innerHTML : '';
+    // 상세내용 처리 - data-content 패턴과 에디터 초기화 지원
+    const contentElement = document.getElementById('detailed-content');
+    let detailedContent = '';
+    
+    // CKEditor가 있다면 CKEditor에서 값 가져오기
+    if (window.RichText && typeof window.RichText.getData === 'function') {
+        detailedContent = window.RichText.getData();
+    } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
+        detailedContent = window.editorInstance.getData();
+    } else if (contentElement) {
+        // div 형태의 에디터 또는 textarea 모두 지원
+        if (contentElement.tagName === 'DIV') {
+            detailedContent = contentElement.innerHTML || '';
+        } else {
+            detailedContent = contentElement.value || '';
+        }
+    }
+    
     formData.append('detailed_content', detailedContent);
     
     // 동적 필드 수집
     const dynamicData = collectDynamicFields();
     
-    // 모든 데이터를 custom_data로 통합
-    const customData = {};
+    // custom_data 구성
+    formData.append('custom_data', JSON.stringify(dynamicData));
     
-    // 섹션별로 데이터 수집
-    sections.forEach(section => {
-        const cols = sectionColumns[section.section_key] || [];
-        cols.forEach(col => {
-            if (dynamicData[col.column_key] !== undefined) {
-                customData[col.column_key] = dynamicData[col.column_key];
-            }
+    // 새 첨부파일 처리 (공통 컴포넌트 변수 사용)
+    if (typeof pendingFiles !== 'undefined') {
+        pendingFiles.forEach((file, index) => {
+            formData.append('files', file);
+        });
+    }
+    
+    // 삭제된 첨부파일 정보
+    if (typeof deletedAttachments !== 'undefined') {
+        formData.append('deleted_attachments', JSON.stringify(deletedAttachments));
+    }
+    
+    // 첨부파일 설명 정보
+    const attachmentDescriptions = [];
+    document.querySelectorAll('.attachment-desc').forEach((input, index) => {
+        const row = input.closest('tr') || input.closest('.attachment-row');
+        attachmentDescriptions.push({
+            id: row ? (row.dataset.id || row.dataset.attachmentId || null) : null,
+            description: input.value || '',
+            isNew: row ? (row.dataset.isNew === 'true') : false
         });
     });
-    
-    // FormData에 custom_data 추가
-    formData.append('custom_data', JSON.stringify(customData));
+    formData.append('attachment_data', JSON.stringify(attachmentDescriptions));
     
     // 서버로 전송
     fetch('/update-follow-sop', {
@@ -304,12 +375,16 @@ function updateFollowSop() {
     .then(data => {
         if (data.success) {
             alert('Follow SOP가 성공적으로 수정되었습니다.');
-            if (window.opener) {
+            
+            // 팝업 모드인 경우 부모 창 새로고침
+            {% if is_popup %}
+            if (window.opener && !window.opener.closed) {
                 window.opener.location.reload();
-                window.close();
-            } else {
-                window.location.href = '/safety-sop';
             }
+            {% endif %}
+            
+            // 현재 창 새로고침 (캐시 무시)
+            window.location.href = window.location.href + '&t=' + new Date().getTime();
         } else {
             alert('수정 실패: ' + (data.message || '알 수 없는 오류'));
         }
@@ -382,12 +457,81 @@ window.receiveTableSelection = function(selectedItem) {
     }
 };
 
-// 비밀번호 모달을 위한 업데이트 함수 설정
-window.updateFunction = updateFollowSop;
+// DOMContentLoaded 시 에디터 초기화 및 엔터키 이벤트 추가
+document.addEventListener('DOMContentLoaded', function() {
+    // 에디터 초기화 - data-content 패턴 적용
+    const contentElement = document.getElementById('detailed-content');
+    if (contentElement && contentElement.hasAttribute('data-content')) {
+        try {
+            const contentData = JSON.parse(contentElement.getAttribute('data-content'));
+            if (contentData) {
+                contentElement.innerHTML = contentData;
+            }
+        } catch(e) {
+            console.warn('상세내용 초기화 실패:', e);
+        }
+    }
+    
+    // 비밀번호 입력 엔터 키 이벤트
+    const passwordInput = document.getElementById('edit-password-input');
+    if (passwordInput) {
+        passwordInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                verifyPasswordAndSave();
+            }
+        });
+    }
+});
+
+// verifyPasswordAndSave 함수 추가 (비밀번호 확인)
+function verifyPasswordAndSave() {
+    const password = document.getElementById('edit-password-input').value;
+    
+    if (!password) {
+        alert('비밀번호를 입력해주세요.');
+        return;
+    }
+    
+    // 비밀번호가 admin123인지 확인
+    if (password === 'admin123') {
+        closeEditPasswordModal();
+        updateFollowSop();
+    } else {
+        alert('비밀번호가 올바르지 않습니다.');
+        document.getElementById('edit-password-input').value = '';
+        document.getElementById('edit-password-input').focus();
+    }
+}
+
+// showEditPasswordModal 함수 추가 (다른 detail 페이지와 일관성)
+function showEditPasswordModal() {
+    document.getElementById('edit-password-modal').style.display = 'block';
+    document.getElementById('edit-password-input').focus();
+}
+
+function closeEditPasswordModal() {
+    document.getElementById('edit-password-modal').style.display = 'none';
+    document.getElementById('edit-password-input').value = '';
+}
 </script>
 
-<!-- 비밀번호 모달 -->
-{% include 'includes/password_modal.html' %}
+    <!-- 비밀번호 입력 모달 -->
+    <div id="edit-password-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>편집 권한 확인</h3>
+                <span class="close" onclick="closeEditPasswordModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>편집을 위해 비밀번호를 입력해주세요.</p>
+                <input type="password" id="edit-password-input" placeholder="비밀번호" class="password-field">
+                <div class="modal-buttons">
+                    <button class="btn-confirm" onclick="verifyPasswordAndSave()">확인</button>
+                    <button class="btn-cancel" onclick="closeEditPasswordModal()">취소</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
 <!-- 팝업 핸들러 스크립트 -->
 <script src="/static/js/popup-handler.js"></script>
@@ -553,6 +697,116 @@ window.updateFunction = updateFollowSop;
 .save-section {
     padding: 20px;
     text-align: center;
+}
+
+/* 비밀번호 모달 */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.4);
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: 15% auto;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    width: 400px;
+    max-width: 90%;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+
+.modal-header {
+    padding: 20px 25px 15px;
+    border-bottom: 1px solid #e1e5e9;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: #333;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.close {
+    color: #999;
+    font-size: 24px;
+    font-weight: bold;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.close:hover {
+    color: #333;
+}
+
+.modal-body {
+    padding: 25px;
+}
+
+.modal-body p {
+    margin: 0 0 20px 0;
+    color: #555;
+    font-size: 14px;
+}
+
+.password-field {
+    width: 100%;
+    padding: 12px 15px;
+    border: 1px solid #e1e5e9;
+    border-radius: 4px;
+    font-size: 14px;
+    margin-bottom: 20px;
+    box-sizing: border-box;
+}
+
+.password-field:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+.modal-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.btn-confirm, .modal-buttons .btn-cancel {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    min-width: 80px;
+}
+
+.btn-confirm {
+    background: #2f5fd3;
+    color: white;
+}
+
+.btn-confirm:hover {
+    background: #1d4ed8;
+}
+
+.modal-buttons .btn-cancel {
+    background: #6b7280;
+    color: white;
+}
+
+.modal-buttons .btn-cancel:hover {
+    background: #4b5563;
 }
 
 /* 저장/취소 버튼 스타일 */

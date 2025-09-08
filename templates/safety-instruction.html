@@ -25,6 +25,27 @@
     <h2 class="page-title">환경안전 지시서</h2>
 </div>
 
+<style>
+/* 리스트 컬럼 폭/높이 제한 */
+th[data-col], td[data-col] {
+    max-width: 200px;
+    min-width: 150px;
+}
+
+td[data-col] .list-display {
+    max-height: 80px;
+    overflow-y: auto;
+    width: 100%;
+}
+
+td[data-col] .list-item-display {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+</style>
+
 <!-- 검색 영역 -->
 <div class="search-section">
     <form method="GET" class="search-form">
@@ -55,10 +76,13 @@
                 <tr>
                     <th class="checkbox-column"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
                     <th class="fixed-col" style="width: 60px;">No</th>
+                    <!-- 하드코딩된 컬럼 헤더 (issue_number, created_at) -->
+                    <th>지시번호</th>
+                    <th style="width: 120px;">등록일</th>
                     {% for section in sections %}
                         {% for col in section_columns[section['section_key']] %}
-                            {% if col['column_key'] not in ['detailed_content', 'violation_content'] %}
-                            <th>{{ col['column_name'] }}</th>
+                            {% if col['column_key'] not in ['detailed_content', 'violation_content', 'issue_number', 'created_at'] %}
+                            <th {% if col['column_type'] == 'list' %}data-col="{{ col['column_key'] }}"{% endif %}>{{ col['column_name'] }}</th>
                             {% endif %}
                         {% endfor %}
                     {% endfor %}
@@ -73,30 +97,75 @@
                     <td class="fixed-col" style="width: 60px;">
                         {{ item.no }}
                     </td>
+                    <!-- 하드코딩된 컬럼 (issue_number, created_at) -->
+                    <td>
+                        <a href="javascript:void(0)" class="company-link" onclick="openSafetyInstructionModal('{{ item.issue_number }}')">{{ item.issue_number or '-' }}</a>
+                    </td>
+                    <td style="width: 120px;">
+                        {{ (item.created_at|date_only) if item.created_at else '-' }}
+                    </td>
                     {% for section in sections %}
                         {% for col in section_columns[section['section_key']] %}
-                            {% if col['column_key'] not in ['detailed_content', 'violation_content'] %}
-                            <td>
-                                {% if col['column_key'] == 'issue_number' %}
-                                    <a href="javascript:void(0)" class="company-link" onclick="openSafetyInstructionModal('{{ item.issue_number }}')">{{ item.issue_number or '-' }}</a>
+                            {% if col['column_key'] not in ['detailed_content', 'violation_content', 'issue_number', 'created_at'] %}
+                            <td {% if col['column_type'] == 'list' %}data-col="{{ col['column_key'] }}"{% endif %}>
+                                {% if col['column_type'] == 'list' %}
+                                    <!-- 리스트 타입 컬럼 표시 개선 -->
+                                    {% if item.custom_mapped and col['column_key'] in item.custom_mapped %}
+                                        {% set list_data = item.custom_mapped[col['column_key']] %}
+                                        {% if list_data and list_data != '[]' %}
+                                            {% if list_data is string %}
+                                                <!-- 문자열인 경우 길이만 표시 -->
+                                                <div style="font-size: 12px; color: #6c757d;">{{ list_data|length }}개 항목</div>
+                                            {% elif list_data is iterable and list_data is not string %}
+                                                <!-- 리스트/배열인 경우 상위 3개 표시 -->
+                                                <div class="list-display" style="max-height: 100px; overflow-y: auto;">
+                                                    {% for list_item in list_data[:3] %}
+                                                    <div class="list-item-display" style="font-size: 12px; padding: 2px 4px; margin-bottom: 2px; border: 1px solid #dee2e6; border-radius: 3px; background: #f8f9fa;">
+                                                        {% if list_item is mapping %}
+                                                            {% for key, value in list_item.items() if value %}
+                                                                {{ value }}{% if not loop.last %}, {% endif %}
+                                                            {% endfor %}
+                                                        {% else %}
+                                                            {{ list_item }}
+                                                        {% endif %}
+                                                    </div>
+                                                    {% endfor %}
+                                                    {% if list_data|length > 3 %}
+                                                    <div style="font-size: 11px; color: #6c757d; padding: 2px 4px;">
+                                                        +{{ list_data|length - 3 }}개 더
+                                                    </div>
+                                                    {% endif %}
+                                                </div>
+                                            {% else %}
+                                                <!-- 기타 타입 -->
+                                                <div style="font-size: 12px; color: #6c757d;">데이터 있음</div>
+                                            {% endif %}
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    {% else %}
+                                        -
+                                    {% endif %}
                                 {% elif col['column_type'] == 'dropdown' %}
                                     {% set field_label = col['column_key'] + '_label' %}
-                                    {% if item.custom_mapped and col['column_key'] in item.custom_mapped %}
-                                        {{ item.custom_mapped[col['column_key']] or '-' }}
+                                    {% set col_key = col['column_key'] %}
+                                    {% if item.custom_mapped and col_key in item.custom_mapped %}
+                                        {{ item.custom_mapped[col_key] or '-' }}
                                     {% elif field_label in item and item[field_label] %}
                                         {{ item[field_label] }}
-                                    {% elif col['column_key'] in item and item[col['column_key']] %}
-                                        {{ item[col['column_key']] }}
+                                    {% elif col_key in item and item[col_key] %}
+                                        {{ item[col_key] }}
                                     {% else %}
                                         -
                                     {% endif %}
                                 {% elif col['column_key'] == 'created_at' %}
                                     {{ (item.created_at|date_only) if item.created_at else '-' }}
                                 {% else %}
-                                    {% if item.custom_mapped and col['column_key'] in item.custom_mapped %}
-                                        {{ item.custom_mapped[col['column_key']] or '-' }}
-                                    {% elif col['column_key'] in item %}
-                                        {{ item[col['column_key']] or '-' }}
+                                    {% set col_key = col['column_key'] %}
+                                    {% if item.custom_mapped and col_key in item.custom_mapped %}
+                                        {{ item.custom_mapped[col_key] or '-' }}
+                                    {% elif col_key in item %}
+                                        {{ item[col_key] or '-' }}
                                     {% else %}
                                         -
                                     {% endif %}

@@ -8,6 +8,7 @@ import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from db_connection import get_db_connection
+from db.upsert import safe_upsert
 
 # 보드 설정
 BOARD_CONFIGS = {
@@ -113,7 +114,7 @@ class ColumnService:
         placeholders = ', '.join(['?' for _ in values])
         columns_str = ', '.join(columns)
         
-        cursor.execute(f"""
+        cursor.execute_with_returning_id(f"""
             INSERT INTO {self.config['column_table']}
             ({columns_str})
             VALUES ({placeholders}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
@@ -246,20 +247,19 @@ class CodeService:
             WHERE board_type = ? AND column_key = ?
         """, (self.board_type, column_key))
         
-        # 새 코드 추가
+        # 새 코드 추가 (safe_upsert 사용)
         for i, code in enumerate(codes):
-            cursor.execute("""
-                INSERT OR REPLACE INTO dropdown_option_codes_v2
-                (board_type, column_key, option_code, option_value, 
-                 display_order, is_active, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """, (
-                self.board_type,
-                column_key,
-                code['code'],
-                code['value'],
-                i
-            ))
+            option_data = {
+                'board_type': self.board_type,
+                'column_key': column_key,
+                'option_code': code['code'],
+                'option_value': code['value'],
+                'display_order': i,
+                'is_active': 1,
+                'created_at': None,  # 자동으로 처리됨
+                'updated_at': None   # 자동으로 처리됨
+            }
+            safe_upsert(conn, 'dropdown_option_codes_v2', option_data)
         
         conn.commit()
         conn.close()
@@ -380,7 +380,7 @@ class ItemService:
         number = f"{self.config['number_prefix']}-{year:04d}-{month:02d}-{max_seq + 1:04d}"
         
         # 데이터 저장
-        cursor.execute(f"""
+        cursor.execute_with_returning_id(f"""
             INSERT INTO {self.config['cache_table']}
             ({self.board_type}_number, {self.board_type}_date, title, content, 
              custom_data, created_by, created_at, updated_at)
@@ -464,6 +464,15 @@ def get_board_type_from_path(path: str) -> Optional[str]:
 class AttachmentService:
     """첨부파일 관리 서비스 - 보드 격리 원칙 준수"""
     
+    # 게시판별 ID 컬럼 매핑 (중앙화)
+    ID_COLUMN_MAP = {
+        'accident': 'accident_number',
+        'safety_instruction': 'issue_number',
+        'follow_sop': 'work_req_no',
+        'full_process': 'fullprocess_number',
+        'change_request': 'request_number'
+    }
+    
     def __init__(self, board_type: str, db_path: str, conn=None):
         """
         첨부파일 서비스 초기화
@@ -483,6 +492,9 @@ class AttachmentService:
         # 보드별 첨부파일 테이블명 설정
         self.attachment_table = f"{board_type}_attachments"
         
+        # ID 컬럼명 설정 (매핑 테이블 사용)
+        self.id_column = self.ID_COLUMN_MAP.get(board_type, 'item_id')
+        
         # 테이블 생성 (없으면)
         self._ensure_table_exists()
     
@@ -497,11 +509,11 @@ class AttachmentService:
             should_close = True
         cursor = conn.cursor()
         
-        # 보드별 테이블 전략 사용 (현재 구조 유지)
+        # 보드별 테이블 전략 사용 - 통일화된 id_column 사용 (PostgreSQL 호환)
         cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS {self.attachment_table} (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                item_id TEXT NOT NULL,  -- 보드별 식별자 (accident_number, issue_number, request_number 등)
+                id SERIAL PRIMARY KEY,
+                {self.id_column} TEXT NOT NULL,  -- 보드별 식별자 (accident_number, issue_number, request_number 등)
                 file_name TEXT NOT NULL,
                 file_path TEXT NOT NULL,
                 file_size INTEGER,
@@ -513,10 +525,10 @@ class AttachmentService:
             )
         """)
         
-        # 인덱스 추가
+        # 인덱스 추가 (중앙화된 id_column 사용)
         cursor.execute(f"""
-            CREATE INDEX IF NOT EXISTS idx_{self.attachment_table}_item_id 
-            ON {self.attachment_table}(item_id)
+            CREATE INDEX IF NOT EXISTS idx_{self.attachment_table}_{self.id_column}
+            ON {self.attachment_table}({self.id_column})
         """)
         
         # 새로 생성한 연결만 닫기
@@ -548,7 +560,7 @@ class AttachmentService:
         
         attachments = conn.execute(f"""
             SELECT * FROM {self.attachment_table}
-            WHERE item_id = ? AND is_deleted = 0
+            WHERE {self.id_column} = ? AND is_deleted = 0
             ORDER BY uploaded_at DESC
         """, (item_id,)).fetchall()
         
@@ -607,9 +619,9 @@ class AttachmentService:
         
         cursor = conn.cursor()
         
-        cursor.execute(f"""
+        cursor.execute_with_returning_id(f"""
             INSERT INTO {self.attachment_table}
-            (item_id, file_name, file_path, file_size, mime_type, description, uploaded_by)
+            ({self.id_column}, file_name, file_path, file_size, mime_type, description, uploaded_by)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             item_id,
@@ -842,10 +854,10 @@ class AttachmentService:
                     # MIME 타입 추출
                     mime_type = file.content_type if hasattr(file, 'content_type') else 'application/octet-stream'
                     
-                    # DB에 저장 (같은 연결 사용)
-                    cursor.execute(f"""
+                    # DB에 저장 (같은 연결 사용, 중앙화된 id_column 사용)
+                    cursor.execute_with_returning_id(f"""
                         INSERT INTO {self.attachment_table}
-                        (item_id, file_name, file_path, file_size, mime_type, description, uploaded_by)
+                        ({self.id_column}, file_name, file_path, file_size, mime_type, description, uploaded_by)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                     """, (
                         item_id,
@@ -899,7 +911,7 @@ class AttachmentService:
                     AVG(file_size) as avg_size,
                     MAX(file_size) as max_size
                 FROM {self.attachment_table}
-                WHERE item_id = ? AND is_deleted = 0
+                WHERE {self.id_column} = ? AND is_deleted = 0
             """, (item_id,)).fetchone()
         else:
             stats = conn.execute(f"""
@@ -908,7 +920,7 @@ class AttachmentService:
                     SUM(file_size) as total_size,
                     AVG(file_size) as avg_size,
                     MAX(file_size) as max_size,
-                    COUNT(DISTINCT item_id) as item_count
+                    COUNT(DISTINCT {self.id_column}) as item_count
                 FROM {self.attachment_table}
                 WHERE is_deleted = 0
             """).fetchone()

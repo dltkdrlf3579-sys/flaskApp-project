@@ -15,6 +15,29 @@
     
     <!-- 리스트 필드 전체 컨테이너 -->
     <div class="list-field-container-{{ col.column_key }}">
+        <!-- DEBUG: 필드 정보 확인 및 데이터 설정 -->
+        <script>
+            // 초기 데이터를 JavaScript 변수로 설정
+            var {{ col.column_key }}_initialData = {{ col_value | tojson | safe if col_value else '[]' }};
+            
+            console.log('🏗️ 리스트 필드 생성:', {
+                column_key: '{{ col.column_key }}',
+                section_key: '{{ section.section_key }}',
+                col_value_type: '{{ col_value.__class__.__name__ if col_value else "None" }}',
+                col_value_length: {{ col_value|length if col_value else 0 }},
+                col_value: {{ col.column_key }}_initialData
+            });
+            
+            // DOM 로드 후 hidden input에 값 설정
+            document.addEventListener('DOMContentLoaded', function() {
+                var hiddenInput = document.getElementById('{{ col.column_key }}');
+                if (hiddenInput && {{ col.column_key }}_initialData) {
+                    hiddenInput.value = JSON.stringify({{ col.column_key }}_initialData);
+                    console.log('🔧 {{ col.column_key }} hidden input 초기값 설정 완료:', hiddenInput.value.length, '문자');
+                }
+            });
+        </script>
+        
         <!-- Hidden input for data storage -->
         <input type="hidden" 
                id="{{ col.column_key }}" 
@@ -22,12 +45,7 @@
                class="{{ section.section_key }}-input" 
                data-field="{{ col.column_key }}"
                data-field-type="list"
-               data-section="{{ section.section_key }}"
-               {% if col_value is string %}
-               value="{{ col_value }}"
-               {% else %}
-               value="{{ col_value | tojson if col_value else '[]' }}"
-               {% endif %}>
+               data-section="{{ section.section_key }}">
         
         <!-- 제목과 추가 버튼 -->
         <div class="list-field-header-{{ col.column_key }}">
@@ -151,8 +169,8 @@
     .list-field-table-{{ col.column_key }} {
         width: 100%;
         border-collapse: collapse;
-        table-layout: fixed;
-        min-width: 1200px; /* 최소 너비 확장 */
+        table-layout: fixed; /* 고정 레이아웃으로 컬럼 너비 강제 고정 */
+        min-width: 800px; /* 최소 너비 */
     }
     
     .list-field-table-{{ col.column_key }} th {
@@ -166,12 +184,12 @@
         white-space: nowrap;
     }
     
-    .list-field-table-{{ col.column_key }} th:nth-child(1) { width: 60px; text-align: center; }
-    .list-field-table-{{ col.column_key }} th:nth-child(2) { width: 150px; }
-    .list-field-table-{{ col.column_key }} th:nth-child(3) { width: 150px; }
-    .list-field-table-{{ col.column_key }} th:nth-child(4) { width: 350px; }
-    .list-field-table-{{ col.column_key }} th:nth-child(5) { width: 160px; }
-    .list-field-table-{{ col.column_key }} th:nth-child(6) { width: 80px; text-align: center; }
+    .list-field-table-{{ col.column_key }} th:nth-child(1) { width: 8%; text-align: center; min-width: 50px; } /* No. */
+    .list-field-table-{{ col.column_key }} th:nth-child(2) { width: 100px !important; min-width: 100px !important; } /* 성함 */
+    .list-field-table-{{ col.column_key }} th:nth-child(3) { width: 17%; min-width: 100px; } /* ID */
+    .list-field-table-{{ col.column_key }} th:nth-child(4) { width: 40%; min-width: 200px; } /* 소속업체 */
+    .list-field-table-{{ col.column_key }} th:nth-child(5) { width: 140px !important; min-width: 140px !important; } /* 사업자번호 */
+    .list-field-table-{{ col.column_key }} th:nth-child(6) { width: 5%; text-align: center; min-width: 60px; } /* 관리 */
     
     .list-field-table-{{ col.column_key }} td {
         padding: 12px 8px;
@@ -184,12 +202,32 @@
     }
     
     .list-field-table-{{ col.column_key }} td:nth-child(1) {
-        text-align: center;
+        width: 8%; text-align: center; min-width: 50px;
         font-weight: 600;
     }
     
+    .list-field-table-{{ col.column_key }} td:nth-child(2) {
+        width: 100px !important; min-width: 100px !important; max-width: 100px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    
+    .list-field-table-{{ col.column_key }} td:nth-child(3) {
+        width: 17%; min-width: 100px; max-width: 120px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    
+    .list-field-table-{{ col.column_key }} td:nth-child(4) {
+        width: 40%; min-width: 200px; max-width: 300px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    
+    .list-field-table-{{ col.column_key }} td:nth-child(5) {
+        width: 140px !important; min-width: 140px !important; max-width: 140px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    
     .list-field-table-{{ col.column_key }} td:nth-child(6) {
-        text-align: center;
+        width: 5%; text-align: center; min-width: 60px;
     }
     
     .list-field-table-{{ col.column_key }} tbody tr:hover {
@@ -283,43 +321,161 @@
             // Update count
             document.getElementById('{{ col.column_key }}_count').textContent = {{ col.column_key }}_data.length;
             
-            // Update hidden input - 중요!
+            // Update hidden input - 중요! 전체 데이터를 확실히 저장
             var jsonData = JSON.stringify({{ col.column_key }}_data);
-            document.getElementById('{{ col.column_key }}').value = jsonData;
-            console.log('{{ col.column_key }} hidden input 업데이트:', jsonData);
-            console.log('{{ col.column_key }} hidden input 현재 value:', document.getElementById('{{ col.column_key }}').value);
+            var hiddenInput = document.getElementById('{{ col.column_key }}');
+            if (hiddenInput) {
+                hiddenInput.value = jsonData;
+                console.log('{{ col.column_key }} hidden input 업데이트 완료');
+                console.log('  - 데이터 개수:', {{ col.column_key }}_data.length);
+                console.log('  - JSON 길이:', jsonData.length);
+                console.log('  - hidden input value 확인:', hiddenInput.value.length, '문자');
+                
+                // 데이터 무결성 검증
+                try {
+                    var verifyData = JSON.parse(hiddenInput.value);
+                    if (verifyData.length !== {{ col.column_key }}_data.length) {
+                        console.error('{{ col.column_key }} 데이터 무결성 오류! 메모리:', {{ col.column_key }}_data.length, ', hidden:', verifyData.length);
+                    } else {
+                        console.log('{{ col.column_key }} 데이터 무결성 검증 통과');
+                    }
+                } catch(e) {
+                    console.error('{{ col.column_key }} 데이터 무결성 검증 실패:', e);
+                }
+            } else {
+                console.error('{{ col.column_key }} hidden input을 찾을 수 없습니다!');
+            }
         }
         
-        // 초기 데이터 로드
-        try {
-            var initialData = document.getElementById('{{ col.column_key }}').value;
-            if (initialData && initialData !== '[]') {
-                {{ col.column_key }}_data = JSON.parse(initialData);
-                console.log('{{ col.column_key }} 초기 데이터:', {{ col.column_key }}_data);
-                
-                // 초기 데이터가 있으면 테이블 다시 렌더링
-                if ({{ col.column_key }}_data.length > 0) {
+        // 초기 데이터 로드 - JavaScript 변수 사용
+        function loadInitialData_{{ col.column_key }}() {
+            console.log('🔄 {{ col.column_key }} 초기 데이터 로드 시작');
+            try {
+                // JavaScript 변수에서 직접 가져오기 (HTML 파싱 문제 해결)
+                if (typeof {{ col.column_key }}_initialData !== 'undefined' && Array.isArray({{ col.column_key }}_initialData)) {
+                    {{ col.column_key }}_data = [...{{ col.column_key }}_initialData];  // 복사본 생성
+                    console.log('✅ {{ col.column_key }} JavaScript 변수에서 초기 데이터 로드 성공');
+                    console.log('📊 {{ col.column_key }} 초기 데이터:', {{ col.column_key }}_data);
+                    console.log('📏 {{ col.column_key }} 초기 데이터 길이:', {{ col.column_key }}_data.length);
+                    
+                    // 항상 테이블 렌더링하여 데이터 동기화
+                    console.log('🔄 {{ col.column_key }} 초기 데이터로 테이블 렌더링 시작 (데이터:', {{ col.column_key }}_data.length, '개)');
                     renderTable_{{ col.column_key }}();
+                } else {
+                    console.log('⚠️ {{ col.column_key }} 초기 데이터 없음 또는 유효하지 않음');
+                    // 기존 메모리 데이터가 있으면 유지, 없으면 빈 배열로 초기화
+                    if (!{{ col.column_key }}_data) {
+                        {{ col.column_key }}_data = [];
+                        console.log('🆕 {{ col.column_key }} 메모리 데이터 새로 초기화');
+                    } else {
+                        console.log('💾 {{ col.column_key }} 기존 메모리 데이터 유지:', {{ col.column_key }}_data.length, '개 항목');
+                    }
+                }
+            } catch(e) {
+                console.error('❌ {{ col.column_key }} 초기 데이터 로드 실패:', e);
+                // 오류 발생 시에도 기존 메모리 데이터 유지
+                if (!{{ col.column_key }}_data) {
+                    {{ col.column_key }}_data = [];
+                    console.log('🛠️ {{ col.column_key }} 오류로 인한 메모리 데이터 새로 초기화');
+                } else {
+                    console.log('🛡️ {{ col.column_key }} 오류 상황에서도 기존 메모리 데이터 유지');
                 }
             }
-        } catch(e) {
-            console.log('{{ col.column_key }} 초기 데이터 파싱 실패:', e);
-            {{ col.column_key }}_data = [];
         }
         
+        // DOM이 완전히 로드된 후 초기 데이터 로드 - 더 안전하게
+        function safeInitialize_{{ col.column_key }}() {
+            // 여러 번 시도하여 안전하게 초기화
+            var retryCount = 0;
+            var maxRetries = 5;
+            
+            function attemptLoad() {
+                try {
+                    var hiddenInput = document.getElementById('{{ col.column_key }}');
+                    if (!hiddenInput) {
+                        if (retryCount < maxRetries) {
+                            retryCount++;
+                            console.log('{{ col.column_key }} hidden input 찾기 재시도:', retryCount);
+                            setTimeout(attemptLoad, 100);
+                            return;
+                        } else {
+                            console.error('{{ col.column_key }} hidden input을 찾을 수 없습니다 (최대 재시도 초과)');
+                            return;
+                        }
+                    }
+                    
+                    loadInitialData_{{ col.column_key }}();
+                } catch(e) {
+                    console.error('{{ col.column_key }} 초기화 실패:', e);
+                    if (retryCount < maxRetries) {
+                        retryCount++;
+                        setTimeout(attemptLoad, 100);
+                    }
+                }
+            }
+            
+            attemptLoad();
+        }
+        
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', safeInitialize_{{ col.column_key }});
+        } else if (document.readyState === 'interactive' || document.readyState === 'complete') {
+            safeInitialize_{{ col.column_key }}();
+        } else {
+            // 최후의 수단
+            window.addEventListener('load', safeInitialize_{{ col.column_key }});
+        }
+        
+        // 현재 데이터를 항상 동기화하는 함수
+        function syncData_{{ col.column_key }}() {
+            var hiddenInput = document.getElementById('{{ col.column_key }}');
+            if (!hiddenInput) return;
+            
+            var currentValue = hiddenInput.value;
+            if (currentValue && currentValue !== '[]') {
+                try {
+                    var parsedData = JSON.parse(currentValue);
+                    if (Array.isArray(parsedData)) {
+                        {{ col.column_key }}_data = parsedData;
+                        console.log('{{ col.column_key }} 데이터 동기화 완료:', {{ col.column_key }}_data.length, '개 항목');
+                        return true;
+                    }
+                } catch(e) {
+                    console.error('{{ col.column_key }} 데이터 동기화 실패:', e);
+                }
+            }
+            return false;
+        }
+
         // 바로 검색 팝업 띄우기
         window.addWorker_{{ col.column_key }} = function() {
+            console.log('🚀 {{ col.column_key }} 팝업 열기 시작');
+            console.log('📊 {{ col.column_key }} 팝업 열기 전 메모리 데이터:', {
+                length: {{ col.column_key }}_data ? {{ col.column_key }}_data.length : 0,
+                data: {{ col.column_key }}_data
+            });
+            
+            // hidden input 현재 값 확인 (동기화는 하지 않음)
+            var hiddenInput = document.getElementById('{{ col.column_key }}');
+            if (hiddenInput) {
+                console.log('💾 {{ col.column_key }} hidden input 현재 값:', hiddenInput.value);
+                console.log('💾 {{ col.column_key }} hidden input 길이:', hiddenInput.value ? hiddenInput.value.length : 0);
+            }
+            
+            // 동기화는 하지 않고 현재 메모리 데이터 신뢰
+            console.log('✅ {{ col.column_key }} 현재 메모리 데이터를 신뢰하고 팝업 진행');
+            console.log('📋 {{ col.column_key }} 최종 확인 - 현재 데이터:', {{ col.column_key }}_data.length, '개 항목');
+            
             var callbackName = 'workerCallback_{{ col.column_key }}_' + Date.now();
             console.log('{{ col.column_key }} 검색 팝업 열기');
             console.log('현재 {{ col.column_key }}_data:', {{ col.column_key }}_data);
+            console.log('현재 {{ col.column_key }}_data 길이:', {{ col.column_key }}_data.length);
             
             window[callbackName] = function(data) {
-                console.log('{{ col.column_key }} 선택된 데이터:', data);
-                console.log('데이터 타입 확인:', {
-                    worker_name: typeof data.worker_name,
-                    worker_id: typeof data.worker_id,
-                    company_name: typeof data.company_name,
-                    business_number: typeof data.business_number
+                console.log('🎯 {{ col.column_key }} 팝업에서 선택된 데이터:', data);
+                console.log('🔍 {{ col.column_key }} 콜백 실행 전 기존 데이터 상태:', {
+                    length: {{ col.column_key }}_data.length,
+                    items: {{ col.column_key }}_data
                 });
                 
                 // 중복 체크
@@ -333,6 +489,8 @@
                     return;
                 }
                 
+                console.log('✅ {{ col.column_key }} 중복 체크 통과, 새 항목 추가 진행');
+                
                 // 데이터 추가
                 var newItem = {
                     name: data.worker_name || '',
@@ -341,13 +499,17 @@
                     bizno: data.business_number || ''
                 };
                 
-                console.log('추가할 새 항목:', newItem);
+                console.log('📝 {{ col.column_key }} 추가할 새 항목:', newItem);
                 {{ col.column_key }}_data.push(newItem);
                 
-                console.log('{{ col.column_key }} 추가 후 데이터:', {{ col.column_key }}_data);
-                console.log('{{ col.column_key }} 데이터 길이:', {{ col.column_key }}_data.length);
+                console.log('✅ {{ col.column_key }} 추가 완료! 최종 데이터:', {{ col.column_key }}_data);
+                console.log('📊 {{ col.column_key }} 최종 데이터 길이:', {{ col.column_key }}_data.length);
+                console.log('🔄 {{ col.column_key }} 테이블 렌더링 시작');
                 
                 renderTable_{{ col.column_key }}();
+                
+                console.log('💾 {{ col.column_key }} hidden input 값 확인:', document.getElementById('{{ col.column_key }}').value);
+                
                 delete window[callbackName];
             };
             

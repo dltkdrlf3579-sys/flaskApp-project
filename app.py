@@ -1126,6 +1126,149 @@ def change_request_detail_route(request_id):
     """변경요청 상세정보 페이지 라우트"""
     return change_request_detail(request_id)
 
+@app.route("/accident")
+def accident_route():
+    """사고 메인 페이지 라우트"""
+    return accident()
+
+def accident():
+    """사고 목록 페이지 (메인)"""
+    from common_mapping import smart_apply_mappings
+    import math
+    
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    
+    # 검색 조건
+    filters = {
+        'accident_date_start': request.args.get('accident_date_start'),
+        'accident_date_end': request.args.get('accident_date_end'),
+        'workplace': request.args.get('workplace', '').strip(),
+        'accident_grade': request.args.get('accident_grade', '').strip()
+    }
+    
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    
+    # 섹션 정보 가져오기
+    try:
+        sections = conn.execute("""
+            SELECT * FROM accident_sections 
+            WHERE is_active = 1 
+            AND (is_deleted = 0 OR is_deleted IS NULL)
+            ORDER BY section_order
+        """).fetchall()
+        sections = [dict(row) for row in sections]
+    except:
+        sections = conn.execute("""
+            SELECT * FROM section_config 
+            WHERE board_type = 'accident' AND is_active = 1 
+            ORDER BY section_order
+        """).fetchall()
+        sections = [dict(row) for row in sections]
+    
+    # 동적 컬럼 설정 가져오기
+    dynamic_columns_rows = conn.execute("""
+        SELECT * FROM accident_column_config 
+        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
+        ORDER BY column_order
+    """).fetchall()
+    dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    
+    # 섹션별로 컬럼 그룹핑
+    section_columns = {}
+    for section in sections:
+        section_columns[section['section_key']] = [
+            col for col in dynamic_columns 
+            if col.get('tab') == section['section_key'] 
+            and col['column_key'] not in ['detailed_content']
+        ]
+    
+    # 드롭다운 컬럼에 대해 코드-값 매핑 정보 추가
+    for col in dynamic_columns:
+        if col['column_type'] == 'dropdown':
+            col['code_mapping'] = get_dropdown_options_for_display('accident', col['column_key'])
+    
+    # 사고 목록 조회
+    query = """
+        SELECT * FROM accidents_cache 
+        WHERE (is_deleted = 0 OR is_deleted IS NULL)
+    """
+    params = []
+    
+    # 필터링 적용
+    if filters['accident_date_start']:
+        query += " AND accident_date >= %s"
+        params.append(filters['accident_date_start'])
+    
+    if filters['accident_date_end']:
+        query += " AND accident_date <= %s"
+        params.append(filters['accident_date_end'])
+    
+    if filters['workplace']:
+        query += " AND workplace LIKE %s"
+        params.append(f"%{filters['workplace']}%")
+    
+    if filters['accident_grade']:
+        query += " AND accident_grade LIKE %s"
+        params.append(f"%{filters['accident_grade']}%")
+    
+    query += " ORDER BY created_at DESC"
+    
+    # 전체 건수 조회
+    count_query = query.replace("SELECT *", "SELECT COUNT(*)")
+    total_count = conn.execute(count_query, tuple(params)).fetchone()[0]
+    
+    # 페이징 적용
+    offset = (page - 1) * per_page
+    query += f" LIMIT {per_page} OFFSET {offset}"
+    
+    accidents_rows = conn.execute(query, tuple(params)).fetchall()
+    accidents = []
+    
+    for idx, row in enumerate(accidents_rows):
+        accident = dict(row)
+        accident['no'] = total_count - offset - idx
+        
+        # custom_data 파싱
+        if accident.get('custom_data'):
+            try:
+                if isinstance(accident['custom_data'], dict):
+                    custom_data = accident['custom_data']
+                else:
+                    custom_data = json.loads(accident['custom_data'])
+                accident.update(custom_data)
+            except Exception as e:
+                print(f"Error parsing custom_data: {e}")
+        
+        # 코드 → 값 변환
+        smart_apply_mappings(accident, dynamic_columns, 'accident')
+        accidents.append(accident)
+    
+    conn.close()
+    
+    # 페이지네이션 정보
+    total_pages = math.ceil(total_count / per_page)
+    pagination = {
+        'page': page,
+        'per_page': per_page,
+        'total_pages': total_pages,
+        'total_count': total_count,
+        'has_prev': page > 1,
+        'has_next': page < total_pages,
+        'pages': list(range(max(1, page - 2), min(total_pages + 1, page + 3)))
+    }
+    
+    return render_template('partner-accident.html',  # 동일한 템플릿 사용
+                         accidents=accidents,
+                         dynamic_columns=dynamic_columns,
+                         sections=sections,
+                         section_columns=section_columns,
+                         pagination=pagination,
+                         search_params=filters,
+                         total_count=total_count,
+                         menu=MENU_CONFIG)
+
 @app.route("/partner-accident")
 def partner_accident_route():
     """협력사 사고 페이지 라우트"""
@@ -4884,27 +5027,6 @@ def download_attachment(attachment_id):
         logging.error(f"파일 다운로드 중 오류: {e}")
         return f"Download error: {str(e)}", 500
 
-@app.route("/uploads/partners/<path:filename>")
-def serve_partner_upload(filename):
-    """D:/uploads/partners 폴더의 파일을 정적으로 서빙"""
-    try:
-        from flask import send_from_directory
-        upload_directory = Path(r"D:/uploads/partners").resolve()
-        
-        # 보안: 파일명에 .. 경로 탐색 방지
-        safe_filename = secure_filename(filename)
-        file_path = upload_directory / safe_filename
-        
-        if not file_path.exists():
-            logging.warning(f"File not found: {file_path}")
-            return "File not found", 404
-            
-        logging.info(f"Serving file: {file_path}")
-        return send_from_directory(str(upload_directory), safe_filename)
-        
-    except Exception as e:
-        logging.error(f"Error serving file {filename}: {str(e)}")
-        return f"Error: {str(e)}", 500
 
 @app.route("/partner-attachments/<business_number>")
 def get_partner_attachments(business_number):
@@ -4943,8 +5065,8 @@ def auto_upload_partner_files():
         if not partner:
             return jsonify({"error": f"Partner not found: {business_number}"}), 404
         
-        # 업로드 폴더 (D드라이브 고정)
-        upload_folder = Path(r"C:\Users\sanggil\flask-portal\uploads")
+        # 업로드 폴더 (현재 작업 디렉토리 기준 상대경로)
+        upload_folder = Path(os.getcwd()) / "uploads"
         upload_folder.mkdir(parents=True, exist_ok=True)
         
         uploaded_files = []
@@ -5068,78 +5190,6 @@ def auto_upload_partner_files():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/generate-partner-html/<business_number>", methods=['POST'])
-def generate_partner_html(business_number):
-    """협력사 상세 정보를 HTML로 생성하여 첨부파일로 저장"""
-    try:
-        # 협력사 정보 조회
-        partner = partner_manager.get_partner_by_business_number(business_number)
-        if not partner:
-            return jsonify({"error": f"Partner not found: {business_number}"}), 404
-        
-        # HTML 템플릿 렌더링
-        html_content = render_template('partner-detail.html', 
-                                     partner=partner, 
-                                     attachments=[],
-                                     menu=MENU_CONFIG, 
-                                     is_popup=False,
-                                     board_type='partner')
-        
-        # HTML을 완전한 문서로 변환
-        if "<html" not in html_content.lower():
-            html_content = f"""<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{partner.get('company_name', '')} - 협력사 상세정보</title>
-</head>
-<body>
-{html_content}
-</body>
-</html>"""
-        
-        # 업로드 폴더 (D드라이브 고정)
-        upload_folder = Path(r"D:\uploads\partners")
-        upload_folder.mkdir(parents=True, exist_ok=True)
-        
-        # 파일명 생성
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{business_number}_{timestamp}_report.html"
-        file_path = upload_folder / filename
-        
-        # HTML 파일 저장
-        file_path.write_text(html_content, encoding="utf-8")
-        
-        # DB에 저장 (기존 컬럼만 사용)
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO partner_attachments 
-            (business_number, filename, original_filename, upload_date, file_size)
-            VALUES (?, ?, ?, datetime('now'), ?)
-        """, (
-            business_number,
-            filename,
-            f"{partner.get('company_name', business_number)}_상세정보.html",
-            file_path.stat().st_size
-        ))
-        conn.commit()
-        conn.close()
-        
-        logging.info(f"HTML report generated for {business_number}: {filename}")
-        
-        return jsonify({
-            "success": True,
-            "business_number": business_number,
-            "filename": filename,
-            "file_size": file_path.stat().st_size,
-            "message": "HTML 리포트가 생성되어 첨부파일로 저장되었습니다."
-        })
-        
-    except Exception as e:
-        logging.error(f"Error generating HTML for {business_number}: {str(e)}")
-        return jsonify({"error": str(e)}), 500
 
 # ===== Phase 1: 동적 컬럼 관리 API =====
 
@@ -7013,19 +7063,6 @@ def reorder_accident_sections():
         logging.error(f"사고 섹션 순서 변경 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/<path:url>")
-def page_view(url):
-    """일반 페이지 체크 (catch-all 라우트)"""
-    conn = get_db_connection()
-    page = conn.execute("SELECT * FROM pages WHERE url = ?", (url,)).fetchone()
-    conn.close()
-    
-    if not page:
-        return "Page not found", 404
-    
-    return render_template("page.html", 
-                         page={'url': page[1], 'title': page[2], 'content': page[3]},
-                         menu=MENU_CONFIG)
 
 @app.route("/api/accident-export")
 def export_accidents_excel():
@@ -9081,8 +9118,70 @@ def board_items_delete_api(board):
 
 
 # ============= Follow SOP & Full Process 페이지 라우트 =============
-# 파일이 길어서 임시로 외부 파일에서 import
-exec(open('add_page_routes.py', encoding='utf-8').read())
+"""
+리팩토링 이후 CWD가 달라질 때 exec로 라우트를 읽지 못해
+엔드포인트가 등록되지 않는 문제가 발생할 수 있음.
+add_page_routes.py는 app 모듈의 globals()를 필요로 하므로
+import 대신 안전한 절대 경로 exec로 로드한다.
+"""
+try:
+    routes_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'add_page_routes.py')
+    with open(routes_path, encoding='utf-8') as f:
+        code = compile(f.read(), routes_path, 'exec')
+        exec(code, globals())
+    print("추가 라우트 로드 완료: follow-sop, full-process 등", flush=True)
+except Exception as e:
+    # 콘솔과 로거 모두에 남겨 원인 파악을 돕는다
+    msg = f"추가 라우트 로드 실패: {e}"
+    print(msg, flush=True)
+    import traceback
+    traceback.print_exc()
+    try:
+        import logging as _logging
+        _logging.error(msg)
+    except Exception:
+        pass
+
+# ============= CMS Catch-all Route (모든 라우트 후에 배치) =============
+@app.route("/<path:url>")
+def page_view(url):
+    """일반 페이지 체크 (catch-all 라우트) - 모든 다른 라우트 후에 실행"""
+    # 실제 라우트로 리다이렉트
+    route_map = {
+        'accident': 'accident_route',
+        'partner-accident': 'partner_accident_route',
+        'safety-instruction': 'safety_instruction_route',
+        'follow-sop': 'follow_sop_route',
+        'full-process': 'full_process_route',
+        'partner-standards': 'partner_standards_route',
+        # 구 라우트 호환: /change-request -> /partner-change-request
+        'change-request': 'partner_change_request_route',
+    }
+    
+    if url in route_map:
+        endpoint = route_map[url]
+        if endpoint != 'page_view':
+            # 엔드포인트가 미등록이면 BuildError를 유발하지 않도록 가드
+            if endpoint in app.view_functions:
+                return redirect(url_for(endpoint))
+            else:
+                try:
+                    import logging as _logging
+                    _logging.error(f"[page_view] 미등록 엔드포인트: {endpoint} (url={url})")
+                except Exception:
+                    pass
+                # 미등록이면 CMS 페이지 탐색으로 폴백 (아래 로직 수행)
+    
+    conn = get_db_connection()
+    page = conn.execute("SELECT * FROM pages WHERE url = ?", (url,)).fetchone()
+    conn.close()
+    
+    if not page:
+        return "Page not found", 404
+    
+    return render_template("page.html", 
+                         page={'url': page[1], 'title': page[2], 'content': page[3]},
+                         menu=MENU_CONFIG)
 
 
 if __name__ == "__main__":

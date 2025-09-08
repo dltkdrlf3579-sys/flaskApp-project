@@ -35,6 +35,21 @@
         <div class="section-content" id="{% if section.section_key == 'basic_info' %}basic-info{% elif section.section_key == 'violation_info' %}violation-info{% elif section.section_key == 'additional' %}additional{% else %}{{ section.section_key|replace('_', '-') }}{% endif %}-content">
             <div class="info-table">
                 {% set all_columns = section_columns[section.section_key] %}
+                
+                <!-- safety_instruction_id와 created_at 추가 (첫 번째 섹션에만) -->
+                {% if loop.index == 1 %}
+                <div class="info-row">
+                    <div class="info-cell span-1">
+                        <label>발부번호</label>
+                        <input type="text" value="{{ instruction.issue_number or '-' }}" readonly style="background-color: #f3f4f6;">
+                    </div>
+                    <div class="info-cell span-1">
+                        <label>등록일</label>
+                        <input type="text" value="{{ (instruction.created_at|date_only) if instruction.created_at else '-' }}" readonly style="background-color: #f3f4f6;">
+                    </div>
+                </div>
+                {% endif %}
+                
                 <!-- detailed_content와 violation_content는 제외 -->
                 {% set columns = [] %}
                 {% for col in all_columns %}
@@ -50,6 +65,9 @@
                     {% for col in chunk %}
                         {% if col %}
                             {% set span = col.column_span|default(1)|int %}
+                            {% if col.column_type == 'list' %}
+                                {% set span = 4 %}
+                            {% endif %}
                             {% if col.column_key == 'created_at' %}
                                 {% set col_value = instruction.created_at | date_only if instruction.created_at else '' %}
                             {% else %}
@@ -134,6 +152,18 @@
                                         </button>
                                     </div>
                                     
+                                {% elif col.column_type == 'list' %}
+                                    <!-- 리스트 필드 -->
+                                    {% set col_value = custom_data.get(col.column_key, '[]') if custom_data else '[]' %}
+                                    <!-- 디버깅: 리스트 필드 값 확인 -->
+                                    <script>console.log('TEMPLATE DEBUG {{ col.column_key }}:', {
+                                        type: '{{ col_value.__class__.__name__ }}',
+                                        length: {{ col_value|length if col_value else 0 }},
+                                        value: {{ col_value|tojson if col_value else '[]' }}
+                                    });</script>
+                                    {% from 'includes/list_field_v3.html' import render_list_field %}
+                                    {{ render_list_field(col, col_value, section, mode='edit') }}
+                                    
                                 {% elif col.column_type == 'textarea' %}
                                     <!-- 텍스트영역 필드 -->
                                     <textarea class="{{ section.section_key|replace('_', '-') }}-input" 
@@ -166,12 +196,8 @@
         </div>
         <div class="section-content">
             <div class="content-editor">
-                <div id="detailed-content" 
-                     class="editable-content"
-                     contenteditable="true"
-                     style="min-height: 300px; padding: 15px; border: 1px solid #d1d5db; border-radius: 4px; background: white;">
-                    {{ instruction.detailed_content | safe if instruction.detailed_content else '' }}
-                </div>
+                <!-- 에디터 초기화 개선 - data-content 패턴 사용 -->
+                <div id="detailed-content" class="editable-content" data-content="{{ (instruction.detailed_content or '') | tojson }}"></div>
             </div>
         </div>
     </div>
@@ -182,13 +208,30 @@
 
     <!-- 저장 버튼 영역 -->
     <div class="save-section">
-        <button class="btn-save" onclick="updateSafetyInstruction()">수정완료</button>
-        <button class="btn-cancel" onclick="window.close()">취소</button>
+        <button class="btn-save" onclick="showEditPasswordModal()">수정완료</button>
+    </div>
+
+    <!-- 비밀번호 입력 모달 -->
+    <div id="edit-password-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>편집 권한 확인</h3>
+                <span class="close" onclick="closeEditPasswordModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>편집을 위해 비밀번호를 입력해주세요.</p>
+                <input type="password" id="edit-password-input" placeholder="비밀번호" class="password-field">
+                <div class="modal-buttons">
+                    <button class="btn-confirm" onclick="verifyPasswordAndSave()">확인</button>
+                    <button class="btn-cancel" onclick="closeEditPasswordModal()">취소</button>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
 <!-- 스타일 -->
-<link rel="stylesheet" href="/static/styles/accident-register.css">
+<link rel="stylesheet" href="/static/styles/safety-instruction-detail.css">
 
 <script>
 // 섹션 정보
@@ -237,7 +280,28 @@ function collectDynamicFields() {
                 value = input.value;
             }
             
-            data[fieldKey] = value;
+            // 리스트 필드 처리 - 더 간단하고 확실한 방법
+            // 1. data-field-type 체크 또는 2. JSON 배열 문자열 체크
+            if ((input.getAttribute('data-field-type') === 'list' || 
+                 (typeof value === 'string' && value.trim().startsWith('['))) && value) {
+                console.log(`🔍 리스트 필드 감지: ${fieldKey}`);
+                try {
+                    const parsed = JSON.parse(value);
+                    if (Array.isArray(parsed)) {
+                        data[fieldKey] = parsed;
+                        console.log(`✅ 리스트 필드 파싱 성공: ${fieldKey} = ${parsed.length}개 항목`);
+                        console.log(`📋 리스트 내용:`, parsed);
+                    } else {
+                        data[fieldKey] = value;
+                        console.log(`⚠️ 리스트가 아닌 데이터: ${fieldKey}`);
+                    }
+                } catch(e) {
+                    data[fieldKey] = value;
+                    console.log(`❌ 리스트 필드 파싱 실패: ${fieldKey}`, e);
+                }
+            } else {
+                data[fieldKey] = value;
+            }
         });
     });
     
@@ -251,47 +315,72 @@ function updateSafetyInstruction() {
     // 발부번호
     formData.append('issue_number', issueNumber);
     
-    // 상세내용 추가
-    const detailedContent = document.getElementById('detailed-content').innerHTML;
+    // 상세내용 처리 - CKEditor 또는 div에서 값 가져오기
+    const contentDiv = document.getElementById('detailed-content');
+    let detailedContent = '';
+    
+    // CKEditor가 있다면 CKEditor에서 값 가져오기
+    if (window.RichText && typeof window.RichText.getData === 'function') {
+        detailedContent = window.RichText.getData();
+    } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
+        detailedContent = window.editorInstance.getData();
+    } else if (contentDiv) {
+        detailedContent = contentDiv.innerHTML || '';
+    }
+    
     formData.append('detailed_content', detailedContent);
     
     // 동적 필드 수집
     const dynamicData = collectDynamicFields();
     
-    // basic_info와 violation_info 분리
-    const basicInfo = {};
-    const violationInfo = {};
-    const customData = {};
+    // 각 필드를 FormData에 추가 (서버에서 필요한 경우 사용)
+    for (const [key, value] of Object.entries(dynamicData)) {
+        formData.append(key, value);
+    }
     
-    // 섹션별로 데이터 분류
-    sections.forEach(section => {
-        const cols = sectionColumns[section.section_key] || [];
-        cols.forEach(col => {
-            if (dynamicData[col.column_key] !== undefined) {
-                if (section.section_key === 'basic_info') {
-                    basicInfo[col.column_key] = dynamicData[col.column_key];
-                } else if (section.section_key === 'violation_info') {
-                    violationInfo[col.column_key] = dynamicData[col.column_key];
-                } else {
-                    customData[col.column_key] = dynamicData[col.column_key];
-                }
-            }
-        });
-    });
+    // base_fields와 custom_data 모두 전송
+    // base_fields: 기본 컬럼들 (화이트리스트)
+    const baseFields = {};
+    const baseFieldsList = [
+        'issue_number', 'instruction_name', 'instruction_date', 'workplace',
+        'instruction_type', 'violation_category', 'created_at'
+    ];
     
-    // FormData에 추가
-    formData.append('basic_info', JSON.stringify(basicInfo));
-    formData.append('violation_info', JSON.stringify(violationInfo));
-    formData.append('custom_data', JSON.stringify(customData));
-    
-    // 새 첨부파일 처리
-    newFiles.forEach((file, index) => {
-        formData.append('files', file);
-        const descInput = document.querySelectorAll('.new-file .file-desc-input')[index];
-        if (descInput) {
-            formData.append(`file_desc_${index}`, descInput.value);
+    baseFieldsList.forEach(field => {
+        if (dynamicData[field] !== undefined) {
+            baseFields[field] = dynamicData[field];
         }
     });
+    
+    formData.append('base_fields', JSON.stringify(baseFields));
+    
+    // custom_data: 모든 동적 필드 포함
+    const customData = { ...dynamicData };
+    formData.append('custom_data', JSON.stringify(customData));
+    
+    // 새 첨부파일 처리 (공통 컴포넌트 변수 사용)
+    if (typeof pendingFiles !== 'undefined') {
+        pendingFiles.forEach((file, index) => {
+            formData.append('files', file);
+        });
+    }
+    
+    // 삭제된 첨부파일 정보
+    if (typeof deletedAttachments !== 'undefined') {
+        formData.append('deleted_attachments', JSON.stringify(deletedAttachments));
+    }
+    
+    // 첨부파일 설명 정보
+    const attachmentDescriptions = [];
+    document.querySelectorAll('.attachment-desc').forEach((input, index) => {
+        const row = input.closest('tr') || input.closest('.attachment-row');
+        attachmentDescriptions.push({
+            id: row ? (row.dataset.id || row.dataset.attachmentId || null) : null,
+            description: input.value || '',
+            isNew: row ? (row.dataset.isNew === 'true') : false
+        });
+    });
+    formData.append('attachment_data', JSON.stringify(attachmentDescriptions));
     
     // 서버로 전송
     fetch('/update-safety-instruction', {
@@ -302,12 +391,16 @@ function updateSafetyInstruction() {
     .then(data => {
         if (data.success) {
             alert('환경안전 지시서가 성공적으로 수정되었습니다.');
-            if (window.opener) {
+            
+            // 팝업 모드인 경우 부모 창 새로고침
+            {% if is_popup %}
+            if (window.opener && !window.opener.closed) {
                 window.opener.location.reload();
-                window.close();
-            } else {
-                window.location.href = '/safety-instruction';
             }
+            {% endif %}
+            
+            // 현재 창 새로고침 (캐시 무시)
+            window.location.href = window.location.href + '&t=' + new Date().getTime();
         } else {
             alert('수정 실패: ' + (data.message || '알 수 없는 오류'));
         }
@@ -318,10 +411,314 @@ function updateSafetyInstruction() {
     });
 }
 
+// 비밀번호 모달 관련 함수들
+function showEditPasswordModal() {
+    document.getElementById('edit-password-modal').style.display = 'block';
+    document.getElementById('edit-password-input').focus();
+}
+
+function closeEditPasswordModal() {
+    document.getElementById('edit-password-modal').style.display = 'none';
+    document.getElementById('edit-password-input').value = '';
+}
+
+function verifyPasswordAndSave() {
+    const password = document.getElementById('edit-password-input').value;
+    
+    if (!password) {
+        alert('비밀번호를 입력해주세요.');
+        return;
+    }
+    
+    // 비밀번호가 admin123인지 확인
+    if (password === 'admin123') {
+        closeEditPasswordModal();
+        updateSafetyInstruction();
+    } else {
+        alert('비밀번호가 올바르지 않습니다.');
+        document.getElementById('edit-password-input').value = '';
+        document.getElementById('edit-password-input').focus();
+    }
+}
+
 // 팝업 열기 함수
 function openPopup(fieldKey) {
     // 팝업 구현 (필요시 추가)
     alert('팝업 기능은 추가 구현이 필요합니다.');
+}
+
+// 페이지 로드 시 초기화
+document.addEventListener('DOMContentLoaded', function() {
+    // 에디터 초기화
+    const contentDiv = document.getElementById('detailed-content');
+    if (contentDiv) {
+        const dataContent = contentDiv.getAttribute('data-content');
+        if (dataContent) {
+            try {
+                const content = JSON.parse(dataContent);
+                contentDiv.innerHTML = content || '';
+            } catch(e) {
+                console.log('상세내용 파싱 오류:', e);
+            }
+        }
+        
+        // contentEditable 활성화
+        contentDiv.contentEditable = true;
+    }
+    
+    // 비밀번호 입력 엔터 키 이벤트
+    const passwordInput = document.getElementById('edit-password-input');
+    if (passwordInput) {
+        passwordInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                verifyPasswordAndSave();
+            }
+        });
+    }
+});
+
+// 공통 팝업 핸들러들 (accident-detail.html과 동일)
+function openPersonSearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=person&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'personSearch', popupOptions);
+    
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    window.receivePersonSelection = function(fieldKey, data) {
+        const mainField = document.getElementById(fieldKey);
+        if (mainField) {
+            mainField.value = data.employee_name || data.name || '';
+        }
+        
+        // ID 필드 업데이트
+        const idField = document.getElementById(fieldKey + '_id');
+        if (idField) {
+            idField.value = data.employee_id || data.id || '';
+        }
+        
+        // 부서 필드 업데이트
+        const deptField = document.getElementById(fieldKey + '_dept');
+        if (deptField) {
+            deptField.value = data.department_name || data.department || '';
+        }
+    };
+    
+    popup.focus();
+}
+
+function openCompanySearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=company&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'companySearch', popupOptions);
+    
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    window.receiveCompanySelection = function(fieldKey, data) {
+        document.getElementById(fieldKey).value = data.company_name || '';
+        
+        // 사업자번호 linked 필드들 업데이트
+        const businessNumberFields = [
+            fieldKey + '_business_number',
+            fieldKey + '_bizno'
+        ];
+        
+        businessNumberFields.forEach(fieldId => {
+            const bnField = document.getElementById(fieldId);
+            if (bnField) bnField.value = data.business_number || '';
+        });
+    };
+    
+    popup.focus();
+}
+
+function openBuildingSearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=building&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'buildingSearch', popupOptions);
+    
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    window.receiveBuildingSelection = function(fieldKey, data) {
+        document.getElementById(fieldKey).value = data.building_name || '';
+        const codeField = document.getElementById(fieldKey + '_code');
+        if (codeField) codeField.value = data.building_code || '';
+    };
+    
+    popup.focus();
+}
+
+function openDepartmentSearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=department&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'departmentSearch', popupOptions);
+    
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    window.receiveDepartmentSelection = function(fieldKey, data) {
+        const mainField = document.getElementById(fieldKey);
+        if (mainField) {
+            mainField.value = data.dept_name || data.department_name || '';
+        }
+        
+        const codeField = document.getElementById(fieldKey + '_code');
+        if (codeField) {
+            codeField.value = data.dept_code || data.department_code || '';
+        }
+    };
+    
+    popup.focus();
+}
+
+function openContractorSearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=contractor&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'contractorSearch', popupOptions);
+    
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    window.receiveContractorSelection = function(fieldKey, data) {
+        const mainField = document.getElementById(fieldKey);
+        if (mainField) {
+            mainField.value = data.worker_name || '';
+        }
+        
+        const linkedFields = ['_id', '_company_name', '_business_number'];
+        linkedFields.forEach(suffix => {
+            const field = document.getElementById(fieldKey + suffix);
+            if (field) {
+                let value = '';
+                if (suffix === '_id') value = data.worker_id || '';
+                else if (suffix === '_company_name') value = data.company_name || '';
+                else if (suffix === '_business_number') value = data.business_number || '';
+                
+                field.value = value;
+            }
+        });
+    };
+    
+    popup.focus();
+}
+
+// 숫자 입력 유효성 검사 함수들
+function isNumberKey(evt) {
+    var charCode = (evt.which) ? evt.which : evt.keyCode;
+    if (charCode > 31 && (charCode < 48 || charCode > 57) && charCode !== 46) {
+        return false;
+    }
+    return true;
+}
+
+function validateNumberInput(input) {
+    const value = input.value;
+    const numericValue = value.replace(/[^0-9.]/g, '');
+    
+    if (value !== numericValue) {
+        input.value = numericValue;
+        showValidationMessage(input, '숫자만 입력할 수 있습니다.');
+    }
+}
+
+function showValidationMessage(input, message) {
+    const existingMessage = input.parentNode.querySelector('.validation-message');
+    if (existingMessage) {
+        existingMessage.remove();
+    }
+    
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'validation-message';
+    messageDiv.style.color = '#dc3545';
+    messageDiv.style.fontSize = '12px';
+    messageDiv.style.marginTop = '5px';
+    messageDiv.textContent = message;
+    
+    input.parentNode.appendChild(messageDiv);
+    
+    setTimeout(() => {
+        if (messageDiv.parentNode) {
+            messageDiv.remove();
+        }
+    }, 3000);
 }
 </script>
 
@@ -526,6 +923,116 @@ function openPopup(fieldKey) {
 }
 
 .btn-cancel:hover {
+    background: #4b5563;
+}
+
+/* 비밀번호 모달 */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.4);
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: 15% auto;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    width: 400px;
+    max-width: 90%;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+
+.modal-header {
+    padding: 20px 25px 15px;
+    border-bottom: 1px solid #e1e5e9;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: #333;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.close {
+    color: #999;
+    font-size: 24px;
+    font-weight: bold;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.close:hover {
+    color: #333;
+}
+
+.modal-body {
+    padding: 25px;
+}
+
+.modal-body p {
+    margin: 0 0 20px 0;
+    color: #555;
+    font-size: 14px;
+}
+
+.password-field {
+    width: 100%;
+    padding: 12px 15px;
+    border: 1px solid #e1e5e9;
+    border-radius: 4px;
+    font-size: 14px;
+    margin-bottom: 20px;
+    box-sizing: border-box;
+}
+
+.password-field:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+.modal-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.btn-confirm, .modal-buttons .btn-cancel {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    min-width: 80px;
+}
+
+.btn-confirm {
+    background: #2f5fd3;
+    color: white;
+}
+
+.btn-confirm:hover {
+    background: #1d4ed8;
+}
+
+.modal-buttons .btn-cancel {
+    background: #6b7280;
+    color: white;
+}
+
+.modal-buttons .btn-cancel:hover {
     background: #4b5563;
 }
 

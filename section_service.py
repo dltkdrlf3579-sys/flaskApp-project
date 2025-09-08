@@ -2,6 +2,7 @@ import sqlite3
 import json
 import logging
 from datetime import datetime
+from db_connection import get_db_connection
 
 class SectionConfigService:
     """섹션 설정 관리 서비스 클래스"""
@@ -22,7 +23,7 @@ class SectionConfigService:
         
     def get_sections(self):
         """특정 보드 타입의 모든 활성 섹션 가져오기"""
-        conn = sqlite3.connect(self.db_path)
+        conn = get_db_connection(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
@@ -60,7 +61,7 @@ class SectionConfigService:
     
     def get_sections_with_columns(self):
         """섹션과 해당 컬럼들을 함께 가져오기"""
-        conn = sqlite3.connect(self.db_path)
+        conn = get_db_connection(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
@@ -100,7 +101,7 @@ class SectionConfigService:
     
     def add_section(self, section_data):
         """새 섹션 추가"""
-        conn = sqlite3.connect(self.db_path)
+        conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
         try:
@@ -133,7 +134,7 @@ class SectionConfigService:
             max_order = cursor.fetchone()[0] or 0
             
             if self.table_name == 'section_config':
-                cursor.execute("""
+                cursor.execute_with_returning_id("""
                     INSERT INTO section_config 
                     (board_type, section_key, section_name, section_order, is_active)
                     VALUES (?, ?, ?, ?, 1)
@@ -144,7 +145,7 @@ class SectionConfigService:
                     max_order + 1
                 ))
             else:
-                cursor.execute(f"""
+                cursor.execute_with_returning_id(f"""
                     INSERT INTO {self.table_name} 
                     (section_key, section_name, section_order, is_active)
                     VALUES (?, ?, ?, 1)
@@ -172,7 +173,7 @@ class SectionConfigService:
     
     def update_section(self, section_id, section_data):
         """섹션 정보 수정 (섹션명만 수정 가능)"""
-        conn = sqlite3.connect(self.db_path)
+        conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
         try:
@@ -226,7 +227,7 @@ class SectionConfigService:
     
     def delete_section(self, section_id):
         """섹션 삭제 (soft delete)"""
-        conn = sqlite3.connect(self.db_path)
+        conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
         try:
@@ -256,7 +257,7 @@ class SectionConfigService:
     
     def reorder_sections(self, section_orders):
         """섹션 순서 재정렬"""
-        conn = sqlite3.connect(self.db_path)
+        conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
         try:

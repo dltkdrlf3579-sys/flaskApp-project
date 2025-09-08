@@ -35,6 +35,21 @@
         <div class="section-content" id="{{ section.section_key }}-content">
             <div class="info-table">
                 {% set all_columns = section_columns[section.section_key] %}
+                
+                <!-- accident_id와 created_at 추가 (첫 번째 섹션에만) -->
+                {% if loop.index == 1 %}
+                <div class="info-row">
+                    <div class="info-cell span-1">
+                        <label>사고번호</label>
+                        <input type="text" value="자동 생성" readonly style="background-color: #f3f4f6; color: #6b7280; font-style: italic;">
+                    </div>
+                    <div class="info-cell span-1">
+                        <label>등록일</label>
+                        <input type="date" value="{{ today_date }}" readonly style="background-color: #f3f4f6;">
+                    </div>
+                </div>
+                {% endif %}
+                
                 <!-- accident_content는 제외하고 일반 필드만 batch 처리 -->
                 {% set columns = [] %}
                 {% for col in all_columns %}
@@ -50,6 +65,9 @@
                     {% for col in chunk %}
                         {% if col %}
                             {% set span = col.column_span|default(1)|int %}
+                            {% if col.column_type == 'list' %}
+                                {% set span = 4 %}
+                            {% endif %}
                             
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
                                 {% if col.column_type != 'list' %}
@@ -112,7 +130,9 @@
                                            class="{{ section.section_key }}-input" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
-                                           placeholder="{{ col.column_name }} 입력">
+                                           oninput="validateNumberInput(this)"
+                                           onkeypress="return isNumberKey(event)"
+                                           placeholder="숫자만 입력하세요">
                                            
                                 {% elif col.column_type in ['linked', 'linked_text', 'linked_dept'] %}
                                     <!-- 연결된 필드 (읽기 전용) -->
@@ -301,12 +321,12 @@
         </div>
         <div class="section-content">
             <div class="content-editor">
-                <!-- 간단한 편집 가능한 영역 -->
-                <div id="detailed-content" 
-                     class="editable-content"></div>
-                
-                <!-- 숨겨진 textarea (저장용) -->
-                <textarea id="detailed-content-hidden" style="display: none;"></textarea>
+                <!-- CKEditor textarea -->
+                <textarea id="detailed-content" 
+                          name="detailed_content"
+                          placeholder="상세내용을 입력하세요."
+                          rows="10"
+                          style="width: 100%; min-height: 300px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;"></textarea>
             </div>
         </div>
     </div>
@@ -404,8 +424,18 @@ function registerAccident() {
     console.log('=== 등록 시작 ===');
     const formData = new FormData();
     
-    // 상세내용 처리 - CKEditor 데이터 가져오기
-    const detailedContent = window.RichText ? window.RichText.getData() : '';
+    // CKEditor 또는 textarea에서 값 가져오기
+    const contentTextarea = document.getElementById('detailed-content');
+    let detailedContent = '';
+    
+    if (window.RichText && typeof window.RichText.getData === 'function') {
+        detailedContent = window.RichText.getData();
+    } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
+        detailedContent = window.editorInstance.getData();
+    } else if (contentTextarea) {
+        detailedContent = contentTextarea.value || '';
+    }
+    
     formData.append('detailed_content', detailedContent);
     console.log('상세내용:', detailedContent);
     
@@ -573,6 +603,52 @@ function registerAccident() {
         console.error('전송 오류:', error);
         alert('등록 중 오류가 발생했습니다: ' + error.message);
     });
+}
+
+// 숫자 입력 유효성 검사 함수들
+function isNumberKey(evt) {
+    var charCode = (evt.which) ? evt.which : evt.keyCode;
+    // 숫자(0-9), 백스페이스, 삭제, 탭, 화살표 키만 허용
+    if (charCode > 31 && (charCode < 48 || charCode > 57) && charCode !== 46) {
+        return false;
+    }
+    return true;
+}
+
+function validateNumberInput(input) {
+    const value = input.value;
+    const numericValue = value.replace(/[^0-9.]/g, '');
+    
+    if (value !== numericValue) {
+        input.value = numericValue;
+        // 경고 메시지 표시
+        showValidationMessage(input, '숫자만 입력할 수 있습니다.');
+    }
+}
+
+function showValidationMessage(input, message) {
+    // 기존 메시지 제거
+    const existingMessage = input.parentNode.querySelector('.validation-message');
+    if (existingMessage) {
+        existingMessage.remove();
+    }
+    
+    // 새 메시지 생성
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'validation-message';
+    messageDiv.style.color = '#dc3545';
+    messageDiv.style.fontSize = '12px';
+    messageDiv.style.marginTop = '5px';
+    messageDiv.textContent = message;
+    
+    input.parentNode.appendChild(messageDiv);
+    
+    // 3초 후 메시지 제거
+    setTimeout(() => {
+        if (messageDiv.parentNode) {
+            messageDiv.remove();
+        }
+    }, 3000);
 }
 
 // 팝업 열기 함수

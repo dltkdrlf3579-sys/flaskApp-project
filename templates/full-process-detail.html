@@ -8,7 +8,7 @@
 {% endblock %}
 
 {% block title %}Full Process 상세정보{% endblock %}
-{% block popup_title %}{{ process.fullprocess_number }} - Full Process 상세정보{% endblock %}
+{% block popup_title %}{{ instruction.fullprocess_number }} - Full Process 상세정보{% endblock %}
 {% block content %}
 
 {% if not is_popup %}
@@ -17,25 +17,39 @@
     <div class="breadcrumb">
         <a href="{{ url_for('page_view', url='full-process') }}">Full Process</a>
         <span class="separator">></span>
-        <span class="current">{{ process.fullprocess_number }}</span>
+        <span class="current">{{ instruction.fullprocess_number }}</span>
     </div>
 </div>
 {% endif %}
 
-<div class="safety-process-detail-container">
+<div class="fullprocess-detail-container">
     <!-- 동적 섹션 렌더링 -->
     {% for section in sections %}
-    <div class="section {% if section.section_key == 'basic_info' %}basic-info{% elif section.section_key == 'violation_info' %}violation-info{% elif section.section_key == 'additional' %}additional{% else %}{{ section.section_key|replace('_', '-') }}{% endif %}-section">
+    <div class="section {{ section.section_key }}-section">
         <div class="section-header">
             <h3 class="section-title">{{ section.section_name }}</h3>
-            <button class="collapse-btn" onclick="toggleSection('{% if section.section_key == 'basic_info' %}basic-info{% elif section.section_key == 'violation_info' %}violation-info{% elif section.section_key == 'additional' %}additional{% else %}{{ section.section_key|replace('_', '-') }}{% endif %}')">
+            <button class="collapse-btn" onclick="toggleSection('{{ section.section_key }}')">
                 <span class="collapse-icon">▲</span>
             </button>
         </div>
-        <div class="section-content" id="{% if section.section_key == 'basic_info' %}basic-info{% elif section.section_key == 'violation_info' %}violation-info{% elif section.section_key == 'additional' %}additional{% else %}{{ section.section_key|replace('_', '-') }}{% endif %}-content">
+        <div class="section-content" id="{{ section.section_key }}-content">
             <div class="info-table">
+                <!-- 평가번호와 등록일 추가 (첫 번째 섹션에만) -->
+                {% if loop.index == 1 %}
+                <div class="info-row">
+                    <div class="info-cell span-1">
+                        <label>평가번호</label>
+                        <input type="text" value="{{ process.evaluation_no or '-' }}" readonly style="background-color: #f3f4f6;">
+                    </div>
+                    <div class="info-cell span-1">
+                        <label>등록일</label>
+                        <input type="text" value="{{ (process.created_at|date_only) if process.created_at else '-' }}" readonly style="background-color: #f3f4f6;">
+                    </div>
+                </div>
+                {% endif %}
+                
                 {% set all_columns = section_columns[section.section_key] %}
-                <!-- detailed_content와 violation_content는 제외 -->
+                <!-- detailed_content와 violation_content는 제외하고 일반 필드만 batch 처리 -->
                 {% set columns = [] %}
                 {% for col in all_columns %}
                     {% if col.column_key not in ['detailed_content', 'violation_content'] %}
@@ -50,10 +64,21 @@
                     {% for col in chunk %}
                         {% if col %}
                             {% set span = col.column_span|default(1)|int %}
-                            {% set col_value = process[col.column_key] | default('', true) %}
+                            {% if col.column_type == 'list' %}
+                                {% set span = 4 %}
+                            {% endif %}
+                            
+                            {% if col.column_type == 'list' %}
+                                <!-- 리스트 필드는 항상 custom_data에서 가져오기 -->
+                                {% set col_value = custom_data.get(col.column_key, '[]') if custom_data else '[]' %}
+                            {% else %}
+                                {% set col_value = instruction[col.column_key] | default('', true) %}
+                            {% endif %}
                             
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
+                                {% if col.column_type != 'list' %}
                                 <label>{{ col.column_name }}</label>
+                                {% endif %}
                                 
                                 {% if col.column_key == 'fullprocess_number' %}
                                     <!-- 평가번호는 수정 불가 -->
@@ -65,7 +90,7 @@
                                     
                                 {% elif col.column_type == 'dropdown' %}
                                     <!-- 드롭다운 필드 -->
-                                    <select class="{{ section.section_key|replace('_', '-') }}-input" 
+                                    <select class="{{ section.section_key }}-input" 
                                             data-field="{{ col.column_key }}"
                                             data-section="{{ section.section_key }}">
                                         <option value="">선택하세요</option>
@@ -89,42 +114,149 @@
                                 {% elif col.column_type == 'date' %}
                                     <!-- 날짜 필드 -->
                                     <input type="date" 
-                                           class="{{ section.section_key|replace('_', '-') }}-input" 
+                                           class="{{ section.section_key }}-input" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            value="{{ col_value }}">
+                                           
+                                {% elif col.column_type == 'time' %}
+                                    <!-- 시간 필드 -->
+                                    <input type="time" 
+                                           class="{{ section.section_key }}-input" 
+                                           data-field="{{ col.column_key }}"
+                                           data-section="{{ section.section_key }}"
+                                           value="{{ col_value }}"
+                                           placeholder="시간 선택">
+                                           
+                                {% elif col.column_type == 'list' %}
+                                    <!-- 리스트 필드 -->
+                                    {% from 'includes/list_field_v3.html' import render_list_field %}
+                                    {{ render_list_field(col, col_value, section, mode='edit') }}
                                            
                                 {% elif col.column_type == 'number' %}
                                     <!-- 숫자 필드 -->
                                     <input type="number" 
-                                           class="{{ section.section_key|replace('_', '-') }}-input" 
+                                           class="{{ section.section_key }}-input" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
-                                           value="{{ col_value }}">
+                                           value="{{ col_value }}"
+                                           oninput="validateNumberInput(this)"
+                                           onkeypress="return isNumberKey(event)"
+                                           placeholder="숫자만 입력하세요">
                                            
-                                {% elif col.column_type == 'linked' or col.column_type == 'linked_text' %}
+                                {% elif col.column_type in ['linked', 'linked_text', 'linked_dept'] %}
                                     <!-- 연결된 필드 (읽기 전용) -->
                                     <input type="text" 
                                            id="{{ col.column_key }}"
-                                           class="{{ section.section_key|replace('_', '-') }}-input" 
+                                           class="{{ section.section_key }}-input linked-field" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            value="{{ col_value }}"
                                            readonly
                                            style="background-color: #f3f4f6;">
                                            
-                                {% elif col.column_type and col.column_type.startswith('popup') %}
+                                {% elif col.column_type == 'popup' %}
                                     <!-- 팝업 필드 -->
                                     <div class="input-group">
                                         <input type="text" 
                                                id="{{ col.column_key }}"
-                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                               class="{{ section.section_key }}-input" 
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                value="{{ col_value }}"
                                                readonly>
                                         <button class="btn btn-sm btn-primary" 
-                                                onclick="{% if col.column_type == 'popup_person' %}openPersonSearch{% elif col.column_type == 'popup_company' %}openCompanySearch{% elif col.column_type == 'popup_building' %}openBuildingSearch{% elif col.column_type == 'popup_department' %}openDepartmentSearch{% elif col.column_type == 'popup_contractor' %}openContractorSearch{% else %}openPopup{% endif %}('{{ col.column_key }}')">
+                                                onclick="openPopup('{{ col.column_key }}')">
+                                            검색
+                                        </button>
+                                    </div>
+                                    
+                                {% elif col.column_type == 'popup_person' %}
+                                    <!-- 담당자 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               id="{{ col.column_key }}" 
+                                               class="{{ section.section_key }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="popup_person"
+                                               value="{{ col_value }}"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <button class="btn btn-sm btn-primary" 
+                                                onclick="openPersonSearch('{{ col.column_key }}')">
+                                            검색
+                                        </button>
+                                    </div>
+                                    
+                                {% elif col.column_type == 'popup_company' %}
+                                    <!-- 업체 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               id="{{ col.column_key }}" 
+                                               class="{{ section.section_key }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="popup_company"
+                                               value="{{ col_value }}"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <button class="btn btn-sm btn-primary" 
+                                                onclick="openCompanySearch('{{ col.column_key }}')">
+                                            검색
+                                        </button>
+                                    </div>
+                                    
+                                {% elif col.column_type == 'popup_building' %}
+                                    <!-- 건물 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               id="{{ col.column_key }}" 
+                                               class="{{ section.section_key }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="popup_building"
+                                               value="{{ col_value }}"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <button class="btn btn-sm btn-primary" 
+                                                onclick="openBuildingSearch('{{ col.column_key }}')">
+                                            검색
+                                        </button>
+                                    </div>
+                                    
+                                {% elif col.column_type == 'popup_department' %}
+                                    <!-- 부서 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               id="{{ col.column_key }}" 
+                                               class="{{ section.section_key }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="popup_department"
+                                               value="{{ col_value }}"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <button class="btn btn-sm btn-primary" 
+                                                onclick="openDepartmentSearch('{{ col.column_key }}')">
+                                            검색
+                                        </button>
+                                    </div>
+                                    
+                                {% elif col.column_type == 'popup_contractor' %}
+                                    <!-- 협력사 근로자 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               id="{{ col.column_key }}" 
+                                               class="{{ section.section_key }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="popup_contractor"
+                                               value="{{ col_value }}"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <button class="btn btn-sm btn-primary" 
+                                                onclick="openContractorSearch('{{ col.column_key }}')">
                                             검색
                                         </button>
                                     </div>
@@ -133,7 +265,8 @@
                                     <!-- 테이블 검색 필드 -->
                                     <div class="input-group">
                                         <input type="text" 
-                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key }}-input" 
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                data-input-type="table"
@@ -147,7 +280,7 @@
                                     
                                 {% elif col.column_type == 'textarea' %}
                                     <!-- 텍스트영역 필드 -->
-                                    <textarea class="{{ section.section_key|replace('_', '-') }}-input" 
+                                    <textarea class="{{ section.section_key }}-input" 
                                             data-field="{{ col.column_key }}"
                                             data-section="{{ section.section_key }}"
                                             rows="4">{{ col_value }}</textarea>
@@ -155,7 +288,7 @@
                                 {% else %}
                                     <!-- 기본 텍스트 필드 -->
                                     <input type="text" 
-                                           class="{{ section.section_key|replace('_', '-') }}-input" 
+                                           class="{{ section.section_key }}-input" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            value="{{ col_value }}">
@@ -170,39 +303,58 @@
     </div>
     {% endfor %}
 
-    <!-- 상세내용 영역 -->
+    <!-- 3. 상세내용 영역 -->
     <div class="section detail-content-section">
         <div class="section-header">
             <h3 class="section-title">상세내용</h3>
         </div>
         <div class="section-content">
             <div class="content-editor">
+                <!-- 간단한 편집 가능한 영역 -->
+                <!-- textarea로 변경하여 안정적인 편집 기능 제공 -->
                 <div id="detailed-content" 
-                     class="editable-content"
-                     data-content="{{ (process.detailed_content or '') | tojson }}"></div>
+                     class="editable-content" 
+                     data-content="{{ (instruction.detailed_content or '') | tojson }}"
+                     contenteditable="true"
+                     placeholder="상세내용을 입력하세요."
+                     style="width: 100%; min-height: 200px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;">{{ instruction.detailed_content | striptags if instruction.detailed_content else '' }}</div>
             </div>
         </div>
     </div>
 
-    <!-- 첨부파일 영역 (공통 컴포넌트) -->
+    <!-- 4. 첨부파일 영역 (공통 컴포넌트) -->
     {% from 'includes/attachment_section.html' import render_attachment_section %}
-    {{ render_attachment_section(attachments, 'safety_process') }}
+    {{ render_attachment_section(attachments, 'fullprocess') }}
 
     <!-- 저장 버튼 영역 -->
     <div class="save-section">
-        <button class="btn btn-primary" onclick="showPasswordModalForUpdate()">수정완료</button>
-        <button class="btn btn-secondary" onclick="window.close()">취소</button>
+        <button class="btn-save" onclick="showEditPasswordModal()">수정완료</button>
+    </div>
+
+    <!-- 비밀번호 입력 모달 -->
+    <div id="edit-password-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>편집 권한 확인</h3>
+                <span class="close" onclick="closeEditPasswordModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>편집을 위해 비밀번호를 입력해주세요.</p>
+                <input type="password" id="edit-password-input" placeholder="비밀번호" class="password-field">
+                <div class="modal-buttons">
+                    <button class="btn-confirm" onclick="verifyPasswordAndSave()">확인</button>
+                    <button class="btn-cancel" onclick="closeEditPasswordModal()">취소</button>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
-
-<!-- 스타일 -->
-<link rel="stylesheet" href="/static/styles/accident-register.css">
 
 <script>
 // 섹션 정보
 const sections = {{ sections | tojson | safe }};
 const sectionColumns = {{ section_columns | tojson | safe }};
-const issueNumber = "{{ process.fullprocess_number }}";
+const issueNumber = "{{ instruction.fullprocess_number }}";
 
 // 섹션 토글
 function toggleSection(sectionId) {
@@ -245,7 +397,28 @@ function collectDynamicFields() {
                 value = input.value;
             }
             
-            data[fieldKey] = value;
+            // 리스트 필드 처리 - 더 간단하고 확실한 방법
+            // 1. data-field-type 체크 또는 2. JSON 배열 문자열 체크
+            if ((input.getAttribute('data-field-type') === 'list' || 
+                 (typeof value === 'string' && value.trim().startsWith('['))) && value) {
+                console.log(`🔍 리스트 필드 감지: ${fieldKey}`);
+                try {
+                    const parsed = JSON.parse(value);
+                    if (Array.isArray(parsed)) {
+                        data[fieldKey] = parsed;
+                        console.log(`✅ 리스트 필드 파싱 성공: ${fieldKey} = ${parsed.length}개 항목`);
+                        console.log(`📋 리스트 내용:`, parsed);
+                    } else {
+                        data[fieldKey] = value;
+                        console.log(`⚠️ 리스트가 아닌 데이터: ${fieldKey}`);
+                    }
+                } catch(e) {
+                    data[fieldKey] = value;
+                    console.log(`❌ 리스트 필드 파싱 실패: ${fieldKey}`, e);
+                }
+            } else {
+                data[fieldKey] = value;
+            }
         });
     });
     
@@ -256,35 +429,74 @@ function collectDynamicFields() {
 function updateFullProcess() {
     const formData = new FormData();
     
-    // 발부번호
+    // 발부번호 (중요: fullprocess_number를 식별자로 사용)
     formData.append('fullprocess_number', issueNumber);
     
-    // 상세내용 추가
-    const detailedContent = document.getElementById('detailed-content');
-    if (detailedContent) {
-        // 상세내용 처리 - CKEditor 데이터 가져오기
-        const content = window.RichText ? window.RichText.getData() : '';
-        formData.append('detailed_content', content);
+    // 상세내용 처리 - contenteditable div에서 값 가져오기
+    const contentDiv = document.getElementById('detailed-content');
+    let detailedContent = '';
+    
+    // CKEditor가 있다면 CKEditor에서 값 가져오기
+    if (window.RichText && typeof window.RichText.getData === 'function') {
+        detailedContent = window.RichText.getData();
+    } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
+        detailedContent = window.editorInstance.getData();
+    } else if (contentDiv) {
+        detailedContent = contentDiv.innerHTML || '';
     }
+    
+    formData.append('detailed_content', detailedContent);
     
     // 동적 필드 수집
     const dynamicData = collectDynamicFields();
     
-    // 모든 데이터를 custom_data로 통합
-    const customData = {};
+    // 각 필드를 FormData에 추가 (서버에서 필요한 경우 사용)
+    for (const [key, value] of Object.entries(dynamicData)) {
+        formData.append(key, value);
+    }
     
-    // 섹션별로 데이터 수집
-    sections.forEach(section => {
-        const cols = sectionColumns[section.section_key] || [];
-        cols.forEach(col => {
-            if (dynamicData[col.column_key] !== undefined) {
-                customData[col.column_key] = dynamicData[col.column_key];
-            }
-        });
+    // base_fields와 custom_data 모두 전송
+    // base_fields: 기본 컬럼들 (화이트리스트)
+    const baseFields = {};
+    const baseFieldsList = [
+        'fullprocess_number', 'created_at'
+    ];
+    
+    baseFieldsList.forEach(field => {
+        if (dynamicData[field] !== undefined) {
+            baseFields[field] = dynamicData[field];
+        }
     });
     
-    // FormData에 custom_data 추가
+    formData.append('base_fields', JSON.stringify(baseFields));
+    
+    // custom_data: 모든 동적 필드 포함
+    const customData = { ...dynamicData };
     formData.append('custom_data', JSON.stringify(customData));
+    
+    // 새 첨부파일 처리 (공통 컴포넌트 변수 사용)
+    if (typeof pendingFiles !== 'undefined') {
+        pendingFiles.forEach((file, index) => {
+            formData.append('files', file);
+        });
+    }
+    
+    // 삭제된 첨부파일 정보
+    if (typeof deletedAttachments !== 'undefined') {
+        formData.append('deleted_attachments', JSON.stringify(deletedAttachments));
+    }
+    
+    // 첨부파일 설명 정보
+    const attachmentDescriptions = [];
+    document.querySelectorAll('.attachment-desc').forEach((input, index) => {
+        const row = input.closest('tr') || input.closest('.attachment-row');
+        attachmentDescriptions.push({
+            id: row ? (row.dataset.id || row.dataset.attachmentId || null) : null,
+            description: input.value || '',
+            isNew: row ? (row.dataset.isNew === 'true') : false
+        });
+    });
+    formData.append('attachment_data', JSON.stringify(attachmentDescriptions));
     
     // 서버로 전송
     fetch('/update-full-process', {
@@ -295,12 +507,16 @@ function updateFullProcess() {
     .then(data => {
         if (data.success) {
             alert('Full Process가 성공적으로 수정되었습니다.');
-            if (window.opener) {
+            
+            // 팝업 모드인 경우 부모 창 새로고침
+            {% if is_popup %}
+            if (window.opener && !window.opener.closed) {
                 window.opener.location.reload();
-                window.close();
-            } else {
-                window.location.href = '/full-process';
             }
+            {% endif %}
+            
+            // 현재 창 새로고침 (캐시 무시)
+            window.location.href = window.location.href + '&t=' + new Date().getTime();
         } else {
             alert('수정 실패: ' + (data.message || '알 수 없는 오류'));
         }
@@ -311,10 +527,52 @@ function updateFullProcess() {
     });
 }
 
-// 팝업 열기 함수
+// 팝업 열기 함수 (테이블 타입용)
 function openPopup(fieldKey) {
-    // 팝업 구현 (필요시 추가)
-    alert('팝업 기능은 추가 구현이 필요합니다.');
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    // 컬럼 설정에서 테이블 정보 가져오기
+    const fieldConfig = columns.find(col => col.column_key === fieldKey);
+    if (!fieldConfig || !fieldConfig.input_type_config) {
+        alert('테이블 설정을 찾을 수 없습니다.');
+        return;
+    }
+    
+    const tableConfig = JSON.parse(fieldConfig.input_type_config);
+    const popupUrl = `/search-popup?type=table&field=${fieldKey}&table=${tableConfig.table_name}`;
+    const popup = window.open(popupUrl, 'tableSearch', popupOptions);
+    
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    window.receiveTableSelection = function(fieldKey, data) {
+        const mainField = document.getElementById(fieldKey);
+        if (mainField && data.display_value) {
+            mainField.value = data.display_value;
+        }
+        
+        // 숨겨진 ID 필드 업데이트
+        const idField = document.getElementById(fieldKey + '_id');
+        if (idField && data.id) {
+            idField.value = data.id;
+        }
+    };
+    
+    popup.focus();
 }
 
 // 담당자 검색 팝업 열기 함수
@@ -362,33 +620,6 @@ function openCompanySearch(fieldKey) {
     
     const popupUrl = `/search-popup?type=company&field=${fieldKey}`;
     const popup = window.open(popupUrl, 'companySearch', popupOptions);
-    
-    if (!popup || popup.closed) {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
-        return;
-    }
-    
-    popup.focus();
-}
-
-// 건물 검색 팝업 열기 함수
-function openBuildingSearch(fieldKey) {
-    const width = 1000;
-    const height = 600;
-    const left = (screen.width - width) / 2;
-    const top = (screen.height - height) / 2;
-    
-    const popupOptions = [
-        `width=${width}`,
-        `height=${height}`,
-        `left=${left}`,
-        `top=${top}`,
-        'scrollbars=yes',
-        'resizable=yes'
-    ].join(',');
-    
-    const popupUrl = `/search-popup?type=building&field=${fieldKey}`;
-    const popup = window.open(popupUrl, 'buildingSearch', popupOptions);
     
     if (!popup || popup.closed) {
         alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
@@ -452,37 +683,362 @@ function openContractorSearch(fieldKey) {
     popup.focus();
 }
 
-// 비밀번호 모달을 위한 업데이트 함수 설정
-window.updateFunction = updateFullProcess;
+// 건물 검색 팝업 열기 함수
+function openBuildingSearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=building&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'buildingSearch', popupOptions);
+    
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    popup.focus();
+}
+
+// 비밀번호 모달 관련 함수들
+function showEditPasswordModal() {
+    document.getElementById('edit-password-modal').style.display = 'block';
+    document.getElementById('edit-password-input').focus();
+}
+
+function closeEditPasswordModal() {
+    document.getElementById('edit-password-modal').style.display = 'none';
+    document.getElementById('edit-password-input').value = '';
+}
+
+function verifyPasswordAndSave() {
+    const password = document.getElementById('edit-password-input').value;
+    
+    if (!password) {
+        alert('비밀번호를 입력해주세요.');
+        return;
+    }
+    
+    // 비밀번호가 admin123인지 확인
+    if (password === 'admin123') {
+        closeEditPasswordModal();
+        updateFullProcess();
+    } else {
+        alert('비밀번호가 올바르지 않습니다.');
+        document.getElementById('edit-password-input').value = '';
+        document.getElementById('edit-password-input').focus();
+    }
+}
+
+// 누락된 팝업 핸들러들 추가 (전역 스코프에서)
+window.receiveDepartmentSelection = function(fieldKey, data) {
+    const mainField = document.getElementById(fieldKey);
+    if (mainField) {
+        mainField.value = data.dept_name || data.department_name || '';
+        mainField.readOnly = true;
+        mainField.style.backgroundColor = '#f3f4f6';
+    }
+    
+    const codeField = document.getElementById(fieldKey + '_code');
+    if (codeField) {
+        codeField.value = data.dept_code || data.department_code || '';
+        codeField.readOnly = true;
+        codeField.style.backgroundColor = '#f3f4f6';
+    }
+    
+    // linked 필드들도 업데이트
+    const linkedFields = ['_name', '_dept_code', '_dept_name'];
+    linkedFields.forEach(suffix => {
+        const field = document.getElementById(fieldKey + suffix);
+        if (field) {
+            let value = '';
+            if (suffix === '_name') value = data.dept_name || data.department_name || '';
+            else if (suffix === '_dept_code') value = data.dept_code || data.department_code || '';
+            else if (suffix === '_dept_name') value = data.dept_name || data.department_name || '';
+            
+            field.value = value;
+            field.readOnly = true;
+            field.style.backgroundColor = '#f3f4f6';
+        }
+    });
+};
+
+window.receiveContractorSelection = function(fieldKey, data) {
+    const mainField = document.getElementById(fieldKey);
+    if (mainField) {
+        mainField.value = data.worker_name || '';
+        mainField.readOnly = true;
+        mainField.style.backgroundColor = '#f3f4f6';
+    }
+    
+    // linked 필드들 업데이트
+    const linkedFields = ['_id', '_company_name', '_business_number'];
+    linkedFields.forEach(suffix => {
+        const field = document.getElementById(fieldKey + suffix);
+        if (field) {
+            let value = '';
+            if (suffix === '_id') value = data.worker_id || '';
+            else if (suffix === '_company_name') value = data.company_name || '';
+            else if (suffix === '_business_number') value = data.business_number || '';
+            
+            field.value = value;
+            field.readOnly = true;
+            field.style.backgroundColor = '#f3f4f6';
+        }
+    });
+};
+
+window.receivePersonSelection = function(fieldKey, data) {
+    const mainField = document.getElementById(fieldKey);
+    if (mainField) {
+        mainField.value = data.employee_name || data.name || '';
+    }
+    
+    // ID 필드 업데이트
+    const idField = document.getElementById(fieldKey + '_id');
+    if (idField) {
+        idField.value = data.employee_id || data.id || '';
+    }
+    
+    // 부서 필드 업데이트
+    const deptField = document.getElementById(fieldKey + '_dept');
+    if (deptField) {
+        deptField.value = data.department_name || data.department || '';
+    }
+};
+
+window.receiveCompanySelection = function(fieldKey, data) {
+    document.getElementById(fieldKey).value = data.company_name || '';
+    
+    // 사업자번호 linked 필드들 업데이트 (다양한 패턴 지원)
+    const businessNumberFields = [
+        fieldKey + '_business_number',  // 기본 패턴
+        fieldKey + '_bizno'             // 실제 사용되는 패턴
+    ];
+    
+    businessNumberFields.forEach(fieldId => {
+        const bnField = document.getElementById(fieldId);
+        if (bnField) bnField.value = data.business_number || '';
+    });
+};
+
+window.receiveBuildingSelection = function(fieldKey, data) {
+    document.getElementById(fieldKey).value = data.building_name || '';
+    const codeField = document.getElementById(fieldKey + '_code');
+    if (codeField) codeField.value = data.building_code || '';
+};
+
+// 숫자 입력 유효성 검사 함수들
+function isNumberKey(evt) {
+    var charCode = (evt.which) ? evt.which : evt.keyCode;
+    // 숫자(0-9), 백스페이스, 삭제, 탭, 화살표 키만 허용
+    if (charCode > 31 && (charCode < 48 || charCode > 57) && charCode !== 46) {
+        return false;
+    }
+    return true;
+}
+
+function validateNumberInput(input) {
+    const value = input.value;
+    const numericValue = value.replace(/[^0-9.]/g, '');
+    
+    if (value !== numericValue) {
+        input.value = numericValue;
+        // 경고 메시지 표시
+        showValidationMessage(input, '숫자만 입력할 수 있습니다.');
+    }
+}
+
+function showValidationMessage(input, message) {
+    // 기존 메시지 제거
+    const existingMessage = input.parentNode.querySelector('.validation-message');
+    if (existingMessage) {
+        existingMessage.remove();
+    }
+    
+    // 새 메시지 생성
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'validation-message';
+    messageDiv.style.color = '#dc3545';
+    messageDiv.style.fontSize = '12px';
+    messageDiv.style.marginTop = '5px';
+    messageDiv.textContent = message;
+    
+    input.parentNode.appendChild(messageDiv);
+    
+    // 3초 후 메시지 제거
+    setTimeout(() => {
+        if (messageDiv.parentNode) {
+            messageDiv.remove();
+        }
+    }, 3000);
+}
+
+// DOMContentLoaded 시 에디터 초기화
+document.addEventListener('DOMContentLoaded', function() {
+    // 에디터 초기화
+    const editorElement = document.getElementById('detailed-content');
+    if (editorElement && editorElement.dataset.content) {
+        try {
+            const content = JSON.parse(editorElement.dataset.content);
+            if (content) {
+                editorElement.innerHTML = content;
+            }
+        } catch (e) {
+            console.log('에디터 초기화 오류:', e);
+        }
+    }
+    
+    // 비밀번호 입력 엔터 키 이벤트
+    const passwordInput = document.getElementById('edit-password-input');
+    if (passwordInput) {
+        passwordInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                verifyPasswordAndSave();
+            }
+        });
+    }
+});
 </script>
 
-<!-- 비밀번호 모달 -->
-{% include 'includes/password_modal.html' %}
-
-<!-- 팝업 핸들러 스크립트 -->
-<script src="/static/js/popup-handler.js"></script>
-
 <style>
-/* 그리드 레이아웃 핵심 스타일 */
-.safety-process-detail-container {
-    padding: 20px;
+/* 추가 스타일 */
+.info-cell textarea {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 14px;
+    resize: vertical;
+}
+
+.info-cell.span-2 {
+    grid-column: span 2;
+}
+
+.info-cell.span-3 {
+    grid-column: span 3;
+}
+
+.info-cell.span-4 {
+    grid-column: span 4;
+}
+
+.info-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.input-group {
+    display: flex;
+    gap: 4px;
+}
+
+.input-group input {
+    flex: 1;
+}
+
+.input-group button {
+    padding: 4px 8px;
+    background: #f3f4f6;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.input-group button:hover {
+    background: #e5e7eb;
+}
+
+/* 페이지 헤더 */
+.page-header {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #2f5fd3;
+}
+.page-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #333;
+    margin: 0 0 8px 0;
+}
+.breadcrumb {
+    font-size: 14px;
+    color: #6b7280;
+}
+.breadcrumb a {
+    color: #2f5fd3;
+    text-decoration: none;
+}
+.breadcrumb a:hover {
+    text-decoration: underline;
+}
+.breadcrumb .separator {
+    margin: 0 8px;
+}
+.breadcrumb .current {
+    color: #374151;
+    font-weight: 600;
+}
+
+/* 팝업 모드일 때 헤더와 액션 버튼 숨김 */
+{% if is_popup %}
+.page-header, .action-buttons {
+    display: none !important;
+}
+{% endif %}
+
+/* 메인 컨테이너 */
+.fullprocess-detail-container {
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+{% if is_popup %}
+.fullprocess-detail-container {
+    padding: 0;
+    gap: 0;
 }
 
 .section {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+}
+
+.section:last-child {
+    border-bottom: none;
+}
+{% endif %}
+
+/* 섹션 공통 스타일 */
+.section {
     background: white;
     border: 1px solid #e1e5e9;
-    border-radius: 8px;
-    margin-bottom: 20px;
-    overflow: hidden;
 }
 
 .section-header {
     background: #f8f9fa;
-    padding: 15px 20px;
+    padding: 12px 20px;
     border-bottom: 1px solid #e1e5e9;
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    justify-content: space-between;
 }
 
 .section-title {
@@ -496,190 +1052,284 @@ window.updateFunction = updateFullProcess;
     background: none;
     border: none;
     cursor: pointer;
-    padding: 5px 10px;
+    padding: 4px;
+}
+
+.collapse-icon {
+    font-size: 12px;
     color: #666;
+    transition: transform 0.2s;
 }
 
 .section-content {
     padding: 20px;
 }
 
+/* 정보 테이블 */
 .info-table {
-    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
 
 .info-row {
-    display: grid !important;
-    grid-template-columns: repeat(4, 1fr) !important;
-    gap: 16px !important;
-    margin-bottom: 16px !important;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
 }
 
 .info-cell {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
+}
+
+.info-cell.span-2 {
+    grid-column: span 2;
+}
+
+.info-cell.span-3 {
+    grid-column: span 3;
+}
+
+.info-cell.span-4 {
+    grid-column: span 4;
 }
 
 .info-cell label {
     font-weight: 600;
-    color: #374151;
+    color: #333;
     font-size: 14px;
-    margin-bottom: 4px;
+    min-height: 20px;
+}
+
+.info-cell .value {
+    padding: 8px 12px;
+    background: #f8f9fa;
+    border: 1px solid #e1e5e9;
+    border-radius: 4px;
+    font-size: 14px;
+    color: #333;
+    min-height: 20px;
 }
 
 .info-cell input,
 .info-cell select,
-.info-cell textarea,
-.info-cell .value {
+.info-cell textarea {
     width: 100%;
     padding: 8px 12px;
     border: 1px solid #d1d5db;
     border-radius: 4px;
     font-size: 14px;
+    transition: border-color 0.15s;
 }
 
-.info-cell textarea {
-    resize: vertical;
-    min-height: 80px;
+.info-cell input:focus,
+.info-cell select:focus,
+.info-cell textarea:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
-.info-cell.span-2 {
-    grid-column: span 2 !important;
-}
-
-.info-cell.span-3 {
-    grid-column: span 3 !important;
-}
-
-.info-cell.span-4 {
-    grid-column: span 4 !important;
-}
-
-.input-group {
-    display: flex;
-    gap: 4px;
-}
-
-.input-group input {
-    flex: 1;
-}
-
-/* Bootstrap input-group button styles will be used - removed duplicate definitions */
-
-/* 첨부파일 섹션 */
-.attachments-section .section-header {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-}
-
-.btn-add-file {
-    padding: 6px 12px;
-    background: #28a745;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: 12px;
-    cursor: pointer;
-    margin-left: auto;
-    margin-right: 10px;
-}
-
-.btn-add-file:hover {
-    background: #218838;
-}
-
-.file-count {
-    font-size: 14px;
-    color: #666;
-}
-
-/* 첨부파일 테이블 스타일은 attachment_section.html에서 제공됨 */
-
-.btn-delete {
-    padding: 4px 8px;
-    background: #dc3545;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: 12px;
-    cursor: pointer;
-}
-
-.btn-delete:hover {
-    background: #c82333;
-}
-
-.file-desc-input {
-    width: 100%;
-    padding: 4px 8px;
-    border: 1px solid #d1d5db;
-    border-radius: 4px;
-    font-size: 12px;
-}
-
-/* 저장 버튼 영역 */
-.save-section {
-    padding: 20px;
-    text-align: center;
-}
-
-/* Bootstrap button styles will be used - removed duplicate definitions */
-
-/* 상세내용 섹션 */
+/* 3. 상세내용 섹션 */
 .detail-content-section .section-content {
     padding: 20px;
 }
 
 .content-editor {
-    width: 100%;
+    position: relative;
 }
 
+/* 간단한 편집 가능한 영역 스타일 */
 .editable-content {
-    min-height: 300px;
-    padding: 15px;
-    border: 1px solid #d1d5db;
+    width: 100%;
+    min-height: 400px;
+    padding: 20px;
+    border: 1px solid #e1e5e9;
     border-radius: 4px;
-    background: white;
     font-size: 14px;
     line-height: 1.6;
+    color: #333;
+    font-family: inherit;
+    box-sizing: border-box;
+    background: white;
     outline: none;
+    overflow-y: auto;
 }
 
 .editable-content:focus {
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
 }
 
-.editable-content p {
-    margin: 10px 0;
+.editable-content:empty:before {
+    content: attr(placeholder);
+    color: #999;
+    font-style: italic;
 }
 
-.editable-content br {
-    line-height: 1.6;
-}
-
-.editable-content table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 15px 0;
-}
-
-.editable-content table td,
-.editable-content table th {
+/* 저장 버튼 */
+.save-section {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    padding: 20px;
+    background: white;
     border: 1px solid #e1e5e9;
-    padding: 8px 12px;
-    text-align: left;
+    border-top: none;
 }
 
-.editable-content table th {
+.btn-save, .btn-cancel {
+    padding: 10px 24px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-save {
+    background: #2f5fd3;
+    color: white;
+}
+
+.btn-save:hover {
+    background: #1d4ed8;
+}
+
+.btn-cancel {
+    background: #6b7280;
+    color: white;
+    margin-left: 10px;
+
+/* 리스트 표시 스타일 */
+.list-display {
+    width: 100%;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.list-item-display {
+    border: 1px solid #dee2e6;
     background: #f8f9fa;
+    font-size: 13px;
+}
+}
+
+.btn-cancel:hover {
+    background: #4b5563;
+}
+
+/* 비밀번호 모달 */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.4);
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: 15% auto;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    width: 400px;
+    max-width: 90%;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+
+.modal-header {
+    padding: 20px 25px 15px;
+    border-bottom: 1px solid #e1e5e9;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: #333;
+    font-size: 18px;
     font-weight: 600;
 }
 
-.editable-content table tr:nth-child(even) {
-    background: #f8f9fa;
+.close {
+    color: #999;
+    font-size: 24px;
+    font-weight: bold;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.close:hover {
+    color: #333;
+}
+
+.modal-body {
+    padding: 25px;
+}
+
+.modal-body p {
+    margin: 0 0 20px 0;
+    color: #555;
+    font-size: 14px;
+}
+
+.password-field {
+    width: 100%;
+    padding: 12px 15px;
+    border: 1px solid #e1e5e9;
+    border-radius: 4px;
+    font-size: 14px;
+    margin-bottom: 20px;
+    box-sizing: border-box;
+}
+
+.password-field:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+.modal-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.btn-confirm, .modal-buttons .btn-cancel {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    min-width: 80px;
+}
+
+.btn-confirm {
+    background: #2f5fd3;
+    color: white;
+}
+
+.btn-confirm:hover {
+    background: #1d4ed8;
+}
+
+.modal-buttons .btn-cancel {
+    background: #6b7280;
+    color: white;
+}
+
+.modal-buttons .btn-cancel:hover {
+    background: #4b5563;
 }
 </style>
 
@@ -687,8 +1337,5 @@ window.updateFunction = updateFullProcess;
 {% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
 {{ attachment_styles() }}
 {{ attachment_scripts() }}
-
-<!-- Content Editor 스크립트 추가 -->
-<script src="/static/js/content-editor.js"></script>
 
 {% endblock %}

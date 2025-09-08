@@ -1173,8 +1173,8 @@ function exportToExcel() {
         }
     }
     
-    // 엑셀 다운로드 URL
-    const downloadUrl = '/api/partners/export?' + params.toString();
+    // 엑셀 다운로드 URL (변경요청용)
+    const downloadUrl = '/api/change-requests/export?' + params.toString();
     
     // 임시 다운로드 링크 생성
     const link = document.createElement('a');

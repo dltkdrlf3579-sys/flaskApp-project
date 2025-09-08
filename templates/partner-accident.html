@@ -68,7 +68,11 @@
                     <th>등록일</th>
                     <!-- 나머지는 dynamic_columns -->
                     {% for col in dynamic_columns %}
-                    <th>{{ col.column_name }}</th>
+                        {% if col.column_key == 'injured_person' %}
+                        <th data-col="injured_person">{{ col.column_name }}</th>
+                        {% else %}
+                        <th>{{ col.column_name }}</th>
+                        {% endif %}
                     {% endfor %}
                 </tr>
             </thead>
@@ -94,11 +98,60 @@
                     <!-- 나머지 dynamic columns -->
                     {% for col in dynamic_columns %}
                         {% if col.column_key == 'accident_name' %}
-                            <td>-</td>
+                            {% set value = accident[col.column_key] or accident.get(col.column_key) %}
+                            <td>{{ value if value else '-' }}</td>
+                        {% elif col.column_key == 'injured_person' %}
+                            <!-- 재해자명단 특별 처리: 첫 번째 이름 + 외 N명 형식 -->
+                            {% set injured_list = accident.get('injured_person', []) %}
+                            <td data-col="injured_person">
+                                {% if injured_list %}
+                                    {% if injured_list is sequence and injured_list|length > 0 %}
+                                        <!-- 이미 리스트인 경우 -->
+                                        {% set first_person = injured_list[0] %}
+                                        {% if first_person is mapping %}
+                                            {{ first_person.name or first_person.get('name') or '이름없음' }}
+                                        {% else %}
+                                            {{ first_person }}
+                                        {% endif %}
+                                        {% if injured_list|length > 1 %}
+                                            <span class="extra-count">외 {{ injured_list|length - 1 }}명</span>
+                                        {% endif %}
+                                    {% elif injured_list is string and injured_list != '[]' and injured_list != '' %}
+                                        <!-- JSON 문자열이나 단순 텍스트 -->
+                                        {% if injured_list.startswith('[') %}
+                                            <!-- JSON 배열로 보이는 문자열 - 첫 번째 이름만 추출 시도 -->
+                                            {% set clean_list = injured_list|replace('[', '')|replace(']', '')|replace('"', '') %}
+                                            {% set parts = clean_list.split(',') %}
+                                            {% if parts|length > 0 %}
+                                                {% set first_part = parts|first %}
+                                                {% if ':' in first_part %}
+                                                    {% set name_parts = first_part.split(':') %}
+                                                    {{ name_parts|last|trim }}
+                                                {% else %}
+                                                    {{ first_part|trim }}
+                                                {% endif %}
+                                                {% if parts|length > 1 %}
+                                                    <span class="extra-count">외 여러명</span>
+                                                {% endif %}
+                                            {% else %}
+                                                {{ clean_list }}
+                                            {% endif %}
+                                        {% else %}
+                                            {{ injured_list }}
+                                        {% endif %}
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
                         {% elif col.column_type == 'dropdown' %}
-                            <td>{{ accident[col.column_key + '_label'] or accident[col.column_key] or accident.get(col.column_key, '-') }}</td>
+                            {% set value = accident[col.column_key + '_label'] or accident[col.column_key] or accident.get(col.column_key) %}
+                            <td>{{ value if value else '-' }}</td>
                         {% else %}
-                            <td>{{ accident[col.column_key] or accident.get(col.column_key, '-') }}</td>
+                            {% set value = accident[col.column_key] or accident.get(col.column_key) %}
+                            <td>{{ value if value else '-' }}</td>
                         {% endif %}
                     {% endfor %}
                 </tr>
@@ -788,6 +841,37 @@ function deleteSelected() {
     });
 }
 </script>
+
+<style>
+/* 재해자명단 컬럼 고정 너비 및 말줄임 처리 */
+.data-table th[data-col="injured_person"], 
+.data-table td[data-col="injured_person"] {
+    width: 200px; 
+    max-width: 200px; 
+    min-width: 160px;
+    white-space: normal; 
+    word-break: break-word; 
+    overflow: hidden; 
+    text-overflow: ellipsis;
+    display: -webkit-box; 
+    -webkit-line-clamp: 2; 
+    -webkit-box-orient: vertical;
+}
+
+/* "외 N명" 스타일 */
+.extra-count {
+    color: #6b7280;
+    font-size: 0.9em;
+    font-weight: 500;
+    margin-left: 4px;
+}
+
+/* 마우스 오버 시 툴팁 효과 */
+.data-table td[data-col="injured_person"]:hover {
+    position: relative;
+    cursor: help;
+}
+</style>
 
 <!-- 비밀번호 모달 포함 -->
 {% include 'includes/password_modal.html' %}

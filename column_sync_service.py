@@ -8,6 +8,8 @@ import os
 import logging
 from typing import Dict, List, Any
 from datetime import datetime
+from db_connection import get_db_connection
+from db.upsert import safe_upsert
 
 class ColumnSyncService:
     """
@@ -71,7 +73,7 @@ class ColumnSyncService:
             config = json.load(f)
             
         # DB 연결
-        conn = sqlite3.connect(self.db_path)
+        conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
         # 테이블명
@@ -87,39 +89,25 @@ class ColumnSyncService:
                 updated_at = CURRENT_TIMESTAMP
         """)
         
-        # JSON 데이터로 업데이트
+        # JSON 데이터로 업데이트 - safe_upsert 사용
         count = 0
         for col in config.get('columns', []):
-            # INSERT OR REPLACE로 업서트
-            cursor.execute(f"""
-                INSERT OR REPLACE INTO {table_name} (
-                    column_key, column_name, column_type, 
-                    column_order, is_active, is_required,
-                    dropdown_options, dropdown_values,
-                    table_name, table_type, tab,
-                    created_at, updated_at
-                ) VALUES (
-                    ?, ?, ?, 
-                    ?, ?, ?,
-                    ?, ?,
-                    ?, ?, ?,
-                    COALESCE((SELECT created_at FROM {table_name} WHERE column_key = ?), CURRENT_TIMESTAMP),
-                    CURRENT_TIMESTAMP
-                )
-            """, (
-                col['key'],
-                col['name'],
-                col.get('type', 'text'),
-                col.get('order', count),
-                1 if col.get('active', True) else 0,
-                1 if col.get('required', False) else 0,
-                json.dumps(col.get('options', [])) if col.get('options') else None,
-                col.get('dropdown_values'),  # 레거시 호환
-                col.get('table_name'),
-                col.get('table_type', 'dynamic'),  # dynamic 또는 static
-                col.get('tab'),  # tab 필드 추가
-                col['key']  # WHERE column_key = ? 용
-            ))
+            col_data = {
+                'column_key': col['key'],
+                'column_name': col['name'],
+                'column_type': col.get('type', 'text'),
+                'column_order': col.get('order', count),
+                'is_active': 1 if col.get('active', True) else 0,
+                'is_required': 1 if col.get('required', False) else 0,
+                'dropdown_options': json.dumps(col.get('options', [])) if col.get('options') else None,
+                'dropdown_values': col.get('dropdown_values'),  # 레거시 호환
+                'table_name': col.get('table_name'),
+                'table_type': col.get('table_type', 'dynamic'),  # dynamic 또는 static
+                'tab': col.get('tab'),  # tab 필드 추가
+                'updated_at': None  # 자동으로 처리됨
+            }
+            # 컬럼 설정 테이블은 레지스트리에 없으므로 수동 설정
+            safe_upsert(conn, table_name, col_data, ['column_key'], ['column_name', 'column_type', 'column_order', 'is_active', 'is_required', 'dropdown_options', 'dropdown_values', 'table_name', 'table_type', 'tab', 'updated_at'])
             count += 1
             
         # 드롭다운 옵션 동기화 (있는 경우)
@@ -196,12 +184,17 @@ class ColumnSyncService:
                         code = str(idx)
                         value = str(option)
                         
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO dropdown_option_codes_v2
-                        (board_type, column_key, option_code, option_value, 
-                         display_order, is_active, updated_at)
-                        VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
-                    """, (board_type, col['key'], code, value, idx))
+                    # dropdown_option_codes_v2 safe_upsert 사용
+                    option_data = {
+                        'board_type': board_type,
+                        'column_key': col['key'],
+                        'option_code': code,
+                        'option_value': value,
+                        'display_order': idx,
+                        'is_active': 1,
+                        'updated_at': None  # 자동으로 처리됨
+                    }
+                    safe_upsert(conn, 'dropdown_option_codes_v2', option_data)
     
     def export_board_to_json(self, board_type: str) -> bool:
         """
@@ -214,8 +207,7 @@ class ColumnSyncService:
             성공 여부
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
+            conn = get_db_connection(self.db_path, row_factory=True)
             cursor = conn.cursor()
             
             table_name = f'{board_type}_column_config'

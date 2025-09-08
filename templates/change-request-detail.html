@@ -33,6 +33,17 @@
         </div>
         <div class="section-content" id="basic-info-content">
             <div class="info-table">
+                <!-- change_request_id와 created_at 추가 -->
+                <div class="info-row">
+                    <div class="info-cell span-1">
+                        <label>ID</label>
+                        <input type="text" value="{{ request_data.change_request_id or request_data.id or '-' }}" readonly style="background-color: #f3f4f6;">
+                    </div>
+                    <div class="info-cell span-1">
+                        <label>등록일</label>
+                        <input type="text" value="{{ (request_data.created_at|date_only) if request_data.created_at else '-' }}" readonly style="background-color: #f3f4f6;">
+                    </div>
+                </div>
                 <div class="info-row">
                     <div class="info-cell">
                         <label>요청번호</label>
@@ -199,12 +210,12 @@
         <div class="section-content">
             <div class="content-editor">
                 <!-- 간단한 편집 가능한 영역 -->
-                <div id="detailed-content" 
-                     class="editable-content"
-                     data-content="{{ (request_data.detailed_content or '') | tojson }}"></div>
-                
-                <!-- 숨겨진 textarea (저장용) -->
-                <textarea id="detailed-content-hidden" style="display: none;">{{ request_data.detailed_content or '' }}</textarea>
+                <!-- textarea로 변경하여 안정적인 편집 기능 제공 -->
+                <textarea id="detailed-content" 
+                          name="detailed_content"
+                          placeholder="변경사유를 입력하세요."
+                          rows="10"
+                          style="width: 100%; min-height: 200px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;">{{ request_data.detailed_content | striptags if request_data.detailed_content else '' }}</textarea>
             </div>
         </div>
     </div>
@@ -862,8 +873,9 @@ function verifyPasswordAndSave() {
     }
 }
 
-// Enter 키 이벤트 리스너 추가
+// 페이지 로드 시 초기화
 document.addEventListener('DOMContentLoaded', function() {
+    // 비밀번호 입력 엔터 키 이벤트
     const passwordInput = document.getElementById('edit-password-input');
     if (passwordInput) {
         passwordInput.addEventListener('keypress', function(e) {
@@ -872,16 +884,24 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+    
+    // 상세내용은 서버에서 직접 렌더링되므로 별도 초기화 불필요
 });
 
 function saveChanges() {
     console.log('saveChanges 함수 시작');
     
-    // 상세내용 처리 - CKEditor 데이터 가져오기
-    const detailedContent = window.RichText ? window.RichText.getData() : '';
-    if (!detailedContent.trim()) {
-        alert('상세내용을 입력해주세요.');
-        return;
+    // 상세내용 처리 - CKEditor 또는 textarea에서 값 가져오기
+    const contentTextarea = document.getElementById('detailed-content');
+    let detailedContent = '';
+    
+    // CKEditor가 있다면 CKEditor에서 값 가져오기
+    if (window.RichText && typeof window.RichText.getData === 'function') {
+        detailedContent = window.RichText.getData();
+    } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
+        detailedContent = window.editorInstance.getData();
+    } else if (contentTextarea) {
+        detailedContent = contentTextarea.value || '';
     }
     console.log('저장할 내용 길이:', detailedContent.length);
     console.log('내용 미리보기:', detailedContent.substring(0, 200));
@@ -925,7 +945,7 @@ function saveChanges() {
     // FormData 생성
     const formData = new FormData();
     formData.append('request_id', requestId);  // ID로 전송
-    formData.append('request_number', '{{ request_data.request_number }}');  // 실제 request_number 전송
+    formData.append('request_number', '{{ request_data.request_number or "" }}');  // 안전한 request_number 전송
     formData.append('change_content', '');  // 변경내용 (필요시 추가)
     formData.append('detailed_content', detailedContent);  // detailed_content로 변경
     formData.append('custom_data', JSON.stringify(customData));

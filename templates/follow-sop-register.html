@@ -38,6 +38,20 @@
         </div>
         <div class="section-content" id="{{ section.section_key|replace('_', '-') }}-content">
             <div class="info-table">
+                <!-- 점검번호와 등록일 추가 (첫 번째 섹션에만) -->
+                {% if loop.index == 1 %}
+                <div class="info-row">
+                    <div class="info-cell span-1">
+                        <label>점검번호</label>
+                        <input type="text" value="자동 생성" readonly style="background-color: #f3f4f6; color: #6b7280; font-style: italic;">
+                    </div>
+                    <div class="info-cell span-1">
+                        <label>등록일</label>
+                        <input type="date" value="{{ today_date }}" readonly style="background-color: #f3f4f6;">
+                    </div>
+                </div>
+                {% endif %}
+                
                 {% set all_columns = section_columns[section.section_key] %}
                 <!-- detailed_content와 violation_content는 제외 -->
                 {% set columns = [] %}
@@ -54,6 +68,9 @@
                     {% for col in chunk %}
                         {% if col %}
                             {% set span = col.column_span|default(1)|int %}
+                            {% if col.column_type == 'list' %}
+                                {% set span = 4 %}
+                            {% endif %}
                             
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
                                 <label>{{ col.column_name }}</label>
@@ -166,6 +183,11 @@
                                             rows="4"
                                             placeholder="{{ col.column_name }} 입력"></textarea>
                                             
+                                {% elif col.column_type == 'list' %}
+                                    <!-- 리스트 필드 -->
+                                    {% from 'includes/list_field_v3.html' import render_list_field %}
+                                    {{ render_list_field(col, '', section, mode='register') }}
+                                           
                                 {% else %}
                                     <!-- 기본 텍스트 필드 -->
                                     <input type="text" 
@@ -192,8 +214,12 @@
         </div>
         <div class="section-content">
             <div class="content-editor">
-                <div id="detailed-content" 
-                     class="editable-content"></div>
+                <!-- CKEditor textarea -->
+                <textarea id="detailed-content" 
+                          name="detailed_content"
+                          placeholder="상세내용을 입력하세요."
+                          rows="10"
+                          style="width: 100%; min-height: 300px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;"></textarea>
             </div>
         </div>
     </div>
@@ -254,6 +280,26 @@ function collectDynamicFields() {
                 value = input.value;
             }
             
+            // 리스트 필드 처리 - 더 간단하고 확실한 방법
+            // 1. data-field-type 체크 또는 2. JSON 배열 문자열 체크
+            if ((input.getAttribute('data-field-type') === 'list' || 
+                 (typeof value === 'string' && value.trim().startsWith('['))) && value) {
+                console.log(`🔍 리스트 필드 감지: ${fieldKey}`);
+                try {
+                    const parsed = JSON.parse(value);
+                    if (Array.isArray(parsed)) {
+                        value = parsed;
+                        console.log(`✅ 리스트 필드 ${fieldKey} 파싱 성공: ${parsed.length}개 항목`);
+                    } else {
+                        console.log(`⚠️ ${fieldKey}는 배열이 아님`);
+                    }
+                } catch(e) {
+                    console.log(`❌ 리스트 필드 ${fieldKey} 파싱 실패:`, e);
+                    // 파싱 실패 시 빈 배열로 설정
+                    value = [];
+                }
+            }
+            
             data[fieldKey] = value;
         });
     });
@@ -265,58 +311,55 @@ function collectDynamicFields() {
 function registerFollowSop() {
     const formData = new FormData();
     
-    // 상세내용 추가
-    // 상세내용 처리 - CKEditor 데이터 가져오기
-    const detailedContent = window.RichText ? window.RichText.getData() : '';
+    // CKEditor 또는 textarea에서 값 가져오기
+    const contentTextarea = document.getElementById('detailed-content');
+    let detailedContent = '';
+    
+    if (window.RichText && typeof window.RichText.getData === 'function') {
+        detailedContent = window.RichText.getData();
+    } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
+        detailedContent = window.editorInstance.getData();
+    } else if (contentTextarea) {
+        detailedContent = contentTextarea.value || '';
+    }
+    
     formData.append('detailed_content', detailedContent);
     
     // 동적 필드 수집
     const dynamicData = collectDynamicFields();
     
-    // basic_info와 violation_info 분리
-    const basicInfo = {};
-    const violationInfo = {};
-    const customData = {};
+    // base_fields와 custom_data 모두 전송 (식별자 키: work_req_no)
+    const baseFields = {};
+    const baseFieldsList = [
+        'work_req_no', 'company_name', 'business_number', 'violation_date',
+        'violation_location', 'violation_type', 'violation_content', 'created_at'
+    ];
     
-    // 섹션별로 데이터 분류
-    sections.forEach(section => {
-        const cols = sectionColumns[section.section_key] || [];
-        cols.forEach(col => {
-            if (dynamicData[col.column_key] !== undefined) {
-                if (section.section_key === 'basic_info') {
-                    basicInfo[col.column_key] = dynamicData[col.column_key];
-                } else if (section.section_key === 'violation_info') {
-                    violationInfo[col.column_key] = dynamicData[col.column_key];
-                } else {
-                    customData[col.column_key] = dynamicData[col.column_key];
-                }
-            }
-        });
+    baseFieldsList.forEach(field => {
+        if (dynamicData[field] !== undefined) {
+            baseFields[field] = dynamicData[field];
+        }
     });
     
-    // FormData에 추가
-    formData.append('basic_info', JSON.stringify(basicInfo));
-    formData.append('violation_info', JSON.stringify(violationInfo));
-    formData.append('custom_data', JSON.stringify(customData));
-    
-    // 첨부파일 처리
-    const attachmentData = [];
-    document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)').forEach((row, index) => {
-        const descInput = row.querySelector('.attachment-desc');
-        attachmentData.push({
-            description: descInput ? descInput.value : ''
-        });
-    });
+    formData.append('base_fields', JSON.stringify(baseFields));
+    formData.append('custom_data', JSON.stringify(dynamicData));
     
     // 새 첨부파일 처리 (공통 컴포넌트 변수 사용)
     if (typeof pendingFiles !== 'undefined') {
         pendingFiles.forEach((file, index) => {
             formData.append('files', file);
-            if (attachmentData[index]) {
-                formData.append(`file_desc_${index}`, attachmentData[index].description);
-            }
         });
     }
+    
+    // 첨부파일 설명 정보
+    const attachmentDescriptions = [];
+    document.querySelectorAll('.attachment-desc').forEach((input, index) => {
+        attachmentDescriptions.push({
+            description: input.value || '',
+            isNew: true
+        });
+    });
+    formData.append('attachment_data', JSON.stringify(attachmentDescriptions));
     
     // 서버로 전송
     fetch('/register-follow-sop', {

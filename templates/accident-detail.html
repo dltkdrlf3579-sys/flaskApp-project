@@ -35,6 +35,21 @@
         <div class="section-content" id="{{ section.section_key }}-content">
             <div class="info-table">
                 {% set all_columns = section_columns[section.section_key] %}
+                
+                <!-- accident_id와 created_at 추가 (첫 번째 섹션에만) -->
+                {% if loop.index == 1 %}
+                <div class="info-row">
+                    <div class="info-cell span-1">
+                        <label>사고번호</label>
+                        <input type="text" value="{{ instruction.accident_number or '-' }}" readonly style="background-color: #f3f4f6;">
+                    </div>
+                    <div class="info-cell span-1">
+                        <label>등록일</label>
+                        <input type="text" value="{{ (instruction.created_at|date_only) if instruction.created_at else '-' }}" readonly style="background-color: #f3f4f6;">
+                    </div>
+                </div>
+                {% endif %}
+                
                 <!-- accident_content는 제외하고 일반 필드만 batch 처리 -->
                 {% set columns = [] %}
                 {% for col in all_columns %}
@@ -50,15 +65,24 @@
                     {% for col in chunk %}
                         {% if col %}
                             {% set span = col.column_span|default(1)|int %}
+                            {% if col.column_type == 'list' %}
+                                {% set span = 4 %}
+                            {% endif %}
                             
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
                                 {% if col.column_type != 'list' %}
                                 <label>{{ col.column_name }}</label>
                                 {% endif %}
-                                {% if section.section_key != 'basic' and col.column_type == 'list' %}
+                                {% if col.column_type == 'list' %}
+                                    <!-- 리스트 필드는 항상 custom_data에서 가져오기 -->
                                     {% set col_value = custom_data.get(col.column_key, '[]') if custom_data else '[]' %}
                                     <!-- 디버깅: 리스트 필드 값 확인 -->
-                                    <!-- col_value for {{ col.column_key }}: {{ col_value }} -->
+                                    <!-- DEBUG {{ col.column_key }}: type={{ col_value.__class__.__name__ }}, length={{ col_value|length if col_value else 0 }}, value={{ col_value }} -->
+                                    <script>console.log('TEMPLATE DEBUG {{ col.column_key }}:', {
+                                        type: '{{ col_value.__class__.__name__ }}',
+                                        length: {{ col_value|length if col_value else 0 }},
+                                        value: {{ col_value|tojson if col_value else '[]' }}
+                                    });</script>
                                 {% else %}
                                     {% set col_value = instruction[col.column_key] | default('', true) %}
                                 {% endif %}
@@ -113,7 +137,10 @@
                                        class="{{ section.section_key }}-input" 
                                        data-field="{{ col.column_key }}"
                                        data-section="{{ section.section_key }}"
-                                       value="{{ col_value }}">
+                                       value="{{ col_value }}"
+                                       oninput="validateNumberInput(this)"
+                                       onkeypress="return isNumberKey(event)"
+                                       placeholder="숫자만 입력하세요">
                             {% elif col.column_type in ['linked', 'linked_text', 'linked_dept'] %}
                                 <!-- 연결된 필드 (읽기 전용) -->
                                 <input type="text" 
@@ -241,22 +268,7 @@
                 </div>
                 {% endfor %}
                 
-                <!-- accident_content 필드가 있는 경우 별도 처리 -->
-                {% for col in all_columns %}
-                    {% if col.column_key == 'accident_content' %}
-                    <div class="info-row">
-                        <div class="info-cell span-4">
-                            <label>{{ col.column_name }}</label>
-                            {% set col_value = instruction[col.column_key] | default('', true) %}
-                            <textarea id="{{ col.column_key }}" 
-                                    class="{{ section.section_key }}-input" 
-                                    data-field="{{ col.column_key }}"
-                                    data-section="{{ section.section_key }}"
-                                    rows="4">{{ col_value }}</textarea>
-                        </div>
-                    </div>
-                    {% endif %}
-                {% endfor %}
+                <!-- accident_content는 제거됨 - detailed_content로 통합 -->
             </div>
         </div>
     </div>
@@ -270,13 +282,12 @@
         <div class="section-content">
             <div class="content-editor">
                 <!-- 간단한 편집 가능한 영역 -->
-                <div id="detailed-content" 
-                     class="editable-content" 
-                     contenteditable="true" 
-                     placeholder="사고 상세내용을 입력하세요.">{{ accident.detailed_content | safe if accident.detailed_content else '' }}</div>
-                
-                <!-- 숨겨진 textarea (저장용) -->
-                <textarea id="detailed-content-hidden" style="display: none;">{{ accident.detailed_content or '' }}</textarea>
+                <!-- textarea로 변경하여 안정적인 편집 기능 제공 -->
+                <textarea id="detailed-content" 
+                          class="editable-content" 
+                          placeholder="사고 상세내용을 입력하세요."
+                          rows="10" 
+                          style="width: 100%; min-height: 200px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;">{{ accident.detailed_content | striptags if accident.detailed_content else '' }}</textarea>
             </div>
         </div>
     </div>
@@ -288,11 +299,28 @@
     <!-- 저장 버튼 영역 -->
     <div class="save-section">
         {% if instruction.accident_number and instruction.accident_number.startswith('ACC') %}
-            <button class="btn-save" onclick="updateSafetyInstruction()">수정완료</button>
+            <button class="btn-save" onclick="showEditPasswordModal()">수정완료</button>
         {% else %}
             <button class="btn-save" disabled style="background-color: #ccc; cursor: not-allowed;">K 사고는 수정 불가</button>
         {% endif %}
-        <button class="btn-cancel" onclick="window.close()">취소</button>
+    </div>
+
+    <!-- 비밀번호 입력 모달 -->
+    <div id="edit-password-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>편집 권한 확인</h3>
+                <span class="close" onclick="closeEditPasswordModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>편집을 위해 비밀번호를 입력해주세요.</p>
+                <input type="password" id="edit-password-input" placeholder="비밀번호" class="password-field">
+                <div class="modal-buttons">
+                    <button class="btn-confirm" onclick="verifyPasswordAndSave()">확인</button>
+                    <button class="btn-cancel" onclick="closeEditPasswordModal()">취소</button>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -345,7 +373,28 @@ function collectDynamicFields() {
                 value = input.value;
             }
             
-            data[fieldKey] = value;
+            // 리스트 필드 처리 - 더 간단하고 확실한 방법
+            // 1. data-field-type 체크 또는 2. JSON 배열 문자열 체크
+            if ((input.getAttribute('data-field-type') === 'list' || 
+                 (typeof value === 'string' && value.trim().startsWith('['))) && value) {
+                console.log(`🔍 리스트 필드 감지: ${fieldKey}`);
+                try {
+                    const parsed = JSON.parse(value);
+                    if (Array.isArray(parsed)) {
+                        data[fieldKey] = parsed;
+                        console.log(`✅ 리스트 필드 파싱 성공: ${fieldKey} = ${parsed.length}개 항목`);
+                        console.log(`📋 리스트 내용:`, parsed);
+                    } else {
+                        data[fieldKey] = value;
+                        console.log(`⚠️ 리스트가 아닌 데이터: ${fieldKey}`);
+                    }
+                } catch(e) {
+                    data[fieldKey] = value;
+                    console.log(`❌ 리스트 필드 파싱 실패: ${fieldKey}`, e);
+                }
+            } else {
+                data[fieldKey] = value;
+            }
         });
     });
     
@@ -359,9 +408,19 @@ function updateSafetyInstruction() {
     // 발부번호
     formData.append('accident_number', issueNumber);
     
-    // 상세내용 처리
-    const editableDiv = document.getElementById('detailed-content');
-    const detailedContent = editableDiv ? editableDiv.innerHTML : '';
+    // 상세내용 처리 - CKEditor 또는 textarea에서 값 가져오기
+    const contentTextarea = document.getElementById('detailed-content');
+    let detailedContent = '';
+    
+    // CKEditor가 있다면 CKEditor에서 값 가져오기
+    if (window.RichText && typeof window.RichText.getData === 'function') {
+        detailedContent = window.RichText.getData();
+    } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
+        detailedContent = window.editorInstance.getData();
+    } else if (contentTextarea) {
+        detailedContent = contentTextarea.value || '';
+    }
+    
     formData.append('detailed_content', detailedContent);
     
     // 동적 필드 수집
@@ -435,12 +494,16 @@ function updateSafetyInstruction() {
     .then(data => {
         if (data.success) {
             alert('사고가 성공적으로 수정되었습니다.');
-            if (window.opener) {
+            
+            // 팝업 모드인 경우 부모 창 새로고침
+            {% if is_popup %}
+            if (window.opener && !window.opener.closed) {
                 window.opener.location.reload();
-                window.close();
-            } else {
-                window.location.href = '/accident';
             }
+            {% endif %}
+            
+            // 현재 창 새로고침 (캐시 무시)
+            window.location.href = window.location.href + '&t=' + new Date().getTime();
         } else {
             alert('수정 실패: ' + (data.message || '알 수 없는 오류'));
         }
@@ -531,6 +594,55 @@ document.addEventListener('DOMContentLoaded', function() {
                     button.style.backgroundColor = '#f3f4f6';
                     button.style.cursor = 'not-allowed';
                 });
+            }
+        });
+    }
+});
+
+// 비밀번호 모달 관련 함수들
+function showEditPasswordModal() {
+    // ACC 사고인지 확인
+    if (!issueNumber || !issueNumber.startsWith('ACC')) {
+        alert('K 사고는 수정할 수 없습니다. (외부 시스템 데이터)');
+        return;
+    }
+    
+    document.getElementById('edit-password-modal').style.display = 'block';
+    document.getElementById('edit-password-input').focus();
+}
+
+function closeEditPasswordModal() {
+    document.getElementById('edit-password-modal').style.display = 'none';
+    document.getElementById('edit-password-input').value = '';
+}
+
+function verifyPasswordAndSave() {
+    const password = document.getElementById('edit-password-input').value;
+    
+    if (!password) {
+        alert('비밀번호를 입력해주세요.');
+        return;
+    }
+    
+    // 비밀번호가 admin123인지 확인
+    if (password === 'admin123') {
+        closeEditPasswordModal();
+        updateSafetyInstruction();
+    } else {
+        alert('비밀번호가 올바르지 않습니다.');
+        document.getElementById('edit-password-input').value = '';
+        document.getElementById('edit-password-input').focus();
+    }
+}
+
+// 페이지 로드 시 엔터 키 이벤트 추가
+document.addEventListener('DOMContentLoaded', function() {
+    // 비밀번호 입력 엔터 키 이벤트
+    const passwordInput = document.getElementById('edit-password-input');
+    if (passwordInput) {
+        passwordInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                verifyPasswordAndSave();
             }
         });
     }
@@ -777,6 +889,52 @@ window.receiveContractorSelection = function(fieldKey, data) {
         }
     });
 };
+
+// 숫자 입력 유효성 검사 함수들
+function isNumberKey(evt) {
+    var charCode = (evt.which) ? evt.which : evt.keyCode;
+    // 숫자(0-9), 백스페이스, 삭제, 탭, 화살표 키만 허용
+    if (charCode > 31 && (charCode < 48 || charCode > 57) && charCode !== 46) {
+        return false;
+    }
+    return true;
+}
+
+function validateNumberInput(input) {
+    const value = input.value;
+    const numericValue = value.replace(/[^0-9.]/g, '');
+    
+    if (value !== numericValue) {
+        input.value = numericValue;
+        // 경고 메시지 표시
+        showValidationMessage(input, '숫자만 입력할 수 있습니다.');
+    }
+}
+
+function showValidationMessage(input, message) {
+    // 기존 메시지 제거
+    const existingMessage = input.parentNode.querySelector('.validation-message');
+    if (existingMessage) {
+        existingMessage.remove();
+    }
+    
+    // 새 메시지 생성
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'validation-message';
+    messageDiv.style.color = '#dc3545';
+    messageDiv.style.fontSize = '12px';
+    messageDiv.style.marginTop = '5px';
+    messageDiv.textContent = message;
+    
+    input.parentNode.appendChild(messageDiv);
+    
+    // 3초 후 메시지 제거
+    setTimeout(() => {
+        if (messageDiv.parentNode) {
+            messageDiv.remove();
+        }
+    }, 3000);
+}
 </script>
 
 <style>
@@ -1087,6 +1245,116 @@ window.receiveContractorSelection = function(fieldKey, data) {
 }
 
 .btn-cancel:hover {
+    background: #4b5563;
+}
+
+/* 비밀번호 모달 */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.4);
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: 15% auto;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    width: 400px;
+    max-width: 90%;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+
+.modal-header {
+    padding: 20px 25px 15px;
+    border-bottom: 1px solid #e1e5e9;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: #333;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.close {
+    color: #999;
+    font-size: 24px;
+    font-weight: bold;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.close:hover {
+    color: #333;
+}
+
+.modal-body {
+    padding: 25px;
+}
+
+.modal-body p {
+    margin: 0 0 20px 0;
+    color: #555;
+    font-size: 14px;
+}
+
+.password-field {
+    width: 100%;
+    padding: 12px 15px;
+    border: 1px solid #e1e5e9;
+    border-radius: 4px;
+    font-size: 14px;
+    margin-bottom: 20px;
+    box-sizing: border-box;
+}
+
+.password-field:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+.modal-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.btn-confirm, .modal-buttons .btn-cancel {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    min-width: 80px;
+}
+
+.btn-confirm {
+    background: #2f5fd3;
+    color: white;
+}
+
+.btn-confirm:hover {
+    background: #1d4ed8;
+}
+
+.modal-buttons .btn-cancel {
+    background: #6b7280;
+    color: white;
+}
+
+.modal-buttons .btn-cancel:hover {
     background: #4b5563;
 }
 </style>

@@ -33,14 +33,21 @@
         </div>
         <div class="section-content" id="basic-info-content">
             <div class="info-table">
+                <!-- change_request_id와 created_at 추가 -->
+                <div class="info-row">
+                    <div class="info-cell span-1">
+                        <label>ID</label>
+                        <input type="text" value="자동 생성" readonly style="background-color: #f3f4f6; color: #6b7280; font-style: italic;">
+                    </div>
+                    <div class="info-cell span-1">
+                        <label>등록일</label>
+                        <input type="date" value="{{ today.strftime('%Y-%m-%d') if today else '' }}" readonly style="background-color: #f3f4f6;">
+                    </div>
+                </div>
                 <div class="info-row">
                     <div class="info-cell">
                         <label>요청번호</label>
                         <div class="value">{{ request_number }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>등록일</label>
-                        <div class="value">{{ today.strftime('%Y-%m-%d') if today else '자동 생성' }}</div>
                     </div>
                 </div>
             </div>
@@ -181,7 +188,10 @@
         </div>
     </div>
 
-    <!-- 4. 첨부파일 영역 (공통 컴포넌트) -->
+    <!-- 4. 상세내용 영역 (하드코딩) -->
+    {% include 'includes/detailed_content_section.html' %}
+
+    <!-- 5. 첨부파일 영역 (공통 컴포넌트) -->
     {% from 'includes/attachment_section.html' import render_attachment_section %}
     {{ render_attachment_section([], 'change_request') }}
 
@@ -538,6 +548,9 @@ function saveChangeRequest() {
     const changeReasonElement = document.getElementById('change-reason-detail');
     const changeReasonText = changeReasonElement ? changeReasonElement.innerText.trim() : '';
     
+    // 상세내용 가져오기
+    const detailedContent = document.getElementById('detailed-content')?.value || '';
+    
     // 필수 필드 추가 (동적 컬럼에서 수집)
     // requester_name, requester_department, company_name, business_number 등은
     // 이미 동적 컬럼으로 처리되므로 dynamicData에 포함되어 있음
@@ -545,6 +558,7 @@ function saveChangeRequest() {
     // 상태는 항상 'requested' (요청)으로 고정 - 등록 페이지이므로
     dynamicData['status'] = 'requested';
     dynamicData['change_reason'] = changeReasonText || '변경사유';
+    dynamicData['detailed_content'] = detailedContent;
     
     // 첨부파일 설명 수집
     const attachments = [];

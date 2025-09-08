@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, date
 from decimal import Decimal
 import numpy as np
 import json
+from db_connection import get_db_connection
+from db.upsert import safe_upsert
 
 # 설정 파일 로드
 config = configparser.ConfigParser()
@@ -84,7 +86,7 @@ class PartnerDataManager:
     
     def init_local_tables(self):
         """로컬 SQLite 테이블 초기화"""
-        conn = sqlite3.connect(self.local_db_path)
+        conn = get_db_connection(self.local_db_path)
         cursor = conn.cursor()
         
         # 기존 partners_cache 테이블의 구조 확인
@@ -198,7 +200,7 @@ class PartnerDataManager:
                 column_name VARCHAR(100) NOT NULL,
                 column_type VARCHAR(20) DEFAULT 'text',
                 column_order INTEGER DEFAULT 0,
-                is_active BOOLEAN DEFAULT 1,
+                is_active BOOLEAN DEFAULT TRUE,
                 dropdown_options TEXT,
                 tab TEXT,
                 column_span INTEGER DEFAULT 1,
@@ -311,7 +313,7 @@ class PartnerDataManager:
                 return False
             
             # DataFrame을 SQLite에 저장
-            conn = sqlite3.connect(self.local_db_path, timeout=30.0)
+            conn = get_db_connection(self.local_db_path, timeout=30.0)
             cursor = conn.cursor()
             
             # PRAGMA 설정 추가
@@ -408,7 +410,7 @@ class PartnerDataManager:
                 return False
             
             # DataFrame을 SQLite에 저장
-            conn = sqlite3.connect(self.local_db_path, timeout=30.0)
+            conn = get_db_connection(self.local_db_path, timeout=30.0)
             cursor = conn.cursor()
             
             # PRAGMA 설정
@@ -510,7 +512,7 @@ class PartnerDataManager:
                 return False
             
             # SQLite에 저장
-            conn = sqlite3.connect(self.local_db_path)
+            conn = get_db_connection(self.local_db_path)
             cursor = conn.cursor()
             
             # 기존 캐시 데이터 삭제
@@ -560,7 +562,7 @@ class PartnerDataManager:
                 return False
             
             # SQLite에 저장
-            conn = sqlite3.connect(self.local_db_path)
+            conn = get_db_connection(self.local_db_path)
             cursor = conn.cursor()
             
             # 기존 캐시 데이터 삭제
@@ -610,7 +612,7 @@ class PartnerDataManager:
                 return False
             
             # SQLite에 저장
-            conn = sqlite3.connect(self.local_db_path)
+            conn = get_db_connection(self.local_db_path)
             cursor = conn.cursor()
             
             # 기존 캐시 데이터 삭제
@@ -661,7 +663,7 @@ class PartnerDataManager:
                 return False
             
             # SQLite에 저장
-            conn = sqlite3.connect(self.local_db_path)
+            conn = get_db_connection(self.local_db_path)
             cursor = conn.cursor()
             
             # 기존 캐시 데이터 삭제
@@ -714,7 +716,7 @@ class PartnerDataManager:
                 return False
             
             # SQLite에 저장
-            conn = sqlite3.connect(self.local_db_path, timeout=30.0)
+            conn = get_db_connection(self.local_db_path, timeout=30.0)
             cursor = conn.cursor()
             
             # PRAGMA 설정
@@ -798,7 +800,7 @@ class PartnerDataManager:
                 return False
             
             # SQLite에 저장
-            conn = sqlite3.connect(self.local_db_path, timeout=30.0)
+            conn = get_db_connection(self.local_db_path, timeout=30.0)
             cursor = conn.cursor()
             
             # PRAGMA 설정
@@ -848,22 +850,48 @@ class PartnerDataManager:
                 
                 rows.append((work_req_no, custom_data))
             
-            # 배치 삽입
-            cursor.executemany('''
-                INSERT OR REPLACE INTO followsop_cache (work_req_no, custom_data) 
-                VALUES (?, ?)
-            ''', rows)
+            # 배치 삽입 - PostgreSQL vs SQLite 조건부 처리
+            if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                # PostgreSQL: bulk_upsert 사용 
+                from db.upsert import bulk_upsert
+                data_list = [{'work_req_no': row[0], 'custom_data': row[1]} for row in rows]
+                bulk_upsert(conn, 'followsop_cache', data_list)
+            else:
+                # SQLite: INSERT OR REPLACE
+                cursor.executemany('''
+                    INSERT OR REPLACE INTO followsop_cache (work_req_no, custom_data) 
+                    VALUES (?, ?)
+                ''', rows)
             
-            # GPT 지침: 캐시→본테이블 이관 (UPSERT) - 동기화된 데이터는 무조건 활성화  
-            cursor.execute('''
-                INSERT OR REPLACE INTO follow_sop (work_req_no, custom_data, created_at, is_deleted)
-                SELECT
-                  c.work_req_no,
-                  c.custom_data,
-                  COALESCE(json_extract(c.custom_data, '$.created_at'), c.sync_date),
-                  0
-                FROM followsop_cache c
-            ''')
+            # GPT 지침: 캐시→본테이블 이관 (UPSERT) - 동기화된 데이터는 무조건 활성화
+            # PostgreSQL vs SQLite 조건부 처리
+            if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                # PostgreSQL용 ON CONFLICT
+                cursor.execute('''
+                    INSERT INTO follow_sop (work_req_no, custom_data, created_at, is_deleted)
+                    SELECT
+                      c.work_req_no,
+                      c.custom_data,
+                      COALESCE(json_extract(c.custom_data, '$.created_at'), c.sync_date),
+                      0
+                    FROM followsop_cache c
+                    ON CONFLICT (work_req_no) 
+                    DO UPDATE SET 
+                        custom_data = EXCLUDED.custom_data,
+                        is_deleted = 0,
+                        updated_at = CURRENT_TIMESTAMP
+                ''')
+            else:
+                # SQLite용 INSERT OR REPLACE
+                cursor.execute('''
+                    INSERT OR REPLACE INTO follow_sop (work_req_no, custom_data, created_at, is_deleted)
+                    SELECT
+                      c.work_req_no,
+                      c.custom_data,
+                      COALESCE(json_extract(c.custom_data, '$.created_at'), c.sync_date),
+                      0
+                    FROM followsop_cache c
+                ''')
             
             # 추가: 동기화된 데이터는 강제로 활성화 (삭제 상태 해제)
             cursor.execute('''
@@ -910,7 +938,7 @@ class PartnerDataManager:
                 return False
             
             # SQLite에 저장
-            conn = sqlite3.connect(self.local_db_path, timeout=30.0)
+            conn = get_db_connection(self.local_db_path, timeout=30.0)
             cursor = conn.cursor()
             
             # PRAGMA 설정
@@ -960,22 +988,48 @@ class PartnerDataManager:
                 
                 rows.append((fullprocess_number, custom_data))
             
-            # 배치 삽입
-            cursor.executemany('''
-                INSERT OR REPLACE INTO fullprocess_cache (fullprocess_number, custom_data) 
-                VALUES (?, ?)
-            ''', rows)
+            # 배치 삽입 - PostgreSQL vs SQLite 조건부 처리
+            if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                # PostgreSQL: bulk_upsert 사용
+                from db.upsert import bulk_upsert
+                data_list = [{'fullprocess_number': row[0], 'custom_data': row[1]} for row in rows]
+                bulk_upsert(conn, 'fullprocess_cache', data_list)
+            else:
+                # SQLite: INSERT OR REPLACE
+                cursor.executemany('''
+                    INSERT OR REPLACE INTO fullprocess_cache (fullprocess_number, custom_data) 
+                    VALUES (?, ?)
+                ''', rows)
             
             # GPT 지침: 캐시→본테이블 이관 (UPSERT) - 동기화된 데이터는 무조건 활성화
-            cursor.execute('''
-                INSERT OR REPLACE INTO full_process (fullprocess_number, custom_data, created_at, is_deleted)
-                SELECT
-                  c.fullprocess_number,
-                  c.custom_data,
-                  COALESCE(json_extract(c.custom_data, '$.created_at'), c.sync_date),
-                  0
-                FROM fullprocess_cache c
-            ''')
+            # PostgreSQL vs SQLite 조건부 처리
+            if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                # PostgreSQL용 ON CONFLICT
+                cursor.execute('''
+                    INSERT INTO full_process (fullprocess_number, custom_data, created_at, is_deleted)
+                    SELECT
+                      c.fullprocess_number,
+                      c.custom_data,
+                      COALESCE(json_extract(c.custom_data, '$.created_at'), c.sync_date),
+                      0
+                    FROM fullprocess_cache c
+                    ON CONFLICT (fullprocess_number) 
+                    DO UPDATE SET 
+                        custom_data = EXCLUDED.custom_data,
+                        is_deleted = 0,
+                        updated_at = CURRENT_TIMESTAMP
+                ''')
+            else:
+                # SQLite용 INSERT OR REPLACE
+                cursor.execute('''
+                    INSERT OR REPLACE INTO full_process (fullprocess_number, custom_data, created_at, is_deleted)
+                    SELECT
+                      c.fullprocess_number,
+                      c.custom_data,
+                      COALESCE(json_extract(c.custom_data, '$.created_at'), c.sync_date),
+                      0
+                    FROM fullprocess_cache c
+                ''')
             
             # 추가: 동기화된 데이터는 강제로 활성화 (삭제 상태 해제)
             cursor.execute('''
@@ -996,7 +1050,7 @@ class PartnerDataManager:
     
     def get_partner_by_business_number(self, business_number):
         """사업자번호로 협력사 정보 조회 (캐시 + 상세정보 조인)"""
-        conn = sqlite3.connect(self.local_db_path)
+        conn = get_db_connection(self.local_db_path)
         conn.row_factory = sqlite3.Row
         
         query = '''
@@ -1015,7 +1069,7 @@ class PartnerDataManager:
     
     def get_all_partners(self, page=1, per_page=10, filters=None):
         """협력사 목록 조회 (필터링 포함)"""
-        conn = sqlite3.connect(self.local_db_path)
+        conn = get_db_connection(self.local_db_path)
         conn.row_factory = sqlite3.Row
         
         # 기본 쿼리 (삭제되지 않은 데이터만)
@@ -1071,7 +1125,7 @@ class DatabaseConfig:
     
     def get_sqlite_connection(self, timeout=10.0):
         """SQLite 연결 반환"""
-        conn = sqlite3.connect(self.local_db_path, timeout=timeout)
+        conn = get_db_connection(self.local_db_path, timeout=timeout)
         cur = conn.cursor()
         cur.execute("PRAGMA journal_mode=WAL")
         cur.execute("PRAGMA busy_timeout=5000")
@@ -1088,7 +1142,7 @@ def maybe_daily_sync(force=False):
     Args:
         force: True면 무조건 동기화 실행 (최초 실행 시 사용)
     """
-    conn = sqlite3.connect(db_config.local_db_path)
+    conn = get_db_connection(db_config.local_db_path)
     cur = conn.cursor()
     
     # 동기화 상태 테이블 생성
@@ -1187,11 +1241,14 @@ def maybe_daily_sync(force=False):
                     # 동기화 완료 기록
                     cur.execute("SELECT COUNT(*) FROM safety_instructions_cache")
                     count = cur.fetchone()[0]
-                    cur.execute("""
-                        INSERT OR REPLACE INTO safety_instructions_sync_history 
-                        (id, first_sync_done, sync_date, record_count) 
-                        VALUES (1, 1, datetime('now'), ?)
-                    """, (count,))
+                    # safe_upsert 사용
+                    sync_data = {
+                        'id': 1,
+                        'first_sync_done': 1,
+                        'sync_date': None,  # 자동으로 처리됨
+                        'record_count': count
+                    }
+                    safe_upsert(conn, 'safety_instructions_sync_history', sync_data)
                     conn.commit()
                     print(f"[SUCCESS] 환경안전지시서 최초 동기화 완료: {count}건")
                 else:
@@ -1201,10 +1258,13 @@ def maybe_daily_sync(force=False):
         except Exception as e:
             print(f"[ERROR] 안전지시서 동기화 실패: {e}")
         
-        # 동기화 성공 시 마지막 동기화 시간 업데이트
+        # 동기화 성공 시 마지막 동기화 시간 업데이트 (safe_upsert 사용)
         if success:
-            cur.execute("INSERT OR REPLACE INTO sync_state (id, last_full_sync) VALUES (1, ?)",
-                       (pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),))
+            sync_data = {
+                'id': 1,
+                'last_full_sync': pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            safe_upsert(conn, 'sync_state', sync_data)
             conn.commit()
             print(f"[SUCCESS] 일일 동기화 완료: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
     else:
@@ -1240,7 +1300,7 @@ def maybe_daily_sync_master(force=False):
     - [MASTER_DATA_QUERIES]에 쿼리가 정의된 항목만 수행.
     """
     import pandas as pd
-    conn = sqlite3.connect(db_config.local_db_path)
+    conn = get_db_connection(db_config.local_db_path)
     _ensure_boot_sync_tables(conn)
     cur = conn.cursor()
 
@@ -1315,9 +1375,13 @@ def maybe_daily_sync_master(force=False):
     except Exception as e:
         print(f"[ERROR] 협력사 근로자 동기화 실패: {e}")
 
-    # 동기화 성공 시 마지막 동기화 시간 업데이트
+    # 동기화 성공 시 마지막 동기화 시간 업데이트 (safe_upsert 사용)
     if success or force:
-        cur.execute("INSERT OR REPLACE INTO master_sync_state (id, last_master_sync) VALUES (1, datetime('now'))")
+        sync_data = {
+            'id': 1,
+            'last_master_sync': None  # datetime('now') 또는 CURRENT_TIMESTAMP로 자동 처리됨
+        }
+        safe_upsert(conn, 'master_sync_state', sync_data)
         conn.commit()
         print(f"[SUCCESS] 마스터 데이터 동기화 완료: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
     else:
@@ -1331,7 +1395,7 @@ def maybe_one_time_sync_content(force=False):
     - 안전지시서(safety_instructions_cache): 최초 1회만 채움
     - 필요 시 FOLLOWSOP/FULLPROCESS 등 확장(키 존재하면)
     """
-    conn = sqlite3.connect(db_config.local_db_path)
+    conn = get_db_connection(db_config.local_db_path)
     _ensure_boot_sync_tables(conn)
     cur = conn.cursor()
 
@@ -1345,10 +1409,13 @@ def maybe_one_time_sync_content(force=False):
         # 실행
         ok = runner()
         if ok or force:
-            cur.execute("""
-                INSERT OR REPLACE INTO content_sync_state(name, first_sync_done, first_sync_at)
-                VALUES (?, 1, datetime('now'))
-            """, (name,))
+            # safe_upsert 사용  
+            sync_data = {
+                'name': name,
+                'first_sync_done': 1,
+                'first_sync_at': None  # 자동으로 처리됨
+            }
+            safe_upsert(conn, 'content_sync_state', sync_data)
             conn.commit()
 
     # 안전지시서(쿼리 존재 시에만 수행)

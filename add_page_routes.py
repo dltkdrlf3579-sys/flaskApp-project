@@ -1,3 +1,12 @@
+# ============= 필요한 imports (exec로 실행될 때 필요) =============
+# 이 파일은 app.py에서 exec()로 실행되므로 필요한 imports를 명시적으로 추가
+import logging
+import sqlite3
+from flask import request, render_template, jsonify
+from db_connection import get_db_connection
+from database_config import DB_PATH
+from config.menu import MENU_CONFIG
+
 # ============= Follow SOP 페이지 라우트 =============
 @app.route("/follow-sop")
 def follow_sop_route():
@@ -57,22 +66,34 @@ def follow_sop_route():
     
     if company_name:
         search_params['company_name'] = company_name
-        where_clauses.append("JSON_EXTRACT(s.custom_data, '$.company_name_1cha') LIKE ?")
-        query_params.append(f"%{company_name}%")
+        # 호환: company_name 또는 company_name_1cha 키 모두 검색
+        where_clauses.append("(JSON_EXTRACT(s.custom_data, '$.company_name') LIKE ? OR JSON_EXTRACT(s.custom_data, '$.company_name_1cha') LIKE ?)")
+        query_params.extend([f"%{company_name}%", f"%{company_name}%"])
     
     if business_number:
         search_params['business_number'] = business_number
-        where_clauses.append("JSON_EXTRACT(s.custom_data, '$.company_name_1cha_bizno') LIKE ?")
-        query_params.append(f"%{business_number}%")
+        # 호환: business_number 또는 company_name_1cha_bizno 키 모두 검색
+        where_clauses.append("(JSON_EXTRACT(s.custom_data, '$.business_number') LIKE ? OR JSON_EXTRACT(s.custom_data, '$.company_name_1cha_bizno') LIKE ?)")
+        query_params.extend([f"%{business_number}%", f"%{business_number}%"])
     
     # WHERE 절 구성 (삭제되지 않은 항목만)
     where_clauses.insert(0, "(s.is_deleted = 0 OR s.is_deleted IS NULL)")
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
     
-    # 전체 건수 조회
+    # 전체 건수 조회 - follow_sop_cache 테이블에서!
+    # cache 테이블이 비어있으면 main 테이블 사용
+    try:
+        cursor.execute("SELECT COUNT(*) FROM follow_sop_cache")
+        cache_count = cursor.fetchone()[0]
+        use_cache = cache_count > 0
+    except:
+        use_cache = False
+    
+    table_name = "follow_sop_cache" if use_cache else "follow_sop"
+    
     count_query = f"""
         SELECT COUNT(*) 
-        FROM follow_sop s
+        FROM {table_name} s
         WHERE {where_sql}
     """
     
@@ -82,7 +103,7 @@ def follow_sop_route():
     # 데이터 조회
     query = f"""
         SELECT s.* 
-        FROM follow_sop s
+        FROM {table_name} s
         WHERE {where_sql}
         ORDER BY s.created_at DESC
         LIMIT ? OFFSET ?
@@ -100,17 +121,36 @@ def follow_sop_route():
         # No 칼럼은 역순 번호로 설정 (총 개수에서 역순)
         item['no'] = total_count - offset - idx
         
-        # custom_data JSON 파싱 및 플래트닝
+        # custom_data JSON 파싱 및 플래트닝 (기본 필드 보호)
         if item.get('custom_data'):
             try:
                 import json
-                custom_data = json.loads(item['custom_data'])
-                item.update(custom_data)  # 최상위 레벨에 병합
+                raw = item.get('custom_data')
+                # dict/str 분기 처리
+                if isinstance(raw, dict):
+                    custom_data = raw
+                elif isinstance(raw, str):
+                    custom_data = json.loads(raw) if raw else {}
+                else:
+                    custom_data = {}
+                
+                # 기본 필드를 보호하면서 custom_data 병합
+                BASE_FIELDS = {'work_req_no', 'created_at', 'updated_at', 'is_deleted', 'synced_at', 'no'}
+                for k, v in custom_data.items():
+                    if k not in BASE_FIELDS:
+                        item[k] = v
             except Exception as e:
                 logging.error(f"custom_data 파싱 오류: {e}")
         items.append(item)
     
     conn.close()
+    
+    # 디버깅 로그 추가
+    logging.info(f"[DEBUG] Follow SOP - Total items: {len(items)}")
+    logging.info(f"[DEBUG] Follow SOP - Table used: {table_name}")
+    logging.info(f"[DEBUG] Follow SOP - Total count: {total_count}")
+    if items and len(items) > 0:
+        logging.info(f"[DEBUG] Follow SOP - First item keys: {list(items[0].keys())[:5]}")
     
     # smart_apply_mappings 적용 (드롭다운 코드를 라벨로 변환)
     if items:
@@ -160,6 +200,7 @@ def follow_sop_route():
                          section_columns=section_columns,
                          pagination=pagination,
                          search_params=search_params,
+                         total_count=total_count,  # 추가
                          menu=MENU_CONFIG)
 
 @app.route("/follow-sop-register")
@@ -258,31 +299,108 @@ def follow_sop_detail(work_req_no):
     import sqlite3
     logging.info(f"Follow SOP 상세 정보 조회: {work_req_no}")
     
+    # 테이블 존재 여부를 먼저 확인
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
-    # Follow SOP 정보 조회
-    cursor.execute("""
-        SELECT * FROM follow_sop
-        WHERE work_req_no = ?
-    """, (work_req_no,))
+    # 사용 가능한 테이블 확인
+    has_cache_table = False
+    has_main_table = False
     
-    sop_row = cursor.fetchone()
+    try:
+        # 테이블 존재 여부를 information_schema나 PRAGMA로 확인
+        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables 
+                    WHERE table_name = 'follow_sop_cache'
+                )
+            """)
+            has_cache_table = cursor.fetchone()[0]
+        else:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='follow_sop_cache'")
+            has_cache_table = cursor.fetchone() is not None
+    except:
+        pass
+    
+    try:
+        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables 
+                    WHERE table_name = 'follow_sop'
+                )
+            """)
+            has_main_table = cursor.fetchone()[0]
+        else:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='follow_sop'")
+            has_main_table = cursor.fetchone() is not None
+    except:
+        pass
+    
+    # Follow SOP 정보 조회
+    sop_row = None
+    
+    # cache 테이블이 존재하면 먼저 조회
+    if has_cache_table:
+        try:
+            cursor.execute("""
+                SELECT * FROM follow_sop_cache
+                WHERE work_req_no = ? AND (is_deleted = 0 OR is_deleted IS NULL)
+            """, (work_req_no,))
+            sop_row = cursor.fetchone()
+        except Exception as e:
+            logging.error(f"follow_sop_cache 조회 오류: {e}")
+    
+    # cache에 없고 main 테이블이 존재하면 조회
+    if not sop_row and has_main_table:
+        try:
+            cursor.execute("""
+                SELECT * FROM follow_sop
+                WHERE work_req_no = ?
+            """, (work_req_no,))
+            sop_row = cursor.fetchone()
+        except Exception as e:
+            logging.error(f"follow_sop 조회 오류: {e}")
+    
     if not sop_row:
         conn.close()
         return "Follow SOP를 찾을 수 없습니다.", 404
     
     sop = dict(sop_row)
     
-    # custom_data JSON 파싱
+    # details 테이블에서 상세내용 병합
+    try:
+        detail_row = cursor.execute("""
+            SELECT detailed_content FROM followsop_details
+            WHERE work_req_no = ?
+        """, (work_req_no,)).fetchone()
+        if detail_row and detail_row['detailed_content']:
+            sop['detailed_content'] = detail_row['detailed_content']
+    except:
+        pass
+    
+    # custom_data JSON 파싱 및 기본 필드 보호
     custom_data = {}
     if sop.get('custom_data'):
         try:
-            custom_data = json.loads(sop['custom_data'])
-            # sop 딕셔너리에 custom_data 병합 (중요!)
-            sop.update(custom_data)
-        except:
+            raw = sop.get('custom_data')
+            # dict/str 분기 처리
+            if isinstance(raw, dict):
+                custom_data = raw
+            elif isinstance(raw, str):
+                custom_data = json.loads(raw) if raw else {}
+            else:
+                custom_data = {}
+            
+            # 기본 필드를 보호하면서 custom_data 병합
+            BASE_FIELDS = {'work_req_no', 'created_at', 'updated_at', 'is_deleted', 'synced_at', 'no'}
+            for k, v in custom_data.items():
+                if k not in BASE_FIELDS:
+                    sop[k] = v
+        except Exception as e:
+            logging.error(f"Custom data parsing error: {e}")
             custom_data = {}
     
     # 섹션별 컬럼 정보 가져오기
@@ -341,6 +459,8 @@ def register_follow_sop():
         # safety-instruction과 동일한 방식으로 form data 처리
         import json
         from timezone_config import get_korean_time_str, get_korean_time
+        from db.upsert import safe_upsert
+        
         data = json.loads(request.form.get('data', '{}'))
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -350,13 +470,13 @@ def register_follow_sop():
         created_at_dt = get_korean_time()
         work_req_no = generate_followsop_number(DB_PATH, created_at_dt)
         
-        # follow_sop 테이블이 없으면 생성
+        # follow_sop_cache 테이블이 없으면 생성
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS follow_sop (
+            CREATE TABLE IF NOT EXISTS follow_sop_cache (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 work_req_no TEXT UNIQUE NOT NULL,
                 custom_data TEXT,
-                created_at TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_by TEXT,
                 updated_by TEXT,
                 is_deleted INTEGER DEFAULT 0
@@ -374,11 +494,15 @@ def register_follow_sop():
         # 번호 생성에 사용한 동일한 시간으로 created_at 설정
         created_at = created_at_dt.strftime('%Y-%m-%d %H:%M:%S')
         
-        # Follow SOP 등록
-        cursor.execute("""
-            INSERT INTO follow_sop (work_req_no, custom_data, created_at, created_by)
-            VALUES (?, ?, ?, ?)
-        """, (work_req_no, custom_data_json, created_at, session.get('user_id', 'system')))
+        # Follow SOP 등록 - safe_upsert 사용
+        upsert_data = {
+            'work_req_no': work_req_no,
+            'custom_data': custom_data_json,
+            'created_at': created_at,
+            'created_by': session.get('user_id', 'system'),
+            'is_deleted': 0
+        }
+        safe_upsert(conn, 'follow_sop_cache', upsert_data)
         
         conn.commit()
         
@@ -397,8 +521,9 @@ def register_follow_sop():
         if conn:
             conn.close()
 
-@app.route('/update-follow-sop', methods=['POST'])
-def update_follow_sop():
+# 이 라우트는 app.py에 더 완전한 버전이 있으므로 백업으로 변경
+# @app.route('/update-follow-sop', methods=['POST'])
+def update_follow_sop_simple():
     """Follow SOP 수정"""
     conn = None
     try:
@@ -467,13 +592,18 @@ def full_process_route():
     section_service = SectionConfigService('full_process', DB_PATH)
     
     # 기본 섹션 확인 및 생성
-    cursor.execute("SELECT COUNT(*) FROM full_process_sections WHERE section_key = 'basic_info'")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute("""
-            INSERT INTO full_process_sections (section_key, section_name, section_order, is_active)
-            VALUES ('basic_info', '기본정보', 1, 1)
-        """)
-        conn.commit()
+    try:
+        cursor.execute("SELECT COUNT(*) FROM full_process_sections WHERE section_key = 'basic_info'")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute("""
+                INSERT INTO full_process_sections (section_key, section_name, section_order, is_active)
+                VALUES ('basic_info', '기본정보', 1, 1)
+            """)
+            conn.commit()
+    except Exception as e:
+        # 테이블이 없거나 컬럼이 없으면 무시
+        conn.rollback() if hasattr(conn, 'rollback') else None
+        pass
     
     # 섹션 정보 가져오기
     sections = section_service.get_sections()
@@ -509,22 +639,34 @@ def full_process_route():
     
     if company_name:
         search_params['company_name'] = company_name
-        where_clauses.append("JSON_EXTRACT(p.custom_data, '$.company_1cha') LIKE ?")
-        query_params.append(f"%{company_name}%")
+        # 호환: company_name 또는 company_1cha 키 모두 검색
+        where_clauses.append("(JSON_EXTRACT(p.custom_data, '$.company_name') LIKE ? OR JSON_EXTRACT(p.custom_data, '$.company_1cha') LIKE ?)")
+        query_params.extend([f"%{company_name}%", f"%{company_name}%"])
     
     if business_number:
         search_params['business_number'] = business_number
-        where_clauses.append("JSON_EXTRACT(p.custom_data, '$.company_1cha_bizno') LIKE ?")
-        query_params.append(f"%{business_number}%")
+        # 호환: business_number 또는 company_1cha_bizno 키 모두 검색
+        where_clauses.append("(JSON_EXTRACT(p.custom_data, '$.business_number') LIKE ? OR JSON_EXTRACT(p.custom_data, '$.company_1cha_bizno') LIKE ?)")
+        query_params.extend([f"%{business_number}%", f"%{business_number}%"])
     
     # WHERE 절 구성 (삭제되지 않은 항목만)
     where_clauses.insert(0, "(p.is_deleted = 0 OR p.is_deleted IS NULL)")
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
     
+    # cache 테이블이 비어있으면 main 테이블 사용
+    try:
+        cursor.execute("SELECT COUNT(*) FROM full_process_cache")
+        cache_count = cursor.fetchone()[0]
+        use_cache = cache_count > 0
+    except:
+        use_cache = False
+    
+    table_name = "full_process_cache" if use_cache else "full_process"
+    
     # 전체 건수 조회
     count_query = f"""
         SELECT COUNT(*) 
-        FROM full_process p
+        FROM {table_name} p
         WHERE {where_sql}
     """
     
@@ -534,7 +676,7 @@ def full_process_route():
     # 데이터 조회
     query = f"""
         SELECT p.* 
-        FROM full_process p
+        FROM {table_name} p
         WHERE {where_sql}
         ORDER BY p.created_at DESC
         LIMIT ? OFFSET ?
@@ -552,12 +694,24 @@ def full_process_route():
         # No 칼럼은 역순 번호로 설정 (총 개수에서 역순)
         item['no'] = total_count - offset - idx
         
-        # custom_data JSON 파싱 및 플래트닝
+        # custom_data JSON 파싱 및 플래트닝 (기본 필드 보호)
         if item.get('custom_data'):
             try:
                 import json
-                custom_data = json.loads(item['custom_data'])
-                item.update(custom_data)  # 최상위 레벨에 병합
+                raw = item.get('custom_data')
+                # dict/str 분기 처리
+                if isinstance(raw, dict):
+                    custom_data = raw
+                elif isinstance(raw, str):
+                    custom_data = json.loads(raw) if raw else {}
+                else:
+                    custom_data = {}
+                
+                # 기본 필드를 보호하면서 custom_data 병합
+                BASE_FIELDS = {'fullprocess_number', 'created_at', 'updated_at', 'is_deleted', 'synced_at', 'no'}
+                for k, v in custom_data.items():
+                    if k not in BASE_FIELDS:
+                        item[k] = v
             except Exception as e:
                 logging.error(f"custom_data 파싱 오류: {e}")
         items.append(item)
@@ -612,6 +766,7 @@ def full_process_route():
                          section_columns=section_columns,
                          pagination=pagination,
                          search_params=search_params,
+                         total_count=total_count,  # 추가
                          menu=MENU_CONFIG)
 
 @app.route("/full-process-register")
@@ -630,13 +785,18 @@ def full_process_register():
     section_service = SectionConfigService('full_process', DB_PATH)
     
     # 기본 섹션 확인 및 생성
-    cursor.execute("SELECT COUNT(*) FROM full_process_sections WHERE section_key = 'basic_info'")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute("""
-            INSERT INTO full_process_sections (section_key, section_name, section_order, is_active)
-            VALUES ('basic_info', '기본정보', 1, 1)
-        """)
-        conn.commit()
+    try:
+        cursor.execute("SELECT COUNT(*) FROM full_process_sections WHERE section_key = 'basic_info'")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute("""
+                INSERT INTO full_process_sections (section_key, section_name, section_order, is_active)
+                VALUES ('basic_info', '기본정보', 1, 1)
+            """)
+            conn.commit()
+    except Exception as e:
+        # 테이블이 없거나 컬럼이 없으면 무시
+        conn.rollback() if hasattr(conn, 'rollback') else None
+        pass
     
     # 섹션 정보 가져오기
     sections = section_service.get_sections()
@@ -697,31 +857,108 @@ def full_process_detail(fullprocess_number):
     import sqlite3
     logging.info(f"Full Process 상세 정보 조회: {fullprocess_number}")
     
+    # 테이블 존재 여부를 먼저 확인
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
-    # Full Process 정보 조회
-    cursor.execute("""
-        SELECT * FROM full_process
-        WHERE fullprocess_number = ?
-    """, (fullprocess_number,))
+    # 사용 가능한 테이블 확인
+    has_cache_table = False
+    has_main_table = False
     
-    process_row = cursor.fetchone()
+    try:
+        # 테이블 존재 여부를 information_schema나 PRAGMA로 확인
+        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables 
+                    WHERE table_name = 'full_process_cache'
+                )
+            """)
+            has_cache_table = cursor.fetchone()[0]
+        else:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='full_process_cache'")
+            has_cache_table = cursor.fetchone() is not None
+    except:
+        pass
+    
+    try:
+        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables 
+                    WHERE table_name = 'full_process'
+                )
+            """)
+            has_main_table = cursor.fetchone()[0]
+        else:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='full_process'")
+            has_main_table = cursor.fetchone() is not None
+    except:
+        pass
+    
+    # Full Process 정보 조회
+    process_row = None
+    
+    # cache 테이블이 존재하면 먼저 조회
+    if has_cache_table:
+        try:
+            cursor.execute("""
+                SELECT * FROM full_process_cache
+                WHERE fullprocess_number = ? AND (is_deleted = 0 OR is_deleted IS NULL)
+            """, (fullprocess_number,))
+            process_row = cursor.fetchone()
+        except Exception as e:
+            logging.error(f"full_process_cache 조회 오류: {e}")
+    
+    # cache에 없고 main 테이블이 존재하면 조회
+    if not process_row and has_main_table:
+        try:
+            cursor.execute("""
+                SELECT * FROM full_process
+                WHERE fullprocess_number = ?
+            """, (fullprocess_number,))
+            process_row = cursor.fetchone()
+        except Exception as e:
+            logging.error(f"full_process 조회 오류: {e}")
+    
     if not process_row:
         conn.close()
         return "Full Process를 찾을 수 없습니다.", 404
     
     process = dict(process_row)
     
-    # custom_data JSON 파싱
+    # details 테이블에서 상세내용 병합
+    try:
+        detail_row = cursor.execute("""
+            SELECT detailed_content FROM fullprocess_details
+            WHERE fullprocess_number = ?
+        """, (fullprocess_number,)).fetchone()
+        if detail_row and detail_row['detailed_content']:
+            process['detailed_content'] = detail_row['detailed_content']
+    except:
+        pass
+    
+    # custom_data JSON 파싱 및 기본 필드 보호
     custom_data = {}
     if process.get('custom_data'):
         try:
-            custom_data = json.loads(process['custom_data'])
-            # process 딕셔너리에 custom_data 병합 (중요!)
-            process.update(custom_data)
-        except:
+            raw = process.get('custom_data')
+            # dict/str 분기 처리
+            if isinstance(raw, dict):
+                custom_data = raw
+            elif isinstance(raw, str):
+                custom_data = json.loads(raw) if raw else {}
+            else:
+                custom_data = {}
+            
+            # 기본 필드를 보호하면서 custom_data 병합
+            BASE_FIELDS = {'fullprocess_number', 'created_at', 'updated_at', 'is_deleted', 'synced_at', 'no'}
+            for k, v in custom_data.items():
+                if k not in BASE_FIELDS:
+                    process[k] = v
+        except Exception as e:
+            logging.error(f"Custom data parsing error: {e}")
             custom_data = {}
     
     # 섹션별 컬럼 정보 가져오기
@@ -774,6 +1011,8 @@ def register_full_process():
         # safety-instruction과 동일한 방식으로 form data 처리
         import json
         from timezone_config import get_korean_time_str, get_korean_time
+        from db.upsert import safe_upsert
+        
         data = json.loads(request.form.get('data', '{}'))
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -783,13 +1022,13 @@ def register_full_process():
         created_at_dt = get_korean_time()
         fullprocess_number = generate_fullprocess_number(DB_PATH, created_at_dt)
         
-        # full_process 테이블이 없으면 생성
+        # full_process_cache 테이블이 없으면 생성
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS full_process (
+            CREATE TABLE IF NOT EXISTS full_process_cache (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 fullprocess_number TEXT UNIQUE NOT NULL,
                 custom_data TEXT,
-                created_at TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 created_by TEXT,
                 updated_by TEXT,
                 is_deleted INTEGER DEFAULT 0
@@ -807,11 +1046,15 @@ def register_full_process():
         # 번호 생성에 사용한 동일한 시간으로 created_at 설정
         created_at = created_at_dt.strftime('%Y-%m-%d %H:%M:%S')
         
-        # Full Process 등록
-        cursor.execute("""
-            INSERT INTO full_process (fullprocess_number, custom_data, created_at, created_by)
-            VALUES (?, ?, ?, ?)
-        """, (fullprocess_number, custom_data_json, created_at, session.get('user_id', 'system')))
+        # Full Process 등록 - safe_upsert 사용
+        upsert_data = {
+            'fullprocess_number': fullprocess_number,
+            'custom_data': custom_data_json,
+            'created_at': created_at,
+            'created_by': session.get('user_id', 'system'),
+            'is_deleted': 0
+        }
+        safe_upsert(conn, 'full_process_cache', upsert_data)
         
         conn.commit()
         
@@ -830,8 +1073,9 @@ def register_full_process():
         if conn:
             conn.close()
 
-@app.route('/update-full-process', methods=['POST'])
-def update_full_process():
+# 이 라우트는 app.py에 더 완전한 버전이 있으므로 백업으로 변경
+# @app.route('/update-full-process', methods=['POST'])
+def update_full_process_simple():
     """Full Process 수정"""
     conn = None
     try:

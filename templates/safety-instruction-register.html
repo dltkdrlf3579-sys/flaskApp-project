@@ -50,6 +50,9 @@
                     {% for col in chunk %}
                         {% if col %}
                             {% set span = col.column_span|default(1)|int %}
+                            {% if col.column_type == 'list' %}
+                                {% set span = 4 %}
+                            {% endif %}
                             
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
                                 <label>{{ col.column_name }}</label>
@@ -245,6 +248,123 @@
                                         </button>
                                     </div>
                                             
+                                {% elif col.column_type == 'list' %}
+                                    <!-- 리스트 필드 -->
+                                    {% from 'includes/list_field_v3.html' import render_list_field %}
+                                    {{ render_list_field(col, '', section, mode='register') }}
+                                    
+                                {% elif col.column_type == 'number' %}
+                                    <!-- 숫자 필드 -->
+                                    <input type="number" 
+                                           id="{{ col.column_key }}" 
+                                           class="{{ section.section_key|replace('_', '-') }}-input" 
+                                           data-field="{{ col.column_key }}"
+                                           data-section="{{ section.section_key }}"
+                                           oninput="validateNumberInput(this)"
+                                           onkeypress="return isNumberKey(event)"
+                                           placeholder="숫자만 입력하세요">
+                                           
+                                {% elif col.column_type in ['linked', 'linked_text', 'linked_dept'] %}
+                                    <!-- 연결된 필드 (읽기 전용) -->
+                                    <input type="text" 
+                                           id="{{ col.column_key }}" 
+                                           class="{{ section.section_key|replace('_', '-') }}-input linked-field" 
+                                           data-field="{{ col.column_key }}"
+                                           data-section="{{ section.section_key }}"
+                                           data-linked-type="{{ col.column_type }}"
+                                           readonly
+                                           style="background-color: #e9ecef; cursor: not-allowed;">
+                                           
+                                {% elif col.column_type == 'popup_person' %}
+                                    <!-- 담당자 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               id="{{ col.column_key }}" 
+                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="popup_person"
+                                               placeholder="담당자 검색"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <button class="btn btn-sm btn-primary" 
+                                                onclick="openPersonSearch('{{ col.column_key }}')">
+                                            검색
+                                        </button>
+                                    </div>
+                                    
+                                {% elif col.column_type == 'popup_company' %}
+                                    <!-- 업체 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               id="{{ col.column_key }}" 
+                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="popup_company"
+                                               placeholder="업체 검색"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <button class="btn btn-sm btn-primary" 
+                                                onclick="openCompanySearch('{{ col.column_key }}')">
+                                            검색
+                                        </button>
+                                    </div>
+                                    
+                                {% elif col.column_type == 'popup_building' %}
+                                    <!-- 건물 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               id="{{ col.column_key }}" 
+                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="popup_building"
+                                               placeholder="건물 검색"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <button class="btn btn-sm btn-primary" 
+                                                onclick="openBuildingSearch('{{ col.column_key }}')">
+                                            검색
+                                        </button>
+                                    </div>
+                                    
+                                {% elif col.column_type == 'popup_department' %}
+                                    <!-- 부서 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               id="{{ col.column_key }}" 
+                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="popup_department"
+                                               placeholder="부서 검색"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <button class="btn btn-sm btn-primary" 
+                                                onclick="openDepartmentSearch('{{ col.column_key }}')">
+                                            검색
+                                        </button>
+                                    </div>
+                                    
+                                {% elif col.column_type == 'popup_contractor' %}
+                                    <!-- 협력사 근로자 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text" 
+                                               id="{{ col.column_key }}" 
+                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="popup_contractor"
+                                               placeholder="협력사 근로자 검색"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <button class="btn btn-sm btn-primary" 
+                                                onclick="openContractorSearch('{{ col.column_key }}')">
+                                            검색
+                                        </button>
+                                    </div>
+                                           
                                 {% else %}
                                     <!-- 기본 텍스트 필드 -->
                                     <input type="text" 
@@ -271,9 +391,13 @@
         </div>
         <div class="section-content">
             <div class="content-editor">
-                <div id="detailed-content" 
-                     class="editable-content"></div>
-                </div>
+                <!-- CKEditor textarea -->
+                <textarea id="detailed-content" 
+                          name="detailed_content"
+                          placeholder="상세내용을 입력하세요."
+                          rows="10"
+                          style="width: 100%; min-height: 300px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;"></textarea>
+            </div>
             </div>
         </div>
     </div>
@@ -334,6 +458,26 @@ function collectDynamicFields() {
                 value = input.value;
             }
             
+            // 리스트 필드 처리 - 더 간단하고 확실한 방법
+            // 1. data-field-type 체크 또는 2. JSON 배열 문자열 체크
+            if ((input.getAttribute('data-field-type') === 'list' || 
+                 (typeof value === 'string' && value.trim().startsWith('['))) && value) {
+                console.log(`🔍 리스트 필드 감지: ${fieldKey}`);
+                try {
+                    const parsed = JSON.parse(value);
+                    if (Array.isArray(parsed)) {
+                        value = parsed;
+                        console.log(`✅ 리스트 필드 ${fieldKey} 파싱 성공: ${parsed.length}개 항목`);
+                    } else {
+                        console.log(`⚠️ ${fieldKey}는 배열이 아님`);
+                    }
+                } catch(e) {
+                    console.log(`❌ 리스트 필드 ${fieldKey} 파싱 실패:`, e);
+                    // 파싱 실패 시 빈 배열로 설정
+                    value = [];
+                }
+            }
+            
             data[fieldKey] = value;
         });
     });
@@ -343,40 +487,76 @@ function collectDynamicFields() {
 
 // 등록 함수
 function registerSafetyInstruction() {
+    console.log('=== 환경안전 지시서 등록 시작 ===');
     const formData = new FormData();
     
-    // 상세내용 추가
-    // 상세내용 처리 - CKEditor 데이터 가져오기
-    const detailedContent = window.RichText ? window.RichText.getData() : '';
+    // CKEditor 또는 textarea에서 값 가져오기
+    const contentTextarea = document.getElementById('detailed-content');
+    let detailedContent = '';
+    
+    if (window.RichText && typeof window.RichText.getData === 'function') {
+        detailedContent = window.RichText.getData();
+    } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
+        detailedContent = window.editorInstance.getData();
+    } else if (contentTextarea) {
+        detailedContent = contentTextarea.value || '';
+    }
+    
     formData.append('detailed_content', detailedContent);
+    console.log('상세내용:', detailedContent);
     
     // 동적 필드 수집
     const dynamicData = collectDynamicFields();
+    console.log('=== collectDynamicFields 결과 ===');
+    console.log('전체 데이터:', dynamicData);
     
-    // basic_info와 violation_info 분리
-    const basicInfo = {};
-    const violationInfo = {};
-    const customData = {};
+    // 각 필드의 타입 확인
+    for (const [key, value] of Object.entries(dynamicData)) {
+        if (Array.isArray(value)) {
+            console.log(`  ${key}: 배열 (${value.length}개 항목)`);
+        } else if (typeof value === 'string' && value.startsWith('[')) {
+            console.log(`  ${key}: JSON 문자열 "${value.substring(0, 50)}..."`);
+        } else {
+            console.log(`  ${key}: ${typeof value} = "${value}"`);
+        }
+    }
     
-    // 섹션별로 데이터 분류
-    sections.forEach(section => {
-        const cols = sectionColumns[section.section_key] || [];
-        cols.forEach(col => {
-            if (dynamicData[col.column_key] !== undefined) {
-                if (section.section_key === 'basic_info') {
-                    basicInfo[col.column_key] = dynamicData[col.column_key];
-                } else if (section.section_key === 'violation_info') {
-                    violationInfo[col.column_key] = dynamicData[col.column_key];
-                } else {
-                    customData[col.column_key] = dynamicData[col.column_key];
-                }
-            }
-        });
+    // 각 필드를 FormData에 추가
+    for (const [key, value] of Object.entries(dynamicData)) {
+        // 배열은 JSON 문자열로 변환해서 추가
+        if (Array.isArray(value)) {
+            formData.append(key, JSON.stringify(value));
+        } else {
+            formData.append(key, value);
+        }
+    }
+    
+    // base_fields 처리 (기본 컬럼들)
+    const baseFields = {};
+    const baseFieldsList = [
+        'issue_number', 'instruction_name', 'instruction_date', 'workplace',
+        'instruction_type', 'violation_category', 'created_at'
+    ];
+    
+    baseFieldsList.forEach(field => {
+        if (dynamicData[field] !== undefined) {
+            baseFields[field] = dynamicData[field];
+        }
     });
+    formData.append('base_fields', JSON.stringify(baseFields));
     
-    // FormData에 추가
-    formData.append('basic_info', JSON.stringify(basicInfo));
-    formData.append('violation_info', JSON.stringify(violationInfo));
+    // custom_data 처리 (모든 동적 필드 포함)
+    const customData = { ...dynamicData };
+    
+    // 리스트 필드 검증 - 리스트 필드가 올바르게 포함되었는지 확인
+    for (const [key, value] of Object.entries(customData)) {
+        if (Array.isArray(value)) {
+            console.log(`✅ 리스트 필드 ${key}: 배열로 정상 포함됨, 항목 수: ${value.length}`);
+        } else if (typeof value === 'string' && value.startsWith('[')) {
+            console.log(`❌ 리스트 필드 ${key}: 문자열로 포함됨 (이중 인코딩 문제!)`, value);
+        }
+    }
+    
     formData.append('custom_data', JSON.stringify(customData));
     
     // 첨부파일 처리
@@ -398,15 +578,45 @@ function registerSafetyInstruction() {
         });
     }
     
+    // FormData 내용 확인
+    console.log('=== FormData 전송 내용 ===');
+    for (let [key, value] of formData.entries()) {
+        if (key === 'custom_data') {
+            console.log(`${key}:`, value);
+            try {
+                const parsed = JSON.parse(value);
+                console.log('custom_data 파싱된 내용:', parsed);
+                for (const [k, v] of Object.entries(parsed)) {
+                    if (Array.isArray(v)) {
+                        console.log(`  - ${k}: 배열 (${v.length}개 항목)`);
+                    } else {
+                        console.log(`  - ${k}: ${typeof v}`);
+                    }
+                }
+            } catch(e) {
+                console.error('custom_data 파싱 실패:', e);
+            }
+        } else {
+            console.log(`${key}:`, value);
+        }
+    }
+    
     // 서버로 전송
+    console.log('서버로 전송 시작...');
     fetch('/register-safety-instruction', {
         method: 'POST',
         body: formData
     })
-    .then(response => response.json())
+    .then(response => {
+        console.log('서버 응답 상태:', response.status);
+        return response.json();
+    })
     .then(data => {
+        console.log('서버 응답 데이터:', data);
         if (data.success) {
             alert('환경안전 지시서가 성공적으로 등록되었습니다.');
+            console.log('등록 성공! Console을 확인하세요.');
+            
             if (window.opener) {
                 window.opener.location.reload();
                 window.close();
@@ -415,19 +625,271 @@ function registerSafetyInstruction() {
             }
         } else {
             alert('등록 실패: ' + (data.message || '알 수 없는 오류'));
+            console.error('등록 실패 상세:', data);
         }
     })
     .catch(error => {
-        console.error('Error:', error);
-        alert('등록 중 오류가 발생했습니다.');
+        console.error('전송 오류:', error);
+        alert('등록 중 오류가 발생했습니다: ' + error.message);
     });
 }
 
-// 공통 팝업 핸들러는 base.html에서 로드됨 (popup-handler.js)
-// 모든 팝업 함수들이 자동으로 사용 가능:
-// - openPersonSearch, openCompanySearch, openBuildingSearch
-// - openDepartmentSearch, openContractorSearch
-// - 각 receive 콜백 함수들
+// 공통 팝업 핸들러들 (accident-register.html과 동일)
+function openPersonSearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=person&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'personSearch', popupOptions);
+    
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    window.receivePersonSelection = function(fieldKey, data) {
+        const mainField = document.getElementById(fieldKey);
+        if (mainField) {
+            mainField.value = data.employee_name || data.name || '';
+        }
+        
+        const idField = document.getElementById(fieldKey + '_id');
+        if (idField) {
+            idField.value = data.employee_id || data.id || '';
+            idField.readOnly = true;
+            idField.style.backgroundColor = '#f8f9fa';
+        }
+        
+        const deptField = document.getElementById(fieldKey + '_dept');
+        if (deptField) {
+            deptField.value = data.department_name || data.department || '';
+            deptField.readOnly = true;
+            deptField.style.backgroundColor = '#f8f9fa';
+        }
+    };
+    
+    popup.focus();
+}
+
+function openCompanySearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=company&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'companySearch', popupOptions);
+    
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    window.receiveCompanySelection = function(fieldKey, data) {
+        document.getElementById(fieldKey).value = data.company_name || '';
+        
+        const businessNumberFields = [
+            fieldKey + '_business_number',
+            fieldKey + '_bizno'
+        ];
+        
+        businessNumberFields.forEach(fieldId => {
+            const bnField = document.getElementById(fieldId);
+            if (bnField) {
+                bnField.value = data.business_number || '';
+                bnField.readOnly = true;
+                bnField.style.backgroundColor = '#f8f9fa';
+            }
+        });
+    };
+    
+    popup.focus();
+}
+
+function openBuildingSearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=building&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'buildingSearch', popupOptions);
+    
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    window.receiveBuildingSelection = function(fieldKey, data) {
+        document.getElementById(fieldKey).value = data.building_name || '';
+        const codeField = document.getElementById(fieldKey + '_code');
+        if (codeField) {
+            codeField.value = data.building_code || '';
+            codeField.readOnly = true;
+            codeField.style.backgroundColor = '#f8f9fa';
+        }
+    };
+    
+    popup.focus();
+}
+
+function openDepartmentSearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=department&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'departmentSearch', popupOptions);
+    
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    window.receiveDepartmentSelection = function(fieldKey, data) {
+        const mainField = document.getElementById(fieldKey);
+        if (mainField) {
+            mainField.value = data.dept_name || data.department_name || '';
+        }
+        
+        const codeField = document.getElementById(fieldKey + '_code');
+        if (codeField) {
+            codeField.value = data.dept_code || data.department_code || '';
+            codeField.readOnly = true;
+            codeField.style.backgroundColor = '#f8f9fa';
+        }
+    };
+    
+    popup.focus();
+}
+
+function openContractorSearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+    
+    const popupUrl = `/search-popup?type=contractor&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'contractorSearch', popupOptions);
+    
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+    
+    window.receiveContractorSelection = function(fieldKey, data) {
+        const mainField = document.getElementById(fieldKey);
+        if (mainField) {
+            mainField.value = data.worker_name || '';
+        }
+        
+        const linkedFields = ['_id', '_company_name', '_business_number'];
+        linkedFields.forEach(suffix => {
+            const field = document.getElementById(fieldKey + suffix);
+            if (field) {
+                let value = '';
+                if (suffix === '_id') value = data.worker_id || '';
+                else if (suffix === '_company_name') value = data.company_name || '';
+                else if (suffix === '_business_number') value = data.business_number || '';
+                
+                field.value = value;
+                field.readOnly = true;
+                field.style.backgroundColor = '#f8f9fa';
+            }
+        });
+    };
+    
+    popup.focus();
+}
+
+// 숫자 입력 유효성 검사 함수들
+function isNumberKey(evt) {
+    var charCode = (evt.which) ? evt.which : evt.keyCode;
+    if (charCode > 31 && (charCode < 48 || charCode > 57) && charCode !== 46) {
+        return false;
+    }
+    return true;
+}
+
+function validateNumberInput(input) {
+    const value = input.value;
+    const numericValue = value.replace(/[^0-9.]/g, '');
+    
+    if (value !== numericValue) {
+        input.value = numericValue;
+        showValidationMessage(input, '숫자만 입력할 수 있습니다.');
+    }
+}
+
+function showValidationMessage(input, message) {
+    const existingMessage = input.parentNode.querySelector('.validation-message');
+    if (existingMessage) {
+        existingMessage.remove();
+    }
+    
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'validation-message';
+    messageDiv.style.color = '#dc3545';
+    messageDiv.style.fontSize = '12px';
+    messageDiv.style.marginTop = '5px';
+    messageDiv.textContent = message;
+    
+    input.parentNode.appendChild(messageDiv);
+    
+    setTimeout(() => {
+        if (messageDiv.parentNode) {
+            messageDiv.remove();
+        }
+    }, 3000);
+}
 </script>
 
 <style>

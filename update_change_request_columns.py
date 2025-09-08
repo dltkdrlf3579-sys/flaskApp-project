@@ -7,6 +7,10 @@
 import sqlite3
 import json
 import sys
+import os
+sys.path.append(os.path.dirname(__file__))
+from db_connection import get_db_connection
+from db.upsert import safe_upsert
 
 # Windows에서 한글 출력을 위한 인코딩 설정
 if sys.platform == 'win32':
@@ -149,24 +153,24 @@ def update_columns():
         }
     ]
     
-    # 4. 컬럼 추가 또는 업데이트
+    # 4. 컬럼 추가 또는 업데이트 - safe_upsert 사용
     for col in columns:
-        cursor.execute("""
-            INSERT OR REPLACE INTO change_request_column_config 
-            (column_key, column_name, column_type, column_order, is_active, 
-             is_required, dropdown_options, linked_key, tab, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        """, (
-            col['column_key'],
-            col['column_name'],
-            col['column_type'],
-            col['column_order'],
-            col['is_active'],
-            col.get('is_required', 0),
-            col.get('dropdown_options'),
-            col.get('linked_key'),
-            col.get('tab', 'basic')
-        ))
+        col_data = {
+            'column_key': col['column_key'],
+            'column_name': col['column_name'],
+            'column_type': col['column_type'],
+            'column_order': col['column_order'],
+            'is_active': col['is_active'],
+            'is_required': col.get('is_required', 0),
+            'dropdown_options': col.get('dropdown_options'),
+            'linked_key': col.get('linked_key'),
+            'tab': col.get('tab', 'basic'),
+            'updated_at': None  # 자동으로 처리됨
+        }
+        # 레지스트리에 없으므로 수동 설정
+        safe_upsert(conn, 'change_request_column_config', col_data, 
+                   ['column_key'], 
+                   ['column_name', 'column_type', 'column_order', 'is_active', 'is_required', 'dropdown_options', 'linked_key', 'tab', 'updated_at'])
     
     # 5. dropdown_option_codes_v2 테이블에 드롭다운 옵션 추가
     cursor.execute("""
@@ -194,11 +198,16 @@ def update_columns():
     
     cursor.execute("DELETE FROM dropdown_option_codes_v2 WHERE board_type='change_request' AND column_key='change_type'")
     for i, (code, value) in enumerate(change_types, 1):
-        cursor.execute("""
-            INSERT OR REPLACE INTO dropdown_option_codes_v2 
-            (board_type, column_key, option_code, option_value, display_order, is_active)
-            VALUES ('change_request', 'change_type', ?, ?, ?, 1)
-        """, (code, value, i))
+        option_data = {
+            'board_type': 'change_request',
+            'column_key': 'change_type',
+            'option_code': code,
+            'option_value': value,
+            'display_order': i,
+            'is_active': 1,
+            'updated_at': None  # 자동으로 처리됨
+        }
+        safe_upsert(conn, 'dropdown_option_codes_v2', option_data)
     
     # 상태 드롭다운 옵션
     statuses = [
@@ -211,11 +220,16 @@ def update_columns():
     
     cursor.execute("DELETE FROM dropdown_option_codes_v2 WHERE board_type='change_request' AND column_key='status'")
     for i, (code, value) in enumerate(statuses, 1):
-        cursor.execute("""
-            INSERT OR REPLACE INTO dropdown_option_codes_v2 
-            (board_type, column_key, option_code, option_value, display_order, is_active)
-            VALUES ('change_request', 'status', ?, ?, ?, 1)
-        """, (code, value, i))
+        option_data = {
+            'board_type': 'change_request',
+            'column_key': 'status',
+            'option_code': code,
+            'option_value': value,
+            'display_order': i,
+            'is_active': 1,
+            'updated_at': None  # 자동으로 처리됨
+        }
+        safe_upsert(conn, 'dropdown_option_codes_v2', option_data)
     
     conn.commit()
     conn.close()

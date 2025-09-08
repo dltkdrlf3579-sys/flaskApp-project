@@ -55,8 +55,9 @@
                 <tr>
                     <th class="checkbox-column"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
                     <th class="fixed-col" style="width: 60px;">No</th>
-                    <!-- 하드코딩된 컬럼 헤더 (work_req_no만) -->
+                    <!-- 하드코딩된 컬럼 헤더 (work_req_no, created_at) -->
                     <th>점검번호</th>
+                    <th style="width: 120px;">등록일</th>
                     {% for section in sections %}
                         {% for col in section_columns[section['section_key']] %}
                             {% if col['column_key'] not in ['detailed_content', 'violation_content', 'work_req_no', 'registered_date'] %}
@@ -75,33 +76,62 @@
                     <td class="fixed-col" style="width: 60px;">
                         {{ followsop.no }}
                     </td>
-                    <!-- 하드코딩된 컬럼 (work_req_no만) -->
+                    <!-- 하드코딩된 컬럼 (work_req_no, created_at) -->
                     <td>
                         <a href="javascript:void(0)" class="company-link" onclick="openFollowSopModal('{{ followsop.work_req_no }}')">{{ followsop.work_req_no or '-' }}</a>
+                    </td>
+                    <td style="width: 120px;">
+                        {{ (followsop.created_at|date_only) if followsop.created_at else '-' }}
                     </td>
                     
                     {% for section in sections %}
                         {% for col in section_columns[section['section_key']] %}
                             {% if col['column_key'] not in ['detailed_content', 'violation_content', 'work_req_no', 'registered_date'] %}
-                            <td>
+                            <td {% if col['column_type'] == 'list' %}data-col="list"{% endif %}>
                                 {% if col['column_key'] == 'created_at' %}
                                     {{ (followsop.created_at|date_only) if followsop.created_at else '-' }}
                                 {% elif col['column_type'] == 'dropdown' %}
                                     {% set field_label = col['column_key'] + '_label' %}
-                                    {% if followsop.custom_mapped and col['column_key'] in followsop.custom_mapped %}
-                                        {{ followsop.custom_mapped[col['column_key']] or '-' }}
+                                    {% set col_key = col['column_key'] %}
+                                    {% if followsop.custom_mapped and col_key in followsop.custom_mapped %}
+                                        {{ followsop.custom_mapped[col_key] or '-' }}
                                     {% elif field_label in followsop and followsop[field_label] %}
                                         {{ followsop[field_label] }}
-                                    {% elif col['column_key'] in followsop and followsop[col['column_key']] %}
-                                        {{ followsop[col['column_key']] }}
+                                    {% elif col_key in followsop and followsop[col_key] %}
+                                        {{ followsop[col_key] }}
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                {% elif col['column_type'] == 'list' %}
+                                    <!-- 리스트 타입 컬럼: 간단히 개수 표시 -->
+                                    {% if followsop.custom_mapped and col['column_key'] in followsop.custom_mapped %}
+                                        {% set list_data = followsop.custom_mapped[col['column_key']] %}
+                                        {% if list_data and list_data != '[]' and list_data != [] %}
+                                            {% if list_data is string %}
+                                                <!-- 문자열인 경우 from_json 필터로 파싱 시도 -->
+                                                {% set parsed_data = list_data | from_json %}
+                                                {% if parsed_data %}
+                                                    {{ parsed_data | length }}개 항목
+                                                {% else %}
+                                                    리스트 데이터
+                                                {% endif %}
+                                            {% elif list_data is iterable and list_data is not string %}
+                                                {{ list_data | length }}개 항목
+                                            {% else %}
+                                                리스트 데이터
+                                            {% endif %}
+                                        {% else %}
+                                            -
+                                        {% endif %}
                                     {% else %}
                                         -
                                     {% endif %}
                                 {% else %}
-                                    {% if followsop.custom_mapped and col['column_key'] in followsop.custom_mapped %}
-                                        {{ followsop.custom_mapped[col['column_key']] or '-' }}
-                                    {% elif col['column_key'] in followsop %}
-                                        {{ followsop[col['column_key']] or '-' }}
+                                    {% set col_key = col['column_key'] %}
+                                    {% if followsop.custom_mapped and col_key in followsop.custom_mapped %}
+                                        {{ followsop.custom_mapped[col_key] or '-' }}
+                                    {% elif col_key in followsop %}
+                                        {{ followsop[col_key] or '-' }}
                                     {% else %}
                                         -
                                     {% endif %}
@@ -504,6 +534,24 @@
     max-width: 30px !important;
     padding: 4px !important;
     text-align: center !important;
+}
+
+/* 긴 컬럼 CSS 제한 추가 (data-col 속성) */
+td[data-col="list"] {
+    max-width: 120px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 리스트 타입 컬럼 폭/높이 제한 */
+.data-table td[data-col="list"] {
+    max-width: 120px;
+    max-height: 50px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
 }
 </style>
 

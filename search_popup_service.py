@@ -51,7 +51,7 @@ class SearchPopupService:
                 'use_cache': True  # 캐시 사용 (partners_cache 테이블)
             },
             'person': {
-                'table': 'employees_cache',  # 로컬 캐시 테이블 사용
+                'table': 'employees_cache',  # cache 테이블 사용
                 'search_fields': [
                     {'field': 'employee_name', 'label': '이름'},
                     {'field': 'employee_id', 'label': 'ID'},
@@ -88,8 +88,8 @@ class SearchPopupService:
                     {'field': 'building_code', 'label': '건물코드'}
                 ],
                 'default_search_field': 'building_name',
-                'display_fields': ['SITE', 'SITE_TYPE','building_name', 'building_code'],
-                'display_labels': {'SITE': '사업장', 'SITE_TYPE': '단위','building_name': '건물명', 'building_code': '건물코드'},
+                'display_fields': ['SITE', 'SITE_TYPE', 'building_name', 'building_code'],
+                'display_labels': {'SITE': '사업장', 'SITE_TYPE': '구역', 'building_name': '건물명', 'building_code': '건물코드'},
                 'id_field': 'building_code',
                 'title': '건물 검색',
                 'placeholder': '검색어를 입력하세요',
@@ -97,7 +97,7 @@ class SearchPopupService:
                 'use_cache': True  # 로컬 테이블 사용
             },
             'contractor': {
-                'table': 'contractors_cache',  # 로컬 캐시 테이블 사용
+                'table': 'contractors_cache',  # cache 테이블 사용
                 'search_fields': [
                     {'field': 'worker_name', 'label': '근로자명'},
                     {'field': 'worker_id', 'label': '근로자ID'},

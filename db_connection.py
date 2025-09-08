@@ -1,78 +1,93 @@
 """
-데이터베이스 연결 공통 모듈
-모든 서비스에서 사용하는 표준 데이터베이스 연결 설정
-WAL 모드와 동시성 설정이 적용된 안전한 연결 제공
+데이터베이스 연결 통합 모듈 - v7 (SQLite/PostgreSQL 통합)
+v7 계획에 따라 CompatConnection을 반환하여 투명한 호환성 제공
 """
 import sqlite3
 import logging
+import configparser
 from typing import Optional
+from db.compat import CompatConnection
 
-class DatabaseConnection:
-    """데이터베이스 연결 관리 클래스"""
+
+def get_db_connection(db_path: str = None, timeout: float = 10.0, row_factory: bool = False):
+    """
+    통합 DB 연결 함수 - v7 호환 레이어
     
-    @staticmethod
-    def get_connection(db_path: str, timeout: float = 10.0, row_factory: bool = False) -> sqlite3.Connection:
-        """
-        WAL 모드와 동시성 설정이 적용된 데이터베이스 연결 생성
-        
-        Args:
-            db_path: 데이터베이스 파일 경로
-            timeout: 연결 타임아웃 (기본값: 10초)
-            row_factory: Row factory 사용 여부
-            
-        Returns:
-            설정된 데이터베이스 연결
-        """
+    Args:
+        db_path: SQLite DB 경로 (PostgreSQL일 때는 무시)
+        timeout: 연결 타임아웃
+        row_factory: sqlite3.Row 사용 여부
+    
+    Returns:
+        CompatConnection 객체 (SQLite/PostgreSQL 투명 처리)
+    """
+    
+    # config.ini에서 설정 읽기
+    config = configparser.ConfigParser()
+    try:
+        config.read('config.ini', encoding='utf-8')
+    except Exception as e:
+        logging.warning(f"config.ini 읽기 실패, 기본값 사용: {e}")
+    
+    # 백엔드 결정
+    backend = config.get('DATABASE', 'db_backend', fallback='sqlite')
+    
+    # 로깅 설정 확인
+    log_backend = config.getboolean('LOGGING', 'log_db_backend', fallback=False)
+    if log_backend:
+        logging.info(f"DB Backend: {backend}")
+    
+    if backend == 'postgres':
+        # PostgreSQL 연결
         try:
-            # 연결 생성
-            conn = sqlite3.connect(db_path, timeout=timeout)
-            
-            # Row factory 설정 (필요시)
+            dsn = config.get('DATABASE', 'postgres_dsn')
+            conn = CompatConnection(backend='postgres', dsn=dsn, timeout=timeout)
+            logging.debug(f"PostgreSQL connection established: {dsn}")
+        except Exception as e:
+            logging.error(f"PostgreSQL connection error: {e}")
+            logging.warning("Falling back to SQLite")
+            # Fallback to SQLite
+            backend = 'sqlite'
+        else:
+            # PostgreSQL 연결 성공 시 row_factory 설정
             if row_factory:
                 conn.row_factory = sqlite3.Row
-            
-            cursor = conn.cursor()
-            
-            # WAL 모드 설정 (Write-Ahead Logging)
-            # 동시에 여러 읽기가 가능하고, 쓰기 중에도 읽기가 가능
-            cursor.execute("PRAGMA journal_mode=WAL")
-            
-            # Busy timeout 설정 (밀리초)
-            # 다른 연결이 잠금을 해제할 때까지 대기하는 시간
-            cursor.execute("PRAGMA busy_timeout=5000")
-            
-            # 동기화 모드 설정
-            # NORMAL: 안전하면서도 성능이 좋음
-            cursor.execute("PRAGMA synchronous=NORMAL")
-            
-            # 캐시 크기 설정 (페이지 단위, 음수는 KB 단위)
-            cursor.execute("PRAGMA cache_size=-2000")  # 2MB 캐시
-            
-            # 외래 키 제약 조건 활성화
-            cursor.execute("PRAGMA foreign_keys=ON")
-            
-            logging.debug(f"Database connection established: {db_path}")
             return conn
-            
-        except sqlite3.Error as e:
-            logging.error(f"Database connection error: {e}")
-            raise
+    
+    # SQLite 연결 (기본 또는 fallback)
+    if db_path is None:
+        db_path = config.get('DATABASE', 'local_db_path', fallback='portal.db')
+    
+    try:
+        conn = CompatConnection(backend='sqlite', database=db_path, timeout=timeout)
+        logging.debug(f"SQLite connection established: {db_path}")
+        
+        # row_factory 설정
+        if row_factory:
+            conn.row_factory = sqlite3.Row
+        
+        return conn
+        
+    except Exception as e:
+        logging.error(f"SQLite connection error: {e}")
+        raise
+
+
+class DatabaseConnection:
+    """기존 코드 호환용 클래스 - 내부에서 get_db_connection 사용"""
     
     @staticmethod
-    def execute_query(conn: sqlite3.Connection, query: str, params: tuple = (), 
+    def get_connection(db_path: str, timeout: float = 10.0, row_factory: bool = False):
+        """
+        기존 코드 호환용 - 내부적으로 새로운 get_db_connection 사용
+        """
+        return get_db_connection(db_path, timeout, row_factory)
+    
+    @staticmethod
+    def execute_query(conn, query: str, params: tuple = (), 
                       fetch_one: bool = False, fetch_all: bool = True) -> Optional[any]:
         """
-        쿼리 실행 헬퍼 함수
-        
-        Args:
-            conn: 데이터베이스 연결
-            query: SQL 쿼리
-            params: 쿼리 파라미터
-            fetch_one: 단일 결과 반환 여부
-            fetch_all: 전체 결과 반환 여부
-            
-        Returns:
-            쿼리 결과
+        쿼리 실행 헬퍼 함수 - CompatConnection에서도 동작
         """
         try:
             cursor = conn.cursor()
@@ -85,47 +100,28 @@ class DatabaseConnection:
             else:
                 return cursor.rowcount
                 
-        except sqlite3.Error as e:
+        except Exception as e:
             logging.error(f"Query execution error: {e}")
             raise
     
     @staticmethod
-    def close_connection(conn: sqlite3.Connection):
+    def close_connection(conn):
         """
-        연결 안전하게 종료
-        
-        Args:
-            conn: 데이터베이스 연결
+        연결 안전하게 종료 - CompatConnection에서도 동작
         """
         if conn:
             try:
                 conn.commit()
                 conn.close()
                 logging.debug("Database connection closed")
-            except sqlite3.Error as e:
+            except Exception as e:
                 logging.error(f"Error closing connection: {e}")
 
 
-def get_db_connection(db_path: str, timeout: float = 10.0, row_factory: bool = False) -> sqlite3.Connection:
-    """
-    데이터베이스 연결 생성 (간편 함수)
-    
-    Args:
-        db_path: 데이터베이스 파일 경로
-        timeout: 연결 타임아웃 (기본값: 10초)
-        row_factory: Row factory 사용 여부
-        
-    Returns:
-        설정된 데이터베이스 연결
-    """
-    return DatabaseConnection.get_connection(db_path, timeout, row_factory)
-
-
-# 컨텍스트 매니저로 사용하기 위한 클래스
 class DatabaseContextManager:
-    """with 문과 함께 사용할 수 있는 데이터베이스 컨텍스트 매니저"""
+    """with 문과 함께 사용할 수 있는 데이터베이스 컨텍스트 매니저 - v7 호환"""
     
-    def __init__(self, db_path: str, timeout: float = 10.0, row_factory: bool = False):
+    def __init__(self, db_path: str = None, timeout: float = 10.0, row_factory: bool = False):
         self.db_path = db_path
         self.timeout = timeout
         self.row_factory = row_factory
@@ -142,3 +138,42 @@ class DatabaseContextManager:
             else:
                 self.conn.commit()
             self.conn.close()
+
+
+# v7: 백엔드 상태 확인 함수 (디버그용)
+def check_backend_status():
+    """현재 설정된 백엔드 상태 확인"""
+    config = configparser.ConfigParser()
+    config.read('config.ini', encoding='utf-8')
+    
+    backend = config.get('DATABASE', 'db_backend', fallback='sqlite')
+    
+    print(f"Current DB Backend: {backend}")
+    
+    if backend == 'postgres':
+        dsn = config.get('DATABASE', 'postgres_dsn', fallback='Not configured')
+        print(f"PostgreSQL DSN: {dsn}")
+        
+        # 연결 테스트
+        try:
+            conn = get_db_connection()
+            print("OK - PostgreSQL connection: SUCCESS")
+            conn.close()
+        except Exception as e:
+            print(f"ERROR - PostgreSQL connection: FAILED - {e}")
+    else:
+        db_path = config.get('DATABASE', 'local_db_path', fallback='portal.db')
+        print(f"SQLite Path: {db_path}")
+        
+        # 연결 테스트
+        try:
+            conn = get_db_connection()
+            print("OK - SQLite connection: SUCCESS")
+            conn.close()
+        except Exception as e:
+            print(f"ERROR - SQLite connection: FAILED - {e}")
+
+
+if __name__ == "__main__":
+    # 테스트 실행
+    check_backend_status()

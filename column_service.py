@@ -60,29 +60,36 @@ class ColumnConfigService:
             )
         """)
         
-        # 데이터 테이블에 custom_data 컬럼 추가 (없으면)
-        cursor.execute(f"""
-            SELECT COUNT(*) FROM pragma_table_info('{self.data_table}') 
-            WHERE name='custom_data'
-        """)
-        
-        if cursor.fetchone()[0] == 0:
-            cursor.execute(f"""
-                ALTER TABLE {self.data_table} 
-                ADD COLUMN custom_data TEXT DEFAULT '{{}}'
-            """)
+        # 데이터 테이블 체크는 스킵 - 컬럼 설정에는 불필요
+        # IQADB 테이블은 존재하지 않을 수 있음
         
         # column_span 컬럼 추가 (없으면)
-        cursor.execute(f"""
-            SELECT COUNT(*) FROM pragma_table_info('{self.table_name}') 
-            WHERE name='column_span'
-        """)
-        
-        if cursor.fetchone()[0] == 0:
+        try:
+            # PostgreSQL용
             cursor.execute(f"""
-                ALTER TABLE {self.table_name} 
-                ADD COLUMN column_span INTEGER DEFAULT 1
+                SELECT COUNT(*) FROM information_schema.columns 
+                WHERE table_name='{self.table_name}' AND column_name='column_span'
             """)
+            result = cursor.fetchone()
+            if result and result[0] == 0:
+                cursor.execute(f"""
+                    ALTER TABLE {self.table_name} 
+                    ADD COLUMN column_span INTEGER DEFAULT 1
+                """)
+        except Exception as e:
+            # SQLite용
+            try:
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM pragma_table_info('{self.table_name}') 
+                    WHERE name='column_span'
+                """)
+                if cursor.fetchone()[0] == 0:
+                    cursor.execute(f"""
+                        ALTER TABLE {self.table_name} 
+                        ADD COLUMN column_span INTEGER DEFAULT 1
+                    """)
+            except:
+                pass
         
         conn.commit()
         conn.close()
@@ -236,7 +243,7 @@ class ColumnConfigService:
             
             # 컬럼 추가
             if has_input_type:
-                cursor.execute(f"""
+                cursor.execute_with_returning_id(f"""
                     INSERT INTO {self.table_name} 
                     (column_key, column_name, column_type, column_order, is_active, 
                      is_required, dropdown_options, column_span, tab, input_type)
@@ -254,7 +261,7 @@ class ColumnConfigService:
                     input_type
                 ))
             else:
-                cursor.execute(f"""
+                cursor.execute_with_returning_id(f"""
                     INSERT INTO {self.table_name} 
                     (column_key, column_name, column_type, column_order, is_active, 
                      is_required, dropdown_options, column_span, tab)
