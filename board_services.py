@@ -35,6 +35,23 @@ BOARD_CONFIGS = {
         'cache_table': 'change_requests',
         'column_table': 'change_request_column_config',
         'upload_path': 'uploads/change_request/',
+    },
+    # 추가: Follow SOP / Full Process 보드 지원
+    'follow_sop': {
+        'board_type': 'follow_sop',
+        'display_name': 'Follow SOP',
+        'number_prefix': 'FS',
+        'cache_table': 'follow_sop_cache',
+        'column_table': 'follow_sop_column_config',
+        'upload_path': 'uploads/follow_sop/',
+    },
+    'full_process': {
+        'board_type': 'full_process',
+        'display_name': 'Full Process',
+        'number_prefix': 'FP',
+        'cache_table': 'full_process_cache',
+        'column_table': 'full_process_column_config',
+        'upload_path': 'uploads/full_process/',
     }
 }
 

@@ -45,52 +45,76 @@ class ColumnConfigService:
         cursor = conn.cursor()
         
         # 컬럼 설정 테이블
-        cursor.execute(f"""
-            CREATE TABLE IF NOT EXISTS {self.table_name} (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                column_key TEXT UNIQUE NOT NULL,
-                column_name TEXT NOT NULL,
-                column_type TEXT NOT NULL,
-                column_order INTEGER DEFAULT 999,
-                is_active INTEGER DEFAULT 1,
-                is_required INTEGER DEFAULT 0,
-                dropdown_options TEXT,  -- JSON 형식
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
+        # Postgres에서는 AUTOINCREMENT 문법이 없어 CREATE는 생략하고
+        # 아래 보강 로직(ALTER)만 수행한다.
+        if not (hasattr(conn, 'is_postgres') and conn.is_postgres):
+            cursor.execute(f"""
+                CREATE TABLE IF NOT EXISTS {self.table_name} (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    column_key TEXT UNIQUE NOT NULL,
+                    column_name TEXT NOT NULL,
+                    column_type TEXT NOT NULL,
+                    column_order INTEGER DEFAULT 999,
+                    is_active INTEGER DEFAULT 1,
+                    is_required INTEGER DEFAULT 0,
+                    dropdown_options TEXT,  -- JSON 형식
+                    tab TEXT,
+                    column_span INTEGER DEFAULT 1,
+                    linked_columns TEXT,
+                    is_deleted INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
         
         # 데이터 테이블 체크는 스킵 - 컬럼 설정에는 불필요
         # IQADB 테이블은 존재하지 않을 수 있음
         
-        # column_span 컬럼 추가 (없으면)
-        try:
-            # PostgreSQL용
-            cursor.execute(f"""
-                SELECT COUNT(*) FROM information_schema.columns 
-                WHERE table_name='{self.table_name}' AND column_name='column_span'
-            """)
-            result = cursor.fetchone()
-            if result and result[0] == 0:
-                cursor.execute(f"""
-                    ALTER TABLE {self.table_name} 
-                    ADD COLUMN column_span INTEGER DEFAULT 1
-                """)
-        except Exception as e:
-            # SQLite용
+        # 누락 컬럼 보강 (PostgreSQL/SQLite 공용)
+        def _has_column_pg(table: str, col: str) -> bool:
             try:
-                cursor.execute(f"""
-                    SELECT COUNT(*) FROM pragma_table_info('{self.table_name}') 
-                    WHERE name='column_span'
-                """)
-                if cursor.fetchone()[0] == 0:
-                    cursor.execute(f"""
-                        ALTER TABLE {self.table_name} 
-                        ADD COLUMN column_span INTEGER DEFAULT 1
-                    """)
-            except:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = %s AND column_name = %s",
+                    (table, col,)
+                )
+                return (cursor.fetchone() or [0])[0] > 0
+            except Exception:
+                return False
+
+        def _has_column_sqlite(table: str, col: str) -> bool:
+            try:
+                cursor.execute(f"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?", (col,))
+                return (cursor.fetchone() or [0])[0] > 0
+            except Exception:
+                return False
+
+        def has_column(table: str, col: str) -> bool:
+            if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                # information_schema는 소문자 기준
+                return _has_column_pg(table.lower(), col.lower())
+            return _has_column_sqlite(table, col)
+
+        def add_column(col: str, ddl: str):
+            try:
+                cursor.execute(f"ALTER TABLE {self.table_name} ADD COLUMN {col} {ddl}")
+            except Exception:
+                # 이미 존재하거나 권한 문제 등은 조용히 무시 (다음 단계로 진행)
                 pass
-        
+
+        # 필수 컬럼 체크/추가
+        if not has_column(self.table_name, 'is_required'):
+            add_column('is_required', 'INTEGER DEFAULT 0')
+        if not has_column(self.table_name, 'tab'):
+            add_column('tab', 'TEXT')
+        if not has_column(self.table_name, 'column_span'):
+            add_column('column_span', 'INTEGER DEFAULT 1')
+        if not has_column(self.table_name, 'linked_columns'):
+            add_column('linked_columns', 'TEXT')
+        if not has_column(self.table_name, 'is_deleted'):
+            add_column('is_deleted', 'INTEGER DEFAULT 0')
+        if not has_column(self.table_name, 'input_type'):
+            add_column('input_type', 'TEXT')
+
         conn.commit()
         conn.close()
     

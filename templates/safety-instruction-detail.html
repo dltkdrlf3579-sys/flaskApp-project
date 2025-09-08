@@ -23,6 +23,8 @@
 {% endif %}
 
 <div class="safety-instruction-detail-container">
+    {# 리스트 타입 필드가 섹션별 중복 등록되어도 한 번만 렌더링하도록 추적 #}
+    {% set rendered_list_keys = [] %}
     <!-- 동적 섹션 렌더링 -->
     {% for section in sections %}
     <div class="section {% if section.section_key == 'basic_info' %}basic-info{% elif section.section_key == 'violation_info' %}violation-info{% elif section.section_key == 'additional' %}additional{% else %}{{ section.section_key|replace('_', '-') }}{% endif %}-section">
@@ -75,7 +77,9 @@
                             {% endif %}
                             
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
+                                {% if col.column_type != 'list' %}
                                 <label>{{ col.column_name }}</label>
+                                {% endif %}
                                 
                                 {% if col.column_key == 'issue_number' %}
                                     <!-- 발부번호는 수정 불가 -->
@@ -153,16 +157,16 @@
                                     </div>
                                     
                                 {% elif col.column_type == 'list' %}
-                                    <!-- 리스트 필드 -->
+                                    {# 동일 column_key의 리스트 필드가 다른 섹션에도 있을 수 있어 중복 방지 #}
+                                    {% if col.column_key in rendered_list_keys %}
+                                        {# 이미 렌더링됨: 스킵 #}
+                                    {% else %}
+                                        {% set _ = rendered_list_keys.append(col.column_key) %}
+                                    <!-- 리스트 필드는 라벨을 외부에서 출력하지 않고 컴포넌트 내부 제목만 사용 -->
                                     {% set col_value = custom_data.get(col.column_key, '[]') if custom_data else '[]' %}
-                                    <!-- 디버깅: 리스트 필드 값 확인 -->
-                                    <script>console.log('TEMPLATE DEBUG {{ col.column_key }}:', {
-                                        type: '{{ col_value.__class__.__name__ }}',
-                                        length: {{ col_value|length if col_value else 0 }},
-                                        value: {{ col_value|tojson if col_value else '[]' }}
-                                    });</script>
                                     {% from 'includes/list_field_v3.html' import render_list_field %}
                                     {{ render_list_field(col, col_value, section, mode='edit') }}
+                                    {% endif %}
                                     
                                 {% elif col.column_type == 'textarea' %}
                                     <!-- 텍스트영역 필드 -->

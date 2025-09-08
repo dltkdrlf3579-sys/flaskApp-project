@@ -8,7 +8,7 @@
 {% endblock %}
 
 {% block title %}Full Process 상세정보{% endblock %}
-{% block popup_title %}{{ instruction.fullprocess_number }} - Full Process 상세정보{% endblock %}
+{% block popup_title %}{{ process.fullprocess_number }} - Full Process 상세정보{% endblock %}
 {% block content %}
 
 {% if not is_popup %}
@@ -17,7 +17,7 @@
     <div class="breadcrumb">
         <a href="{{ url_for('page_view', url='full-process') }}">Full Process</a>
         <span class="separator">></span>
-        <span class="current">{{ instruction.fullprocess_number }}</span>
+        <span class="current">{{ process.fullprocess_number }}</span>
     </div>
 </div>
 {% endif %}
@@ -39,7 +39,7 @@
                 <div class="info-row">
                     <div class="info-cell span-1">
                         <label>평가번호</label>
-                        <input type="text" value="{{ process.evaluation_no or '-' }}" readonly style="background-color: #f3f4f6;">
+                        <input type="text" value="{{ process.fullprocess_number or '-' }}" readonly style="background-color: #f3f4f6;">
                     </div>
                     <div class="info-cell span-1">
                         <label>등록일</label>
@@ -72,7 +72,7 @@
                                 <!-- 리스트 필드는 항상 custom_data에서 가져오기 -->
                                 {% set col_value = custom_data.get(col.column_key, '[]') if custom_data else '[]' %}
                             {% else %}
-                                {% set col_value = instruction[col.column_key] | default('', true) %}
+                                {% set col_value = process[col.column_key] | default('', true) %}
                             {% endif %}
                             
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
@@ -314,10 +314,10 @@
                 <!-- textarea로 변경하여 안정적인 편집 기능 제공 -->
                 <div id="detailed-content" 
                      class="editable-content" 
-                     data-content="{{ (instruction.detailed_content or '') | tojson }}"
+                     data-content="{{ (process.detailed_content or '') | tojson }}"
                      contenteditable="true"
                      placeholder="상세내용을 입력하세요."
-                     style="width: 100%; min-height: 200px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;">{{ instruction.detailed_content | striptags if instruction.detailed_content else '' }}</div>
+                     style="width: 100%; min-height: 200px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;">{{ process.detailed_content | striptags if process.detailed_content else '' }}</div>
             </div>
         </div>
     </div>
@@ -354,7 +354,7 @@
 // 섹션 정보
 const sections = {{ sections | tojson | safe }};
 const sectionColumns = {{ section_columns | tojson | safe }};
-const issueNumber = "{{ instruction.fullprocess_number }}";
+const issueNumber = "{{ process.fullprocess_number }}";
 
 // 섹션 토글
 function toggleSection(sectionId) {

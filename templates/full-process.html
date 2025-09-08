@@ -99,14 +99,11 @@
                                         -
                                     {% endif %}
                                 {% elif col['column_type'] == 'list' %}
-                                    <!-- 리스트 타입 컬럼 제한 표시 -->
-                                    {% if item.custom_mapped and col['column_key'] in item.custom_mapped %}
-                                        {% set list_data = item.custom_mapped[col['column_key']] %}
-                                        {% if list_data and list_data is iterable and list_data is not string %}
-                                            <div class="list-summary">{{ list_data | length }}개 항목</div>
-                                        {% else %}
-                                            -
-                                        {% endif %}
+                                    {% set col_key = col['column_key'] %}
+                                    {% if item.custom_mapped and col_key in item.custom_mapped %}
+                                        {{ item.custom_mapped[col_key] | list_summary }}
+                                    {% elif col_key in item %}
+                                        {{ item[col_key] | list_summary }}
                                     {% else %}
                                         -
                                     {% endif %}

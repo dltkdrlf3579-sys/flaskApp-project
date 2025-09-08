@@ -400,9 +400,6 @@
                             <label class="form-label">섹션 선택 <span class="text-danger">*</span></label>
                             <select class="form-select" id="columnSection" required>
                                 <option value="">섹션을 선택하세요</option>
-                                <option value="basic_info">기본정보</option>
-                                <option value="violation_info">위반정보</option>
-                                <option value="additional">추가기입정보</option>
                             </select>
                             <small class="text-muted">컬럼이 표시될 섹션을 선택하세요</small>
                         </div>
@@ -1166,9 +1163,12 @@ let editingId = null;
             typeSelect.value = '';  // placeholder 옵션으로 설정
             typeSelect.dataset.originalType = '';
             
-            // 섹션 선택 초기화
+            // 섹션 선택 초기화 (실제 섹션 목록으로 옵션 구성)
             const sectionSelect = document.getElementById('columnSection');
-            sectionSelect.value = defaultSection;
+            populateSectionSelect(sectionSelect);
+            if (defaultSection) {
+                sectionSelect.value = defaultSection;
+            }
             
             // 테이블 설정 초기화
             document.getElementById('selectedTableDisplay').value = '';
@@ -1208,15 +1208,16 @@ let editingId = null;
             document.getElementById('columnKey').disabled = !column._isNew;
             
             // 테이블 타입 관련 처리
+            const typeSelectEl = document.getElementById('columnType');
             if (column._tableGroup) {
-                // 테이블로 생성된 컬럼인 경우 원래 타입 표시
-                document.getElementById('columnType').value = column.column_type;
+                // 테이블로 생성된 컬럼인 경우 원래 타입 표시 (누락된 경우 input_type/메타로 보정)
+                typeSelectEl.value = (column.column_type === 'table' || column.input_type === 'table' || column._tableType || column.table_type) ? 'table' : column.column_type;
                 
                 // popup 타입들은 타입 변경 불가
                 if (column.column_type === 'popup_person' || 
                     column.column_type === 'popup_company' || 
                     column.column_type === 'popup_contractor') {
-                    document.getElementById('columnType').disabled = true;
+                    typeSelectEl.disabled = true;
                 }
                 
                 // 테이블 설정 정보 복원
@@ -1229,7 +1230,7 @@ let editingId = null;
                 }
                 
                 // 테이블 설정 영역 표시 (테이블로 생성된 컬럼인 경우)
-                if (column._tableType) {
+                if (column._tableType || typeSelectEl.value === 'table' || column.input_type === 'table') {
                     document.getElementById('tableConfigField').style.display = 'block';
                     
                     // 미리보기 업데이트
@@ -1237,7 +1238,7 @@ let editingId = null;
                     if (config) {
                         let previewHtml = `<small class="text-muted">연결된 테이블: </small>`;
                         previewHtml += `<span class="badge bg-info">${config.name}</span>`;
-                        if (column.column_type.startsWith('popup_')) {
+                        if (column.column_type && column.column_type.startsWith('popup_')) {
                             previewHtml += `<small class="text-warning ms-2">(팝업 타입 - 타입 변경 불가)</small>`;
                         }
                         document.getElementById('tableColumnsPreview').innerHTML = previewHtml;
@@ -1246,10 +1247,10 @@ let editingId = null;
                 }
             } else if (column.column_type === 'linked_text' || column.column_type === 'linked_dept') {
                 // linked 타입은 강제로 타입 설정하고 변경 불가능하게
-                document.getElementById('columnType').value = column.column_type;
+                typeSelectEl.value = column.column_type;
                 
                 // linked 타입은 타입 변경 불가능
-                document.getElementById('columnType').disabled = true;
+                typeSelectEl.disabled = true;
                 
                 // 타입 변경 경고 숨기기
                 document.getElementById('typeChangeWarning').style.display = 'none';
@@ -1280,16 +1281,22 @@ let editingId = null;
                     document.getElementById('tableConfigField').style.display = 'block';
                 }
             } else {
-                document.getElementById('columnType').value = column.column_type;
+                const resolvedType = (column.column_type === 'table' || column.input_type === 'table' || column._tableType || column.table_type) ? 'table' : column.column_type;
+                typeSelectEl.value = resolvedType || '';
                 // 일반 컬럼은 타입 변경 가능
-                document.getElementById('columnType').disabled = false;
+                typeSelectEl.disabled = false;
+                if (resolvedType === 'table') {
+                    document.getElementById('tableConfigField').style.display = 'block';
+                }
             }
             
-            document.getElementById('columnType').dataset.originalType = column.column_type;
+            typeSelectEl.dataset.originalType = typeSelectEl.value || column.column_type || '';
             document.getElementById('isActive').checked = column.is_active;
             
-            // 섹션 값 설정
-            document.getElementById('columnSection').value = column.tab || 'additional';
+            // 섹션 선택 옵션 갱신 후 값 설정
+            const sectionSelect = document.getElementById('columnSection');
+            populateSectionSelect(sectionSelect);
+            sectionSelect.value = column.tab || 'basic_info';
             
             // 텍스트 타입이고 span 값이 있으면 설정
             if (column.column_type === 'text' && column.column_span) {
@@ -1350,6 +1357,25 @@ let editingId = null;
                 modalInstance = new bootstrap.Modal(modalElement);
             }
             modalInstance.show();
+        }
+
+        // 섹션 선택 드롭다운을 실제 섹션 목록으로 채우는 유틸
+        function populateSectionSelect(selectEl) {
+            if (!selectEl) return;
+            const current = selectEl.value;
+            // placeholder만 남기고 초기화
+            selectEl.innerHTML = '<option value="">섹션을 선택하세요</option>';
+            // sections는 서버에서 전달된 실제 섹션 목록
+            (sections || []).forEach(sec => {
+                const opt = document.createElement('option');
+                opt.value = sec.section_key;
+                opt.textContent = sec.section_name || sec.section_key;
+                selectEl.appendChild(opt);
+            });
+            // 이전 선택 복원 시도
+            if (current) {
+                selectEl.value = current;
+            }
         }
         
         function toggleOptionsField() {
@@ -1815,9 +1841,11 @@ let editingId = null;
                 
                 // 먼저 섹션 변경사항 저장
                 for (const [sectionId, change] of Object.entries(sectionChanges)) {
+                    const sid = parseInt(sectionId, 10);
+                    if (!sid) { console.warn('Skip update: invalid sectionId', sectionId, change); continue; }
                     if (!change.is_new) {
                         // 기존 섹션 이름 변경
-                        const response = await fetch(`/api/accident-sections/${sectionId}`, {
+                        const response = await fetch(`/api/accident-sections/${sid}`, {
                             method: 'PUT',
                             headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify({ section_name: change.section_name })
@@ -1877,7 +1905,9 @@ let editingId = null;
                 // 섹션 삭제 처리
                 const failedSections = [];
                 for (const sectionId of sectionsToDelete) {
-                    const response = await fetch(`/api/accident-sections/${sectionId}`, {
+                    const sid = parseInt(sectionId, 10);
+                    if (!sid) { console.warn('Skip delete: invalid sectionId', sectionId); continue; }
+                    const response = await fetch(`/api/accident-sections/${sid}`, {
                         method: 'DELETE',
                         headers: {'Content-Type': 'application/json'}
                     });

@@ -101,6 +101,59 @@ def from_json_filter(value):
     return []
 app.jinja_env.filters['from_json'] = from_json_filter
 
+# 리스트 요약 필터: "첫번째이름 외 N명" 형태로 표시
+@app.template_filter('list_summary')
+def list_summary_filter(value):
+    """value가 문자열(JSON) / 리스트 / 기타일 때 공통 요약 문자열 반환"""
+    import json as _json
+    # 1) normalize to list
+    data = None
+    try:
+        if isinstance(value, (list, tuple)):
+            data = list(value)
+        elif isinstance(value, str):
+            v = value.strip()
+            if not v:
+                data = []
+            else:
+                try:
+                    parsed = _json.loads(v)
+                    data = parsed if isinstance(parsed, list) else []
+                except Exception:
+                    data = []
+        else:
+            data = []
+    except Exception:
+        data = []
+
+    if not data:
+        return '-'
+
+    # 2) pick first display name
+    def extract_name(item):
+        if isinstance(item, dict):
+            for k in (
+                'name', 'worker_name', 'violator_name', 'employee_name', 'person_name',
+                'victim_name', 'value', 'label', 'title'
+            ):
+                if k in item and item[k]:
+                    return str(item[k])
+            # 아무 키도 못 찾으면 dict 전체를 문자열로
+            return ''
+        elif isinstance(item, str):
+            return item
+        else:
+            return str(item)
+
+    first = extract_name(data[0])
+    others = max(0, len(data) - 1)
+
+    if not first:
+        # 이름을 못 뽑으면 개수만 표시
+        return f"{len(data)}개 항목"
+
+    return f"{first} 외 {others}명" if others > 0 else first
+
 DB_PATH = db_config.local_db_path
 PASSWORD = db_config.config.get('DEFAULT', 'EDIT_PASSWORD')
 ADMIN_PASSWORD = db_config.config.get('DEFAULT', 'ADMIN_PASSWORD')
@@ -1215,8 +1268,10 @@ def accident():
     
     query += " ORDER BY created_at DESC"
     
-    # 전체 건수 조회
-    count_query = query.replace("SELECT *", "SELECT COUNT(*)")
+    # 전체 건수 조회 (ORDER BY 제거 후 COUNT)
+    import re as _re
+    count_query = _re.sub(r"ORDER BY[\s\S]*$", "", query, flags=_re.IGNORECASE)
+    count_query = count_query.replace("SELECT *", "SELECT COUNT(*)")
     total_count = conn.execute(count_query, tuple(params)).fetchone()[0]
     
     # 페이징 적용
@@ -1241,23 +1296,52 @@ def accident():
             except Exception as e:
                 print(f"Error parsing custom_data: {e}")
         
-        # 코드 → 값 변환
-        smart_apply_mappings(accident, dynamic_columns, 'accident')
         accidents.append(accident)
     
+    # 드롭다운 매핑 (리스트 전체 기준) - 상단 분기에서도 동일하게 적용
+    try:
+        from common_mapping import smart_apply_mappings as _smart_map
+        accidents = _smart_map(accidents, 'accident', dynamic_columns, DB_PATH)
+    except Exception as _e:
+        logging.error(f"accident mapping error(top): {_e}")
     conn.close()
     
-    # 페이지네이션 정보
-    total_pages = math.ceil(total_count / per_page)
-    pagination = {
-        'page': page,
-        'per_page': per_page,
-        'total_pages': total_pages,
-        'total_count': total_count,
-        'has_prev': page > 1,
-        'has_next': page < total_pages,
-        'pages': list(range(max(1, page - 2), min(total_pages + 1, page + 3)))
-    }
+    # 페이지네이션 객체 (다른 보드와 동일한 인터페이스)
+    class Pagination:
+        def __init__(self, page, per_page, total_count):
+            import math as _math
+            self.page = page
+            self.per_page = per_page
+            self.total_count = total_count
+            self.pages = _math.ceil(total_count / per_page) if total_count > 0 else 1
+            self.has_prev = page > 1
+            self.prev_num = page - 1 if self.has_prev else None
+            self.has_next = page < self.pages
+            self.next_num = page + 1 if self.has_next else None
+        
+        def iter_pages(self, window_size=10):
+            start = ((self.page - 1) // window_size) * window_size + 1
+            end = min(start + window_size - 1, self.pages)
+            for num in range(start, end + 1):
+                yield num
+        
+        def get_window_info(self, window_size=10):
+            start = ((self.page - 1) // window_size) * window_size + 1
+            end = min(start + window_size - 1, self.pages)
+            has_prev_window = start > 1
+            has_next_window = end < self.pages
+            prev_window_start = max(1, start - window_size)
+            next_window_start = min(end + 1, self.pages)
+            return {
+                'start': start,
+                'end': end,
+                'has_prev_window': has_prev_window,
+                'has_next_window': has_next_window,
+                'prev_window_start': prev_window_start,
+                'next_window_start': next_window_start
+            }
+    
+    pagination = Pagination(page, per_page, total_count)
     
     return render_template('partner-accident.html',  # 동일한 템플릿 사용
                          accidents=accidents,
@@ -1271,8 +1355,8 @@ def accident():
 
 @app.route("/partner-accident")
 def partner_accident_route():
-    """협력사 사고 페이지 라우트"""
-    return partner_accident()
+    """구경로 호환: /accident로 리다이렉트"""
+    return redirect(url_for('accident_route'))
 
 def partner_accident():
     """협력사 사고 목록 페이지"""
@@ -1358,8 +1442,10 @@ def partner_accident():
         query += " AND accident_grade LIKE %s"
         params.append(f"%{filters['accident_grade']}%")
     
-    # 전체 개수 조회 (ORDER BY 제외)
-    count_query = query.replace("SELECT *", "SELECT COUNT(*)")
+    # 전체 개수 조회 (ORDER BY 제거 후 COUNT)
+    import re as _re
+    count_query = _re.sub(r"ORDER BY[\s\S]*$", "", query, flags=_re.IGNORECASE)
+    count_query = count_query.replace("SELECT *", "SELECT COUNT(*)")
     total_count = conn.execute(count_query, params).fetchone()[0]
     
     # ORDER BY는 데이터 조회시에만 추가 - created_at 기준으로 최신순 정렬
@@ -5323,29 +5409,28 @@ def admin_cache_counts():
 @app.route("/admin/accident-columns")
 @require_admin_auth
 def admin_accident_columns():
-    """사고 컬럼 관리 페이지"""
-    return render_template('admin-accident-columns.html', menu=MENU_CONFIG)
+    """사고 컬럼 관리 페이지 (표준 경로) - simplified 템플릿 사용"""
+    # 기존 simplified 구현을 표준 경로에서 사용
+    conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
+    sections = conn.execute(
+        "SELECT * FROM section_config WHERE board_type = 'accident' AND is_active = 1 ORDER BY section_order"
+    ).fetchall()
+    sections = [dict(row) for row in sections]
+    # 드롭다운 코드 → 라벨 매핑 (리스트 전체 기준)
+    try:
+        from common_mapping import smart_apply_mappings as _smart_map
+        accidents = _smart_map(accidents, 'accident', dynamic_columns, DB_PATH)
+    except Exception as _e:
+        logging.error(f"accident mapping error: {_e}")
+    conn.close()
+    return render_template('admin-accident-columns-simplified.html', sections=sections, menu=MENU_CONFIG)
 
 @app.route("/admin/accident-columns-simplified")
 @require_admin_auth
 def admin_accident_columns_simplified():
-    """사고 컬럼 관리 페이지 Simplified - 간소화 버전"""
-    conn = get_db_connection()
-    conn.row_factory = sqlite3.Row  # Row 객체로 반환하도록 설정
-    
-    # 섹션 정보 가져오기
-    sections = conn.execute("""
-        SELECT * FROM section_config 
-        WHERE board_type = 'accident' AND is_active = 1
-        ORDER BY section_order
-    """).fetchall()
-    sections = [dict(row) for row in sections]
-    
-    conn.close()
-    
-    return render_template('admin-accident-columns-simplified.html', 
-                         sections=sections,
-                         menu=MENU_CONFIG)
+    """구 경로 호환: 표준 경로로 리다이렉트"""
+    return redirect(url_for('admin_accident_columns'))
 
 @app.route("/admin/accident-basic-codes")
 @require_admin_auth
@@ -9149,7 +9234,8 @@ def page_view(url):
     # 실제 라우트로 리다이렉트
     route_map = {
         'accident': 'accident_route',
-        'partner-accident': 'partner_accident_route',
+        # 구경로 호환: partner-accident는 accident로 리다이렉트
+        'partner-accident': 'accident_route',
         'safety-instruction': 'safety_instruction_route',
         'follow-sop': 'follow_sop_route',
         'full-process': 'full_process_route',

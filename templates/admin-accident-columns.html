@@ -623,15 +623,16 @@ let editingId = null;
             document.getElementById('columnKey').disabled = !column._isNew;
             
             // 테이블 타입 관련 처리
+            const typeSelectEl = document.getElementById('columnType');
             if (column._tableGroup) {
-                // 테이블로 생성된 컬럼인 경우 원래 타입 표시
-                document.getElementById('columnType').value = column.column_type;
+                // 테이블로 생성된 컬럼인 경우 원래 타입 표시 (누락된 경우 input_type/메타로 보정)
+                typeSelectEl.value = (column.column_type === 'table' || column.input_type === 'table' || column._tableType || column.table_type) ? 'table' : column.column_type;
                 
                 // popup 타입들은 타입 변경 불가
                 if (column.column_type === 'popup_person' || 
                     column.column_type === 'popup_company' || 
                     column.column_type === 'popup_contractor') {
-                    document.getElementById('columnType').disabled = true;
+                    typeSelectEl.disabled = true;
                 }
                 
                 // 테이블 설정 정보 복원
@@ -644,7 +645,7 @@ let editingId = null;
                 }
                 
                 // 테이블 설정 영역 표시 (테이블로 생성된 컬럼인 경우)
-                if (column._tableType) {
+                if (column._tableType || typeSelectEl.value === 'table' || column.input_type === 'table') {
                     document.getElementById('tableConfigField').style.display = 'block';
                     
                     // 미리보기 업데이트
@@ -652,7 +653,7 @@ let editingId = null;
                     if (config) {
                         let previewHtml = `<small class="text-muted">연결된 테이블: </small>`;
                         previewHtml += `<span class="badge bg-info">${config.name}</span>`;
-                        if (column.column_type.startsWith('popup_')) {
+                        if (column.column_type && column.column_type.startsWith('popup_')) {
                             previewHtml += `<small class="text-warning ms-2">(팝업 타입 - 타입 변경 불가)</small>`;
                         }
                         document.getElementById('tableColumnsPreview').innerHTML = previewHtml;
@@ -661,10 +662,10 @@ let editingId = null;
                 }
             } else if (column.column_type === 'linked_text' || column.column_type === 'linked_dept') {
                 // linked 타입은 강제로 타입 설정하고 변경 불가능하게
-                document.getElementById('columnType').value = column.column_type;
+                typeSelectEl.value = column.column_type;
                 
                 // linked 타입은 타입 변경 불가능
-                document.getElementById('columnType').disabled = true;
+                typeSelectEl.disabled = true;
                 
                 // 타입 변경 경고 숨기기
                 document.getElementById('typeChangeWarning').style.display = 'none';
@@ -695,12 +696,16 @@ let editingId = null;
                     document.getElementById('tableConfigField').style.display = 'block';
                 }
             } else {
-                document.getElementById('columnType').value = column.column_type;
+                const resolvedType = (column.column_type === 'table' || column.input_type === 'table' || column._tableType || column.table_type) ? 'table' : column.column_type;
+                typeSelectEl.value = resolvedType || '';
                 // 일반 컬럼은 타입 변경 가능
-                document.getElementById('columnType').disabled = false;
+                typeSelectEl.disabled = false;
+                if (resolvedType === 'table') {
+                    document.getElementById('tableConfigField').style.display = 'block';
+                }
             }
             
-            document.getElementById('columnType').dataset.originalType = column.column_type;
+            typeSelectEl.dataset.originalType = typeSelectEl.value || column.column_type || '';
             document.getElementById('isActive').checked = column.is_active;
             
             // 드롭다운 타입일 때 옵션 처리
@@ -1280,7 +1285,7 @@ let editingId = null;
             const top = (window.screen.height - height) / 2;
             
             const codeEditorWindow = window.open(
-                `/admin/accident-columns-simplified?column_key=${columnKey}&embedded=true`,
+                `/admin/accident-columns?column_key=${columnKey}&embedded=true`,
                 'codeEditor',
                 `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
             );

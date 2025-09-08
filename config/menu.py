@@ -10,7 +10,7 @@ MENU_CONFIG = [
     {
         "title": "사고예방",
         "submenu": [
-            {"title": "협력사 사고", "url": "partner-accident"},
+            {"title": "협력사 사고", "url": "accident"},
             {"title": "환경안전 지시서", "url": "safety-instruction"},
         ],
     },

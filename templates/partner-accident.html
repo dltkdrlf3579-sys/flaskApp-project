@@ -179,13 +179,13 @@
         
         <!-- 이전 10페이지 -->
         {% if window_info.has_prev_window %}
-            <a href="{{ url_for('page_view', url='partner-accident', page=window_info.prev_window_start, **search_params) }}" class="page-btn">&laquo; 이전</a>
+            <a href="{{ url_for('page_view', url='accident', page=window_info.prev_window_start, **search_params) }}" class="page-btn">&laquo; 이전</a>
         {% endif %}
         
         <!-- 현재 윈도우의 페이지들 (최대 10개) -->
         {% for page in pagination.iter_pages() %}
             {% if page != pagination.page %}
-                <a href="{{ url_for('page_view', url='partner-accident', page=page, **search_params) }}" class="page-btn">{{ page }}</a>
+                <a href="{{ url_for('page_view', url='accident', page=page, **search_params) }}" class="page-btn">{{ page }}</a>
             {% else %}
                 <span class="page-btn active">{{ page }}</span>
             {% endif %}
@@ -193,7 +193,7 @@
         
         <!-- 다음 10페이지 -->
         {% if window_info.has_next_window %}
-            <a href="{{ url_for('page_view', url='partner-accident', page=window_info.next_window_start, **search_params) }}" class="page-btn">다음 &raquo;</a>
+            <a href="{{ url_for('page_view', url='accident', page=window_info.next_window_start, **search_params) }}" class="page-btn">다음 &raquo;</a>
         {% endif %}
     </div>
 </div>

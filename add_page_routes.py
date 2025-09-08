@@ -4,7 +4,6 @@ import logging
 import sqlite3
 from flask import request, render_template, jsonify
 from db_connection import get_db_connection
-from database_config import DB_PATH
 from config.menu import MENU_CONFIG
 
 # ============= Follow SOP 페이지 라우트 =============
@@ -43,6 +42,10 @@ def follow_sop_route():
     """)
     dynamic_columns_rows = cursor.fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    try:
+        logging.info(f"[FOLLOW_SOP] dynamic_columns={len(dynamic_columns)} first={[c.get('column_key') for c in dynamic_columns[:5]]}")
+    except Exception:
+        pass
     
     # 섹션별로 컬럼 분류
     section_columns = {}
@@ -50,6 +53,17 @@ def follow_sop_route():
         section_columns[section['section_key']] = [
             col for col in dynamic_columns if col.get('tab') == section['section_key']
         ]
+
+    # 목록 표시용 컬럼(중복 제거, 불필요 키 제외)
+    excluded_keys = {'detailed_content', 'violation_content', 'work_req_no', 'registered_date', 'created_at'}
+    seen_keys = set()
+    display_columns = []
+    for col in dynamic_columns:
+        key = col.get('column_key')
+        if not key or key in excluded_keys or key in seen_keys:
+            continue
+        seen_keys.add(key)
+        display_columns.append(col)
     
     # 페이지네이션 처리
     page = request.args.get('page', 1, type=int)
@@ -80,17 +94,30 @@ def follow_sop_route():
     where_clauses.insert(0, "(s.is_deleted = 0 OR s.is_deleted IS NULL)")
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
     
-    # 전체 건수 조회 - follow_sop_cache 테이블에서!
-    # cache 테이블이 비어있으면 main 테이블 사용
+    # 캐시 우선 + 비어있으면 메인 테이블 (safety-instruction와 동일 철학)
+    use_cache = False
     try:
-        cursor.execute("SELECT COUNT(*) FROM follow_sop_cache")
-        cache_count = cursor.fetchone()[0]
-        use_cache = cache_count > 0
-    except:
+        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables 
+                    WHERE table_name = 'follow_sop_cache'
+                )
+            """)
+            exists = bool(cursor.fetchone()[0])
+        else:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='follow_sop_cache'")
+            exists = cursor.fetchone() is not None
+        if exists:
+            cursor.execute("SELECT COUNT(*) FROM follow_sop_cache")
+            use_cache = (cursor.fetchone()[0] > 0)
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         use_cache = False
-    
     table_name = "follow_sop_cache" if use_cache else "follow_sop"
-    
     count_query = f"""
         SELECT COUNT(*) 
         FROM {table_name} s
@@ -118,31 +145,27 @@ def follow_sop_route():
     items = []
     for idx, row in enumerate(cursor.fetchall()):
         item = dict(row)
-        # No 칼럼은 역순 번호로 설정 (총 개수에서 역순)
-        item['no'] = total_count - offset - idx
-        
-        # custom_data JSON 파싱 및 플래트닝 (기본 필드 보호)
+        # custom_data 평탄화 (safety-instruction 방식)
         if item.get('custom_data'):
             try:
                 import json
                 raw = item.get('custom_data')
-                # dict/str 분기 처리
-                if isinstance(raw, dict):
-                    custom_data = raw
-                elif isinstance(raw, str):
-                    custom_data = json.loads(raw) if raw else {}
-                else:
-                    custom_data = {}
-                
-                # 기본 필드를 보호하면서 custom_data 병합
-                BASE_FIELDS = {'work_req_no', 'created_at', 'updated_at', 'is_deleted', 'synced_at', 'no'}
-                for k, v in custom_data.items():
-                    if k not in BASE_FIELDS:
-                        item[k] = v
+                custom_data = raw if isinstance(raw, dict) else (json.loads(raw) if isinstance(raw, str) and raw else {})
             except Exception as e:
                 logging.error(f"custom_data 파싱 오류: {e}")
+                custom_data = {}
+            if isinstance(custom_data, dict):
+                item.update(custom_data)
+        # No 칼럼은 역순 번호로 설정 (총 개수에서 역순)
+        item['no'] = total_count - offset - idx
         items.append(item)
     
+    try:
+        logging.info(f"[FOLLOW_SOP] table={table_name} total_count={total_count} items={len(items)}")
+        if items:
+            logging.info(f"[FOLLOW_SOP] first_keys={list(items[0].keys())[:10]}")
+    except Exception:
+        pass
     conn.close()
     
     # 디버깅 로그 추가
@@ -156,6 +179,16 @@ def follow_sop_route():
     if items:
         from common_mapping import smart_apply_mappings
         items = smart_apply_mappings(items, 'follow_sop', dynamic_columns, DB_PATH)
+    
+    # 섹션 보정은 유지
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM follow_sop_sections WHERE section_key='work_info' AND (is_deleted=0 OR is_deleted IS NULL)")
+        if (cursor.fetchone() or [0])[0] == 0:
+            cursor.execute("INSERT OR IGNORE INTO follow_sop_sections (section_key, section_name, section_order, is_active, is_deleted) VALUES ('work_info','작업정보',2,1,0)")
+            conn.commit()
+    except Exception:
+        pass
     
     # 페이지네이션 객체 생성 (app.py와 동일한 구조)
     class Pagination:
@@ -198,6 +231,7 @@ def follow_sop_route():
                          dynamic_columns=dynamic_columns,
                          sections=sections,
                          section_columns=section_columns,
+                         display_columns=display_columns,
                          pagination=pagination,
                          search_params=search_params,
                          total_count=total_count,  # 추가
@@ -237,6 +271,10 @@ def follow_sop_register():
     """)
     dynamic_columns_rows = cursor.fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    try:
+        logging.info(f"[FULL_PROCESS] dynamic_columns={len(dynamic_columns)} first={[c.get('column_key') for c in dynamic_columns[:5]]}")
+    except Exception:
+        pass
     
     # 기본정보 필드 추가 (하드코딩) - 자동 생성값 포함
     from id_generator import generate_followsop_number
@@ -370,38 +408,45 @@ def follow_sop_detail(work_req_no):
     
     sop = dict(sop_row)
     
-    # details 테이블에서 상세내용 병합
+    # details 테이블에서 상세내용 병합 (테이블 존재 확인 후 조회)
     try:
-        detail_row = cursor.execute("""
-            SELECT detailed_content FROM followsop_details
-            WHERE work_req_no = ?
-        """, (work_req_no,)).fetchone()
-        if detail_row and detail_row['detailed_content']:
-            sop['detailed_content'] = detail_row['detailed_content']
-    except:
-        pass
+        details_exists = False
+        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables 
+                    WHERE table_name = 'followsop_details'
+                )
+            """)
+            details_exists = bool(cursor.fetchone()[0])
+        else:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='followsop_details'")
+            details_exists = cursor.fetchone() is not None
+        if details_exists:
+            detail_row = cursor.execute("""
+                SELECT detailed_content FROM followsop_details
+                WHERE work_req_no = ?
+            """, (work_req_no,)).fetchone()
+            if detail_row and detail_row['detailed_content']:
+                sop['detailed_content'] = detail_row['detailed_content']
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logging.error(f"followsop_details 조회 오류(롤백): {e}")
     
-    # custom_data JSON 파싱 및 기본 필드 보호
+    # custom_data 평탄화 (safety-instruction 방식)
     custom_data = {}
     if sop.get('custom_data'):
         try:
             raw = sop.get('custom_data')
-            # dict/str 분기 처리
-            if isinstance(raw, dict):
-                custom_data = raw
-            elif isinstance(raw, str):
-                custom_data = json.loads(raw) if raw else {}
-            else:
-                custom_data = {}
-            
-            # 기본 필드를 보호하면서 custom_data 병합
-            BASE_FIELDS = {'work_req_no', 'created_at', 'updated_at', 'is_deleted', 'synced_at', 'no'}
-            for k, v in custom_data.items():
-                if k not in BASE_FIELDS:
-                    sop[k] = v
+            custom_data = raw if isinstance(raw, dict) else (json.loads(raw) if isinstance(raw, str) and raw else {})
         except Exception as e:
             logging.error(f"Custom data parsing error: {e}")
             custom_data = {}
+        if isinstance(custom_data, dict):
+            sop.update(custom_data)
     
     # 섹션별 컬럼 정보 가져오기
     from section_service import SectionConfigService
@@ -653,14 +698,29 @@ def full_process_route():
     where_clauses.insert(0, "(p.is_deleted = 0 OR p.is_deleted IS NULL)")
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
     
-    # cache 테이블이 비어있으면 main 테이블 사용
+    # 캐시 우선 + 비어있으면 메인 테이블 (safety-instruction와 동일 철학)
+    use_cache = False
     try:
-        cursor.execute("SELECT COUNT(*) FROM full_process_cache")
-        cache_count = cursor.fetchone()[0]
-        use_cache = cache_count > 0
-    except:
+        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables 
+                    WHERE table_name = 'full_process_cache'
+                )
+            """)
+            exists = bool(cursor.fetchone()[0])
+        else:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='full_process_cache'")
+            exists = cursor.fetchone() is not None
+        if exists:
+            cursor.execute("SELECT COUNT(*) FROM full_process_cache")
+            use_cache = (cursor.fetchone()[0] > 0)
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         use_cache = False
-    
     table_name = "full_process_cache" if use_cache else "full_process"
     
     # 전체 건수 조회
@@ -691,37 +751,43 @@ def full_process_route():
     items = []
     for idx, row in enumerate(cursor.fetchall()):
         item = dict(row)
-        # No 칼럼은 역순 번호로 설정 (총 개수에서 역순)
-        item['no'] = total_count - offset - idx
-        
-        # custom_data JSON 파싱 및 플래트닝 (기본 필드 보호)
+        # custom_data 평탄화 (safety-instruction 방식)
         if item.get('custom_data'):
             try:
                 import json
                 raw = item.get('custom_data')
-                # dict/str 분기 처리
-                if isinstance(raw, dict):
-                    custom_data = raw
-                elif isinstance(raw, str):
-                    custom_data = json.loads(raw) if raw else {}
-                else:
-                    custom_data = {}
-                
-                # 기본 필드를 보호하면서 custom_data 병합
-                BASE_FIELDS = {'fullprocess_number', 'created_at', 'updated_at', 'is_deleted', 'synced_at', 'no'}
-                for k, v in custom_data.items():
-                    if k not in BASE_FIELDS:
-                        item[k] = v
+                custom_data = raw if isinstance(raw, dict) else (json.loads(raw) if isinstance(raw, str) and raw else {})
             except Exception as e:
                 logging.error(f"custom_data 파싱 오류: {e}")
+                custom_data = {}
+            if isinstance(custom_data, dict):
+                item.update(custom_data)
+        # No 칼럼은 역순 번호로 설정 (총 개수에서 역순)
+        item['no'] = total_count - offset - idx
         items.append(item)
     
+    try:
+        logging.info(f"[FULL_PROCESS] table={table_name} total_count={total_count} items={len(items)}")
+        if items:
+            logging.info(f"[FULL_PROCESS] first_keys={list(items[0].keys())[:10]}")
+    except Exception:
+        pass
     conn.close()
     
     # smart_apply_mappings 적용 (드롭다운 코드를 라벨로 변환)
     if items:
         from common_mapping import smart_apply_mappings
         items = smart_apply_mappings(items, 'full_process', dynamic_columns, DB_PATH)
+    
+    # 섹션 보정은 유지
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM full_process_sections WHERE section_key='process_info' AND (is_deleted=0 OR is_deleted IS NULL)")
+        if (cursor.fetchone() or [0])[0] == 0:
+            cursor.execute("INSERT OR IGNORE INTO full_process_sections (section_key, section_name, section_order, is_active, is_deleted) VALUES ('process_info','프로세스 정보',2,1,0)")
+            conn.commit()
+    except Exception:
+        pass
     
     # 페이지네이션 객체 생성 (app.py와 동일한 구조)
     class Pagination:
@@ -928,38 +994,45 @@ def full_process_detail(fullprocess_number):
     
     process = dict(process_row)
     
-    # details 테이블에서 상세내용 병합
+    # details 테이블에서 상세내용 병합 (테이블 존재 확인 후 조회)
     try:
-        detail_row = cursor.execute("""
-            SELECT detailed_content FROM fullprocess_details
-            WHERE fullprocess_number = ?
-        """, (fullprocess_number,)).fetchone()
-        if detail_row and detail_row['detailed_content']:
-            process['detailed_content'] = detail_row['detailed_content']
-    except:
-        pass
+        details_exists = False
+        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables 
+                    WHERE table_name = 'fullprocess_details'
+                )
+            """)
+            details_exists = bool(cursor.fetchone()[0])
+        else:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='fullprocess_details'")
+            details_exists = cursor.fetchone() is not None
+        if details_exists:
+            detail_row = cursor.execute("""
+                SELECT detailed_content FROM fullprocess_details
+                WHERE fullprocess_number = ?
+            """, (fullprocess_number,)).fetchone()
+            if detail_row and detail_row['detailed_content']:
+                process['detailed_content'] = detail_row['detailed_content']
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logging.error(f"fullprocess_details 조회 오류(롤백): {e}")
     
-    # custom_data JSON 파싱 및 기본 필드 보호
+    # custom_data 평탄화 (safety-instruction 방식)
     custom_data = {}
     if process.get('custom_data'):
         try:
             raw = process.get('custom_data')
-            # dict/str 분기 처리
-            if isinstance(raw, dict):
-                custom_data = raw
-            elif isinstance(raw, str):
-                custom_data = json.loads(raw) if raw else {}
-            else:
-                custom_data = {}
-            
-            # 기본 필드를 보호하면서 custom_data 병합
-            BASE_FIELDS = {'fullprocess_number', 'created_at', 'updated_at', 'is_deleted', 'synced_at', 'no'}
-            for k, v in custom_data.items():
-                if k not in BASE_FIELDS:
-                    process[k] = v
+            custom_data = raw if isinstance(raw, dict) else (json.loads(raw) if isinstance(raw, str) and raw else {})
         except Exception as e:
             logging.error(f"Custom data parsing error: {e}")
             custom_data = {}
+        if isinstance(custom_data, dict):
+            process.update(custom_data)
     
     # 섹션별 컬럼 정보 가져오기
     from section_service import SectionConfigService
@@ -997,6 +1070,7 @@ def full_process_detail(fullprocess_number):
     
     return render_template('full-process-detail.html',
                          process=process,
+                         instruction=process,  # 템플릿 호환용 별칭
                          custom_data=custom_data,
                          sections=sections,
                          section_columns=section_columns,
