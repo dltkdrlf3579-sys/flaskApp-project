@@ -77,6 +77,38 @@
                             {% endif %}
                             
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
+                                {# 렌더 타입 계산: 전역 키 + custom_data로 그룹 추정 #}
+                                {% set render_type = col.column_type %}
+                                {% if not render_type or render_type == 'text' %}
+                                    {% set suffixes = ['_id','_dept','_bizno','_code','_company'] %}
+                                    {% set base_key = col.column_key %}
+                                    {% for s in suffixes %}
+                                        {% if base_key.endswith(s) %}
+                                            {% set base_key = base_key[:-s|length] %}
+                                        {% endif %}
+                                    {% endfor %}
+                                    {% set all_keys = (dynamic_columns | map(attribute='column_key') | list) + ((custom_data.keys() | list) if custom_data else []) %}
+                                    {% set group = '' %}
+                                    {% if (base_key ~ '_bizno') in all_keys %}
+                                        {% set group = 'company' %}
+                                    {% elif (base_key ~ '_dept') in all_keys %}
+                                        {% set group = 'person' %}
+                                    {% elif (base_key ~ '_code') in all_keys %}
+                                        {% set group = 'department' %}
+                                    {% elif (base_key ~ '_company') in all_keys %}
+                                        {% set group = 'contractor' %}
+                                    {% endif %}
+                                    {% if group == 'person' %}
+                                        {% set render_type = 'popup_person' %}
+                                    {% elif group == 'company' %}
+                                        {% set render_type = 'popup_company' %}
+                                    {% elif group == 'department' %}
+                                        {% set render_type = 'popup_department' %}
+                                    {% elif group == 'contractor' %}
+                                        {% set render_type = 'popup_contractor' %}
+                                    {% endif %}
+                                {% endif %}
+
                                 {% if col.column_type != 'list' %}
                                 <label>{{ col.column_name }}</label>
                                 {% endif %}
@@ -85,7 +117,7 @@
                                     <!-- 발부번호는 수정 불가 -->
                                     <div class="value">{{ col_value or '-' }}</div>
                                     
-                                {% elif col.column_type == 'dropdown' %}
+                                {% elif render_type == 'dropdown' %}
                                     <!-- 드롭다운 필드 -->
                                     <select class="{{ section.section_key|replace('_', '-') }}-input" 
                                             data-field="{{ col.column_key }}"
@@ -120,7 +152,7 @@
                                            style="background-color: #f3f4f6;"
                                            {% endif %}>
                                            
-                                {% elif col.column_type == 'number' %}
+                                {% elif render_type == 'number' %}
                                     <!-- 숫자 필드 -->
                                     <input type="number" 
                                            class="{{ section.section_key|replace('_', '-') }}-input" 
@@ -128,7 +160,7 @@
                                            data-section="{{ section.section_key }}"
                                            value="{{ col_value }}">
                                            
-                                {% elif col.column_type == 'linked' %}
+                                {% elif render_type in ['linked','linked_text','linked_dept'] %}
                                     <!-- 연결된 필드 (읽기 전용) -->
                                     <input type="text" 
                                            class="{{ section.section_key|replace('_', '-') }}-input" 
@@ -138,7 +170,7 @@
                                            readonly
                                            style="background-color: #f3f4f6;">
                                            
-                                {% elif col.column_type == 'popup' %}
+                                {% elif render_type in ['popup','popup_person','popup_company','popup_department','popup_building','popup_contractor'] %}
                                     <!-- 팝업 필드 -->
                                     <!-- ⚠️ IMPORTANT: btn-primary 유지, 아이콘 없이 "검색" 텍스트만 -->
                                     <!-- DO NOT CHANGE to btn-outline-secondary or add icons -->
@@ -151,9 +183,9 @@
                                                value="{{ col_value }}"
                                                readonly>
                                         <button class="btn btn-sm btn-primary" 
-                                                onclick="openPopup('{{ col.column_key }}')">
-                                            검색
-                                        </button>
+                                                onclick="{% if render_type == 'popup_person' %}openPersonSearch{% elif render_type == 'popup_company' %}openCompanySearch{% elif render_type == 'popup_department' %}openDepartmentSearch{% elif render_type == 'popup_building' %}openBuildingSearch{% elif render_type == 'popup_contractor' %}openContractorSearch{% else %}openPopup{% endif %}('{{ col.column_key }}')">
+                                                검색
+                                            </button>
                                     </div>
                                     
                                 {% elif col.column_type == 'list' %}
@@ -284,24 +316,14 @@ function collectDynamicFields() {
                 value = input.value;
             }
             
-            // 리스트 필드 처리 - 더 간단하고 확실한 방법
-            // 1. data-field-type 체크 또는 2. JSON 배열 문자열 체크
+            // 리스트 필드 처리: data-field-type 또는 JSON 배열 문자열 판별
             if ((input.getAttribute('data-field-type') === 'list' || 
                  (typeof value === 'string' && value.trim().startsWith('['))) && value) {
-                console.log(`🔍 리스트 필드 감지: ${fieldKey}`);
                 try {
                     const parsed = JSON.parse(value);
-                    if (Array.isArray(parsed)) {
-                        data[fieldKey] = parsed;
-                        console.log(`✅ 리스트 필드 파싱 성공: ${fieldKey} = ${parsed.length}개 항목`);
-                        console.log(`📋 리스트 내용:`, parsed);
-                    } else {
-                        data[fieldKey] = value;
-                        console.log(`⚠️ 리스트가 아닌 데이터: ${fieldKey}`);
-                    }
+                    data[fieldKey] = Array.isArray(parsed) ? parsed : value;
                 } catch(e) {
                     data[fieldKey] = value;
-                    console.log(`❌ 리스트 필드 파싱 실패: ${fieldKey}`, e);
                 }
             } else {
                 data[fieldKey] = value;

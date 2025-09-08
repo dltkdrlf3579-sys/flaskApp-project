@@ -74,6 +74,37 @@
                             {% else %}
                                 {% set col_value = process[col.column_key] | default('', true) %}
                             {% endif %}
+
+                            {% set render_type = col.column_type %}
+                            {% if not render_type or render_type == 'text' %}
+                                {% set suffixes = ['_id','_dept','_bizno','_code','_company'] %}
+                                {% set base_key = col.column_key %}
+                                {% for s in suffixes %}
+                                    {% if base_key.endswith(s) %}
+                                        {% set base_key = base_key[:-s|length] %}
+                                    {% endif %}
+                                {% endfor %}
+                                {% set all_keys = (all_column_keys if all_column_keys is defined else (section_columns[section.section_key] | map(attribute='column_key') | list)) + ((custom_data.keys() | list) if custom_data else []) %}
+                                {% set group = '' %}
+                                {% if (base_key ~ '_bizno') in all_keys %}
+                                    {% set group = 'company' %}
+                                {% elif (base_key ~ '_dept') in all_keys %}
+                                    {% set group = 'person' %}
+                                {% elif (base_key ~ '_code') in all_keys %}
+                                    {% set group = 'department' %}
+                                {% elif (base_key ~ '_company') in all_keys %}
+                                    {% set group = 'contractor' %}
+                                {% endif %}
+                                {% if group == 'person' %}
+                                    {% set render_type = 'popup_person' %}
+                                {% elif group == 'company' %}
+                                    {% set render_type = 'popup_company' %}
+                                {% elif group == 'department' %}
+                                    {% set render_type = 'popup_department' %}
+                                {% elif group == 'contractor' %}
+                                    {% set render_type = 'popup_contractor' %}
+                                {% endif %}
+                            {% endif %}
                             
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
                                 {% if col.column_type != 'list' %}
@@ -88,7 +119,7 @@
                                     <!-- 등록일은 수정 불가 -->
                                     <div class="value">{{ (col_value|date_only) if col_value else '-' }}</div>
                                     
-                                {% elif col.column_type == 'dropdown' %}
+                                {% elif render_type == 'dropdown' %}
                                     <!-- 드롭다운 필드 -->
                                     <select class="{{ section.section_key }}-input" 
                                             data-field="{{ col.column_key }}"
@@ -171,7 +202,7 @@
                                         </button>
                                     </div>
                                     
-                                {% elif col.column_type == 'popup_person' %}
+                                {% elif render_type == 'popup_person' %}
                                     <!-- 담당자 검색 필드 -->
                                     <div class="input-group">
                                         <input type="text" 
@@ -189,7 +220,7 @@
                                         </button>
                                     </div>
                                     
-                                {% elif col.column_type == 'popup_company' %}
+                                {% elif render_type == 'popup_company' %}
                                     <!-- 업체 검색 필드 -->
                                     <div class="input-group">
                                         <input type="text" 
@@ -207,7 +238,7 @@
                                         </button>
                                     </div>
                                     
-                                {% elif col.column_type == 'popup_building' %}
+                                {% elif render_type == 'popup_building' %}
                                     <!-- 건물 검색 필드 -->
                                     <div class="input-group">
                                         <input type="text" 
@@ -225,7 +256,7 @@
                                         </button>
                                     </div>
                                     
-                                {% elif col.column_type == 'popup_department' %}
+                                {% elif render_type == 'popup_department' %}
                                     <!-- 부서 검색 필드 -->
                                     <div class="input-group">
                                         <input type="text" 
@@ -243,7 +274,7 @@
                                         </button>
                                     </div>
                                     
-                                {% elif col.column_type == 'popup_contractor' %}
+                                {% elif render_type == 'popup_contractor' %}
                                     <!-- 협력사 근로자 검색 필드 -->
                                     <div class="input-group">
                                         <input type="text" 
@@ -397,24 +428,14 @@ function collectDynamicFields() {
                 value = input.value;
             }
             
-            // 리스트 필드 처리 - 더 간단하고 확실한 방법
-            // 1. data-field-type 체크 또는 2. JSON 배열 문자열 체크
+            // 리스트 필드 처리: data-field-type 또는 JSON 배열 문자열 판별
             if ((input.getAttribute('data-field-type') === 'list' || 
                  (typeof value === 'string' && value.trim().startsWith('['))) && value) {
-                console.log(`🔍 리스트 필드 감지: ${fieldKey}`);
                 try {
                     const parsed = JSON.parse(value);
-                    if (Array.isArray(parsed)) {
-                        data[fieldKey] = parsed;
-                        console.log(`✅ 리스트 필드 파싱 성공: ${fieldKey} = ${parsed.length}개 항목`);
-                        console.log(`📋 리스트 내용:`, parsed);
-                    } else {
-                        data[fieldKey] = value;
-                        console.log(`⚠️ 리스트가 아닌 데이터: ${fieldKey}`);
-                    }
+                    data[fieldKey] = Array.isArray(parsed) ? parsed : value;
                 } catch(e) {
                     data[fieldKey] = value;
-                    console.log(`❌ 리스트 필드 파싱 실패: ${fieldKey}`, e);
                 }
             } else {
                 data[fieldKey] = value;

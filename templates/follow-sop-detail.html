@@ -33,7 +33,7 @@
             </button>
         </div>
         <div class="section-content" id="{% if section.section_key == 'basic_info' %}basic-info{% elif section.section_key == 'violation_info' %}violation-info{% elif section.section_key == 'additional' %}additional{% else %}{{ section.section_key|replace('_', '-') }}{% endif %}-content">
-            <!-- DEBUG: {{ section.section_key }} has {{ section_columns[section.section_key]|length if section.section_key in section_columns else 0 }} columns -->
+                
             <div class="info-table">
                 <!-- 점검번호와 등록일 추가 (첫 번째 섹션에만) -->
                 {% if loop.index == 1 %}
@@ -51,14 +51,12 @@
                 
                 {% set all_columns = section_columns[section.section_key] if section.section_key in section_columns else [] %}
                 <!-- detailed_content와 violation_content는 제외 -->
-                <!-- DEBUG: all_columns = {{ all_columns|length }} items -->
                 {% set columns = [] %}
                 {% for col in all_columns %}
                     {% if col.column_key not in ['detailed_content', 'violation_content'] %}
                         {% set _ = columns.append(col) %}
                     {% endif %}
                 {% endfor %}
-                <!-- DEBUG: filtered columns = {{ columns|length }} items -->
                 {% set columns_per_row = 4 %}
                 
                 <!-- batch 방식으로 4개씩 묶어서 처리 -->
@@ -71,9 +69,50 @@
                                 {% set span = 4 %}
                             {% endif %}
                             {% set col_value = sop[col.column_key] | default('', true) %}
-                            <!-- DEBUG: {{ col.column_key }} ({{ col.column_type }}) = {{ col_value }} -->
                             
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
+                                {# 렌더 타입 계산: 전역 키 + custom_data로 그룹 추정 #}
+                                {% set render_type = col.column_type %}
+                                {% if not render_type or render_type == 'text' %}
+                                    {% set suffixes = ['_id','_dept','_bizno','_code','_company'] %}
+                                    {% set base_key = col.column_key %}
+                                    {% for s in suffixes %}
+                                        {% if base_key.endswith(s) %}
+                                            {% set base_key = base_key[:-s|length] %}
+                                        {% endif %}
+                                    {% endfor %}
+                                    {% set base_keys_src = all_column_keys if all_column_keys is defined else (dynamic_columns | map(attribute='column_key') | list) %}
+                                    {% set data_keys_src = (custom_data.keys() | list) if custom_data else [] %}
+                                    {% set all_keys = base_keys_src + data_keys_src %}
+                                    {% set group = '' %}
+                                    {% if (base_key ~ '_bizno') in all_keys %}
+                                        {% set group = 'company' %}
+                                    {% elif (base_key ~ '_dept') in all_keys %}
+                                        {% set group = 'person' %}
+                                    {% elif (base_key ~ '_code') in all_keys %}
+                                        {% set group = 'department' %}
+                                    {% elif (base_key ~ '_company') in all_keys %}
+                                        {% set group = 'contractor' %}
+                                    {% endif %}
+                                    {% if columns | selectattr('column_key','equalto', base_key ~ '_bizno') | list | length > 0 %}
+                                        {% set group = 'company' %}
+                                    {% elif columns | selectattr('column_key','equalto', base_key ~ '_dept') | list | length > 0 %}
+                                        {% set group = 'person' %}
+                                    {% elif columns | selectattr('column_key','equalto', base_key ~ '_code') | list | length > 0 %}
+                                        {% set group = 'department' %}
+                                    {% elif columns | selectattr('column_key','equalto', base_key ~ '_company') | list | length > 0 %}
+                                        {% set group = 'contractor' %}
+                                    {% endif %}
+                                    {% if group == 'person' %}
+                                        {% set render_type = 'popup_person' %}
+                                    {% elif group == 'company' %}
+                                        {% set render_type = 'popup_company' %}
+                                    {% elif group == 'department' %}
+                                        {% set render_type = 'popup_department' %}
+                                    {% elif group == 'contractor' %}
+                                        {% set render_type = 'popup_contractor' %}
+                                    {% endif %}
+                                {% endif %}
                                 {% if col.column_type != 'list' %}
                                 <label>{{ col.column_name }}</label>
                                 {% endif %}
@@ -131,7 +170,7 @@
                                            data-section="{{ section.section_key }}"
                                            value="{{ col_value }}">
                                            
-                                {% elif col.column_type == 'linked' or col.column_type == 'linked_text' %}
+                                {% elif render_type in ['linked','linked_text','linked_dept'] %}
                                     <!-- 연결된 필드 (읽기 전용) -->
                                     <input type="text" 
                                            id="{{ col.column_key }}"
@@ -142,7 +181,7 @@
                                            readonly
                                            style="background-color: #f3f4f6;">
                                            
-                                {% elif col.column_type and col.column_type.startswith('popup') %}
+                                {% elif render_type in ['popup','popup_person','popup_company','popup_department','popup_building','popup_contractor'] or (col.column_type and col.column_type.startswith('popup')) %}
                                     <!-- 팝업 필드 -->
                                     <div class="input-group">
                                         <input type="text" 
@@ -153,7 +192,7 @@
                                                value="{{ col_value }}"
                                                readonly>
                                         <button class="btn btn-sm btn-primary" 
-                                                onclick="{% if col.column_type == 'popup_person' %}openPersonSearch{% elif col.column_type == 'popup_company' %}openCompanySearch{% elif col.column_type == 'popup_building' %}openBuildingSearch{% elif col.column_type == 'popup_department' %}openDepartmentSearch{% elif col.column_type == 'popup_contractor' %}openContractorSearch{% else %}openPopup{% endif %}('{{ col.column_key }}')">
+                                                onclick="{% if render_type == 'popup_person' %}openPersonSearch{% elif render_type == 'popup_company' %}openCompanySearch{% elif render_type == 'popup_building' %}openBuildingSearch{% elif render_type == 'popup_department' %}openDepartmentSearch{% elif render_type == 'popup_contractor' %}openContractorSearch{% else %}openPopup{% endif %}('{{ col.column_key }}')">
                                             검색
                                         </button>
                                     </div>
@@ -281,24 +320,14 @@ function collectDynamicFields() {
                 value = input.value;
             }
             
-            // 리스트 필드 처리 - 더 간단하고 확실한 방법
-            // 1. data-field-type 체크 또는 2. JSON 배열 문자열 체크
+            // 리스트 필드 처리: data-field-type 또는 JSON 배열 문자열 판별
             if ((input.getAttribute('data-field-type') === 'list' || 
                  (typeof value === 'string' && value.trim().startsWith('['))) && value) {
-                console.log(`🔍 리스트 필드 감지: ${fieldKey}`);
                 try {
                     const parsed = JSON.parse(value);
-                    if (Array.isArray(parsed)) {
-                        data[fieldKey] = parsed;
-                        console.log(`✅ 리스트 필드 파싱 성공: ${fieldKey} = ${parsed.length}개 항목`);
-                        console.log(`📋 리스트 내용:`, parsed);
-                    } else {
-                        data[fieldKey] = value;
-                        console.log(`⚠️ 리스트가 아닌 데이터: ${fieldKey}`);
-                    }
+                    data[fieldKey] = Array.isArray(parsed) ? parsed : value;
                 } catch(e) {
                     data[fieldKey] = value;
-                    console.log(`❌ 리스트 필드 파싱 실패: ${fieldKey}`, e);
                 }
             } else {
                 data[fieldKey] = value;

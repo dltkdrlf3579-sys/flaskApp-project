@@ -1239,10 +1239,27 @@ let editingId = null;
             document.getElementById('columnKey').disabled = !column._isNew;
             
             const typeSelectEl = document.getElementById('columnType');
+            const isPopup = column.column_type && column.column_type.startsWith('popup_');
+            const isLinked = column.column_type && column.column_type.startsWith('linked_');
+            let looksTable = isPopup || isLinked || column.input_type === 'table' || column._tableType || column.table_type;
+            // 보강: 형식이 깨진 경우 키 기반으로 그룹 추론
+            if (!looksTable) {
+                const suffixes = ['_id','_dept','_bizno','_code','_company'];
+                let baseKey = column.column_key || '';
+                suffixes.forEach(s => { if (baseKey.endsWith(s)) baseKey = baseKey.slice(0, -s.length); });
+                const sibling = (pendingColumns || []).find(c => String(c.id) !== String(column.id) && (
+                    c.column_key === baseKey || suffixes.some(s => c.column_key === baseKey + s)
+                ));
+                if (sibling && ( (sibling.column_type||'').startsWith('popup_') || (sibling.column_type||'').startsWith('linked_') || sibling._tableType || sibling.input_type === 'table' || sibling._tableGroup )) {
+                    looksTable = true;
+                }
+            }
             // 테이블 타입 관련 처리
-            if (column._tableGroup) {
-                // 테이블로 생성된 컬럼인 경우 원래 타입 표시
-                typeSelectEl.value = (column.column_type === 'table' || column.input_type === 'table' || column._tableType || column.table_type) ? 'table' : column.column_type;
+            if (column._tableGroup || looksTable) {
+                // 테이블 그룹으로 판단되면 강제로 'table'로 고정
+                typeSelectEl.value = 'table';
+                // 테이블 그룹은 타입 변경 불가
+                typeSelectEl.disabled = true;
                 
                 // popup 타입들은 타입 변경 불가
                 if (column.column_type === 'popup_person' || 
@@ -1261,11 +1278,11 @@ let editingId = null;
                 }
                 
                 // 테이블 설정 영역 표시 (테이블로 생성된 컬럼인 경우)
-                if (column._tableType || typeSelectEl.value === 'table' || column.input_type === 'table') {
+                if (document.getElementById('tableConfigField')) {
                     document.getElementById('tableConfigField').style.display = 'block';
                     
                     // 미리보기 업데이트
-                    const config = tableColumnMappings[column._tableType];
+                    const config = tableColumnMappings[column._tableType] || tableColumnMappings[selectedTableType || ''] || null;
                     if (config) {
                         let previewHtml = `<small class="text-muted">연결된 테이블: </small>`;
                         previewHtml += `<span class="badge bg-info">${config.name}</span>`;
@@ -1600,6 +1617,55 @@ let editingId = null;
                     }
                 }
             }
+
+            // 링크드 컬럼 편집 시, 본체(첫 번째 popup_*) 컬럼이 없으면 자동 생성
+            if (editingId) {
+                const existingColumn = pendingColumns.find(c => String(c.id) === String(editingId));
+                if (existingColumn && existingColumn.column_type && existingColumn.column_type.startsWith('linked_')) {
+                    // suffix 매칭으로 tableType 추론
+                    let detected = null;
+                    for (const [tKey, cfg] of Object.entries(tableColumnMappings)) {
+                        for (let i = 1; i < cfg.columns.length; i++) {
+                            const cdef = cfg.columns[i];
+                            if (cdef.type === existingColumn.column_type && existingColumn.column_key.endsWith(cdef.key_suffix)) {
+                                detected = { tableType: tKey, config: cfg, suffix: cdef.key_suffix };
+                                break;
+                            }
+                        }
+                        if (detected) break;
+                    }
+                    if (detected) {
+                        const baseKey = existingColumn.column_key.slice(0, -detected.suffix.length);
+                        const baseExists = pendingColumns.some(c => !c._toDelete && c.column_key === baseKey);
+                        if (!baseExists) {
+                            const baseOrder = Math.max(0, (pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete).map(c => c.column_order).reduce((a,b)=>Math.max(a,b), -1)) + 1);
+                            // 이름에서 마지막 토큰 제거하여 기본명 추정
+                            let baseName = columnName;
+                            const lastToken = detected.config.columns.find(c=>c.key_suffix===detected.suffix)?.name.split(' ').slice(-1)[0] || '';
+                            if (lastToken && baseName.endsWith(' ' + lastToken)) {
+                                baseName = baseName.slice(0, -(' ' + lastToken).length);
+                            }
+                            const baseType = detected.config.columns[0].type; // popup_* 등
+                            const newId = Date.now() + Math.floor(Math.random()*1000);
+                            const newBase = {
+                                id: newId,
+                                column_name: baseName,
+                                column_key: baseKey,
+                                column_type: baseType,
+                                tab: selectedSection,
+                                is_active: isActive,
+                                column_order: baseOrder,
+                                _isNew: true,
+                                _tableGroup: baseKey,
+                                _tableType: detected.tableType,
+                                _tableName: detected.config.name
+                            };
+                            pendingColumns.push(newBase);
+                            console.log('자동 생성된 본체 컬럼:', newBase);
+                        }
+                    }
+                }
+            }
             
             let dropdownOptions = null;
             if (columnType === 'dropdown') {
@@ -1615,20 +1681,41 @@ let editingId = null;
                 if (index !== -1) {
                     const existingColumn = pendingColumns[index];
                     
-                    // 테이블로 생성된 컬럼인 경우 테이블 정보 유지
+                    // 테이블 컬럼 타입 보존/복원 로직
+                    const suffixes = ['_id','_dept','_bizno','_code','_company'];
+                    const isLinkedField = suffixes.some(s => (columnKey || '').endsWith(s));
+                    // 힌트 매핑 (기지 키 → 테이블 타입)
+                    const baseKeyHints = { 'incharged_person': 'person', 'incharge': 'department', 'company_1cha': 'company', 'company_1st': 'company' };
+                    const keyHint = baseKeyHints[existingColumn.column_key] || baseKeyHints[columnKey] || null;
+                    // 형제 컬럼으로 테이블 타입 추론
+                    let siblingType = null;
+                    const baseKey = (function(k){ let b=k||''; suffixes.forEach(s=>{ if(b.endsWith(s)) b=b.slice(0,-s.length);}); return b; })(columnKey || existingColumn.column_key || '');
+                    const siblings = (pendingColumns||[]).filter(c => String(c.id)!==String(existingColumn.id));
+                    if (siblings.some(c => c.column_key === baseKey + '_bizno')) siblingType = 'company';
+                    else if (siblings.some(c => c.column_key === baseKey + '_code')) siblingType = 'department';
+                    else if (siblings.some(c => c.column_key === baseKey + '_dept')) siblingType = 'person';
+                    else if (siblings.some(c => c.column_key === baseKey + '_company')) siblingType = 'contractor';
+                    // 최종 테이블 타입 추정
+                    const tableTypeGuess = existingColumn._tableType || keyHint || siblingType || (looksTable ? (existingColumn._tableType || null) : null);
+                    // 최종 타입 결정
+                    let newType = existingColumn._tableGroup ? existingColumn.column_type : columnType;
+                    if (!isLinkedField && (!newType || newType === 'text') && tableTypeGuess) {
+                        const popupMap = { person:'popup_person', department:'popup_department', company:'popup_company', building:'popup_building', contractor:'popup_contractor' };
+                        newType = popupMap[tableTypeGuess] || newType || 'text';
+                    }
                     pendingColumns[index] = {
                         ...existingColumn,
                         column_name: columnName,
                         column_key: columnKey,
-                        column_type: columnType,
+                        column_type: newType,
                         column_span: columnSpan, // span 정보 추가
                         tab: selectedSection, // 섹션 정보 추가
                         is_active: isActive,
                         dropdown_options: dropdownOptions,
                         _modified: !existingColumn._isNew, // 새 컬럼이 아니면 수정됨 표시
-                        // 테이블 관련 정보 유지
-                        _tableGroup: existingColumn._tableGroup,
-                        _tableType: existingColumn._tableType,
+                        // 테이블 관련 정보 유지/보강
+                        _tableGroup: existingColumn._tableGroup || baseKey,
+                        _tableType: existingColumn._tableType || tableTypeGuess || null,
                         _tableName: existingColumn._tableName
                     };
                 }

@@ -1221,12 +1221,70 @@ def accident():
         sections = [dict(row) for row in sections]
     
     # 동적 컬럼 설정 가져오기
-    dynamic_columns_rows = conn.execute("""
+    dynamic_columns_rows = conn.execute(
+        """
         SELECT * FROM accident_column_config 
         WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
         ORDER BY column_order
-    """).fetchall()
+        """
+    ).fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+
+    # 키 집합은 활성/비활성 모두 포함하여 그룹 추론에 사용 (렌더는 활성만)
+    try:
+        all_keys_rows = conn.execute(
+            "SELECT column_key FROM accident_column_config WHERE (is_deleted = 0 OR is_deleted IS NULL)"
+        ).fetchall()
+        all_keys = {r[0] if isinstance(r, (list, tuple)) else (r['column_key'] if 'column_key' in r.keys() else None) for r in all_keys_rows}
+        all_keys = {k for k in all_keys if k}
+    except Exception:
+        all_keys = {c.get('column_key') for c in dynamic_columns if c.get('column_key')}
+
+    # Normalize table/popup types for base columns using sibling keys
+    try:
+        suffixes = ['_id', '_dept', '_bizno', '_code', '_company']
+        def base_key_of(key: str) -> str:
+            if not isinstance(key, str):
+                return ''
+            for s in suffixes:
+                if key.endswith(s):
+                    return key[:-len(s)]
+            return key
+        key_set = all_keys
+        # Determine group by presence of sibling suffix keys (across all sections)
+        def infer_group(bk: str) -> str:
+            if not bk:
+                return ''
+            # support irregular 'd' variant like incharge -> incharged_code
+            variants = [bk, bk + 'd']
+            if any((v + '_bizno') in key_set for v in variants):
+                return 'company'
+            if any((v + '_dept') in key_set for v in variants):
+                return 'person'
+            if any((v + '_code') in key_set for v in variants):
+                return 'department'
+            if any((v + '_company') in key_set for v in variants):
+                return 'contractor'
+            return ''
+        popup_map = {
+            'person': 'popup_person',
+            'company': 'popup_company',
+            'department': 'popup_department',
+            'contractor': 'popup_contractor',
+        }
+        for col in dynamic_columns:
+            ck = col.get('column_key')
+            ct = col.get('column_type')
+            bk = base_key_of(ck)
+            grp = infer_group(bk)
+            # Base column: exact base key and has a recognized group
+            if grp and ck == bk:
+                if not ct or ct in ('text', 'popup', 'table', 'table_select'):
+                    col['column_type'] = popup_map.get(grp, ct)
+                # Mark as table input for robust rendering
+                col['input_type'] = col.get('input_type') or 'table'
+    except Exception as _e:
+        logging.error(f"accident_detail: normalize popup types failed: {_e}")
     
     # 섹션별로 컬럼 그룹핑
     section_columns = {}
@@ -1397,12 +1455,32 @@ def partner_accident():
         sections = [dict(row) for row in sections]
     
     # 동적 컬럼 설정 가져오기 (활성화되고 삭제되지 않은 것만)
-    dynamic_columns_rows = conn.execute("""
+    dynamic_columns_rows = conn.execute(
+        """
         SELECT * FROM accident_column_config 
         WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
         ORDER BY column_order
-    """).fetchall()
+        """
+    ).fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+
+    # 전역 키(활성/비활성 포함) 수집 - 상세 화면 팝업 타입 보정에 사용
+    try:
+        _all_keys_rows = conn.execute(
+            "SELECT column_key FROM accident_column_config WHERE (is_deleted = 0 OR is_deleted IS NULL)"
+        ).fetchall()
+        all_keys = set()
+        for r in _all_keys_rows:
+            try:
+                all_keys.add(r['column_key'])
+            except Exception:
+                try:
+                    all_keys.add(r[0])
+                except Exception:
+                    pass
+        all_keys = {k for k in all_keys if k}
+    except Exception:
+        all_keys = {c.get('column_key') for c in dynamic_columns if c.get('column_key')}
     
     # 섹션별로 컬럼 그룹핑 (detailed_content 제외)
     section_columns = {}
@@ -3467,24 +3545,87 @@ def accident_detail(accident_id):
     logging.info(f"Accident {accident['accident_number']}: {len(attachments)} attachments found")
     
     # 동적 컬럼 설정 가져오기 - safety-instruction과 동일한 방식 (활성화되고 삭제되지 않은 것만)
-    dynamic_columns_rows = conn.execute("""
+    dynamic_columns_rows = conn.execute(
+        """
         SELECT * FROM accident_column_config 
         WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
         ORDER BY column_order
-    """).fetchall()
+        """
+    ).fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+
+    # 전역 컬럼 키(활성/비활성 포함) 수집 - 상세 렌더 보정에 사용
+    try:
+        _ak_rows = conn.execute(
+            "SELECT column_key FROM accident_column_config WHERE (is_deleted = 0 OR is_deleted IS NULL)"
+        ).fetchall()
+        all_keys = set()
+        for r in _ak_rows:
+            try:
+                all_keys.add(r['column_key'])
+            except Exception:
+                try:
+                    all_keys.add(r[0])
+                except Exception:
+                    pass
+        all_keys = {k for k in all_keys if k}
+    except Exception:
+        all_keys = {c.get('column_key') for c in dynamic_columns if c.get('column_key')}
     
     # column_span을 정수로 변환
     for col in dynamic_columns:
         if col.get('column_span'):
-            col['column_span'] = int(col['column_span'])
-    
+            try:
+                col['column_span'] = int(col['column_span'])
+            except Exception:
+                pass
+
+    # 전역 키 기반으로 베이스 컬럼의 popup_* 타입 보정
+    try:
+        suffixes = ['_id', '_dept', '_bizno', '_code', '_company']
+        def base_key_of(key: str) -> str:
+            if not isinstance(key, str):
+                return ''
+            for s in suffixes:
+                if key.endswith(s):
+                    return key[:-len(s)]
+            return key
+        key_set = all_keys
+        def infer_group(bk: str) -> str:
+            if not bk:
+                return ''
+            variants = [bk, bk + 'd']
+            if any((v + '_bizno') in key_set for v in variants):
+                return 'company'
+            if any((v + '_dept') in key_set for v in variants):
+                return 'person'
+            if any((v + '_code') in key_set for v in variants):
+                return 'department'
+            if any((v + '_company') in key_set for v in variants):
+                return 'contractor'
+            return ''
+        popup_map = {
+            'person': 'popup_person',
+            'company': 'popup_company',
+            'department': 'popup_department',
+            'contractor': 'popup_contractor',
+        }
+        for col in dynamic_columns:
+            ck = col.get('column_key')
+            ct = col.get('column_type')
+            bk = base_key_of(ck)
+            grp = infer_group(bk)
+            if grp and ck == bk:
+                if not ct or ct in ('text', 'popup', 'table', 'table_select'):
+                    col['column_type'] = popup_map.get(grp, ct)
+                col['input_type'] = col.get('input_type') or 'table'
+    except Exception as _e:
+        logging.error(f"accident_detail normalize failed: {_e}")
+
     # 드롭다운 컬럼에 대해 코드-값 매핑 적용
     for col in dynamic_columns:
-        if col['column_type'] == 'dropdown':
-            # 코드-값 매핑 방식으로 옵션 가져오기
-            code_options = get_dropdown_options_for_display('accident', col['column_key'])
-            # 코드-값 매핑 방식 사용 (DB dropdown_option_codes_v2 테이블)
+        if col.get('column_type') == 'dropdown':
+            code_options = get_dropdown_options_for_display('accident', col.get('column_key'))
             col['dropdown_options_mapped'] = code_options if code_options else []
     
     # 섹션별로 컬럼 그룹핑 - safety-instruction과 동일한 방식
@@ -3614,25 +3755,7 @@ def accident_detail(accident_id):
                     print(f"[DEBUG] 템플릿 라인 {i+1}: {line.strip()}", flush=True)
     
     # 템플릿으로 전달되는 데이터 디버그
-    print(f"[DEBUG] accident type: {type(accident)}")
-    print(f"[DEBUG] custom_data type: {type(custom_data)}")
-    
-    if isinstance(accident, dict):
-        print(f"[DEBUG] Template data - accident_number: {accident.get('accident_number')}")
-        print(f"[DEBUG] Template data - detailed_content: {accident.get('detailed_content', 'MISSING')[:50] if accident.get('detailed_content') else 'EMPTY'}...")
-        print(f"[DEBUG] Template data - injured_person in accident: {'injured_person' in accident}")
-        if 'injured_person' in accident:
-            print(f"[DEBUG] Template data - injured_person from accident: {accident.get('injured_person')}")
-    else:
-        print(f"[DEBUG] ERROR: accident is not a dict: {accident}")
-    
-    if isinstance(custom_data, dict):
-        print(f"[DEBUG] Template data - custom_data keys: {list(custom_data.keys())}")
-        print(f"[DEBUG] Template data - injured_person in custom_data: {'injured_person' in custom_data}")
-        if 'injured_person' in custom_data:
-            print(f"[DEBUG] Template data - injured_person from custom_data: {custom_data.get('injured_person')}")
-    else:
-        print(f"[DEBUG] ERROR: custom_data is not a dict: {custom_data}")
+    logging.debug(f"accident_detail: accident type {type(accident)}, custom_data type {type(custom_data)}")
     
     return render_template('accident-detail.html', 
                          instruction=accident,  # accident를 instruction으로도 전달 (템플릿 호환성)
@@ -3641,6 +3764,7 @@ def accident_detail(accident_id):
                          sections=sections,
                          section_columns=section_columns,
                          dynamic_columns=dynamic_columns,  # 동적 컬럼 정보
+                         all_column_keys=list(all_keys),  # 전역 컬럼 키 (활성/비활성 포함)
                          basic_info_columns=basic_info_columns,  # 하위 호환성
                          violation_info_columns=violation_info_columns,  # 하위 호환성
                          additional_columns=additional_columns,  # 하위 호환성

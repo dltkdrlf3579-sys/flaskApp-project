@@ -488,11 +488,14 @@ def follow_sop_detail(work_req_no):
     # 팝업 여부 확인
     is_popup = request.args.get('popup') == '1'
     
+    # 전역 키(활성 컬럼) 전달
+    all_keys = [c.get('column_key') for c in dynamic_columns if c.get('column_key')]
     return render_template('follow-sop-detail.html',
                          sop=sop,
                          custom_data=custom_data,
                          sections=sections,
                          section_columns=section_columns,
+                         all_column_keys=all_keys,
                          is_popup=is_popup,
                          menu=MENU_CONFIG)
 
@@ -1068,12 +1071,15 @@ def full_process_detail(fullprocess_number):
     # 팝업 여부 확인
     is_popup = request.args.get('popup') == '1'
     
+    # 전역 키(활성 컬럼) 전달
+    all_keys = [c.get('column_key') for c in dynamic_columns if c.get('column_key')]
     return render_template('full-process-detail.html',
                          process=process,
                          instruction=process,  # 템플릿 호환용 별칭
                          custom_data=custom_data,
                          sections=sections,
                          section_columns=section_columns,
+                         all_column_keys=all_keys,
                          is_popup=is_popup,
                          menu=MENU_CONFIG)
 

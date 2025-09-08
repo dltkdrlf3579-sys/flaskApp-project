@@ -114,6 +114,13 @@ class ColumnConfigService:
             add_column('is_deleted', 'INTEGER DEFAULT 0')
         if not has_column(self.table_name, 'input_type'):
             add_column('input_type', 'TEXT')
+        # 테이블 메타 컬럼 보강
+        if not has_column(self.table_name, 'table_group'):
+            add_column('table_group', 'TEXT')
+        if not has_column(self.table_name, 'table_type'):
+            add_column('table_type', 'TEXT')
+        if not has_column(self.table_name, 'table_name'):
+            add_column('table_name', 'TEXT')
 
         conn.commit()
         conn.close()
@@ -260,47 +267,55 @@ class ColumnConfigService:
                 # column_type이 table인 경우 input_type을 table로 설정
                 input_type = 'table'
             
-            # 테이블에 input_type 컬럼이 있는지 확인
+            # 테이블 컬럼 존재 여부 확인
             cursor.execute(f"PRAGMA table_info({self.table_name})")
-            columns = [col[1] for col in cursor.fetchall()]
-            has_input_type = 'input_type' in columns
-            
-            # 컬럼 추가
-            if has_input_type:
-                cursor.execute_with_returning_id(f"""
-                    INSERT INTO {self.table_name} 
-                    (column_key, column_name, column_type, column_order, is_active, 
-                     is_required, dropdown_options, column_span, tab, input_type)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    column_key,
-                    column_data['column_name'],
-                    column_data.get('column_type', 'text'),
-                    max_order + 1,
-                    column_data.get('is_active', 1),
-                    column_data.get('is_required', 0),
-                    dropdown_options,
-                    column_data.get('column_span', 1),  # column_span 추가
-                    column_data.get('tab', 'additional'),  # tab 필드 추가 (기본값: additional)
-                    input_type
-                ))
+            cols = [col[1] for col in cursor.fetchall()]
+            has_input_type = 'input_type' in cols
+            has_table_group = 'table_group' in cols
+            has_table_type = 'table_type' in cols
+            has_table_name = 'table_name' in cols
+
+            # 동적 INSERT 구성
+            fields = ['column_key', 'column_name', 'column_type', 'column_order', 'is_active',
+                      'is_required', 'dropdown_options', 'column_span', 'tab']
+            # Postgres boolean 호환: 드라이버에 따라 0/1로 전송될 수 있으므로 명시적으로 처리
+            _to_bool = lambda v: (v in (1, '1', True, 'true', 't', 'T'))
+            if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                # 문자열 'true'/'false'로 전달 (BOOLEAN으로 안전 캐스팅됨)
+                is_active_val = 'true' if _to_bool(column_data.get('is_active', 1)) else 'false'
+                is_required_val = 'true' if _to_bool(column_data.get('is_required', 0)) else 'false'
             else:
-                cursor.execute_with_returning_id(f"""
-                    INSERT INTO {self.table_name} 
-                    (column_key, column_name, column_type, column_order, is_active, 
-                     is_required, dropdown_options, column_span, tab)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    column_key,
-                    column_data['column_name'],
-                    column_data.get('column_type', 'text'),
-                    max_order + 1,
-                    column_data.get('is_active', 1),
-                    column_data.get('is_required', 0),
-                    dropdown_options,
-                    column_data.get('column_span', 1),  # column_span 추가
-                    column_data.get('tab', 'additional')  # tab 필드 추가 (기본값: additional)
-                ))
+                is_active_val = True if _to_bool(column_data.get('is_active', 1)) else False
+                is_required_val = True if _to_bool(column_data.get('is_required', 0)) else False
+            values = [
+                column_key,
+                column_data['column_name'],
+                column_data.get('column_type', 'text'),
+                max_order + 1,
+                is_active_val,
+                is_required_val,
+                dropdown_options,
+                column_data.get('column_span', 1),
+                column_data.get('tab', 'additional')
+            ]
+            if has_input_type:
+                fields.append('input_type')
+                values.append(input_type)
+            if has_table_group:
+                fields.append('table_group')
+                values.append(column_data.get('table_group'))
+            if has_table_type:
+                fields.append('table_type')
+                values.append(column_data.get('table_type'))
+            if has_table_name:
+                fields.append('table_name')
+                values.append(column_data.get('table_name'))
+
+            placeholders = ', '.join(['?'] * len(fields))
+            cursor.execute_with_returning_id(
+                f"INSERT INTO {self.table_name} ({', '.join(fields)}) VALUES ({placeholders})",
+                tuple(values)
+            )
             
             column_id = cursor.lastrowid
             conn.commit()
@@ -377,7 +392,8 @@ class ColumnConfigService:
             has_input_type = 'input_type' in columns
             
             allowed_fields = ['column_name', 'column_type', 'is_active', 
-                             'is_required', 'dropdown_options', 'column_order', 'column_span', 'tab']
+                             'is_required', 'dropdown_options', 'column_order', 'column_span', 'tab',
+                             'table_group', 'table_type', 'table_name']
             
             # input_type이 있으면 허용 필드에 추가
             if has_input_type:
@@ -389,7 +405,14 @@ class ColumnConfigService:
             for field in allowed_fields:
                 if field in column_data:
                     update_fields.append(f"{field} = ?")
-                    update_values.append(column_data[field])
+                    if field in ('is_active','is_required'):
+                        _to_bool = lambda v: (v in (1, '1', True, 'true', 't', 'T'))
+                        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                            update_values.append('true' if _to_bool(column_data[field]) else 'false')
+                        else:
+                            update_values.append(True if _to_bool(column_data[field]) else False)
+                    else:
+                        update_values.append(column_data[field])
             
             if update_fields:
                 update_fields.append("updated_at = CURRENT_TIMESTAMP")
