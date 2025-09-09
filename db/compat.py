@@ -408,9 +408,18 @@ class CompatCursor:
                 # psycopg3에서는 executemany가 내부적으로 최적화됨
                 self._cursor.executemany(sql, params_list)
             except Exception:
-                # fallback
+                # 안전 폴백: 행 단위 SAVEPOINT로 격리하여 일부 실패에도 전체 트랜잭션 유지
                 for params in params_list:
-                    self._cursor.execute(sql, params)
+                    try:
+                        self._cursor.execute("SAVEPOINT sp_execmany")
+                        self._cursor.execute(sql, params)
+                        self._cursor.execute("RELEASE SAVEPOINT sp_execmany")
+                    except Exception:
+                        # 실패한 레코드는 롤백하고 다음으로 진행
+                        try:
+                            self._cursor.execute("ROLLBACK TO SAVEPOINT sp_execmany")
+                        except Exception:
+                            pass
         else:
             self._cursor.executemany(sql, params_list)
         

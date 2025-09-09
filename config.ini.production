@@ -1,0 +1,108 @@
+[DEFAULT]
+debug = False
+secret_key = CHANGE-THIS-TO-RANDOM-SECRET-KEY-PRODUCTION
+upload_folder = uploads
+edit_password = CHANGE_THIS_PASSWORD
+admin_password = CHANGE_THIS_PASSWORD
+
+[DATABASE]
+local_db_path = portal.db
+db_backend = postgres
+# 운영 서버 PostgreSQL 설정
+postgres_dsn = postgresql://postgres:YOUR_PASSWORD_HERE@10.172.127.77:5432/portal_dev
+iqadb_module_path = C:/Users/user/AppData/Local/aipforge/pkgs/dist/obf/PY310
+default_module_path = C:/Users/user/AppData/Local/aipforge/pkgs/dist/obf/PY310
+external_db_enabled = true
+initial_sync_on_first_request = false
+master_data_daily = true
+content_data_once = false
+
+[SECURITY]
+max_upload_size_mb = 10
+allowed_extensions = pdf,doc,docx,xls,xlsx,png,jpg,jpeg
+
+[LOGGING]
+log_level = INFO
+log_file = app.log
+log_db_backend = false
+
+[DASHBOARD]
+dashboard_url = https://your-dashboard.com
+dashboard_enabled = True
+
+[SQL_QUERIES]
+
+[COLUMNS]
+sync_on_startup = true
+
+[MASTER_DATA_QUERIES]
+partners_query = SELECT
+	business_number,
+	company_name,
+	partner_class,
+	business_type_major,
+	business_type_minor,
+	hazard_work_flag,
+	representative,
+	address,
+	average_age,
+	annual_revenue,
+	transaction_count,
+	permanent_workers
+	FROM partners
+	ORDER BY company_name
+accidents_query = SELECT
+	accident_number,
+	accident_name,
+	workplace,
+	accident_grade,
+	major_category,
+	injury_form,
+	injury_type,
+	accident_date,
+	day_of_week,
+	created_at as created_at,
+	building,
+	floor,
+	location_category,
+	location_detail
+	FROM accidents
+	WHERE accident_number IS NOT NULL
+building_query = SELECT building_code, building_name, SITE, SITE_TYPE FROM buildings WHERE 1=1
+department_query = SELECT dept_code, dept_name, parent_dept_code FROM departments WHERE 1=1
+contractor_query = SELECT worker_id, worker_name, company_name, business_number FROM contractors WHERE 1=1
+employee_query = SELECT employee_id, employee_name, department_name FROM employees WHERE 1=1
+safety_instructions_query = SELECT * FROM safety_instructions_cache WHERE issue_number IS NOT NULL
+followsop_query = SELECT * FROM 외부_followsop_테이블 WHERE 1=1
+fullprocess_query = SELECT * FROM 외부_fullprocess_테이블 WHERE 1=1
+
+[CONTENT_DATA_QUERIES]
+safety_instructions_query = SELECT * FROM safety_instructions_cache WHERE issue_number IS NOT NULL AND (is_deleted = 0 OR is_deleted IS NULL)
+followsop_query = SELECT * FROM 외부_followsop_테이블 WHERE 1=1
+fullprocess_query = SELECT * FROM 외부_fullprocess_테이블 WHERE 1=1
+
+[SSO]
+# 운영 환경에서는 SSO 활성화
+sso_enabled = true
+
+# IdP 설정 (실제 운영 SSO 서버 정보로 변경)
+idp_entity_id = https://sso.yourcompany.com
+idp_signout_url = https://sso.yourcompany.com/logout
+idp_client_id = YOUR_CLIENT_ID_HERE
+idp_client_secret = YOUR_CLIENT_SECRET_HERE
+
+# SP 설정 (실제 운영 포털 URL로 변경)
+sp_redirect_url = https://portal.yourcompany.com/sso/callback
+sp_base_url = https://portal.yourcompany.com
+
+# 인증서 설정
+cert_file_path = cert/idp.cer
+cert_enabled = true
+
+# 운영 환경에서는 개발 모드 비활성화
+dev_mode = false
+dev_user_id = 
+dev_user_name = 
+dev_department = 
+dev_grade = 
+dev_simulate_flow = false

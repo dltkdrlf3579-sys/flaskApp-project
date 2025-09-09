@@ -140,6 +140,10 @@ def _upsert_postgresql(cursor, table: str, data: Dict[str, Any],
     insert_values = []
     
     for col, val in data.items():
+        # 빈 문자열('')도 None처럼 취급하여 TIMESTAMP 캐스팅 오류 방지
+        if isinstance(val, str) and val.strip() == '':
+            val = None
+
         if col in timestamp_columns and (val is None or val == 'now'):
             # timestamp 컬럼이 None이거나 'now'면 INSERT에서 제외 (DEFAULT 적용)
             continue
