@@ -403,11 +403,11 @@ class CompatCursor:
         sql = self._conn._convert_sql(sql)
         
         if self._conn.is_postgres and PSYCOPG_AVAILABLE:
-            # PostgreSQL 최적화: execute_batch 사용
+            # PostgreSQL 최적화: psycopg3는 executemany가 자동으로 배치 처리
             try:
-                from psycopg.extras import execute_batch
-                execute_batch(self._cursor, sql, params_list)
-            except ImportError:
+                # psycopg3에서는 executemany가 내부적으로 최적화됨
+                self._cursor.executemany(sql, params_list)
+            except Exception:
                 # fallback
                 for params in params_list:
                     self._cursor.execute(sql, params)
