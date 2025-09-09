@@ -878,6 +878,15 @@ def full_process_register():
     """)
     dynamic_columns_rows = cursor.fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    # 드롭다운 코드 매핑 주입 (register)
+    try:
+        from app import get_dropdown_options_for_display as _get_opts
+        for col in dynamic_columns:
+            if col.get('column_type') == 'dropdown':
+                opts = _get_opts('full_process', col.get('column_key'))
+                col['dropdown_options_mapped'] = opts if opts else []
+    except Exception:
+        pass
     
     # 기본정보 필드 추가 (하드코딩) - 자동 생성값 포함
     from id_generator import generate_fullprocess_number
@@ -1049,6 +1058,15 @@ def full_process_detail(fullprocess_number):
         ORDER BY column_order
     """)
     dynamic_columns = [dict(row) for row in cursor.fetchall()]
+    # 드롭다운 코드 매핑 주입 (detail)
+    try:
+        from app import get_dropdown_options_for_display as _get_opts
+        for col in dynamic_columns:
+            if col.get('column_type') == 'dropdown':
+                opts = _get_opts('full_process', col.get('column_key'))
+                col['dropdown_options_mapped'] = opts if opts else []
+    except Exception:
+        pass
     
     # 기본정보 필드 추가 (하드코딩)
     basic_fields = [

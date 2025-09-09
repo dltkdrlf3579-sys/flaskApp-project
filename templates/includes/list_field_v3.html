@@ -2,6 +2,13 @@
 
 {% macro render_list_field(col, col_value, section, mode='view') %}
 {% if col.column_type == 'list' %}
+    {# 리스트 유형 결정: 기본은 협력사 근로자, input_type이 'list_company'이면 업체 리스트 #}
+    {% set _list_input_type = (col.input_type or col.list_item_type or '') %}
+    {% if _list_input_type == 'list_company' or _list_input_type == 'company' %}
+        {% set list_type = 'company' %}
+    {% else %}
+        {% set list_type = 'partner_worker' %}
+    {% endif %}
     {% if col_value %}
         {% if col_value is string %}
             {% set list_data = [] %}
@@ -54,7 +61,7 @@
             <button type="button" 
                     class="list-field-add-btn-{{ col.column_key }}"
                     onclick="addWorker_{{ col.column_key }}()">
-                + 협력사 근로자 추가
+                {% if list_type == 'company' %}+ 업체 추가{% else %}+ 협력사 근로자 추가{% endif %}
             </button>
             {% endif %}
         </div>
@@ -65,12 +72,20 @@
                 <thead>
                     <tr>
                         <th>No.</th>
-                        <th>성함</th>
-                        <th>ID</th>
-                        <th>소속업체</th>
-                        <th>사업자번호</th>
-                        {% if mode == 'edit' or mode == 'register' %}
-                        <th>관리</th>
+                        {% if list_type == 'company' %}
+                            <th>업체</th>
+                            <th>사업자번호</th>
+                            {% if mode == 'edit' or mode == 'register' %}
+                            <th>관리</th>
+                            {% endif %}
+                        {% else %}
+                            <th>성함</th>
+                            <th>ID</th>
+                            <th>소속업체</th>
+                            <th>사업자번호</th>
+                            {% if mode == 'edit' or mode == 'register' %}
+                            <th>관리</th>
+                            {% endif %}
                         {% endif %}
                     </tr>
                 </thead>
@@ -79,10 +94,15 @@
                         {% for item in list_data %}
                         <tr>
                             <td>{{ loop.index }}</td>
-                            <td>{{ item.name or '-' }}</td>
-                            <td>{{ item.id or '-' }}</td>
-                            <td>{{ item.company or '-' }}</td>
-                            <td>{{ item.bizno or '-' }}</td>
+                            {% if list_type == 'company' %}
+                                <td>{{ item.name or '-' }}</td>
+                                <td>{{ item.bizno or '-' }}</td>
+                            {% else %}
+                                <td>{{ item.name or '-' }}</td>
+                                <td>{{ item.id or '-' }}</td>
+                                <td>{{ item.company or '-' }}</td>
+                                <td>{{ item.bizno or '-' }}</td>
+                            {% endif %}
                             {% if mode == 'edit' or mode == 'register' %}
                             <td>
                                 <button type="button" 
@@ -96,8 +116,8 @@
                         {% endfor %}
                     {% else %}
                         <tr id="{{ col.column_key }}_empty_row">
-                            <td colspan="{% if mode == 'edit' or mode == 'register' %}6{% else %}5{% endif %}">
-                                등록된 협력사 근로자가 없습니다.
+                            <td colspan="{% if list_type == 'company' %}{% if mode == 'edit' or mode == 'register' %}4{% else %}3{% endif %}{% else %}{% if mode == 'edit' or mode == 'register' %}6{% else %}5{% endif %}{% endif %}">
+                                {% if list_type == 'company' %}등록된 업체가 없습니다.{% else %}등록된 협력사 근로자가 없습니다.{% endif %}
                             </td>
                         </tr>
                     {% endif %}
@@ -107,7 +127,7 @@
         
         <!-- 총 인원수 -->
         <div class="list-field-count-{{ col.column_key }}">
-            총 <span id="{{ col.column_key }}_count">{{ list_data|length if list_data else 0 }}</span>명
+            총 <span id="{{ col.column_key }}_count">{{ list_data|length if list_data else 0 }}</span>{% if list_type == 'company' %}개{% else %}명{% endif %}
         </div>
     </div>
     
@@ -296,16 +316,22 @@
             
             if ({{ col.column_key }}_data.length === 0) {
                 html = '<tr id="{{ col.column_key }}_empty_row">' +
-                       '<td colspan="{% if mode == "edit" or mode == "register" %}6{% else %}5{% endif %}">' +
-                       '등록된 협력사 근로자가 없습니다.</td></tr>';
+                       '<td colspan="{% if list_type == "company" %}{% if mode == "edit" or mode == "register" %}4{% else %}3{% endif %}{% else %}{% if mode == "edit" or mode == "register" %}6{% else %}5{% endif %}{% endif %}">'
+                       + ({% if list_type == 'company' %}'등록된 업체가 없습니다.'{% else %}'등록된 협력사 근로자가 없습니다.'{% endif %})
+                       + '</td></tr>';
             } else {
                 {{ col.column_key }}_data.forEach(function(item, index) {
                     html += '<tr>' +
                            '<td>' + (index + 1) + '</td>' +
+                           {% if list_type == 'company' %}
+                           '<td>' + (item.name || '-') + '</td>' +
+                           '<td>' + (item.bizno || '-') + '</td>' +
+                           {% else %}
                            '<td>' + (item.name || '-') + '</td>' +
                            '<td>' + (item.id || '-') + '</td>' +
                            '<td>' + (item.company || '-') + '</td>' +
                            '<td>' + (item.bizno || '-') + '</td>' +
+                           {% endif %}
                            {% if mode == 'edit' or mode == 'register' %}
                            '<td>' +
                            '<button type="button" class="list-field-remove-btn-{{ col.column_key }}" ' +
@@ -479,9 +505,13 @@
                 });
                 
                 // 중복 체크
-                var isDuplicate = {{ col.column_key }}_data.some(function(item) {
-                    return item.id === data.worker_id;
-                });
+                var isDuplicate = (function(){
+                    var t = '{{ list_type }}';
+                    if (t === 'company') {
+                        return {{ col.column_key }}_data.some(function(item){ return item.bizno && data.business_number && String(item.bizno) === String(data.business_number); });
+                    }
+                    return {{ col.column_key }}_data.some(function(item){ return item.id && data.worker_id && String(item.id) === String(data.worker_id); });
+                })();
                 
                 if (isDuplicate) {
                     alert('이미 추가된 근로자입니다.');
@@ -492,12 +522,22 @@
                 console.log('✅ {{ col.column_key }} 중복 체크 통과, 새 항목 추가 진행');
                 
                 // 데이터 추가
-                var newItem = {
-                    name: data.worker_name || '',
-                    id: data.worker_id || '',
-                    company: data.company_name || '',
-                    bizno: data.business_number || ''
-                };
+                var newItem;
+                if ('{{ list_type }}' === 'company') {
+                    newItem = {
+                        name: data.company_name || '',
+                        id: '',
+                        company: '',
+                        bizno: data.business_number || ''
+                    };
+                } else {
+                    newItem = {
+                        name: data.worker_name || data.name || '',
+                        id: data.worker_id || data.id || '',
+                        company: data.company_name || '',
+                        bizno: data.business_number || ''
+                    };
+                }
                 
                 console.log('📝 {{ col.column_key }} 추가할 새 항목:', newItem);
                 {{ col.column_key }}_data.push(newItem);
@@ -514,7 +554,8 @@
             };
             
             // 검색 팝업 열기
-            window.open('/search-popup?type=contractor&callback=' + callbackName, 
+            var searchType = ('{{ list_type }}' === 'company') ? 'company' : 'contractor';
+            window.open('/search-popup?type=' + searchType + '&callback=' + callbackName, 
                        'workerPopup', 'width=900,height=600,scrollbars=yes');
         };
         

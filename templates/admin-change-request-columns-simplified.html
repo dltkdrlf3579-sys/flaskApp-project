@@ -728,6 +728,10 @@ let editingId = null;
                         table_name: tableName,
                         _modified: !existingColumn._isNew // 새 컬럼이 아니면 수정됨 표시
                     };
+                    try { renderColumns(); } catch(e) {}
+                    setTimeout(() => {
+                        alert('변경사항이 저장 대기중입니다.\n"전체 변경사항 저장" 버튼을 눌러 최종 반영하세요.');
+                    }, 0);
                 }
             } else {
                 // 새 컬럼 추가

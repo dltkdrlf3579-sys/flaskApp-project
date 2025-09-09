@@ -12,7 +12,7 @@ UPSERT_REGISTRY = {
     # 드롭다운 옵션 코드
     'dropdown_option_codes_v2': {
         'conflict_cols': ['board_type', 'column_key', 'option_code'],
-        'update_cols': ['option_value', 'display_order', 'updated_at']
+        'update_cols': ['option_value', 'display_order', 'is_active', 'updated_at']
     },
     
     # 상세 정보 테이블들

@@ -5,6 +5,7 @@ import pytz
 from pathlib import Path
 import shutil
 from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, Response
+import configparser
 from timezone_config import KST, get_korean_time, get_korean_time_str
 from werkzeug.utils import secure_filename
 from config.menu import MENU_CONFIG
@@ -190,6 +191,30 @@ def convert_dropdown_code(column_key, code):
         return DROPDOWN_MAPPINGS[column_key].get(code, code)
     return code
 
+# --- SQL boolean helpers for SQLite/Postgres portability ---
+def sql_is_active_true(field_expr: str, conn) -> str:
+    """Active=true condition portable for SQLite(int) and Postgres(bool/int).
+
+    Postgres: cast to text and accept true markers ('1','t','true').
+    SQLite: compare to 1 (integers are used for booleans).
+    """
+    if getattr(conn, 'is_postgres', False):
+        return (
+            f"(LOWER(COALESCE({field_expr}::text, '0')) IN ('1','t','true'))"
+        )
+    return f"(COALESCE({field_expr}, 0) = 1)"
+
+def sql_is_deleted_false(field_expr: str, conn) -> str:
+    """Deleted=false (or NULL) portable for SQLite(int) and Postgres(bool/int).
+
+    Treat NULL as false (not deleted).
+    """
+    if getattr(conn, 'is_postgres', False):
+        return (
+            f"(LOWER(COALESCE({field_expr}::text, '0')) NOT IN ('1','t','true'))"
+        )
+    return f"(COALESCE({field_expr}, 0) = 0)"
+
 # 로깅 설정
 logging.basicConfig(
     level=getattr(logging, db_config.config.get('LOGGING', 'LOG_LEVEL')),
@@ -206,6 +231,34 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 # Jinja2 템플릿 캐시 비우기
 app.jinja_env.cache = {}
+
+# =====================
+# SSO (OIDC-like) setup
+# =====================
+from sso import sso_bp
+# Ensure blueprint routes are loaded before registration
+import sso.routes  # noqa: F401
+from sso.middleware import check_sso_authentication
+
+# Read SSO config
+_cfg = configparser.ConfigParser()
+try:
+    _cfg.read('config.ini', encoding='utf-8')
+except Exception:
+    pass
+
+app.config['SSO_CLIENT_ID'] = _cfg.get('SSO', 'idp_client_id', fallback='')
+app.config['SSO_REDIRECT_URI'] = _cfg.get('SSO', 'sp_redirect_url', fallback='')
+app.config['SSO_LOGOUT_URL'] = _cfg.get('SSO', 'idp_signout_url', fallback='')
+
+# Register SSO blueprint (after routes imported)
+app.register_blueprint(sso_bp)
+
+# Enforce SSO (dev mode auto-seeds session)
+@app.before_request
+def _sso_before_request():
+    resp = check_sso_authentication()
+    return resp
 
 def init_db():
     """기본 설정 초기화 및 데이터 동기화"""
@@ -565,12 +618,14 @@ def init_db():
         """)
         
         # 나머지 NULL은 모두 additional로
-        cursor.execute("""
+        _wa_si = sql_is_active_true('is_active', conn)
+        _wd_si = sql_is_deleted_false('is_deleted', conn)
+        cursor.execute(f"""
             UPDATE safety_instruction_column_config 
             SET tab = 'additional' 
             WHERE (tab IS NULL OR tab = '') 
-              AND is_active = 1 
-              AND (is_deleted = 0 OR is_deleted IS NULL)
+              AND {_wa_si}
+              AND {_wd_si}
         """)
         
         # Follow SOP
@@ -592,12 +647,14 @@ def init_db():
             )
         """)
         
-        cursor.execute("""
+        _wa_fs = sql_is_active_true('is_active', conn)
+        _wd_fs = sql_is_deleted_false('is_deleted', conn)
+        cursor.execute(f"""
             UPDATE follow_sop_column_config 
             SET tab = 'additional' 
             WHERE (tab IS NULL OR tab = '') 
-              AND is_active = 1 
-              AND (is_deleted = 0 OR is_deleted IS NULL)
+              AND {_wa_fs}
+              AND {_wd_fs}
         """)
         
         # Full Process
@@ -619,12 +676,14 @@ def init_db():
             )
         """)
         
-        cursor.execute("""
+        _wa_fp = sql_is_active_true('is_active', conn)
+        _wd_fp = sql_is_deleted_false('is_deleted', conn)
+        cursor.execute(f"""
             UPDATE full_process_column_config 
             SET tab = 'additional' 
             WHERE (tab IS NULL OR tab = '') 
-              AND is_active = 1 
-              AND (is_deleted = 0 OR is_deleted IS NULL)
+              AND {_wa_fp}
+              AND {_wd_fp}
         """)
         
         # Accident
@@ -654,12 +713,14 @@ def init_db():
             )
         """)
         
-        cursor.execute("""
+        _wa_ac = sql_is_active_true('is_active', conn)
+        _wd_ac = sql_is_deleted_false('is_deleted', conn)
+        cursor.execute(f"""
             UPDATE accident_column_config 
             SET tab = 'additional' 
             WHERE (tab IS NULL OR tab = '') 
-              AND is_active = 1 
-              AND (is_deleted = 0 OR is_deleted IS NULL)
+              AND {_wa_ac}
+              AND {_wd_ac}
         """)
         
         logging.info("컬럼 tab 매핑 업데이트 완료")
@@ -1205,26 +1266,31 @@ def accident():
     
     # 섹션 정보 가져오기
     try:
-        sections = conn.execute("""
+        _wa = sql_is_active_true('is_active', conn)
+        _wd = sql_is_deleted_false('is_deleted', conn)
+        sections = conn.execute(f"""
             SELECT * FROM accident_sections 
-            WHERE is_active = 1 
-            AND (is_deleted = 0 OR is_deleted IS NULL)
+            WHERE {_wa}
+              AND {_wd}
             ORDER BY section_order
         """).fetchall()
         sections = [dict(row) for row in sections]
     except:
-        sections = conn.execute("""
+        _wa2 = sql_is_active_true('is_active', conn)
+        sections = conn.execute(f"""
             SELECT * FROM section_config 
-            WHERE board_type = 'accident' AND is_active = 1 
+            WHERE board_type = 'accident' AND {_wa2}
             ORDER BY section_order
         """).fetchall()
         sections = [dict(row) for row in sections]
     
     # 동적 컬럼 설정 가져오기
+    _wa3 = sql_is_active_true('is_active', conn)
+    _wd3 = sql_is_deleted_false('is_deleted', conn)
     dynamic_columns_rows = conn.execute(
-        """
+        f"""
         SELECT * FROM accident_column_config 
-        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
+        WHERE {_wa3} AND {_wd3}
         ORDER BY column_order
         """
     ).fetchall()
@@ -1232,8 +1298,9 @@ def accident():
 
     # 키 집합은 활성/비활성 모두 포함하여 그룹 추론에 사용 (렌더는 활성만)
     try:
+        _wd4 = sql_is_deleted_false('is_deleted', conn)
         all_keys_rows = conn.execute(
-            "SELECT column_key FROM accident_column_config WHERE (is_deleted = 0 OR is_deleted IS NULL)"
+            f"SELECT column_key FROM accident_column_config WHERE {_wd4}"
         ).fetchall()
         all_keys = {r[0] if isinstance(r, (list, tuple)) else (r['column_key'] if 'column_key' in r.keys() else None) for r in all_keys_rows}
         all_keys = {k for k in all_keys if k}
@@ -1301,9 +1368,10 @@ def accident():
             col['code_mapping'] = get_dropdown_options_for_display('accident', col['column_key'])
     
     # 사고 목록 조회
-    query = """
+    _wd5 = sql_is_deleted_false('is_deleted', conn)
+    query = f"""
         SELECT * FROM accidents_cache 
-        WHERE (is_deleted = 0 OR is_deleted IS NULL)
+        WHERE {_wd5}
     """
     params = []
     
@@ -1438,27 +1506,32 @@ def partner_accident():
     # 섹션 정보 가져오기
     # 먼저 accident_sections 테이블 사용 시도, 없으면 section_config 사용
     try:
-        sections = conn.execute("""
+        _wa = sql_is_active_true('is_active', conn)
+        _wd = sql_is_deleted_false('is_deleted', conn)
+        sections = conn.execute(f"""
             SELECT * FROM accident_sections 
-            WHERE is_active = 1 
-            AND (is_deleted = 0 OR is_deleted IS NULL)
+            WHERE {_wa} 
+              AND {_wd}
             ORDER BY section_order
         """).fetchall()
         sections = [dict(row) for row in sections]
     except:
         # accident_sections 테이블이 없으면 section_config 사용
-        sections = conn.execute("""
+        _wa2 = sql_is_active_true('is_active', conn)
+        sections = conn.execute(f"""
             SELECT * FROM section_config 
-            WHERE board_type = 'accident' AND is_active = 1 
+            WHERE board_type = 'accident' AND {_wa2}
             ORDER BY section_order
         """).fetchall()
         sections = [dict(row) for row in sections]
     
     # 동적 컬럼 설정 가져오기 (활성화되고 삭제되지 않은 것만)
+    _wa3 = sql_is_active_true('is_active', conn)
+    _wd3 = sql_is_deleted_false('is_deleted', conn)
     dynamic_columns_rows = conn.execute(
-        """
+        f"""
         SELECT * FROM accident_column_config 
-        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
+        WHERE {_wa3} AND {_wd3}
         ORDER BY column_order
         """
     ).fetchall()
@@ -1466,8 +1539,9 @@ def partner_accident():
 
     # 전역 키(활성/비활성 포함) 수집 - 상세 화면 팝업 타입 보정에 사용
     try:
+        _wd4 = sql_is_deleted_false('is_deleted', conn)
         _all_keys_rows = conn.execute(
-            "SELECT column_key FROM accident_column_config WHERE (is_deleted = 0 OR is_deleted IS NULL)"
+            f"SELECT column_key FROM accident_column_config WHERE {_wd4}"
         ).fetchall()
         all_keys = set()
         for r in _all_keys_rows:
@@ -1497,9 +1571,10 @@ def partner_accident():
             col['code_mapping'] = get_dropdown_options_for_display('accident', col['column_key'])
     
     # 사고 목록 조회
-    query = """
+    _wd5 = sql_is_deleted_false('is_deleted', conn)
+    query = f"""
         SELECT * FROM accidents_cache 
-        WHERE (is_deleted = 0 OR is_deleted IS NULL)
+        WHERE {_wd5}
     """
     params = []
     
@@ -1634,10 +1709,12 @@ def safety_instruction_route():
     # 섹션 정보 가져오기 (safety_instruction 전용, 삭제되지 않은 것만)
     # 먼저 safety_instruction_sections 테이블 사용 시도, 없으면 section_config 사용
     try:
-        sections = conn.execute("""
+        _wa = sql_is_active_true('is_active', conn)
+        _wd = sql_is_deleted_false('is_deleted', conn)
+        sections = conn.execute(f"""
             SELECT * FROM safety_instruction_sections 
-            WHERE is_active = 1 
-            AND (is_deleted = 0 OR is_deleted IS NULL)
+            WHERE {_wa}
+              AND {_wd}
             ORDER BY section_order
         """).fetchall()
         sections = [dict(row) for row in sections]
@@ -1649,10 +1726,12 @@ def safety_instruction_route():
         
         try:
             # safety_instruction_sections 테이블이 없으면 section_config 사용
-            sections = conn.execute("""
+            _wa2 = sql_is_active_true('is_active', conn)
+            _wd2 = sql_is_deleted_false('is_deleted', conn)
+            sections = conn.execute(f"""
                 SELECT * FROM section_config 
-                WHERE board_type = 'safety_instruction' AND is_active = 1 
-                AND (is_deleted = 0 OR is_deleted IS NULL)
+                WHERE board_type = 'safety_instruction' AND {_wa2}
+                  AND {_wd2}
                 ORDER BY section_order
             """).fetchall()
             sections = [dict(row) for row in sections]
@@ -1661,9 +1740,11 @@ def safety_instruction_route():
             sections = []
     
     # 동적 컬럼 설정 가져오기 (활성화되고 삭제되지 않은 것만)
-    dynamic_columns_rows = conn.execute("""
+    _wa3 = sql_is_active_true('is_active', conn)
+    _wd3 = sql_is_deleted_false('is_deleted', conn)
+    dynamic_columns_rows = conn.execute(f"""
         SELECT * FROM safety_instruction_column_config 
-        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
+        WHERE {_wa3} AND {_wd3}
         ORDER BY column_order
     """).fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
@@ -1686,7 +1767,7 @@ def safety_instruction_route():
             col['code_mapping'] = get_dropdown_options_for_display('safety_instruction', col['column_key'])
     
     # 로컬 캐시 테이블에서 직접 조회 (삭제되지 않은 것만)
-    base_query = "SELECT * FROM safety_instructions_cache WHERE (is_deleted = 0 OR is_deleted IS NULL)"
+    base_query = f"SELECT * FROM safety_instructions_cache WHERE {sql_is_deleted_false('is_deleted', conn)}"
     query = base_query
     params = []
     
@@ -1824,9 +1905,11 @@ def safety_instruction_register():
     conn.row_factory = sqlite3.Row
     
     # 동적 컬럼 설정 가져오기 (safety_instruction 전용 테이블 사용)
-    dynamic_columns_rows = conn.execute("""
+    _wa = sql_is_active_true('is_active', conn)
+    _wd = sql_is_deleted_false('is_deleted', conn)
+    dynamic_columns_rows = conn.execute(f"""
         SELECT * FROM safety_instruction_column_config 
-        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
+        WHERE {_wa} AND {_wd}
         ORDER BY column_order
     """).fetchall()
     
@@ -1926,9 +2009,10 @@ def safety_instruction_detail(issue_number):
     # 실제 데이터베이스에서 조회 시도
     instruction = None
     try:
-        instruction = conn.execute("""
+        _wd = sql_is_deleted_false('is_deleted', conn)
+        instruction = conn.execute(f"""
             SELECT * FROM safety_instructions_cache 
-            WHERE issue_number = ? AND (is_deleted = 0 OR is_deleted IS NULL)
+            WHERE issue_number = ? AND {_wd}
         """, (issue_number,)).fetchone()
     except sqlite3.OperationalError:
         # 테이블이 없는 경우 더미 데이터 사용
@@ -2002,10 +2086,12 @@ def safety_instruction_detail(issue_number):
         conn.close()
         return "환경안전 지시서 정보를 찾을 수 없습니다.", 404
     
-    # 동적 컬럼 설정 가져오기 (활성화되고 삭제되지 않은 것만)
-    dynamic_columns_rows = conn.execute("""
+    # 동적 컬럼 설정 가져오기 (활성+미삭제)
+    _wa = sql_is_active_true('is_active', conn)
+    _wd = sql_is_deleted_false('is_deleted', conn)
+    dynamic_columns_rows = conn.execute(f"""
         SELECT * FROM safety_instruction_column_config 
-        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
+        WHERE {_wa} AND {_wd}
         ORDER BY column_order
     """).fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
@@ -3096,9 +3182,11 @@ def change_request_detail(request_id):
     # change_request_column_config 테이블 사용
     try:
         cursor = conn.cursor()
-        dynamic_columns_rows = conn.execute("""
+        _wa = sql_is_active_true('is_active', conn)
+        _wd = sql_is_deleted_false('is_deleted', conn)
+        dynamic_columns_rows = conn.execute(f"""
             SELECT * FROM change_request_column_config 
-            WHERE is_active = true AND (is_deleted = false OR is_deleted IS NULL)
+            WHERE {_wa} AND {_wd}
             ORDER BY column_order
         """).fetchall()
         
@@ -3362,18 +3450,21 @@ def accident_detail(accident_id):
     # 섹션 정보 가져오기
     # 먼저 accident_sections 테이블 사용 시도, 없으면 section_config 사용
     try:
-        sections = conn.execute("""
+        _wa = sql_is_active_true('is_active', conn)
+        _wd = sql_is_deleted_false('is_deleted', conn)
+        sections = conn.execute(f"""
             SELECT * FROM accident_sections 
-            WHERE is_active = 1 
-            AND (is_deleted = 0 OR is_deleted IS NULL)
+            WHERE {_wa}
+              AND {_wd}
             ORDER BY section_order
         """).fetchall()
         sections = [dict(row) for row in sections]
     except:
         # accident_sections 테이블이 없으면 section_config 사용
-        sections = conn.execute("""
+        _wa2 = sql_is_active_true('is_active', conn)
+        sections = conn.execute(f"""
             SELECT * FROM section_config 
-            WHERE board_type = 'accident' AND is_active = 1 
+            WHERE board_type = 'accident' AND {_wa2}
             ORDER BY section_order
         """).fetchall()
         sections = [dict(row) for row in sections]
@@ -3384,9 +3475,10 @@ def accident_detail(accident_id):
     
     # accidents_cache 테이블에서 조회
     try:
-        accident_row = conn.execute("""
+        _wd_acc = sql_is_deleted_false('is_deleted', conn)
+        accident_row = conn.execute(f"""
             SELECT * FROM accidents_cache 
-            WHERE id = %s AND (is_deleted = 0 OR is_deleted IS NULL)
+            WHERE id = %s AND {_wd_acc}
         """, (accident_id,)).fetchone()
         
         if accident_row:
@@ -3545,10 +3637,12 @@ def accident_detail(accident_id):
     logging.info(f"Accident {accident['accident_number']}: {len(attachments)} attachments found")
     
     # 동적 컬럼 설정 가져오기 - safety-instruction과 동일한 방식 (활성화되고 삭제되지 않은 것만)
+    _wa3 = sql_is_active_true('is_active', conn)
+    _wd3 = sql_is_deleted_false('is_deleted', conn)
     dynamic_columns_rows = conn.execute(
-        """
+        f"""
         SELECT * FROM accident_column_config 
-        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
+        WHERE {_wa3} AND {_wd3}
         ORDER BY column_order
         """
     ).fetchall()
@@ -3556,8 +3650,9 @@ def accident_detail(accident_id):
 
     # 전역 컬럼 키(활성/비활성 포함) 수집 - 상세 렌더 보정에 사용
     try:
+        _wd4 = sql_is_deleted_false('is_deleted', conn)
         _ak_rows = conn.execute(
-            "SELECT column_key FROM accident_column_config WHERE (is_deleted = 0 OR is_deleted IS NULL)"
+            f"SELECT column_key FROM accident_column_config WHERE {_wd4}"
         ).fetchall()
         all_keys = set()
         for r in _ak_rows:
@@ -3887,9 +3982,11 @@ def accident_register():
     conn.row_factory = sqlite3.Row
     
     # 동적 컬럼 설정 가져오기 - is_deleted 체크 추가
-    dynamic_columns_rows = conn.execute("""
+    _wa = sql_is_active_true('is_active', conn)
+    _wd = sql_is_deleted_false('is_deleted', conn)
+    dynamic_columns_rows = conn.execute(f"""
         SELECT * FROM accident_column_config 
-        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
+        WHERE {_wa} AND {_wd}
         ORDER BY column_order
     """).fetchall()
     
@@ -5537,16 +5634,12 @@ def admin_accident_columns():
     # 기존 simplified 구현을 표준 경로에서 사용
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
+    _wa = sql_is_active_true('is_active', conn)
     sections = conn.execute(
-        "SELECT * FROM section_config WHERE board_type = 'accident' AND is_active = 1 ORDER BY section_order"
+        f"SELECT * FROM section_config WHERE board_type = 'accident' AND {_wa} ORDER BY section_order"
     ).fetchall()
     sections = [dict(row) for row in sections]
-    # 드롭다운 코드 → 라벨 매핑 (리스트 전체 기준)
-    try:
-        from common_mapping import smart_apply_mappings as _smart_map
-        accidents = _smart_map(accidents, 'accident', dynamic_columns, DB_PATH)
-    except Exception as _e:
-        logging.error(f"accident mapping error: {_e}")
+    # 컬럼 관리 페이지에서는 사고 데이터 매핑이 필요 없음 (불필요 코드 제거)
     conn.close()
     return render_template('admin-accident-columns-simplified.html', sections=sections, menu=MENU_CONFIG)
 
@@ -6007,12 +6100,14 @@ def change_request_register():
         conn.commit()
         
         # 동적 컬럼 설정 가져오기 (딕셔너리로 직접 조회)
-        dynamic_columns_rows = conn.execute("""
+        _wa = sql_is_active_true('is_active', conn)
+        _wd = sql_is_deleted_false('is_deleted', conn)
+        dynamic_columns_rows = conn.execute(f"""
             SELECT 
                 column_key, column_name, column_type, column_order, is_active,
                 dropdown_options, tab, column_span, linked_columns
             FROM change_request_column_config 
-            WHERE is_active = true AND (is_deleted = false OR is_deleted IS NULL)
+            WHERE {_wa} AND {_wd}
             ORDER BY column_order
         """).fetchall()
         
@@ -6157,9 +6252,10 @@ def get_full_process():
         conn.row_factory = sqlite3.Row
         
         # 삭제되지 않은 Full Process 목록 조회
-        items = conn.execute("""
+        _wd = sql_is_deleted_false('is_deleted', conn)
+        items = conn.execute(f"""
             SELECT * FROM full_process 
-            WHERE is_deleted = 0 OR is_deleted IS NULL
+            WHERE {_wd}
             ORDER BY created_at DESC
         """).fetchall()
         
@@ -7293,23 +7389,28 @@ def export_accidents_excel():
         conn = get_db_connection()
         conn.row_factory = sqlite3.Row
         
-        # 동적 컬럼 정보 가져오기 (활성화되고 삭제되지 않은 컬럼만, 섹션도 활성화된 것만)
-        dynamic_columns_rows = conn.execute("""
+        # 동적 컬럼 정보 가져오기 (활성+미삭제, 섹션도 활성인 것만)
+        where_c_active = sql_is_active_true('c.is_active', conn)
+        where_c_notdel = sql_is_deleted_false('c.is_deleted', conn)
+        where_s_active = sql_is_active_true('s.is_active', conn)
+        where_s_notdel = sql_is_deleted_false('s.is_deleted', conn)
+        dyn_sql = f"""
             SELECT c.* FROM accident_column_config c
             LEFT JOIN section_config s ON s.board_type = 'accident' AND s.section_key = c.tab
-            WHERE c.is_active = 1 
-            AND (c.is_deleted = 0 OR c.is_deleted IS NULL)
-            AND (s.is_active = 1 OR s.section_key IS NULL)
-            AND (s.is_deleted = 0 OR s.is_deleted IS NULL OR s.section_key IS NULL)
+            WHERE {where_c_active}
+              AND {where_c_notdel}
+              AND ({where_s_active} OR s.section_key IS NULL)
+              AND ({where_s_notdel} OR s.section_key IS NULL)
             ORDER BY c.column_order
-        """).fetchall()
+        """
+        dynamic_columns_rows = conn.execute(dyn_sql).fetchall()
         dynamic_columns = [dict(row) for row in dynamic_columns_rows]
         
         # 사고 데이터 조회 (partner_accident 함수와 동일한 로직)
         # 삭제되지 않은 데이터만 조회
-        query = """
+        query = f"""
             SELECT * FROM accidents_cache 
-            WHERE (is_deleted = 0 OR is_deleted IS NULL)
+            WHERE {sql_is_deleted_false('is_deleted', conn)}
         """
         params = []
         
@@ -7539,10 +7640,12 @@ def import_accidents():
             logging.info("accident_columns 테이블이 없어서 동적 컬럼 없이 처리합니다.")
         else:
             # 동적 컬럼 조회
-            cursor.execute("""
+            _wa = sql_is_active_true('is_active', conn)
+            _wd = sql_is_deleted_false('is_deleted', conn)
+            cursor.execute(f"""
                 SELECT column_key, column_name, column_type, dropdown_options
                 FROM accident_column_config 
-                WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
+                WHERE {_wa} AND {_wd}
                 ORDER BY column_order
             """)
             dynamic_columns = cursor.fetchall()
@@ -7761,24 +7864,30 @@ def export_follow_sop_excel():
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # 동적 컬럼 정보 가져오기 (활성화되고 삭제되지 않은 컬럼만, 섹션도 활성화된 것만)
-        cursor.execute("""
+        # 동적 컬럼 정보 (활성+미삭제, 섹션도 활성)
+        where_c_active = sql_is_active_true('c.is_active', conn)
+        where_c_notdel = sql_is_deleted_false('c.is_deleted', conn)
+        where_s_active = sql_is_active_true('s.is_active', conn)
+        where_s_notdel = sql_is_deleted_false('s.is_deleted', conn)
+        dyn_sql = f"""
             SELECT c.* FROM follow_sop_column_config c
             LEFT JOIN follow_sop_sections s ON s.section_key = c.tab
-            WHERE c.is_active = 1 
-            AND (c.is_deleted = 0 OR c.is_deleted IS NULL)
-            AND (s.is_active = 1 OR s.section_key IS NULL)
-            AND (s.is_deleted = 0 OR s.is_deleted IS NULL OR s.section_key IS NULL)
+            WHERE {where_c_active}
+              AND {where_c_notdel}
+              AND ({where_s_active} OR s.section_key IS NULL)
+              AND ({where_s_notdel} OR s.section_key IS NULL)
             ORDER BY c.column_order
-        """)
+        """
+        cursor.execute(dyn_sql)
         dynamic_columns = cursor.fetchall()
         
         # Follow SOP 데이터 조회
-        cursor.execute("""
+        data_sql = f"""
             SELECT * FROM follow_sop 
-            WHERE (is_deleted = 0 OR is_deleted IS NULL)
+            WHERE {sql_is_deleted_false('is_deleted', conn)}
             ORDER BY created_at DESC
-        """)
+        """
+        cursor.execute(data_sql)
         data = cursor.fetchall()
         
         # 엑셀 워크북 생성
@@ -7834,12 +7943,29 @@ def export_follow_sop_excel():
                     custom_data = {}
             
             # 동적 컬럼 데이터 - 활성화되고 삭제되지 않은 컬럼만
-            for col in dynamic_columns:
-                value = custom_data.get(col['column_key'], '')
-                # 팝업형 값(dict)이면 이름 추출
+            # 드롭다운 매핑 지원
+            def _map_value(col, value):
+                # 팝업형 값(dict) → name
                 if isinstance(value, dict):
-                    value = value.get('name', str(value))
-                ws.cell(row=row_idx, column=col_idx, value=value)
+                    return value.get('name', str(value))
+                # 리스트 ⇒ JSON 문자열
+                if col['column_type'] == 'list' and isinstance(value, list):
+                    try:
+                        return json.dumps(value, ensure_ascii=False)
+                    except Exception:
+                        return str(value)
+                # 드롭다운 코드 → 표시값
+                if col['column_type'] == 'dropdown' and value:
+                    opts = get_dropdown_options_for_display('follow_sop', col['column_key'])
+                    if opts:
+                        for opt in opts:
+                            if opt['code'] == value:
+                                return opt['value']
+                return value
+
+            for col in dynamic_columns:
+                v = custom_data.get(col['column_key'], '')
+                ws.cell(row=row_idx, column=col_idx, value=_map_value(col, v))
                 col_idx += 1
         
         # 컬럼 너비 자동 조정
@@ -7896,24 +8022,30 @@ def export_full_process_excel():
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # 동적 컬럼 정보 가져오기 (활성화되고 삭제되지 않은 컬럼만, 섹션도 활성화된 것만)
-        cursor.execute("""
+        # 동적 컬럼 정보 (활성+미삭제, 섹션도 활성)
+        where_c_active = sql_is_active_true('c.is_active', conn)
+        where_c_notdel = sql_is_deleted_false('c.is_deleted', conn)
+        where_s_active = sql_is_active_true('s.is_active', conn)
+        where_s_notdel = sql_is_deleted_false('s.is_deleted', conn)
+        dyn_sql = f"""
             SELECT c.* FROM full_process_column_config c
             LEFT JOIN full_process_sections s ON s.section_key = c.tab
-            WHERE c.is_active = 1 
-            AND (c.is_deleted = 0 OR c.is_deleted IS NULL)
-            AND (s.is_active = 1 OR s.section_key IS NULL)
-            AND (s.is_deleted = 0 OR s.is_deleted IS NULL OR s.section_key IS NULL)
+            WHERE {where_c_active}
+              AND {where_c_notdel}
+              AND ({where_s_active} OR s.section_key IS NULL)
+              AND ({where_s_notdel} OR s.section_key IS NULL)
             ORDER BY c.column_order
-        """)
+        """
+        cursor.execute(dyn_sql)
         dynamic_columns = cursor.fetchall()
         
         # Full Process 데이터 조회
-        cursor.execute("""
+        data_sql = f"""
             SELECT * FROM full_process 
-            WHERE (is_deleted = 0 OR is_deleted IS NULL)
+            WHERE {sql_is_deleted_false('is_deleted', conn)}
             ORDER BY created_at DESC
-        """)
+        """
+        cursor.execute(data_sql)
         data = cursor.fetchall()
         
         # 엑셀 워크북 생성
@@ -7969,12 +8101,26 @@ def export_full_process_excel():
                     custom_data = {}
             
             # 동적 컬럼 데이터 - 활성화되고 삭제되지 않은 컬럼만
-            for col in dynamic_columns:
-                value = custom_data.get(col['column_key'], '')
-                # 팝업형 값(dict)이면 이름 추출
+            # 드롭다운 매핑 지원
+            def _map_value(col, value):
                 if isinstance(value, dict):
-                    value = value.get('name', str(value))
-                ws.cell(row=row_idx, column=col_idx, value=value)
+                    return value.get('name', str(value))
+                if col['column_type'] == 'list' and isinstance(value, list):
+                    try:
+                        return json.dumps(value, ensure_ascii=False)
+                    except Exception:
+                        return str(value)
+                if col['column_type'] == 'dropdown' and value:
+                    opts = get_dropdown_options_for_display('full_process', col['column_key'])
+                    if opts:
+                        for opt in opts:
+                            if opt['code'] == value:
+                                return opt['value']
+                return value
+
+            for col in dynamic_columns:
+                v = custom_data.get(col['column_key'], '')
+                ws.cell(row=row_idx, column=col_idx, value=_map_value(col, v))
                 col_idx += 1
         
         # 컬럼 너비 자동 조정
@@ -8031,22 +8177,28 @@ def export_safety_instruction_excel():
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # 동적 컬럼 정보 가져오기 (활성화되고 삭제되지 않은 컬럼만, 섹션도 활성화된 것만)
-        cursor.execute("""
+        # 동적 컬럼 정보 (활성+미삭제, 섹션도 활성)
+        where_c_active = sql_is_active_true('c.is_active', conn)
+        where_c_notdel = sql_is_deleted_false('c.is_deleted', conn)
+        where_s_active = sql_is_active_true('s.is_active', conn)
+        dyn_sql = f"""
             SELECT c.* FROM safety_instruction_column_config c
-            INNER JOIN section_config s ON s.board_type = 'safety_instruction' AND s.section_key = c.tab AND s.is_active = 1
-            WHERE c.is_active = 1 
-            AND (c.is_deleted = 0 OR c.is_deleted IS NULL)
+            INNER JOIN section_config s 
+              ON s.board_type = 'safety_instruction' AND s.section_key = c.tab AND {where_s_active}
+            WHERE {where_c_active}
+              AND {where_c_notdel}
             ORDER BY c.column_order
-        """)
+        """
+        cursor.execute(dyn_sql)
         dynamic_columns = cursor.fetchall()
         
         # Safety Instruction 데이터 조회 - safety_instructions_cache 테이블 사용
-        cursor.execute("""
+        data_sql = f"""
             SELECT * FROM safety_instructions_cache 
-            WHERE (is_deleted = 0 OR is_deleted IS NULL)
+            WHERE {sql_is_deleted_false('is_deleted', conn)}
             ORDER BY created_at DESC, issue_number DESC
-        """)
+        """
+        cursor.execute(data_sql)
         data = cursor.fetchall()
         
         # 엑셀 워크북 생성
@@ -8109,18 +8261,27 @@ def export_safety_instruction_excel():
             
             # 동적 컬럼 데이터 - 기본 필드 제외하고 처리
             basic_column_keys = ['issue_number', 'issuer', 'violation_date', 'discipline_date', 'disciplined_person']
+            def _map_value(col, value):
+                if isinstance(value, dict):
+                    return value.get('name', str(value))
+                if col['column_type'] == 'list' and isinstance(value, list):
+                    try:
+                        return json.dumps(value, ensure_ascii=False)
+                    except Exception:
+                        return str(value)
+                if col['column_type'] == 'dropdown' and value:
+                    opts = get_dropdown_options_for_display('safety_instruction', col['column_key'])
+                    if opts:
+                        for opt in opts:
+                            if opt['code'] == value:
+                                return opt['value']
+                return value
+
             for col in dynamic_columns:
                 if col['column_key'] not in basic_column_keys:
                     col_key = col['column_key']
-                    # 먼저 실제 테이블 컬럼에서 값 찾기
-                    value = row_dict.get(col_key, '')
-                    # 없으면 custom_data에서 찾기
-                    if not value and custom_data:
-                        value = custom_data.get(col_key, '')
-                    # 팝업형 값(dict)이면 이름 추출
-                    if isinstance(value, dict):
-                        value = value.get('name', str(value))
-                    ws.cell(row=row_idx, column=col_idx, value=value)
+                    v = row_dict.get(col_key, '') or (custom_data.get(col_key, '') if custom_data else '')
+                    ws.cell(row=row_idx, column=col_idx, value=_map_value(col, v))
                     col_idx += 1
         
         # 컬럼 너비 자동 조정
@@ -8184,22 +8345,27 @@ def export_change_requests_excel():
         conn = get_db_connection()
         conn.row_factory = sqlite3.Row
         
-        # 동적 컬럼 정보 가져오기
-        dynamic_columns_rows = conn.execute("""
+        # 동적 컬럼 정보 (활성+미삭제, 섹션도 활성)
+        where_c_active = sql_is_active_true('c.is_active', conn)
+        where_c_notdel = sql_is_deleted_false('c.is_deleted', conn)
+        where_s_active = sql_is_active_true('s.is_active', conn)
+        where_s_notdel = sql_is_deleted_false('s.is_deleted', conn)
+        dyn_sql = f"""
             SELECT c.* FROM change_request_column_config c
             LEFT JOIN section_config s ON s.board_type = 'change_request' AND s.section_key = c.tab
-            WHERE c.is_active = 1 
-            AND (c.is_deleted = 0 OR c.is_deleted IS NULL)
-            AND (s.is_active = 1 OR s.section_key IS NULL)
-            AND (s.is_deleted = 0 OR s.is_deleted IS NULL OR s.section_key IS NULL)
+            WHERE {where_c_active}
+              AND {where_c_notdel}
+              AND ({where_s_active} OR s.section_key IS NULL)
+              AND ({where_s_notdel} OR s.section_key IS NULL)
             ORDER BY c.column_order
-        """).fetchall()
+        """
+        dynamic_columns_rows = conn.execute(dyn_sql).fetchall()
         dynamic_columns = [dict(row) for row in dynamic_columns_rows]
         
         # 변경요청 데이터 조회
-        query = """
+        query = f"""
             SELECT * FROM partner_change_requests 
-            WHERE (is_deleted = 0 OR is_deleted IS NULL)
+            WHERE {sql_is_deleted_false('is_deleted', conn)}
         """
         params = []
         
@@ -8386,7 +8552,7 @@ def export_partners_to_excel():
             cursor = conn.cursor()
             
             # 쿼리 구성 (삭제되지 않은 데이터만)
-            query = "SELECT * FROM partners_cache WHERE (is_deleted = 0 OR is_deleted IS NULL)"
+            query = f"SELECT * FROM partners_cache WHERE {sql_is_deleted_false('is_deleted', conn)}"
             params = []
             
             if company_name:

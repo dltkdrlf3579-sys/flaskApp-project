@@ -26,35 +26,47 @@ class SectionConfigService:
         conn = get_db_connection(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        
+
+        def _col_exists(table: str, col: str) -> bool:
+            try:
+                if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                    cursor.execute(
+                        "SELECT 1 FROM information_schema.columns WHERE table_name = %s AND column_name = %s",
+                        (table.lower(), col.lower())
+                    )
+                    return cursor.fetchone() is not None
+                else:
+                    cursor.execute(f"PRAGMA table_info({table})")
+                    return any(r[1].lower() == col.lower() for r in cursor.fetchall())
+            except Exception:
+                return False
+
         try:
             # follow_sop과 full_process는 별도 테이블 사용
-            if self.board_type == 'follow_sop':
-                cursor.execute("""
-                    SELECT * FROM follow_sop_sections 
-                    WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
-                    ORDER BY section_order
-                """)
-            elif self.board_type == 'full_process':
-                cursor.execute("""
-                    SELECT * FROM full_process_sections 
-                    WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
-                    ORDER BY section_order
-                """)
+            if self.board_type in ('follow_sop', 'full_process'):
+                table = f"{self.board_type}_sections"
+                where = "is_active = 1"
+                if _col_exists(table, 'is_deleted'):
+                    where += " AND (is_deleted = 0 OR is_deleted IS NULL)"
+                cursor.execute(f"SELECT * FROM {table} WHERE {where} ORDER BY section_order")
             else:
                 # safety_instruction 등은 기존 section_config 테이블 사용
-                cursor.execute("""
-                    SELECT * FROM section_config 
-                    WHERE board_type = ? AND is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
-                    ORDER BY section_order
-                """, (self.board_type,))
-            
+                where = "board_type = ? AND is_active = 1"
+                # section_config에는 is_deleted가 있을 수 있으므로 동적 확인
+                add_deleted = _col_exists('section_config', 'is_deleted')
+                if add_deleted:
+                    where += " AND (is_deleted = 0 OR is_deleted IS NULL)"
+                sql = f"SELECT * FROM section_config WHERE {where} ORDER BY section_order"
+                if add_deleted:
+                    cursor.execute(sql, (self.board_type,))
+                else:
+                    cursor.execute(sql, (self.board_type,))
+
             sections = [dict(row) for row in cursor.fetchall()]
             return sections
-            
+
         except Exception as e:
             logging.error(f"섹션 조회 오류: {e}")
-            # 오류 시 기본 섹션 반환 (하드코딩 폴백)
             return self._get_default_sections()
         finally:
             conn.close()
@@ -73,11 +85,24 @@ class SectionConfigService:
             table_name = f"{self.board_type}_column_config"
             
             for section in sections:
-                cursor.execute(f"""
-                    SELECT * FROM {table_name}
-                    WHERE tab = ? AND is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
-                    ORDER BY column_order
-                """, (section['section_key'],))
+                where = "tab = ? AND is_active = 1"
+                # column_config에 is_deleted 있는지 확인
+                def _has_col(col: str) -> bool:
+                    try:
+                        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                            cursor.execute(
+                                "SELECT 1 FROM information_schema.columns WHERE table_name = %s AND column_name = %s",
+                                (table_name.lower(), col.lower())
+                            )
+                            return cursor.fetchone() is not None
+                        else:
+                            cursor.execute(f"PRAGMA table_info({table_name})")
+                            return any(r[1].lower() == col.lower() for r in cursor.fetchall())
+                    except Exception:
+                        return False
+                if _has_col('is_deleted'):
+                    where += " AND (is_deleted = 0 OR is_deleted IS NULL)"
+                cursor.execute(f"SELECT * FROM {table_name} WHERE {where} ORDER BY column_order", (section['section_key'],))
                 
                 section['columns'] = [dict(row) for row in cursor.fetchall()]
             

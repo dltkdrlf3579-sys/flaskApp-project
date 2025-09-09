@@ -1000,7 +1000,13 @@ let editingId = null;
                     else if (siblings.some(c => c.column_key === baseKey + '_code')) siblingType = 'department';
                     else if (siblings.some(c => c.column_key === baseKey + '_dept')) siblingType = 'person';
                     else if (siblings.some(c => c.column_key === baseKey + '_company')) siblingType = 'contractor';
-                    const tableTypeGuess = existingColumn._tableType || keyHint || siblingType || (looksTable ? (existingColumn._tableType || null) : null);
+                    const looksLikeTable = (
+                        (existingColumn.column_type && (existingColumn.column_type.startsWith('popup_') || existingColumn.column_type.startsWith('linked_')))
+                        || existingColumn.input_type === 'table'
+                        || !!existingColumn._tableType
+                        || !!existingColumn.table_type
+                    );
+                    const tableTypeGuess = existingColumn._tableType || keyHint || siblingType || (looksLikeTable ? (existingColumn._tableType || null) : null);
                     let newType = existingColumn._tableGroup ? existingColumn.column_type : columnType;
                     if (!isLinkedField && (!newType || newType === 'text') && tableTypeGuess) {
                         const popupMap = { person:'popup_person', department:'popup_department', company:'popup_company', building:'popup_building', contractor:'popup_contractor' };
@@ -1234,7 +1240,7 @@ let editingId = null;
                             dropdown_options: column.dropdown_options,
                             column_order: column.column_order,
                             // 테이블 그룹인 경우 input_type 설정
-                            input_type: (column.column_type === 'table' || column._tableType) ? 'table' : null,
+                            input_type: (column.column_type === 'table') ? 'table' : null,
                             // 테이블 정보도 저장 (메타데이터로)
                             table_group: column._tableGroup || null,
                             table_type: column._tableType || null,
@@ -1262,7 +1268,7 @@ let editingId = null;
                             dropdown_options: column.dropdown_options,
                             column_order: column.column_order,
                             // 테이블 그룹인 경우 input_type 설정
-                            input_type: (column.column_type === 'table' || column._tableType) ? 'table' : null,
+                            input_type: (column.column_type === 'table') ? 'table' : null,
                             // 테이블 정보도 저장 (메타데이터로)
                             table_group: column._tableGroup || null,
                             table_type: column._tableType || null,
@@ -1319,7 +1325,8 @@ let editingId = null;
         // 드롭다운 옵션 미리보기 로드
         async function loadOptionPreview(columnKey) {
             try {
-                const response = await fetch(`/api/dropdown-codes/${columnKey}`);
+            const boardType = 'accident';
+            const response = await fetch(`/api/${boardType}/dropdown-codes?column_key=${encodeURIComponent(columnKey)}`);
                 const data = await response.json();
                 
                 if (data.success && data.codes && data.codes.length > 0) {

@@ -257,6 +257,20 @@ class CodeService:
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
+        # Ensure unique index for ON CONFLICT target in PostgreSQL
+        try:
+            if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                cursor.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_doc_v2_uniq
+                    ON dropdown_option_codes_v2 (board_type, column_key, option_code)
+                    """
+                )
+        except Exception as e:
+            # If creation fails, continue; UPSERT may still work if constraint already exists
+            import logging as _log
+            _log.debug(f"Ensure unique index skipped/failed: {e}")
+
         # 기존 코드 비활성화
         cursor.execute("""
             UPDATE dropdown_option_codes_v2

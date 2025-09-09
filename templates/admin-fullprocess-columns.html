@@ -428,12 +428,13 @@
                         
                         <div class="mb-3">
                             <label class="form-label">입력 타입 <span class="text-danger">*</span></label>
-                            <select class="form-select" id="columnType" onchange="toggleOptionsField(); toggleTableField(); toggleSpanField(); toggleListField(); checkTypeChange();">
+                            <select class="form-select" id="columnType" onchange="toggleOptionsField(); toggleTableField(); toggleSpanField(); toggleListField(); toggleNumberField(); checkTypeChange();">
                                 <option value="" disabled selected>타입을 선택하세요</option>
                                 <option value="text">텍스트</option>
                                 <option value="dropdown">드롭다운</option>
                                 <option value="date">날짜</option>
                                 <option value="time">시간</option>
+                                <option value="number">숫자</option>
                                 <option value="table">테이블</option>
                                 <option value="list">리스트</option>
                             </select>
@@ -442,8 +443,8 @@
                             </div>
                         </div>
                         
-                        <!-- 텍스트 타입일 때 span 설정 -->
-                        <div class="mb-3" id="spanField" style="display: none;">
+        <!-- 텍스트 타입일 때 span 설정 -->
+        <div class="mb-3" id="spanField" style="display: none;">
                             <label class="form-label">차지할 칸 수</label>
                             <div class="btn-group w-100" role="group">
                                 <input type="radio" class="btn-check" name="columnSpan" id="span1" value="1" checked>
@@ -535,11 +536,12 @@
                         <div class="mb-3" id="listConfigField" style="display: none;">
                             <label class="form-label">리스트 항목 설정</label>
                             <div class="alert alert-info" style="font-size: 13px;">
-                                <i class="bi bi-info-circle"></i> 리스트에 포함될 항목을 설정합니다. (현재는 협력사 근로자만 지원)
+                                <i class="bi bi-info-circle"></i> 리스트에 포함될 항목을 설정합니다. (협력사 근로자/업체 지원)
                             </div>
                             <div class="d-flex gap-2 align-items-center">
                                 <select class="form-select" id="listItemType">
                                     <option value="partner_worker">협력사 근로자</option>
+                                    <option value="company">업체</option>
                                 </select>
                             </div>
                             <div class="mt-2">
@@ -566,9 +568,25 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">취소</button>
-                    <button type="button" class="btn btn-primary" onclick="saveColumnToQueue()">입력 완료</button>
+                    <button type="button" id="saveColumnBtn" class="btn btn-primary" onclick="try{saveColumnToQueue()}catch(e){alert('저장 함수 에러: ' + (e && e.message ? e.message : e));}">입력 완료</button>
                 </div>
             </div>
+        </div>
+
+        <!-- 숫자 설정 영역 (정수/실수) -->
+        <div class="mb-3" id="numberConfigField" style="display: none;">
+            <label class="form-label">숫자 형식</label>
+            <div class="d-flex gap-3 align-items-center">
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="numberType" id="numberTypeInteger" value="integer" checked>
+                    <label class="form-check-label" for="numberTypeInteger">정수</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="numberType" id="numberTypeFloat" value="float">
+                    <label class="form-check-label" for="numberTypeFloat">실수</label>
+                </div>
+            </div>
+            <small class="text-muted">정수는 소수점을 허용하지 않습니다. 실수는 소수점 입력이 가능합니다.</small>
         </div>
     </div>
 </div>
@@ -623,6 +641,15 @@ if (typeof Sortable !== 'undefined') {
 } else {
     console.error('❌ Sortable.js failed to load');
 }
+
+// 전역 스크립트 오류 감지 (디버그)
+window.addEventListener('error', function(ev){
+    try {
+        alert('스크립트 오류: ' + (ev && ev.message ? ev.message : ev));
+    } catch(e) {}
+});
+
+// no-op (inline onclick already wraps with try/catch)
 
 let columns = [];
 let pendingColumns = []; // 모든 변경사항을 담는 단순 배열
@@ -1170,6 +1197,7 @@ let editingId = null;
                 'dropdown': '드롭다운',
                 'date': '날짜',
                 'time': '시간',
+                'number': '숫자',
                 'table': '테이블',
                 'table_select': '테이블 선택',
                 'popup_person': '담당자',
@@ -1216,6 +1244,8 @@ let editingId = null;
             toggleOptionsField();
             toggleTableField();
             toggleSpanField();
+            toggleListField();
+            toggleNumberField();
             
             // 기존 모달 인스턴스가 있으면 재사용, 없으면 새로 생성
             const modalElement = document.getElementById('columnModal');
@@ -1254,8 +1284,13 @@ let editingId = null;
                     looksTable = true;
                 }
             }
-            // 테이블 타입 관련 처리
-            if (column._tableGroup || looksTable) {
+            // 타입 우선순위: 명시 dropdown은 테이블로 강제하지 않음
+            if (column.column_type === 'dropdown') {
+                typeSelectEl.value = 'dropdown';
+                typeSelectEl.disabled = false;
+                document.getElementById('tableConfigField').style.display = 'none';
+                document.getElementById('tableColumnsPreview').style.display = 'none';
+            } else if (column._tableGroup || looksTable) {
                 // 테이블 그룹으로 판단되면 강제로 'table'로 고정
                 typeSelectEl.value = 'table';
                 // 테이블 그룹은 타입 변경 불가
@@ -1390,6 +1425,21 @@ let editingId = null;
                 document.getElementById('optionPreview').style.display = 'none';
             }
             
+            // 리스트/숫자 서브타입 복원
+            if (column.column_type === 'list') {
+                const listSel = document.getElementById('listItemType');
+                if (listSel) listSel.value = (column.input_type === 'list_company') ? 'company' : 'partner_worker';
+            }
+            if (column.column_type === 'number') {
+                const isInt = (column.input_type === 'number_integer');
+                const intRadio = document.getElementById('numberTypeInteger');
+                const floatRadio = document.getElementById('numberTypeFloat');
+                if (intRadio && floatRadio) {
+                    intRadio.checked = !!isInt;
+                    floatRadio.checked = !isInt;
+                }
+            }
+
             toggleOptionsField();
             toggleSpanField();
             
@@ -1397,6 +1447,8 @@ let editingId = null;
             if (column.column_type !== 'linked_text' && column.column_type !== 'linked_dept') {
                 toggleTableField();
             }
+            toggleListField();
+            toggleNumberField();
             
             const modalElement = document.getElementById('columnModal');
             let modalInstance = bootstrap.Modal.getInstance(modalElement);
@@ -1449,6 +1501,12 @@ let editingId = null;
             const type = document.getElementById('columnType').value;
             document.getElementById('listConfigField').style.display = 
                 type === 'list' ? 'block' : 'none';
+        }
+
+        function toggleNumberField() {
+            const type = document.getElementById('columnType').value;
+            document.getElementById('numberConfigField').style.display = 
+                type === 'number' ? 'block' : 'none';
         }
         
         function updateMappingFields() {
@@ -1691,12 +1749,33 @@ let editingId = null;
                     else if (siblings.some(c => c.column_key === baseKey + '_code')) siblingType = 'department';
                     else if (siblings.some(c => c.column_key === baseKey + '_dept')) siblingType = 'person';
                     else if (siblings.some(c => c.column_key === baseKey + '_company')) siblingType = 'contractor';
-                    const tableTypeGuess = existingColumn._tableType || keyHint || siblingType || (looksTable ? (existingColumn._tableType || null) : null);
+                    // determine if this column looks like a table group in this context
+                    const looksLikeTable = (
+                        (existingColumn.column_type && (existingColumn.column_type.startsWith('popup_') || existingColumn.column_type.startsWith('linked_')))
+                        || existingColumn.input_type === 'table'
+                        || !!existingColumn._tableType
+                        || !!existingColumn.table_type
+                    );
+                    const tableTypeGuess = existingColumn._tableType || keyHint || siblingType || (looksLikeTable ? (existingColumn._tableType || null) : null);
                     let newType = existingColumn._tableGroup ? existingColumn.column_type : columnType;
                     if (!isLinkedField && (!newType || newType === 'text') && tableTypeGuess) {
                         const popupMap = { person:'popup_person', department:'popup_department', company:'popup_company', building:'popup_building', contractor:'popup_contractor' };
                         newType = popupMap[tableTypeGuess] || newType || 'text';
                     }
+                    // 입력 서브타입 계산 (table/list/number)
+                    let resolvedInputType = null;
+                    if (newType === 'table') {
+                        resolvedInputType = 'table';
+                    } else if (newType === 'list') {
+                        const listSel = document.getElementById('listItemType');
+                        const lit = listSel ? listSel.value : (existingColumn.list_item_type || 'partner_worker');
+                        resolvedInputType = (lit === 'company') ? 'list_company' : 'list_partner_worker';
+                    } else if (newType === 'number') {
+                        const nsel = document.querySelector('input[name="numberType"]:checked');
+                        const nt = nsel ? nsel.value : 'float';
+                        resolvedInputType = (nt === 'integer') ? 'number_integer' : 'number_float';
+                    }
+
                     pendingColumns[index] = {
                         ...existingColumn,
                         column_name: columnName,
@@ -1706,43 +1785,46 @@ let editingId = null;
                         tab: selectedSection, // 섹션 정보 추가
                         is_active: isActive,
                         dropdown_options: dropdownOptions,
+                        input_type: resolvedInputType,
                         _modified: !existingColumn._isNew, // 새 컬럼이 아니면 수정됨 표시
                         // 테이블 관련 정보 유지/보강
                         _tableGroup: existingColumn._tableGroup || baseKey,
                         _tableType: existingColumn._tableType || tableTypeGuess || null,
                         _tableName: existingColumn._tableName
                     };
+                    // 변경 즉시 UI에 반영 (최종 저장은 별도 버튼)
+                    try { renderColumns(); } catch(e) {}
+                    setTimeout(() => {
+                        alert('변경사항이 저장 대기중입니다.\n"전체 변경사항 저장" 버튼을 눌러 최종 반영하세요.');
+                    }, 0);
                 }
             } else {
                 // 새 컬럼 추가
                 if (columnType === 'list') {
                     // 리스트 타입 처리
                     const listItemType = document.getElementById('listItemType').value;
+                    const newId = Date.now();
+                    const baseOrder = pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete).length;
                     
-                    if (listItemType === 'partner_worker') {
-                        // 협력사 근로자 리스트를 위한 컬럼 생성
-                        const newId = Date.now();
-                        const baseOrder = pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete).length;
-                        
-                        const newColumn = {
-                            id: newId,
-                            column_name: columnName,
-                            column_key: columnKey,
-                            column_type: 'list',
-                            list_item_type: 'partner_worker',
-                            tab: selectedSection,
-                            is_active: isActive,
-                            column_order: baseOrder,
-                            _isNew: true,
-                            _listConfig: listItemType
-                        };
-                        
-                        pendingColumns.push(newColumn);
-                        console.log(`리스트 컬럼 생성:`, newColumn);
-                        
-                        alert(`✅ 리스트 컬럼이 생성되었습니다:\n\n${columnName}\n\n"전체 변경사항 저장" 버튼을 눌러야 최종 반영됩니다.`);
-                    }
+                    const newColumn = {
+                        id: newId,
+                        column_name: columnName,
+                        column_key: columnKey,
+                        column_type: 'list',
+                        list_item_type: listItemType,
+                        input_type: (listItemType === 'company') ? 'list_company' : 'list_partner_worker',
+                        tab: selectedSection,
+                        is_active: isActive,
+                        column_order: baseOrder,
+                        _isNew: true,
+                        _listConfig: listItemType
+                    };
                     
+                    pendingColumns.push(newColumn);
+                    console.log(`리스트 컬럼 생성:`, newColumn);
+                    
+                    alert(`✅ 리스트 컬럼이 생성되었습니다:\n\n${columnName}\n\n"전체 변경사항 저장" 버튼을 눌러야 최종 반영됩니다.`);
+                
                 } else if (columnType === 'table') {
                     // 테이블 타입: 선택된 테이블 설정 확인
                     const selectedTable = document.getElementById('selectedTableConfig').value;
@@ -1811,6 +1893,12 @@ let editingId = null;
                         column_order: maxOrderInSection + 1, // 섹션 내 순서로 설정
                         _isNew: true
                     };
+                    // 숫자 서브타입 저장
+                    if (columnType === 'number') {
+                        const nsel = document.querySelector('input[name="numberType"]:checked');
+                        const nt = nsel ? nsel.value : 'float';
+                        newColumn.input_type = (nt === 'integer') ? 'number_integer' : 'number_float';
+                    }
                     pendingColumns.push(newColumn);
                     
                     alert('변경사항이 저장 대기중입니다.\n"전체 변경사항 저장" 버튼을 눌러야 최종 반영됩니다.');
@@ -2027,8 +2115,13 @@ let editingId = null;
                             dropdown_options: column.dropdown_options,
                             column_order: column.column_order,
                             tab: column.tab || 'additional',  // 탭 정보 추가 (기본값: additional)
-                            // 테이블 그룹인 경우 input_type 설정
-                            input_type: (column.column_type === 'table' || column._tableType) ? 'table' : null,
+                            // 입력 서브타입 설정 (table/list/number)
+                            input_type: (function(){
+                                if (column.column_type === 'table') return 'table';
+                                if (column.column_type === 'list') return (column.input_type || ((column.list_item_type === 'company') ? 'list_company' : 'list_partner_worker'));
+                                if (column.column_type === 'number') return (column.input_type || 'number_float');
+                                return null;
+                            })(),
                             // 테이블 정보도 저장 (메타데이터로)
                             table_group: column._tableGroup || null,
                             table_type: column._tableType || null,
@@ -2057,8 +2150,13 @@ let editingId = null;
                             dropdown_options: column.dropdown_options,
                             column_order: column.column_order,
                             tab: column.tab || 'additional',  // 탭 정보 추가 (기본값: additional)
-                            // 테이블 그룹인 경우 input_type 설정
-                            input_type: (column.column_type === 'table' || column._tableType) ? 'table' : null,
+                            // 입력 서브타입 설정 (table/list/number)
+                            input_type: (function(){
+                                if (column.column_type === 'table') return 'table';
+                                if (column.column_type === 'list') return (column.input_type || ((column.list_item_type === 'company') ? 'list_company' : 'list_partner_worker'));
+                                if (column.column_type === 'number') return (column.input_type || 'number_float');
+                                return null;
+                            })(),
                             // 테이블 정보도 저장 (메타데이터로)
                             table_group: column._tableGroup || null,
                             table_type: column._tableType || null,
@@ -2115,7 +2213,8 @@ let editingId = null;
         // 드롭다운 옵션 미리보기 로드
         async function loadOptionPreview(columnKey) {
             try {
-                const response = await fetch(`/api/dropdown-codes/${columnKey}`);
+            const boardType = 'full_process';
+            const response = await fetch(`/api/${boardType}/dropdown-codes?column_key=${encodeURIComponent(columnKey)}`);
                 const data = await response.json();
                 
                 if (data.success && data.codes && data.codes.length > 0) {

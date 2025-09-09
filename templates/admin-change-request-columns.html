@@ -311,7 +311,7 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">취소</button>
-                    <button type="button" class="btn btn-primary" onclick="saveColumnToQueue()">입력 완료</button>
+                    <button type="button" id="saveColumnBtn" class="btn btn-primary" onclick="try{saveColumnToQueue()}catch(e){alert('저장 함수 에러: ' + (e && e.message ? e.message : e));}">입력 완료</button>
                 </div>
             </div>
         </div>
@@ -946,6 +946,10 @@ let editingId = null;
                         _tableType: existingColumn._tableType,
                         _tableName: existingColumn._tableName
                     };
+                    try { renderColumns(); } catch(e) {}
+                    setTimeout(() => {
+                        alert('변경사항이 저장 대기중입니다.\n"전체 변경사항 저장" 버튼을 눌러 최종 반영하세요.');
+                    }, 0);
                 }
             } else {
                 // 새 컬럼 추가
@@ -1242,7 +1246,8 @@ let editingId = null;
         // 드롭다운 옵션 미리보기 로드
         async function loadOptionPreview(columnKey) {
             try {
-                const response = await fetch(`/api/dropdown-codes/${columnKey}`);
+            const boardType = 'change_request';
+            const response = await fetch(`/api/${boardType}/dropdown-codes?column_key=${encodeURIComponent(columnKey)}`);
                 const data = await response.json();
                 
                 if (data.success && data.codes && data.codes.length > 0) {

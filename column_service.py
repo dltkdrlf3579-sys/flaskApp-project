@@ -9,6 +9,19 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from db_connection import get_db_connection
 
+# --- Common helpers ---------------------------------------------------------
+def _to_bool(v) -> bool:
+    """Lenient truthy parser for flags coming as 1/0, '1'/'0', 'true'/'false', etc."""
+    try:
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return int(v) != 0
+        s = str(v).strip().lower()
+        return s in ('1', 'true', 't', 'y', 'yes')
+    except Exception:
+        return False
+
 class ColumnConfigService:
     """동적 컬럼 설정 관리 서비스"""
     
@@ -278,15 +291,34 @@ class ColumnConfigService:
             # 동적 INSERT 구성
             fields = ['column_key', 'column_name', 'column_type', 'column_order', 'is_active',
                       'is_required', 'dropdown_options', 'column_span', 'tab']
-            # Postgres boolean 호환: 드라이버에 따라 0/1로 전송될 수 있으므로 명시적으로 처리
+            # boolean 필드 처리: 대상 컬럼 타입에 따라 안전하게 값 결정
             _to_bool = lambda v: (v in (1, '1', True, 'true', 't', 'T'))
-            if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                # 문자열 'true'/'false'로 전달 (BOOLEAN으로 안전 캐스팅됨)
-                is_active_val = 'true' if _to_bool(column_data.get('is_active', 1)) else 'false'
-                is_required_val = 'true' if _to_bool(column_data.get('is_required', 0)) else 'false'
-            else:
-                is_active_val = True if _to_bool(column_data.get('is_active', 1)) else False
-                is_required_val = True if _to_bool(column_data.get('is_required', 0)) else False
+
+            def _is_boolean_column(cn: str) -> bool:
+                try:
+                    if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                        cursor.execute(
+                            """
+                            SELECT data_type FROM information_schema.columns
+                            WHERE table_name = %s AND column_name = %s
+                            """,
+                            (self.table_name.lower(), cn.lower())
+                        )
+                        row = cursor.fetchone()
+                        return (row and (row[0] == 'boolean'))
+                except Exception:
+                    return False
+                return False
+
+            def _bool_param(cn: str, v):
+                b = _to_bool(v)
+                if _is_boolean_column(cn):
+                    return True if b else False
+                # 정수 컬럼 호환
+                return 1 if b else 0
+
+            is_active_val = _bool_param('is_active', column_data.get('is_active', 1))
+            is_required_val = _bool_param('is_required', column_data.get('is_required', 0))
             values = [
                 column_key,
                 column_data['column_name'],
@@ -406,11 +438,25 @@ class ColumnConfigService:
                 if field in column_data:
                     update_fields.append(f"{field} = ?")
                     if field in ('is_active','is_required'):
-                        _to_bool = lambda v: (v in (1, '1', True, 'true', 't', 'T'))
-                        if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                            update_values.append('true' if _to_bool(column_data[field]) else 'false')
-                        else:
-                            update_values.append(True if _to_bool(column_data[field]) else False)
+                        # 필드 타입 확인 후 안전한 값 전달
+                        try:
+                            if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                                cursor.execute(
+                                    """
+                                    SELECT data_type FROM information_schema.columns
+                                    WHERE table_name = %s AND column_name = %s
+                                    """,
+                                    (self.table_name.lower(), field.lower())
+                                )
+                                row = cursor.fetchone()
+                                if row and row[0] == 'boolean':
+                                    update_values.append(True if _to_bool(column_data[field]) else False)
+                                else:
+                                    update_values.append(1 if _to_bool(column_data[field]) else 0)
+                            else:
+                                update_values.append(1 if _to_bool(column_data[field]) else 0)
+                        except Exception:
+                            update_values.append(1 if _to_bool(column_data[field]) else 0)
                     else:
                         update_values.append(column_data[field])
             

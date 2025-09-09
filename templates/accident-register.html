@@ -125,13 +125,16 @@
                                            
                                 {% elif col.column_type == 'number' %}
                                     <!-- 숫자 필드 -->
+                                    {% set _nt = 'integer' if col.input_type == 'number_integer' else 'float' %}
                                     <input type="number" 
                                            id="{{ col.column_key }}" 
                                            class="{{ section.section_key }}-input" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
+                                           data-number-type="{{ _nt }}"
+                                           step="{% if _nt == 'integer' %}1{% else %}any{% endif %}"
                                            oninput="validateNumberInput(this)"
-                                           onkeypress="return isNumberKey(event)"
+                                           onkeypress="return isNumberKey(event, this)"
                                            placeholder="숫자만 입력하세요">
                                            
                                 {% elif col.column_type in ['linked', 'linked_text', 'linked_dept'] %}
@@ -606,23 +609,25 @@ function registerAccident() {
 }
 
 // 숫자 입력 유효성 검사 함수들
-function isNumberKey(evt) {
+function isNumberKey(evt, inputEl) {
     var charCode = (evt.which) ? evt.which : evt.keyCode;
-    // 숫자(0-9), 백스페이스, 삭제, 탭, 화살표 키만 허용
-    if (charCode > 31 && (charCode < 48 || charCode > 57) && charCode !== 46) {
+    var t = (inputEl && inputEl.getAttribute('data-number-type')) || 'float';
+    if (charCode > 31 && (charCode < 48 || charCode > 57)) {
+        if (t === 'float' && charCode === 46) return true; // '.' 허용 (실수)
         return false;
     }
     return true;
 }
 
 function validateNumberInput(input) {
+    const t = input.getAttribute('data-number-type') || 'float';
     const value = input.value;
-    const numericValue = value.replace(/[^0-9.]/g, '');
+    const numericValue = t === 'integer' ? value.replace(/[^0-9]/g, '') : value.replace(/[^0-9.]/g, '');
     
     if (value !== numericValue) {
         input.value = numericValue;
         // 경고 메시지 표시
-        showValidationMessage(input, '숫자만 입력할 수 있습니다.');
+        showValidationMessage(input, t === 'integer' ? '정수만 입력할 수 있습니다.' : '숫자만 입력할 수 있습니다.');
     }
 }
 

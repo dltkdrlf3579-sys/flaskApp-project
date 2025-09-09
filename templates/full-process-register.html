@@ -122,11 +122,16 @@
                                            
                                 {% elif col.column_type == 'number' %}
                                     <!-- 숫자 필드 -->
+                                    {% set _nt = 'integer' if col.input_type == 'number_integer' else 'float' %}
                                     <input type="number" 
                                            id="{{ col.column_key }}" 
                                            class="{{ section.section_key|replace('_', '-') }}-input" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
+                                           data-number-type="{{ _nt }}"
+                                           step="{% if _nt == 'integer' %}1{% else %}any{% endif %}"
+                                           oninput="validateNumberInput(this)"
+                                           onkeypress="return isNumberKey(event, this)"
                                            placeholder="{{ col.column_name }} 입력">
                                            
                                 {% elif col.column_type == 'linked' or col.column_type == 'linked_text' %}

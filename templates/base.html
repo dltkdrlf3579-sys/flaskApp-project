@@ -66,16 +66,23 @@
           {% endfor %}
         </ul>
         <!-- 관리자 메뉴 (우측 상단) -->
-        <div class="admin-tools">
-          <div class="dropdown">
-            <button class="btn btn-sm btn-admin-menu dropdown-toggle" type="button" id="adminMenu" data-bs-toggle="dropdown" aria-expanded="false">
-              <i class="bi bi-gear"></i> 관리자
-            </button>
-            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="adminMenu">
-              <li><a class="dropdown-item" href="/admin/permission-settings"><i class="bi bi-shield-lock"></i> 권한 설정</a></li>
-              <li><a class="dropdown-item" href="/admin/menu-settings"><i class="bi bi-sliders"></i> 메뉴 설정</a></li>
-              <li><a class="dropdown-item" href="/admin/data-management"><i class="bi bi-trash"></i> 데이터 관리</a></li>
-            </ul>
+        <div class="right-tools">
+          <div class="user-info" aria-label="사용자 정보">
+            {% if session.get('user_name') %}
+            <span class="user-name">{{ session.get('user_name') }}</span>
+            {% endif %}
+          </div>
+          <div class="admin-tools">
+            <div class="dropdown">
+              <button class="btn btn-sm btn-admin-menu dropdown-toggle" type="button" id="adminMenu" data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="bi bi-gear"></i> 관리자
+              </button>
+              <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="adminMenu">
+                <li><a class="dropdown-item" href="/admin/permission-settings"><i class="bi bi-shield-lock"></i> 권한 설정</a></li>
+                <li><a class="dropdown-item" href="/admin/menu-settings"><i class="bi bi-sliders"></i> 메뉴 설정</a></li>
+                <li><a class="dropdown-item" href="/admin/data-management"><i class="bi bi-trash"></i> 데이터 관리</a></li>
+              </ul>
+            </div>
           </div>
         </div>
       </div>
@@ -97,9 +104,10 @@
     }
     
     /* 관리자 도구 (우측 상단) */
-    .admin-tools {
-      margin-left: auto;
-    }
+    .right-tools { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    .admin-tools { margin-left: 0; }
+    .user-info { margin-right: 12px; color: #6b7280; font-size: 14px; }
+    .user-info .user-name { font-weight: 600; color: #374151; }
     .logo-img {
       height: 40px;
       width: auto;

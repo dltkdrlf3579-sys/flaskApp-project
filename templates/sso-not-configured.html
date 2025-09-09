@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SSO 미설정</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+  <div class="container" style="max-width: 720px; padding: 32px;">
+    <h3 class="mb-3">SSO가 아직 설정되지 않았습니다</h3>
+    <p class="text-muted">운영용 IdP 주소/리다이렉트 URL이 예시(example) 값으로 남아있어 인증을 진행할 수 없습니다.</p>
+
+    <div class="card mb-3">
+      <div class="card-body">
+        <h5 class="card-title">개발 환경에서 확인하고 싶다면</h5>
+        <ol class="mb-0">
+          <li>config.ini → [SSO] sso_enabled = false</li>
+          <li>config.ini → [SSO] dev_simulate_flow = true</li>
+          <li>페이지 재접속 → 샘플 로그인 화면(/sso/dev-login)에서 Username 입력</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">운영 환경에서 연동하려면</h5>
+        <ol class="mb-0">
+          <li>[SSO] sso_enabled = true, cert_enabled = true</li>
+          <li>idp_entity_id, idp_client_id, sp_redirect_url 등을 실제 값으로 설정</li>
+          <li>cert/idp.cer 인증서 파일 배치</li>
+          <li>IdP에 리다이렉트 URI(…/sso/callback) 등록</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="mt-3">
+      <a href="/" class="btn btn-primary">홈으로</a>
+    </div>
+  </div>
+</body>
+</html>
+
