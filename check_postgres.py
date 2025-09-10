@@ -83,8 +83,10 @@ def check_postgres():
         cache_tables = [
             'safety_instructions_cache',
             'accidents_cache',
-            'follow_sop_cache',
-            'full_process_cache',
+            'followsop_cache',  # 언더스코어 없음!
+            'fullprocess_cache',  # 언더스코어 없음!
+            'follow_sop_cache',  # 둘 다 체크
+            'full_process_cache',  # 둘 다 체크
             'partners_cache',
             'change_requests_cache',
             'partner_standards_cache'
