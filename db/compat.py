@@ -327,6 +327,26 @@ class CompatCursor:
         sql_original = sql
         sql = self._conn._convert_sql(sql)
         params = self._conn._convert_params(params)
+
+        # PostgreSQL에서 트랜잭션 제어문을 안전하게 무시/위임
+        # - SQLite 코드에서 사용하는 BEGIN IMMEDIATE/EXCLUSIVE를 변환한 START TRANSACTION이
+        #   이미 암묵 트랜잭션이 시작된 psycopg3 환경에서는 오류가 될 수 있음.
+        # - 이러한 제어문은 psycopg의 커밋/롤백 API로 위임하거나 no-op 처리하여 파이프라인/트랜잭션 오류를 회피.
+        if self._conn.is_postgres:
+            sql_upper = sql.strip().upper()
+            # BEGIN / START TRANSACTION -> no-op (psycopg가 암묵 트랜잭션을 관리)
+            if sql_upper.startswith('START TRANSACTION') or sql_upper == 'BEGIN':
+                self._rowcount = -1
+                return self
+            # COMMIT / ROLLBACK -> 연결 메서드로 위임
+            if sql_upper == 'COMMIT' or sql_upper.startswith('END TRANSACTION'):
+                self._conn.commit()
+                self._rowcount = -1
+                return self
+            if sql_upper == 'ROLLBACK':
+                self._conn.rollback()
+                self._rowcount = -1
+                return self
         
         # PRAGMA table_info 특별 처리 (v7 필수)
         if 'PRAGMA' in sql_original.upper() and 'TABLE_INFO' in sql_original.upper():

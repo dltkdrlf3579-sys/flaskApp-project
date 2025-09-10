@@ -48,7 +48,10 @@ UPSERT_REGISTRY = {
     },
     'safety_instructions_cache': {
         'conflict_cols': ['issue_number'],
-        'update_cols': ['detailed_content', 'custom_data', 'updated_at']
+        'update_cols': [
+            'issue_title', 'issue_date', 'instruction_type', 'department',
+            'target_audience', 'related_regulation', 'custom_data', 'updated_at'
+        ]
     },
     'followsop_cache': {
         'conflict_cols': ['work_req_no'],
