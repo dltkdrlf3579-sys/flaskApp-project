@@ -57,7 +57,17 @@ UPSERT_REGISTRY = {
         'conflict_cols': ['work_req_no'],
         'update_cols': ['custom_data']
     },
+    # alias used by some modules
+    'follow_sop_cache': {
+        'conflict_cols': ['work_req_no'],
+        'update_cols': ['custom_data']
+    },
     'fullprocess_cache': {
+        'conflict_cols': ['fullprocess_number'],
+        'update_cols': ['custom_data']
+    },
+    # alias used by some modules
+    'full_process_cache': {
         'conflict_cols': ['fullprocess_number'],
         'update_cols': ['custom_data']
     },

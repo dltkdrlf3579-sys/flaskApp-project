@@ -281,6 +281,34 @@ def ensure_attachments(cur):
         ensure_column(cur, t, 'upload_date', 'upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
 
 
+def ensure_main_tables(cur):
+    """Ensure core data tables used by the app exist (follow_sop, full_process)."""
+    # follow_sop
+    exec_safe(cur, """
+        CREATE TABLE IF NOT EXISTS follow_sop (
+            work_req_no TEXT PRIMARY KEY,
+            custom_data JSONB DEFAULT '{}'::JSONB,
+            is_deleted INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_by TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_by TEXT
+        )
+    """)
+    # full_process
+    exec_safe(cur, """
+        CREATE TABLE IF NOT EXISTS full_process (
+            fullprocess_number TEXT PRIMARY KEY,
+            custom_data JSONB DEFAULT '{}'::JSONB,
+            is_deleted INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_by TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_by TEXT
+        )
+    """)
+
+
 def ensure_caches(cur):
     """Ensure *_cache tables and required columns used by the app exist."""
     # safety_instructions_cache
@@ -321,7 +349,7 @@ def ensure_caches(cur):
     ]:
         ensure_column(cur, 'accidents_cache', col, ddl)
 
-    # followsop_cache
+    # followsop_cache (legacy) and follow_sop_cache (current)
     exec_safe(cur, "CREATE TABLE IF NOT EXISTS followsop_cache (id SERIAL PRIMARY KEY)")
     for col, ddl in [
         ('work_req_no', 'work_req_no TEXT UNIQUE'),
@@ -332,8 +360,18 @@ def ensure_caches(cur):
         ('is_deleted', 'is_deleted INTEGER DEFAULT 0'),
     ]:
         ensure_column(cur, 'followsop_cache', col, ddl)
+    exec_safe(cur, "CREATE TABLE IF NOT EXISTS follow_sop_cache (id SERIAL PRIMARY KEY)")
+    for col, ddl in [
+        ('work_req_no', 'work_req_no TEXT UNIQUE'),
+        ('custom_data', "custom_data JSONB DEFAULT '{}'::JSONB"),
+        ('synced_at', 'synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+        ('created_at', 'created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+        ('updated_at', 'updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+        ('is_deleted', 'is_deleted INTEGER DEFAULT 0'),
+    ]:
+        ensure_column(cur, 'follow_sop_cache', col, ddl)
 
-    # fullprocess_cache
+    # fullprocess_cache (legacy) and full_process_cache (current)
     exec_safe(cur, "CREATE TABLE IF NOT EXISTS fullprocess_cache (id SERIAL PRIMARY KEY)")
     for col, ddl in [
         ('fullprocess_number', 'fullprocess_number TEXT UNIQUE'),
@@ -344,6 +382,16 @@ def ensure_caches(cur):
         ('is_deleted', 'is_deleted INTEGER DEFAULT 0'),
     ]:
         ensure_column(cur, 'fullprocess_cache', col, ddl)
+    exec_safe(cur, "CREATE TABLE IF NOT EXISTS full_process_cache (id SERIAL PRIMARY KEY)")
+    for col, ddl in [
+        ('fullprocess_number', 'fullprocess_number TEXT UNIQUE'),
+        ('custom_data', "custom_data JSONB DEFAULT '{}'::JSONB"),
+        ('synced_at', 'synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+        ('created_at', 'created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+        ('updated_at', 'updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+        ('is_deleted', 'is_deleted INTEGER DEFAULT 0'),
+    ]:
+        ensure_column(cur, 'full_process_cache', col, ddl)
 
     # change_requests_cache (used in some views)
     exec_safe(cur, "CREATE TABLE IF NOT EXISTS change_requests_cache (id SERIAL PRIMARY KEY)")
@@ -392,6 +440,7 @@ def main():
         ensure_dropdown_codes(cur)
         ensure_attachments(cur)
         ensure_caches(cur)
+        ensure_main_tables(cur)
 
         conn.commit()
         print("OK: schema repair completed.")

@@ -1,0 +1,26 @@
+{
+  "board": "full_process",
+  "display_name": "Full Process",
+  "columns": [
+    {"key": "fullprocess_number", "name": "프로세스번호", "type": "text", "tab": "basic_info", "order": 1, "active": true},
+    {"key": "company_name", "name": "회사명", "type": "text", "tab": "basic_info", "order": 2, "active": true},
+    {"key": "business_number", "name": "사업자번호", "type": "text", "tab": "basic_info", "order": 3, "active": true},
+    {"key": "process_date", "name": "프로세스일자", "type": "date", "tab": "basic_info", "order": 4, "active": true},
+    {"key": "department", "name": "부서", "type": "text", "tab": "basic_info", "order": 5, "active": true},
+    {"key": "created_by", "name": "작성자", "type": "text", "tab": "basic_info", "order": 6, "active": true},
+    {"key": "created_at", "name": "등록일", "type": "datetime", "tab": "basic_info", "order": 7, "active": true},
+
+    {"key": "process_type", "name": "프로세스유형", "type": "dropdown", "tab": "process_info", "order": 8, "active": true},
+    {"key": "process_name", "name": "프로세스명", "type": "text", "tab": "process_info", "order": 9, "active": true},
+    {"key": "process_status", "name": "프로세스상태", "type": "dropdown", "tab": "process_info", "order": 10, "active": true},
+    {"key": "process_owner", "name": "프로세스담당자", "type": "text", "tab": "process_info", "order": 11, "active": true},
+    {"key": "process_steps", "name": "프로세스단계", "type": "list", "tab": "process_info", "order": 12, "active": false},
+    {"key": "process_duration", "name": "소요시간", "type": "text", "tab": "process_info", "order": 13, "active": true},
+    {"key": "process_output", "name": "산출물", "type": "textarea", "tab": "process_info", "order": 14, "active": false},
+
+    {"key": "attachments", "name": "첨부파일", "type": "file", "tab": "additional", "order": 15, "active": false},
+    {"key": "notes", "name": "비고", "type": "textarea", "tab": "additional", "order": 16, "active": false},
+    {"key": "detailed_content", "name": "상세내용", "type": "textarea", "tab": "additional", "order": 17, "active": false}
+  ]
+}
+

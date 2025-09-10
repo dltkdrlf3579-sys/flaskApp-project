@@ -1,0 +1,24 @@
+{
+  "board": "follow_sop",
+  "display_name": "Follow SOP",
+  "columns": [
+    {"key": "work_req_no", "name": "작업요청번호", "type": "text", "tab": "basic_info", "order": 1, "active": true},
+    {"key": "company_name", "name": "회사명", "type": "text", "tab": "basic_info", "order": 2, "active": true},
+    {"key": "business_number", "name": "사업자번호", "type": "text", "tab": "basic_info", "order": 3, "active": true},
+    {"key": "request_date", "name": "요청일", "type": "date", "tab": "basic_info", "order": 4, "active": true},
+    {"key": "department", "name": "부서", "type": "text", "tab": "basic_info", "order": 5, "active": true},
+    {"key": "created_by", "name": "작성자", "type": "text", "tab": "basic_info", "order": 6, "active": true},
+    {"key": "created_at", "name": "등록일", "type": "datetime", "tab": "basic_info", "order": 7, "active": true},
+
+    {"key": "work_type", "name": "작업유형", "type": "dropdown", "tab": "work_info", "order": 8, "active": true},
+    {"key": "work_location", "name": "작업장소", "type": "text", "tab": "work_info", "order": 9, "active": true},
+    {"key": "work_content", "name": "작업내용", "type": "textarea", "tab": "work_info", "order": 10, "active": false},
+    {"key": "work_status", "name": "작업상태", "type": "dropdown", "tab": "work_info", "order": 11, "active": true},
+    {"key": "worker_count", "name": "작업인원", "type": "number", "tab": "work_info", "order": 12, "active": true},
+    {"key": "work_duration", "name": "작업기간", "type": "text", "tab": "work_info", "order": 13, "active": false},
+    {"key": "safety_measures", "name": "안전조치", "type": "list", "tab": "work_info", "order": 14, "active": false},
+
+    {"key": "attachments", "name": "첨부파일", "type": "file", "tab": "additional", "order": 15, "active": false}
+  ]
+}
+

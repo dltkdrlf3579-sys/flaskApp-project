@@ -111,7 +111,7 @@ class ColumnSyncService:
             count += 1
             
         # 드롭다운 옵션 동기화 (있는 경우)
-        self._sync_dropdown_options(cursor, board_type, config)
+        self._sync_dropdown_options(conn, cursor, board_type, config)
         
         conn.commit()
         conn.close()
@@ -142,7 +142,7 @@ class ColumnSyncService:
             )
         """)
         
-    def _sync_dropdown_options(self, cursor, board_type: str, config: Dict):
+    def _sync_dropdown_options(self, conn, cursor, board_type: str, config: Dict):
         """
         드롭다운 옵션 동기화
         """
