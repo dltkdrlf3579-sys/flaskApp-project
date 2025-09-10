@@ -14,34 +14,24 @@ def get_config():
     if os.path.exists(config_path):
         config.read(config_path, encoding='utf-8')
         
-        # PostgreSQL 설정 읽기
-        host = config.get('postgresql', 'host', fallback='localhost')
-        port = config.get('postgresql', 'port', fallback='5432')
-        database = config.get('postgresql', 'database', fallback='portal_dev')
-        admin_user = config.get('postgresql', 'admin_user', fallback='postgres')
-        admin_password = config.get('postgresql', 'admin_password', fallback='admin123')
-        portal_user = config.get('postgresql', 'user', fallback='portal_user')
-        portal_password = config.get('postgresql', 'password', fallback='admin123')
+        # DATABASE 섹션에서 postgres_dsn 직접 읽기
+        postgres_dsn = config.get('DATABASE', 'postgres_dsn', fallback='postgresql://postgres:admin123@localhost:5432/portal_dev')
         
-        admin_dsn = f'postgresql://{admin_user}:{admin_password}@{host}:{port}/{database}'
-        portal_dsn = f'postgresql://{portal_user}:{portal_password}@{host}:{port}/{database}'
-        
-        return admin_dsn, portal_dsn
+        return postgres_dsn, postgres_dsn  # admin과 portal 동일하게 사용
     else:
         # 기본값 사용
         print('WARN - config.ini not found, using defaults')
-        admin_dsn = 'postgresql://postgres:admin123@localhost:5432/portal_dev'
-        portal_dsn = 'postgresql://portal_user:admin123@localhost:5432/portal_dev'
-        return admin_dsn, portal_dsn
+        postgres_dsn = 'postgresql://postgres:admin123@localhost:5432/portal_dev'
+        return postgres_dsn, postgres_dsn
 
 def setup_compatibility_functions():
     """SQLite 호환 함수들을 PostgreSQL에 설치"""
     
-    admin_dsn, _ = get_config()
-    print(f'INFO - Connecting with admin DSN: {admin_dsn.replace(":admin123@", ":***@")}')
+    postgres_dsn, _ = get_config()
+    print(f'INFO - Connecting with DSN: {postgres_dsn.replace(":admin123@", ":***@")}')
     
     # postgres 계정으로 연결
-    conn = psycopg.connect(admin_dsn)
+    conn = psycopg.connect(postgres_dsn)
     conn.autocommit = True
     cur = conn.cursor()
     
