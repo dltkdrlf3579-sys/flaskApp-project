@@ -131,6 +131,10 @@ def _upsert_postgresql(cursor, table: str, data: Dict[str, Any],
                       conflict_cols: List[str], update_cols: List[str]) -> int:
     """PostgreSQL용 ON CONFLICT UPSERT"""
     
+    # 디버깅: sync_date 관련 테이블의 데이터 로깅
+    if 'cache' in table and 'sync_date' in data:
+        logging.info(f"UPSERT {table} - sync_date value: {repr(data.get('sync_date'))}")
+    
     # timestamp 컬럼들을 INSERT에서 제거하고 DEFAULT 적용되도록 처리
     timestamp_columns = ['updated_at', 'last_master_sync', 'last_full_sync', 'sync_date', 'first_sync_at', 'created_at']
     
@@ -150,6 +154,7 @@ def _upsert_postgresql(cursor, table: str, data: Dict[str, Any],
         else:
             insert_columns.append(col)
             insert_placeholders.append('%s')
+            # 빈 문자열을 None으로 변환한 값을 사용
             insert_values.append(val)
     
     # UPDATE SET 구성
