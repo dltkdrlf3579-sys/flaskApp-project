@@ -872,7 +872,7 @@ class PartnerDataManager:
                     SELECT
                       c.work_req_no,
                       c.custom_data,
-                      COALESCE(NULLIF(json_extract(c.custom_data, '$.created_at'), '')::timestamp, c.created_at),
+                      COALESCE(NULLIF(json_extract(c.custom_data, '$.created_at'), '')::timestamp, c.sync_date),
                       0
                     FROM followsop_cache c
                     ON CONFLICT (work_req_no) 
@@ -888,7 +888,7 @@ class PartnerDataManager:
                     SELECT
                       c.work_req_no,
                       c.custom_data,
-                      COALESCE(json_extract(c.custom_data, '$.created_at')::timestamp, c.created_at),
+                      COALESCE(json_extract(c.custom_data, '$.created_at')::timestamp, c.sync_date),
                       0
                     FROM followsop_cache c
                 ''')
@@ -1010,7 +1010,7 @@ class PartnerDataManager:
                     SELECT
                       c.fullprocess_number,
                       c.custom_data,
-                      COALESCE(NULLIF(json_extract(c.custom_data, '$.created_at'), '')::timestamp, c.created_at),
+                      COALESCE(NULLIF(json_extract(c.custom_data, '$.created_at'), '')::timestamp, c.sync_date),
                       0
                     FROM fullprocess_cache c
                     ON CONFLICT (fullprocess_number) 
@@ -1026,7 +1026,7 @@ class PartnerDataManager:
                     SELECT
                       c.fullprocess_number,
                       c.custom_data,
-                      COALESCE(json_extract(c.custom_data, '$.created_at')::timestamp, c.created_at),
+                      COALESCE(json_extract(c.custom_data, '$.created_at')::timestamp, c.sync_date),
                       0
                     FROM fullprocess_cache c
                 ''')
