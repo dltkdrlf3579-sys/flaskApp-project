@@ -925,13 +925,13 @@ class PartnerDataManager:
                         WHERE f.work_req_no = c.work_req_no
                     ''')
             else:
-                # SQLite용 INSERT OR REPLACE
+                # SQLite용 INSERT OR REPLACE (avoid ::timestamp and json_extract dependency)
                 cursor.execute('''
                     INSERT OR REPLACE INTO follow_sop (work_req_no, custom_data, created_at, is_deleted)
                     SELECT
                       c.work_req_no,
                       c.custom_data,
-                      COALESCE(json_extract(c.custom_data, '$.created_at')::timestamp, c.sync_date),
+                      COALESCE(c.sync_date, CURRENT_TIMESTAMP),
                       0
                     FROM followsop_cache c
                 ''')
@@ -1104,13 +1104,13 @@ class PartnerDataManager:
                         WHERE f.fullprocess_number = c.fullprocess_number
                     ''')
             else:
-                # SQLite용 INSERT OR REPLACE
+                # SQLite용 INSERT OR REPLACE (avoid ::timestamp and json_extract dependency)
                 cursor.execute('''
                     INSERT OR REPLACE INTO full_process (fullprocess_number, custom_data, created_at, is_deleted)
                     SELECT
                       c.fullprocess_number,
                       c.custom_data,
-                      COALESCE(json_extract(c.custom_data, '$.created_at')::timestamp, c.sync_date),
+                      COALESCE(c.sync_date, CURRENT_TIMESTAMP),
                       0
                     FROM fullprocess_cache c
                 ''')
