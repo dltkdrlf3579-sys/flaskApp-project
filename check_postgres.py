@@ -66,11 +66,11 @@ def check_postgres():
                     except:
                         latest_str = 'N/A'
                     
-                    main_summary.append([table, '✅', count, latest_str])
+                    main_summary.append([table, 'OK', count, latest_str])
                 else:
-                    main_summary.append([table, '❌', '-', '-'])
+                    main_summary.append([table, 'MISSING', '-', '-'])
             except Exception as e:
-                main_summary.append([table, '⚠️', f'Error: {str(e)[:20]}', '-'])
+                main_summary.append([table, 'ERROR', f'Error: {str(e)[:20]}', '-'])
         
         # 메인 테이블 출력
         print(f"{'Table':<30} {'Status':<8} {'Count':<10} {'Latest Data':<20}")
@@ -83,10 +83,8 @@ def check_postgres():
         cache_tables = [
             'safety_instructions_cache',
             'accidents_cache',
-            'followsop_cache',  # 언더스코어 없음!
-            'fullprocess_cache',  # 언더스코어 없음!
-            'follow_sop_cache',  # 둘 다 체크
-            'full_process_cache',  # 둘 다 체크
+            'followsop_cache',  # 실제 사용하는 테이블 (언더스코어 없음)
+            'fullprocess_cache',  # 실제 사용하는 테이블 (언더스코어 없음)
             'partners_cache',
             'change_requests_cache',
             'partner_standards_cache'
@@ -114,11 +112,11 @@ def check_postgres():
                     except:
                         latest_str = 'N/A'
                     
-                    cache_summary.append([table, '✅', count, latest_str])
+                    cache_summary.append([table, 'OK', count, latest_str])
                 else:
-                    cache_summary.append([table, '❌', '-', '-'])
+                    cache_summary.append([table, 'MISSING', '-', '-'])
             except Exception as e:
-                cache_summary.append([table, '⚠️', f'Error', '-'])
+                cache_summary.append([table, 'ERROR', f'Error', '-'])
         
         print(f"{'Table':<35} {'Status':<8} {'Count':<10} {'Latest Data':<20}")
         print("-" * 70)
@@ -159,13 +157,13 @@ def check_postgres():
                         )
                     """, (table,))
                     has_scoring = cursor.fetchone()[0]
-                    scoring_status = '✅' if has_scoring else '❌'
+                    scoring_status = 'YES' if has_scoring else 'NO'
                     
-                    config_summary.append([table, '✅', count, scoring_status])
+                    config_summary.append([table, 'OK', count, scoring_status])
                 else:
-                    config_summary.append([table, '❌', '-', '-'])
+                    config_summary.append([table, 'MISSING', '-', '-'])
             except Exception as e:
-                config_summary.append([table, '⚠️', 'Error', '-'])
+                config_summary.append([table, 'ERROR', 'Error', '-'])
         
         print(f"{'Table':<40} {'Status':<8} {'Count':<10} {'Scoring':<10}")
         print("-" * 70)
@@ -193,7 +191,7 @@ def check_postgres():
                 )
             """, (func,))
             exists = cursor.fetchone()[0]
-            status = '✅' if exists else '❌'
+            status = 'YES' if exists else 'NO'
             print(f"{func}: {status}")
         
         # 6. 최근 등록된 데이터 샘플 (있으면)
@@ -228,11 +226,11 @@ def check_postgres():
         conn.close()
         
         print(f"{'='*70}")
-        print("✅ PostgreSQL 상태 확인 완료!")
+        print("[SUCCESS] PostgreSQL 상태 확인 완료!")
         print(f"{'='*70}\n")
         
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"[ERROR] Error: {e}")
         print("\nPostgreSQL 연결 실패. 다음을 확인하세요:")
         print("1. PostgreSQL 서버가 실행 중인지")
         print("2. config.ini의 postgres_dsn이 올바른지")

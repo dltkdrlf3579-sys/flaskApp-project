@@ -8,8 +8,24 @@ try:
     from psycopg.rows import dict_row
     from psycopg.types.json import Jsonb
     PSYCOPG_AVAILABLE = True
+    PSYCOPG_VERSION = 3
 except ImportError:
-    PSYCOPG_AVAILABLE = False
+    try:
+        import psycopg2
+        import psycopg2.extras
+        PSYCOPG_AVAILABLE = True
+        PSYCOPG_VERSION = 2
+        # psycopg2 호환성을 위한 alias
+        class dict_row:
+            @staticmethod
+            def __call__(cursor):
+                return psycopg2.extras.RealDictCursor
+        class Jsonb:
+            def __init__(self, obj):
+                self.obj = json.dumps(obj) if not isinstance(obj, str) else obj
+    except ImportError:
+        PSYCOPG_AVAILABLE = False
+        PSYCOPG_VERSION = None
 
 
 class SqliteRowCompat:
@@ -69,11 +85,19 @@ class CompatConnection:
                 raise ImportError("psycopg not available - cannot connect to PostgreSQL")
             
             # PostgreSQL 연결
-            self._conn = psycopg.connect(
-                kwargs.get('dsn'),
-                row_factory=dict_row,
-                client_encoding='UTF8'
-            )
+            if PSYCOPG_VERSION == 3:
+                self._conn = psycopg.connect(
+                    kwargs.get('dsn'),
+                    row_factory=dict_row,
+                    client_encoding='UTF8'
+                )
+            else:  # psycopg2
+                import psycopg2
+                import psycopg2.extras
+                self._conn = psycopg2.connect(
+                    kwargs.get('dsn'),
+                    cursor_factory=psycopg2.extras.RealDictCursor
+                )
             self.is_postgres = True
         else:
             # SQLite 연결
