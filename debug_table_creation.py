@@ -87,9 +87,9 @@ def debug_creation():
         SELECT table_name 
         FROM information_schema.tables 
         WHERE table_schema = %s 
-        AND table_name LIKE '%cache%'
+        AND table_name LIKE %s
         ORDER BY table_name
-    """, (schema,))
+    """, (schema, '%cache%'))
     tables = cursor.fetchall()
     for t in tables:
         print(f"  - {t[0]}")
