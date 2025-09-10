@@ -124,6 +124,30 @@ def ensure_section_config(cur):
     """)
     ensure_column(cur, 'section_config', 'is_deleted', 'is_deleted INTEGER DEFAULT 0')
     ensure_unique_index(cur, 'uniq_section_config_board_key', 'section_config', 'board_type, section_key')
+    # Seed defaults for boards that use section_config (safety_instruction, accident)
+    # safety_instruction
+    cur.execute("SELECT COUNT(*) FROM section_config WHERE board_type = %s", ('safety_instruction',))
+    if (cur.fetchone() or [0])[0] == 0:
+        exec_safe(cur, (
+            "INSERT INTO section_config (board_type, section_key, section_name, section_order, is_active, is_deleted) "
+            "VALUES (%s,%s,%s,%s,1,0),(%s,%s,%s,%s,1,0),(%s,%s,%s,%s,1,0)"
+        ), (
+            'safety_instruction','basic_info','기본정보',1,
+            'safety_instruction','violation_info','위반정보',2,
+            'safety_instruction','additional','추가기입정보',3,
+        ))
+    # accident
+    cur.execute("SELECT COUNT(*) FROM section_config WHERE board_type = %s", ('accident',))
+    if (cur.fetchone() or [0])[0] == 0:
+        exec_safe(cur, (
+            "INSERT INTO section_config (board_type, section_key, section_name, section_order, is_active, is_deleted) "
+            "VALUES (%s,%s,%s,%s,1,0),(%s,%s,%s,%s,1,0),(%s,%s,%s,%s,1,0),(%s,%s,%s,%s,1,0)"
+        ), (
+            'accident','basic_info','기본정보',1,
+            'accident','accident_info','사고정보',2,
+            'accident','location_info','장소정보',3,
+            'accident','additional','추가정보',4,
+        ))
 
 
 def ensure_column_config_tables(cur):
@@ -171,6 +195,35 @@ def ensure_column_config_tables(cur):
         ensure_column(cur, t, 'is_required', 'is_required INTEGER DEFAULT 0')
         ensure_column(cur, t, 'input_type', "input_type TEXT DEFAULT 'text'")
         ensure_column(cur, t, 'scoring_config', 'scoring_config TEXT')
+
+    # Seed accident_column_config minimal set if empty
+    cur.execute("SELECT COUNT(*) FROM accident_column_config")
+    if (cur.fetchone() or [0])[0] == 0:
+        rows = [
+            ('accident_number','사고번호',1),
+            ('accident_name','사고명',2),
+            ('accident_date','사고일자',3),
+            ('accident_time','사고시간',4),
+            ('workplace','사업장',5),
+            ('accident_grade','사고등급',6),
+            ('accident_type','사고유형',7),
+            ('injury_type','상해유형',8),
+            ('injury_form','상해형태',9),
+            ('major_category','대분류',10),
+            ('building','건물',11),
+            ('floor','층',12),
+            ('location_category','장소분류',13),
+            ('location_detail','상세위치',14),
+            ('responsible_company1','원청업체',15),
+            ('responsible_company2','하청업체',16),
+        ]
+        for key, name, order in rows:
+            exec_safe(
+                cur,
+                "INSERT INTO accident_column_config (column_key, column_name, column_order, is_active) VALUES (%s,%s,%s,1) "
+                "ON CONFLICT (column_key) DO NOTHING",
+                (key, name, order)
+            )
 
 
 def ensure_dropdown_codes(cur):
