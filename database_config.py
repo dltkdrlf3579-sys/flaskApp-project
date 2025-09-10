@@ -866,21 +866,64 @@ class PartnerDataManager:
             # GPT 지침: 캐시→본테이블 이관 (UPSERT) - 동기화된 데이터는 무조건 활성화
             # PostgreSQL vs SQLite 조건부 처리
             if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                # PostgreSQL용 ON CONFLICT
-                cursor.execute('''
-                    INSERT INTO follow_sop (work_req_no, custom_data, created_at, is_deleted)
-                    SELECT
-                      c.work_req_no,
-                      c.custom_data,
-                      COALESCE(NULLIF(json_extract(c.custom_data, '$.created_at'), '')::timestamp, c.sync_date),
-                      0
-                    FROM followsop_cache c
-                    ON CONFLICT (work_req_no) 
-                    DO UPDATE SET 
-                        custom_data = EXCLUDED.custom_data,
-                        is_deleted = 0,
-                        updated_at = CURRENT_TIMESTAMP
-                ''')
+                # PostgreSQL: Try fast path with ON CONFLICT if a UNIQUE constraint exists.
+                try:
+                    # Detect UNIQUE on follow_sop(work_req_no)
+                    cursor.execute(
+                        """
+                        SELECT 1
+                        FROM information_schema.table_constraints tc
+                        JOIN information_schema.constraint_column_usage ccu
+                          ON tc.constraint_name = ccu.constraint_name
+                        WHERE tc.table_schema='public'
+                          AND tc.table_name='follow_sop'
+                          AND tc.constraint_type='UNIQUE'
+                          AND ccu.column_name='work_req_no'
+                        LIMIT 1
+                        """
+                    )
+                    has_unique = cursor.fetchone() is not None
+                except Exception:
+                    has_unique = False
+
+                if has_unique:
+                    # Fast path: ON CONFLICT upsert
+                    cursor.execute('''
+                        INSERT INTO follow_sop (work_req_no, custom_data, created_at, is_deleted)
+                        SELECT
+                          c.work_req_no,
+                          c.custom_data,
+                          COALESCE(c.sync_date, CURRENT_TIMESTAMP),
+                          0
+                        FROM followsop_cache c
+                        ON CONFLICT (work_req_no) 
+                        DO UPDATE SET 
+                            custom_data = EXCLUDED.custom_data,
+                            is_deleted = 0,
+                            updated_at = CURRENT_TIMESTAMP
+                    ''')
+                else:
+                    # Fallback path without UNIQUE: insert missing rows, then update existing rows
+                    cursor.execute('''
+                        INSERT INTO follow_sop (work_req_no, custom_data, created_at, is_deleted)
+                        SELECT
+                          c.work_req_no,
+                          c.custom_data,
+                          COALESCE(c.sync_date, CURRENT_TIMESTAMP),
+                          0
+                        FROM followsop_cache c
+                        WHERE NOT EXISTS (
+                          SELECT 1 FROM follow_sop f WHERE f.work_req_no = c.work_req_no
+                        )
+                    ''')
+                    cursor.execute('''
+                        UPDATE follow_sop f
+                        SET custom_data = c.custom_data,
+                            is_deleted = 0,
+                            updated_at = CURRENT_TIMESTAMP
+                        FROM followsop_cache c
+                        WHERE f.work_req_no = c.work_req_no
+                    ''')
             else:
                 # SQLite용 INSERT OR REPLACE
                 cursor.execute('''
@@ -990,7 +1033,7 @@ class PartnerDataManager:
             
             # 배치 삽입 - PostgreSQL vs SQLite 조건부 처리
             if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                # PostgreSQL: bulk_upsert 사용
+                # PostgreSQL: bulk_upsert 사용 
                 from db.upsert import bulk_upsert
                 data_list = [{'fullprocess_number': row[0], 'custom_data': row[1]} for row in rows]
                 bulk_upsert(conn, 'fullprocess_cache', data_list)
@@ -1004,21 +1047,62 @@ class PartnerDataManager:
             # GPT 지침: 캐시→본테이블 이관 (UPSERT) - 동기화된 데이터는 무조건 활성화
             # PostgreSQL vs SQLite 조건부 처리
             if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                # PostgreSQL용 ON CONFLICT
-                cursor.execute('''
-                    INSERT INTO full_process (fullprocess_number, custom_data, created_at, is_deleted)
-                    SELECT
-                      c.fullprocess_number,
-                      c.custom_data,
-                      COALESCE(NULLIF(json_extract(c.custom_data, '$.created_at'), '')::timestamp, c.sync_date),
-                      0
-                    FROM fullprocess_cache c
-                    ON CONFLICT (fullprocess_number) 
-                    DO UPDATE SET 
-                        custom_data = EXCLUDED.custom_data,
-                        is_deleted = 0,
-                        updated_at = CURRENT_TIMESTAMP
-                ''')
+                # PostgreSQL: Try fast path with ON CONFLICT if a UNIQUE exists.
+                try:
+                    cursor.execute(
+                        """
+                        SELECT 1
+                        FROM information_schema.table_constraints tc
+                        JOIN information_schema.constraint_column_usage ccu
+                          ON tc.constraint_name = ccu.constraint_name
+                        WHERE tc.table_schema='public'
+                          AND tc.table_name='full_process'
+                          AND tc.constraint_type='UNIQUE'
+                          AND ccu.column_name='fullprocess_number'
+                        LIMIT 1
+                        """
+                    )
+                    has_unique = cursor.fetchone() is not None
+                except Exception:
+                    has_unique = False
+
+                if has_unique:
+                    cursor.execute('''
+                        INSERT INTO full_process (fullprocess_number, custom_data, created_at, is_deleted)
+                        SELECT
+                          c.fullprocess_number,
+                          c.custom_data,
+                          COALESCE(c.sync_date, CURRENT_TIMESTAMP),
+                          0
+                        FROM fullprocess_cache c
+                        ON CONFLICT (fullprocess_number) 
+                        DO UPDATE SET 
+                            custom_data = EXCLUDED.custom_data,
+                            is_deleted = 0,
+                            updated_at = CURRENT_TIMESTAMP
+                    ''')
+                else:
+                    # Fallback without UNIQUE
+                    cursor.execute('''
+                        INSERT INTO full_process (fullprocess_number, custom_data, created_at, is_deleted)
+                        SELECT
+                          c.fullprocess_number,
+                          c.custom_data,
+                          COALESCE(c.sync_date, CURRENT_TIMESTAMP),
+                          0
+                        FROM fullprocess_cache c
+                        WHERE NOT EXISTS (
+                          SELECT 1 FROM full_process f WHERE f.fullprocess_number = c.fullprocess_number
+                        )
+                    ''')
+                    cursor.execute('''
+                        UPDATE full_process f
+                        SET custom_data = c.custom_data,
+                            is_deleted = 0,
+                            updated_at = CURRENT_TIMESTAMP
+                        FROM fullprocess_cache c
+                        WHERE f.fullprocess_number = c.fullprocess_number
+                    ''')
             else:
                 # SQLite용 INSERT OR REPLACE
                 cursor.execute('''

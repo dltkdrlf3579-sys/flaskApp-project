@@ -181,6 +181,36 @@ def main():
     except Exception as e:
         print(f"WARNING: full_process unique fix failed: {e}")
 
+    # 6) followsop_cache: ensure UNIQUE(work_req_no)
+    try:
+        dup, rows = has_duplicates(cur, 'followsop_cache', 'work_req_no')
+        if dup:
+            print("ERROR: followsop_cache has duplicate work_req_no values. Cannot add UNIQUE constraint.")
+            for r in rows[:10]:
+                print("  duplicate:", r)
+        else:
+            cname = 'followsop_cache_work_req_no_key'
+            if not constraint_exists(cur, 'followsop_cache', cname):
+                print("- Adding UNIQUE constraint followsop_cache(work_req_no)")
+                cur.execute(f"ALTER TABLE followsop_cache ADD CONSTRAINT {cname} UNIQUE(work_req_no)")
+    except Exception as e:
+        print(f"WARNING: followsop_cache unique fix failed: {e}")
+
+    # 7) fullprocess_cache: ensure UNIQUE(fullprocess_number)
+    try:
+        dup, rows = has_duplicates(cur, 'fullprocess_cache', 'fullprocess_number')
+        if dup:
+            print("ERROR: fullprocess_cache has duplicate fullprocess_number values. Cannot add UNIQUE constraint.")
+            for r in rows[:10]:
+                print("  duplicate:", r)
+        else:
+            cname = 'fullprocess_cache_fullprocess_number_key'
+            if not constraint_exists(cur, 'fullprocess_cache', cname):
+                print("- Adding UNIQUE constraint fullprocess_cache(fullprocess_number)")
+                cur.execute(f"ALTER TABLE fullprocess_cache ADD CONSTRAINT {cname} UNIQUE(fullprocess_number)")
+    except Exception as e:
+        print(f"WARNING: fullprocess_cache unique fix failed: {e}")
+
     # Done
     try:
         conn.commit()
@@ -193,4 +223,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
