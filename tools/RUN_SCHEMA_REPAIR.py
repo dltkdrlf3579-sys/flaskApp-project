@@ -45,12 +45,16 @@ def _connect():
     return conn, driver
 
 
-def exec_safe(cur, sql: str):
+def exec_safe(cur, sql: str, params=None):
     try:
-        cur.execute(sql)
+        if params is not None:
+            cur.execute(sql, params)
+        else:
+            cur.execute(sql)
         return True
     except Exception as e:
-        print(f"WARN: {e}\n  SQL: {sql.strip().splitlines()[0][:200]}...")
+        head = sql.strip().splitlines()[0][:200]
+        print(f"WARN: {e}\n  SQL: {head}...")
         return False
 
 
@@ -95,14 +99,12 @@ def ensure_sections(cur):
     }
     for table, items in default_maps.items():
         for i, (key, name) in enumerate(items, start=1):
-            exec_safe(cur, (
+            exec_safe(
+                cur,
                 f"INSERT INTO {table} (section_key, section_name, section_order, is_active, is_deleted) "
-                f"VALUES (%s, %s, %s, 1, 0) ON CONFLICT (section_key) DO NOTHING"
-            ))
-            try:
-                cur.execute("SELECT 1")  # ensure previous execute consumed
-            except Exception:
-                pass
+                f"VALUES (%s, %s, %s, 1, 0) ON CONFLICT (section_key) DO NOTHING",
+                (key, name, i)
+            )
 
 
 def ensure_section_config(cur):
