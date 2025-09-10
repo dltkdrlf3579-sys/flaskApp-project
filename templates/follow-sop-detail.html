@@ -5,10 +5,16 @@
 {% endif %}
 
 {% block head %}
+<script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
+
 {% endblock %}
 
-{% block title %}Follow SOP 상세정보{% endblock %}
-{% block popup_title %}{{ sop.work_req_no }} - Follow SOP 상세정보{% endblock %}
+{% block title %}Follow SOP 상세정보<script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
+
+{% endblock %}
+{% block popup_title %}{{ sop.work_req_no }} - Follow SOP 상세정보<script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
+
+{% endblock %}
 {% block content %}
 
 {% if not is_popup %}
@@ -229,6 +235,39 @@
                                             data-field="{{ col.column_key }}"
                                             data-section="{{ section.section_key }}"
                                             rows="4">{{ col_value }}</textarea>
+
+                                {% elif col.column_type == 'scoring' %}
+                                    <!-- 채점 필드 -->
+                                    <div class="scoring-field" data-field="{{ col.column_key }}" data-config="{{ col.scoring_config | default('{}') | tojson }}">
+                                        <div class="scoring-items">
+                                            <!-- 동적으로 생성될 채점 항목들 -->
+                                        </div>
+                                        <input type="hidden" 
+                                               class="{{ section.section_key }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               value="{{ col_value | default('{}') | tojson }}">
+                                    </div>
+                                    
+                                {% elif col.column_type == 'score_total' %}
+                                    <!-- 총점 필드 (자동 계산) -->
+                                    <div class="score-total-field">
+                                        <div class="score-display">
+                                            <span class="score-value">0</span>점
+                                            <div class="score-breakdown">
+                                                <span class="critical-count">중대: 0</span>
+                                                <span class="major-count">주요: 0</span>
+                                                <span class="minor-count">경미: 0</span>
+                                                <span class="bonus-count">가점: 0</span>
+                                            </div>
+                                        </div>
+                                        <input type="hidden" 
+                                               class="{{ section.section_key }}-input" 
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               value="{{ col_value }}">
+                                    </div>
+                                            
                                             
                                 {% else %}
                                     <!-- 기본 텍스트 필드 -->
@@ -939,6 +978,8 @@ function closeEditPasswordModal() {
     background: #f8f9fa;
 }
 </style>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/scoring-system.css') }}">
+
 
 <!-- 공통 첨부파일 스크립트와 스타일 import -->
 {% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
@@ -969,5 +1010,7 @@ function validateNumberInput(input) {
     }
 }
 </script>
+
+<script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
 
 {% endblock %}

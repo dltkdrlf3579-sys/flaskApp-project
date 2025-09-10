@@ -134,6 +134,9 @@ class ColumnConfigService:
             add_column('table_type', 'TEXT')
         if not has_column(self.table_name, 'table_name'):
             add_column('table_name', 'TEXT')
+        # 채점 시스템 설정 저장 컬럼 추가
+        if not has_column(self.table_name, 'scoring_config'):
+            add_column('scoring_config', 'TEXT')
 
         conn.commit()
         conn.close()
@@ -343,6 +346,19 @@ class ColumnConfigService:
                 fields.append('table_name')
                 values.append(column_data.get('table_name'))
 
+            # scoring_config 지원: JSON 문자열로 저장
+            try:
+                cursor.execute(f"PRAGMA table_info({self.table_name})")
+                cols2 = [col[1] for col in cursor.fetchall()]
+            except Exception:
+                cols2 = []
+            if 'scoring_config' in column_data and 'scoring_config' in cols2:
+                fields.append('scoring_config')
+                sc = column_data.get('scoring_config')
+                if isinstance(sc, (dict, list)):
+                    sc = json.dumps(sc, ensure_ascii=False)
+                values.append(sc)
+
             placeholders = ', '.join(['?'] * len(fields))
             cursor.execute_with_returning_id(
                 f"INSERT INTO {self.table_name} ({', '.join(fields)}) VALUES ({placeholders})",
@@ -425,7 +441,7 @@ class ColumnConfigService:
             
             allowed_fields = ['column_name', 'column_type', 'is_active', 
                              'is_required', 'dropdown_options', 'column_order', 'column_span', 'tab',
-                             'table_group', 'table_type', 'table_name']
+                             'table_group', 'table_type', 'table_name', 'scoring_config']
             
             # input_type이 있으면 허용 필드에 추가
             if has_input_type:
@@ -458,7 +474,14 @@ class ColumnConfigService:
                         except Exception:
                             update_values.append(1 if _to_bool(column_data[field]) else 0)
                     else:
-                        update_values.append(column_data[field])
+                        # scoring_config는 dict/list면 JSON 문자열로 변환
+                        val = column_data[field]
+                        if field == 'scoring_config' and isinstance(val, (dict, list)):
+                            try:
+                                val = json.dumps(val, ensure_ascii=False)
+                            except Exception:
+                                pass
+                        update_values.append(val)
             
             if update_fields:
                 update_fields.append("updated_at = CURRENT_TIMESTAMP")

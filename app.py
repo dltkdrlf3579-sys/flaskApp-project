@@ -239,6 +239,7 @@ from sso import sso_bp
 # Ensure blueprint routes are loaded before registration
 import sso.routes  # noqa: F401
 from sso.middleware import check_sso_authentication
+from scoring_service import calculate_score as _calc_score
 
 # Read SSO config
 _cfg = configparser.ConfigParser()
@@ -259,6 +260,21 @@ app.register_blueprint(sso_bp)
 def _sso_before_request():
     resp = check_sso_authentication()
     return resp
+
+# =====================
+# Scoring API
+# =====================
+@app.route('/api/<board>/calculate-score', methods=['POST'])
+def api_calculate_score(board):
+    try:
+        data = request.get_json(silent=True) or {}
+        # Normalize board keys: allow hyphen
+        board_norm = board.replace('-', '_')
+        summary = _calc_score(board_norm, data, DB_PATH)
+        return jsonify(summary)
+    except Exception as e:
+        logging.error(f"calculate-score error: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 400
 
 def init_db():
     """기본 설정 초기화 및 데이터 동기화"""
