@@ -66,11 +66,8 @@ def setup_compatibility_functions():
         cur.execute(datetime_sql)
         print('OK - datetime function created')
         
-        # portal_user에게 함수 실행 권한 부여
-        cur.execute('GRANT EXECUTE ON FUNCTION json_extract(jsonb, text) TO portal_user')
-        cur.execute('GRANT EXECUTE ON FUNCTION json_extract(text, text) TO portal_user')
-        cur.execute('GRANT EXECUTE ON FUNCTION datetime(text) TO portal_user')
-        print('OK - Function permissions granted to portal_user')
+        # postgres 사용자는 이미 모든 권한을 가지고 있으므로 권한 부여 불필요
+        print('OK - Using postgres user (no additional permissions needed)')
         
         # 테스트
         test_json = """{"test": "value", "nested": {"key": "nested_value"}}"""
