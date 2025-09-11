@@ -183,6 +183,7 @@
                                 {% elif render_type in ['linked','linked_text','linked_dept'] %}
                                     <!-- 연결된 필드 (읽기 전용) -->
                                     <input type="text" 
+                                           id="{{ col.column_key }}"
                                            class="{{ section.section_key|replace('_', '-') }}-input" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
@@ -636,17 +637,12 @@ function openCompanySearch(fieldKey) {
     }
     
     window.receiveCompanySelection = function(fieldKey, data) {
-        document.getElementById(fieldKey).value = data.company_name || '';
-        
-        // 사업자번호 linked 필드들 업데이트
-        const businessNumberFields = [
-            fieldKey + '_business_number',
-            fieldKey + '_bizno'
-        ];
-        
-        businessNumberFields.forEach(fieldId => {
-            const bnField = document.getElementById(fieldId);
-            if (bnField) bnField.value = data.business_number || '';
+        const mainField = document.getElementById(fieldKey) || document.querySelector(`[data-field="${fieldKey}"]`);
+        if (mainField) mainField.value = data.company_name || '';
+        const businessNumberFields = [fieldKey + '_business_number', fieldKey + '_bizno'];
+        businessNumberFields.forEach(fid => {
+            const bn = document.getElementById(fid) || document.querySelector(`[data-field="${fid}"]`);
+            if (bn) bn.value = data.business_number || '';
         });
     };
     
@@ -746,23 +742,15 @@ function openContractorSearch(fieldKey) {
         return;
     }
     
+    
     window.receiveContractorSelection = function(fieldKey, data) {
-        const mainField = document.getElementById(fieldKey);
-        if (mainField) {
-            mainField.value = data.worker_name || '';
-        }
-        
-        const linkedFields = ['_id', '_company_name', '_business_number'];
-        linkedFields.forEach(suffix => {
-            const field = document.getElementById(fieldKey + suffix);
-            if (field) {
-                let value = '';
-                if (suffix === '_id') value = data.worker_id || '';
-                else if (suffix === '_company_name') value = data.company_name || '';
-                else if (suffix === '_business_number') value = data.business_number || '';
-                
-                field.value = value;
-            }
+        const mainField = document.getElementById(fieldKey) || document.querySelector(`[data-field="${fieldKey}"]`);
+        if (mainField) mainField.value = data.worker_name || '';
+
+        const pairs = [["_id","worker_id"], ["_company_name","company_name"], ["_business_number","business_number"]];
+        pairs.forEach(([suffix, src]) => {
+            const field = document.getElementById(fieldKey + suffix) || document.querySelector(`[data-field="${fieldKey + suffix}"]`);
+            if (field) field.value = data[src] || '';
         });
     };
     
