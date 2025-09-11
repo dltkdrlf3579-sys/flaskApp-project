@@ -29,23 +29,45 @@ def generate_manual_accident_number(cursor):
     """수기입력 사고번호 자동 생성 (ACCYYMMDD00 형식)"""
     today = get_korean_time()
     date_part = today.strftime('%y%m%d')  # 240822
-    
-    # 오늘 날짜의 마지막 번호 조회
-    cursor.execute("""
-        SELECT accident_number 
-        FROM accidents 
-        WHERE accident_number LIKE ?
-        ORDER BY accident_number DESC
-        LIMIT 1
-    """, (f'ACC{date_part}%',))
-    
-    last = cursor.fetchone()
-    if last:
-        # ACC24082203 → 04
-        seq = int(last[0][-2:]) + 1
+    pattern = f'ACC{date_part}%'
+    # 1) accidents_cache에서 조회
+    try:
+        cursor.execute(
+            """
+            SELECT accident_number 
+            FROM accidents_cache 
+            WHERE accident_number LIKE ?
+            ORDER BY accident_number DESC
+            LIMIT 1
+            """,
+            (pattern,)
+        )
+        last = cursor.fetchone()
+    except Exception:
+        last = None
+    # 2) 없으면 accidents 테이블에서 조회(호환)
+    if not last:
+        try:
+            cursor.execute(
+                """
+                SELECT accident_number 
+                FROM accidents 
+                WHERE accident_number LIKE ?
+                ORDER BY accident_number DESC
+                LIMIT 1
+                """,
+                (pattern,)
+            )
+            last = cursor.fetchone()
+        except Exception:
+            last = None
+    if last and last[0] and str(last[0]).startswith('ACC'):
+        try:
+            seq = int(str(last[0])[-2:]) + 1
+        except Exception:
+            seq = 1
     else:
         seq = 1
-    
     return f'ACC{date_part}{seq:02d}'
 
 app = Flask(__name__, static_folder='static')
@@ -4436,6 +4458,7 @@ def register_accident():
             ('injury_type', 'TEXT'),
             ('injury_form', 'TEXT'),
             ('workplace', 'TEXT'),
+            ('report_date', 'TEXT'),
             ('building', 'TEXT'),
             ('floor', 'TEXT'),
             ('location_detail', 'TEXT'),
@@ -4458,6 +4481,8 @@ def register_accident():
             accident_datetime = get_korean_time().strftime('%Y-%m-%d %H:%M')
         
         print(f"[DEBUG] Inserting accident with name: '{accident_name or f'사고_{accident_number}'}'")  # 디버깅
+        # report_date: 사고일자 있으면 그것, 없으면 오늘 날짜
+        report_date_value = (accident_date or created_at)
         cursor.execute("""
             INSERT INTO accidents_cache (
                 accident_number,
@@ -4469,13 +4494,14 @@ def register_accident():
                 injury_type,
                 accident_date,
                 day_of_week,
+                report_date,
                 created_at,
                 building,
                 floor,
                 location_category,
                 location_detail,
                 custom_data
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             accident_number,
             accident_name or f"사고_{accident_number}",
@@ -4486,6 +4512,7 @@ def register_accident():
             injury_type or '',
             accident_date or korean_now.strftime('%Y-%m-%d'),
             day_of_week or '',
+            report_date_value,
             created_at or korean_now.strftime('%Y-%m-%d'),
             building or '',
             floor or '',
