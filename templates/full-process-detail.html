@@ -395,7 +395,7 @@
                      data-content="{{ (process.detailed_content or '') | tojson }}"
                      contenteditable="true"
                      placeholder="상세내용을 입력하세요."
-                     style="width: 100%; min-height: 200px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;">{{ process.detailed_content | striptags if process.detailed_content else '' }}</div>
+                     style="width: 100%; min-height: 200px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;" data-ckeditor="true">{{ process.detailed_content | striptags if process.detailed_content else '' }}</div>
             </div>
         </div>
     </div>
@@ -1718,5 +1718,9 @@ document.addEventListener('DOMContentLoaded', function() {
 {% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
 {{ attachment_styles() }}
 {{ attachment_scripts() }}
+
+
+<!-- CKEditor 스크립트 -->
+<script src="/static/js/ckeditor-simple.js"></script>
 
 {% endblock %}

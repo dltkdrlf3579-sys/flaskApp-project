@@ -208,7 +208,7 @@
                           name="detailed_content"
                           placeholder="변경사유를 입력하세요."
                           rows="10"
-                          style="width: 100%; min-height: 200px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;">{{ request_data.detailed_content | striptags if request_data.detailed_content else '' }}</textarea>
+                          style="width: 100%; min-height: 200px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;" data-ckeditor="true">{{ request_data.detailed_content | striptags if request_data.detailed_content else '' }}</textarea>
             </div>
         </div>
     </div>
@@ -1252,6 +1252,7 @@ function handleDepartmentSelection(selectedItem) {
 {{ attachment_scripts() }}
 
 <!-- Content Editor 스크립트 추가 -->
-<script src="/static/js/content-editor.js"></script>
+<!-- CKEditor 스크립트 -->
+<script src="/static/js/ckeditor-simple.js"></script>
 
 {% endblock %}

@@ -438,7 +438,7 @@
                           name="detailed_content"
                           placeholder="상세내용을 입력하세요."
                           rows="10"
-                          style="width: 100%; min-height: 300px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;"></textarea>
+                          style="width: 100%; min-height: 300px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;" data-ckeditor="true"></textarea>
             </div>
             </div>
         </div>
@@ -1246,7 +1246,8 @@ input[data-linked-type][readonly] {
 
 
 <!-- Content Editor 스크립트 추가 -->
-<script src="/static/js/content-editor.js"></script>
+<!-- CKEditor 스크립트 -->
+<script src="/static/js/ckeditor-simple.js"></script>
 
 <script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
 

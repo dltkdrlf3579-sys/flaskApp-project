@@ -283,7 +283,7 @@
         <div class="section-content">
             <div class="content-editor">
                 <!-- 에디터 초기화 개선 - data-content 패턴 사용 -->
-                <div id="detailed-content" class="editable-content" data-content="{{ (instruction.detailed_content or '') | tojson }}"></div>
+                <div id="detailed-content" class="editable-content" data-content="{{ (instruction.detailed_content or '') | tojson }}" data-ckeditor="true"></div>
             </div>
         </div>
     </div>
@@ -1177,5 +1177,9 @@ function showValidationMessage(input, message) {
 {% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
 {{ attachment_styles() }}
 {{ attachment_scripts() }}
+
+
+<!-- CKEditor 스크립트 -->
+<script src="/static/js/ckeditor-simple.js"></script>
 
 {% endblock %}
