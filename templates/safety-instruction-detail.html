@@ -101,14 +101,24 @@
                                     {% elif (base_key ~ '_company') in all_keys %}
                                         {% set group = 'contractor' %}
                                     {% endif %}
-                                    {% if group == 'person' %}
-                                        {% set render_type = 'popup_person' %}
-                                    {% elif group == 'company' %}
-                                        {% set render_type = 'popup_company' %}
-                                    {% elif group == 'department' %}
-                                        {% set render_type = 'popup_department' %}
-                                    {% elif group == 'contractor' %}
-                                        {% set render_type = 'popup_contractor' %}
+                                    {% if group %}
+                                        {% if col.column_key == base_key %}
+                                            {% if group == 'person' %}
+                                                {% set render_type = 'popup_person' %}
+                                            {% elif group == 'company' %}
+                                                {% set render_type = 'popup_company' %}
+                                            {% elif group == 'department' %}
+                                                {% set render_type = 'popup_department' %}
+                                            {% elif group == 'contractor' %}
+                                                {% set render_type = 'popup_contractor' %}
+                                            {% endif %}
+                                        {% else %}
+                                            {% if col.column_key.endswith('_dept') %}
+                                                {% set render_type = 'linked_dept' %}
+                                            {% elif col.column_key.endswith('_id') or col.column_key.endswith('_bizno') %}
+                                                {% set render_type = 'linked' %}
+                                            {% endif %}
+                                        {% endif %}
                                     {% endif %}
                                 {% endif %}
 
