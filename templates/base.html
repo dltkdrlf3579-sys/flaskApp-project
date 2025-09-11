@@ -10,6 +10,12 @@
         {% block style %}{% endblock %}
     </style>
     <style>
+    /* Ensure CKEditor area is visible with comfortable height */
+    .ck-editor__editable { min-height: 300px !important; }
+    .editor-controls { margin: 8px 0; display: flex; gap: 8px; }
+    .editor-controls button { padding: 4px 8px; font-size: 12px; }
+    </style>
+    <style>
         /* 전체 페이지 가로 스크롤 방지 */
         html, body {
             overflow-x: hidden;
@@ -343,6 +349,7 @@
                 })
                 .catch(error => {
                     console.error('CKEditor 5 초기화 실패:', error);
+                    this.initialized = false;
                 });
         },
         
@@ -364,6 +371,31 @@
                     element.innerHTML = content;
                 }
             }
+        },
+        destroy: function() {
+            if (this.editor) {
+                try { this.editor.destroy(); } catch (e) {}
+                this.editor = null;
+                this.initialized = false;
+            }
+            const el = document.getElementById('detailed-content');
+            if (el) el.setAttribute('contenteditable', 'true');
+        },
+        addControls: function() {
+            const el = document.getElementById('detailed-content');
+            if (!el) return;
+            let bar = document.getElementById('editor-controls');
+            if (bar) return;
+            bar = document.createElement('div');
+            bar.id = 'editor-controls';
+            bar.className = 'editor-controls';
+            bar.innerHTML = `
+                <button type="button" id="btn-editor-on">고급 편집 켜기</button>
+                <button type="button" id="btn-editor-off">간편 편집 전환</button>
+            `;
+            el.parentNode.insertBefore(bar, el);
+            document.getElementById('btn-editor-on').addEventListener('click', () => this.init());
+            document.getElementById('btn-editor-off').addEventListener('click', () => this.destroy());
         }
     };
     
@@ -373,6 +405,7 @@
         setTimeout(function() {
             if (document.getElementById('detailed-content')) {
                 console.log('🚀 CKEditor 자동 초기화 시작');
+                try { window.RichText.addControls(); } catch(e){}
                 window.RichText.init();
             }
         }, 100);

@@ -3505,6 +3505,14 @@ def accident_detail(accident_id):
             ORDER BY section_order
         """).fetchall()
         sections = [dict(row) for row in sections]
+    # 섹션이 비어 있으면 안전한 기본값 제공 (DB 상태 불완전 시 UI 보호)
+    if not sections:
+        sections = [
+            {'section_key': 'basic_info', 'section_name': '기본정보', 'section_order': 1},
+            {'section_key': 'accident_info', 'section_name': '사고정보', 'section_order': 2},
+            {'section_key': 'location_info', 'section_name': '장소정보', 'section_order': 3},
+            {'section_key': 'additional', 'section_name': '추가정보', 'section_order': 4},
+        ]
     
     # 실제 DB에서 사고 데이터 조회
     accident = None
@@ -3684,6 +3692,37 @@ def accident_detail(accident_id):
         """
     ).fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    # 컬럼 설정이 하나도 없으면 최소 표시 컬럼 세트로 폴백 (DB 시드 누락 보호)
+    if not dynamic_columns:
+        fallback_cols = [
+            # (key, name, type, tab, order)
+            ('accident_number','사고번호','text','basic_info',1),
+            ('accident_name','사고명','text','basic_info',2),
+            ('accident_date','사고일자','date','basic_info',3),
+            ('workplace','사업장','text','basic_info',4),
+            ('accident_grade','사고등급','dropdown','basic_info',5),
+            ('major_category','대분류','dropdown','accident_info',6),
+            ('injury_form','상해형태','dropdown','accident_info',7),
+            ('injury_type','상해유형','dropdown','accident_info',8),
+            ('building','건물','text','location_info',9),
+            ('floor','층','text','location_info',10),
+            ('location_category','장소분류','text','location_info',11),
+            ('location_detail','상세위치','text','location_info',12),
+            ('detailed_content','상세내용','textarea','additional',99),
+        ]
+        dynamic_columns = [
+            {
+                'column_key': k,
+                'column_name': n,
+                'column_type': t,
+                'tab': tab,
+                'column_order': order,
+                'is_active': 1,
+                'is_deleted': 0,
+                'column_span': 1,
+            }
+            for (k,n,t,tab,order) in fallback_cols
+        ]
 
     # 전역 컬럼 키(활성/비활성 포함) 수집 - 상세 렌더 보정에 사용
     try:

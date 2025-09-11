@@ -305,12 +305,11 @@
         </div>
         <div class="section-content">
             <div class="content-editor">
-                <!-- 에디터 초기화를 위한 data-content 패턴 적용 -->
-                <div id="detailed-content" 
-                     class="editable-content" 
-                     contenteditable="true"
-                     data-content="{{ (sop.detailed_content or '') | tojson }}"
-                     placeholder="상세내용을 입력하세요.">{{ sop.detailed_content | striptags if sop.detailed_content else '' }}</div>
+                <!-- CKEditor textarea (안정 모드) -->
+                <textarea id="detailed-content"
+                          class="editable-content"
+                          data-content="{{ (sop.detailed_content or '') | tojson }}"
+                          placeholder="상세내용을 입력하세요."></textarea>
             </div>
         </div>
     </div>
