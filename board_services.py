@@ -85,10 +85,14 @@ class ColumnService:
         }
         protected = protected_common | per_board.get(self.board_type, set())
 
+        # f-string 내 중첩 중괄호/따옴표로 SyntaxError가 나므로, 별도로 구성
+        protected_lowers = sorted({(k or '').lower() for k in protected})
+        protected_sql_list = ','.join("'" + k.replace("'", "''") + "'" for k in protected_lowers)
+
         where_clauses = [
             "COALESCE(is_deleted, 0) = 0",
             "COALESCE(is_system, 0) = 0",
-            f"LOWER(column_key) NOT IN ({','.join(["'"+k+"'" for k in sorted({k.lower() for k in protected} )])})",
+            f"LOWER(column_key) NOT IN ({protected_sql_list})",
         ]
         if active_only:
             where_clauses.append("COALESCE(is_active, 1) = 1")

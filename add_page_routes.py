@@ -194,6 +194,11 @@ def follow_sop_route():
     offset = (page - 1) * per_page
     
     items = []
+    # 스코어 총점 계산을 위해 구성 수집
+    import json as _json
+    scoring_cols = [dict(c) for c in dynamic_columns if dict(c).get('column_type') == 'scoring']
+    score_total_cols = [dict(c) for c in dynamic_columns if dict(c).get('column_type') == 'score_total']
+
     for idx, row in enumerate(cursor.fetchall()):
         item = dict(row)
         # custom_data 평탄화 (safety-instruction 방식)
@@ -228,6 +233,44 @@ def follow_sop_route():
                             item[item_key] = group_obj.get(iid, 0)
             except Exception as _e:
                 logging.error(f"scoring flatten error: {_e}")
+
+            # 채점 총점(score_total) 계산: total_key 기준 합산
+            try:
+                # 미리 파싱된 scoring/score_total configs
+                # build map: group -> base_score (from score_total column config)
+                for stc in score_total_cols:
+                    conf = stc.get('scoring_config')
+                    if conf and isinstance(conf, str):
+                        try: conf = _json.loads(conf)
+                        except Exception: conf = {}
+                    total_key = (conf or {}).get('total_key') or 'default'
+                    base = (conf or {}).get('base_score', 100)
+                    total = base
+                    # iterate scoring cols with same total_key
+                    for sc_col in scoring_cols:
+                        sconf = sc_col.get('scoring_config')
+                        if sconf and isinstance(sconf, str):
+                            try: sconf = _json.loads(sconf)
+                            except Exception: sconf = {}
+                        if ((sconf or {}).get('total_key') or 'default') != total_key:
+                            continue
+                        items_cfg = (sconf or {}).get('items') or []
+                        group_obj = custom_data.get(sc_col.get('column_key'), {})
+                        if isinstance(group_obj, str):
+                            try: group_obj = _json.loads(group_obj)
+                            except Exception: group_obj = {}
+                        for it in items_cfg:
+                            iid = it.get('id')
+                            delta = float(it.get('per_unit_delta') or 0)
+                            count = 0
+                            if isinstance(group_obj, dict) and iid in group_obj:
+                                try: count = int(group_obj.get(iid) or 0)
+                                except Exception: count = 0
+                            total += count * delta
+                    # write into item using the score_total column key
+                    item[stc.get('column_key')] = total
+            except Exception as _e:
+                logging.error(f"score_total compute error: {_e}")
         # No 칼럼은 역순 번호로 설정 (총 개수에서 역순)
         item['no'] = total_count - offset - idx
         items.append(item)

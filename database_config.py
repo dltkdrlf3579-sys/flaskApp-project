@@ -435,8 +435,13 @@ class PartnerDataManager:
             # 배치 삽입을 위한 데이터 준비
             rows = []
             for _, row in df.iterrows():
+                # UNIQUE 키 누락 행 스킵 (Postgres 파이프라인 오류 방지)
+                acc_no = (row.get('accident_number') or '').strip()
+                if not acc_no:
+                    continue
+                # created_at은 서버 기본값 사용(CURRENT_TIMESTAMP) – 문자열 파싱 실패 방지
                 rows.append(tuple(_to_sqlite_safe(dfv) for dfv in (
-                    row.get('accident_number', ''),
+                    acc_no,
                     row.get('accident_name', ''),
                     row.get('workplace', ''),
                     row.get('accident_grade', ''),
@@ -445,7 +450,6 @@ class PartnerDataManager:
                     row.get('injury_type', ''),
                     row.get('accident_date', ''),
                     row.get('day_of_week', ''),
-                    row.get('created_at', ''),
                     row.get('building', ''),
                     row.get('floor', ''),
                     row.get('location_category', ''),
@@ -457,9 +461,9 @@ class PartnerDataManager:
                 INSERT INTO accidents_cache (
                     accident_number, accident_name, workplace,
                     accident_grade, major_category, injury_form, injury_type,
-                    accident_date, day_of_week, created_at, building, floor,
-                    location_category, location_detail, custom_data, is_deleted
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', 0)
+                    accident_date, day_of_week, building, floor,
+                    location_category, location_detail, custom_data, is_deleted, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', 0, CURRENT_TIMESTAMP)
             ''', rows)
             
             # 기존 custom_data와 is_deleted 복원
@@ -744,12 +748,12 @@ class PartnerDataManager:
                 custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
                 
                 # issue_number와 created_at 추출 (컬럼명이 한글일 수 있음)
-                issue_number = row.get('issue_number', '') or row.get('발부번호', '') or ''
-                created_at = row.get('created_at', '') or row.get('작성일자', '') or row.get('등록일', '') or ''
-                
+                issue_number = (row.get('issue_number') or row.get('발부번호') or '').strip()
+                if not issue_number:
+                    # UNIQUE 키가 비어 있으면 스킵 (파이프라인 에러 방지)
+                    continue
                 rows.append((
                     issue_number,
-                    created_at,
                     custom_data,
                     0  # is_deleted = 0
                 ))
@@ -757,8 +761,8 @@ class PartnerDataManager:
             # 배치 삽입
             cursor.executemany('''
                 INSERT INTO safety_instructions_cache (
-                    issue_number, created_at, custom_data, is_deleted
-                ) VALUES (?, ?, ?, ?)
+                    issue_number, custom_data, is_deleted, created_at
+                ) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
             ''', rows)
             
             conn.commit()

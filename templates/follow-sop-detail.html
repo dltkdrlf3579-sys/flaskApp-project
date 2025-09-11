@@ -308,7 +308,9 @@
                 <!-- 에디터 초기화를 위한 data-content 패턴 적용 -->
                 <div id="detailed-content" 
                      class="editable-content" 
+                     contenteditable="true"
                      data-content="{{ (sop.detailed_content or '') | tojson }}"
+                     data-editor-mode="basic"
                      placeholder="상세내용을 입력하세요.">{{ sop.detailed_content | striptags if sop.detailed_content else '' }}</div>
             </div>
         </div>

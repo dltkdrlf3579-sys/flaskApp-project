@@ -264,12 +264,12 @@
         </div>
         <div class="section-content">
             <div class="content-editor">
-                <!-- CKEditor textarea -->
-                <textarea id="detailed-content" 
-                          name="detailed_content"
-                          placeholder="상세내용을 입력하세요."
-                          rows="10"
-                          style="width: 100%; min-height: 300px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;"></textarea>
+                <!-- Rich text editable DIV (basic mode) -->
+                <div id="detailed-content"
+                     class="editable-content"
+                     data-editor-mode="basic"
+                     contenteditable="true"
+                     placeholder="상세내용을 입력하세요."></div>
             </div>
         </div>
     </div>

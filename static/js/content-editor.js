@@ -22,38 +22,90 @@
         
         console.log('✅ Content Editor 초기화');
         
-        // 붙여넣기 이벤트 핸들러
+        // 붙여넣기 이벤트 핸들러 (HTML/이미지/표 우선)
         editor.addEventListener('paste', function(e) {
-            e.preventDefault();
+            let handled = false;
+
+            const cd = e.clipboardData || window.clipboardData;
+            if (!cd) return;
             
-            const clipboardData = e.clipboardData || window.clipboardData;
-            
-            // 1. 엑셀 표 처리 (우선순위 높음)
-            const text = clipboardData.getData('text/plain');
-            if (text && text.includes('\t') && text.includes('\n')) {
-                console.log('📊 표 데이터 감지');
-                if (handleTablePaste(text)) {
+            const html = cd.getData('text/html');
+            const text = cd.getData('text/plain');
+            const uriList = (cd.getData && cd.getData('text/uri-list')) ? cd.getData('text/uri-list') : '';
+            const items = cd.items || [];
+            const files = cd.files || [];
+
+            // 1) HTML 우선: Excel/Word 등 리치 HTML을 살려서 붙여넣기 (표/스타일 유지)
+            if (html && /<\s*table[\s>]/i.test(html)) {
+                console.log('📋 HTML 표 감지 - 원본 스타일 유지 붙여넣기');
+                const sanitized = sanitizeHtml(html);
+                insertHtmlAtCursor(sanitized);
+                handled = true;
+                e.preventDefault();
+                return;
+            }
+
+            // 2) 이미지 (클립보드 파일)
+            for (let i = 0; i < items.length; i++) {
+                const it = items[i];
+                if (it && it.type && it.type.indexOf('image') !== -1) {
+                    console.log('🖼️ 이미지 데이터 감지');
+                    handleImagePaste(it);
+                    handled = true;
+                    e.preventDefault();
                     return;
                 }
             }
-            
-            // 2. 이미지 처리
-            const items = clipboardData.items;
-            let imageHandled = false;
-            for (let i = 0; i < items.length; i++) {
-                const item = items[i];
-                if (item.type.indexOf('image') !== -1) {
-                    console.log('🖼️ 이미지 데이터 감지');
-                    handleImagePaste(item);
-                    imageHandled = true;
-                    break;
+            // 일부 환경은 items가 비어 있고 files에만 담김
+            if (files && files.length) {
+                for (let f of files) {
+                    if (f && f.type && f.type.indexOf('image') !== -1) {
+                        handleImageFile(f);
+                        handled = true;
+                        e.preventDefault();
+                        return;
+                    }
                 }
             }
-            
-            // 3. 일반 텍스트 처리
-            if (!imageHandled && text) {
+
+            // 2-1) URI 리스트로 온 이미지 URL 처리 (일부 브라우저/사이트)
+            if (uriList) {
+                const first = uriList.split('\n').find(line => line && !line.startsWith('#')) || '';
+                if (/^https?:\/\//i.test(first) && /(\.png|\.jpg|\.jpeg|\.gif|\.webp|\.bmp)(\?.*)?$/i.test(first)) {
+                    const imgHtml = `<img src="${first}" style="max-width:100%;height:auto;margin:10px 0;border-radius:4px;" />`;
+                    insertHtmlAtCursor(imgHtml);
+                    handled = true;
+                    e.preventDefault();
+                    return;
+                }
+            }
+
+            // 3) 탭/개행 표 → 간이 표로 변환
+            if (text && text.includes('\t') && text.includes('\n')) {
+                console.log('📊 표 데이터 감지 (텍스트 기반)');
+                if (handleTablePaste(text)) return;
+            }
+
+            // 4) 일반 HTML (표는 아니지만 굵기/줄바꿈 등 유지)
+            if (html) {
+                const sanitized = sanitizeHtml(html);
+                insertHtmlAtCursor(sanitized);
+                handled = true;
+                e.preventDefault();
+                return;
+            }
+
+            // 5) 일반 텍스트
+            if (text) {
                 console.log('📝 텍스트 데이터 처리');
                 document.execCommand('insertText', false, text);
+                handled = true;
+                e.preventDefault();
+            }
+
+            // 아무 케이스에도 매칭되지 않으면 기본 동작 허용 (브라우저 기본 붙여넣기)
+            if (!handled) {
+                // do nothing (no preventDefault)
             }
         });
         
@@ -72,6 +124,73 @@
         editor.addEventListener('dragover', function(e) {
             e.preventDefault();
         });
+
+        // 포커스 유틸
+        function focusEditable(el){
+            try {
+                el.focus();
+                const range = document.createRange();
+                range.selectNodeContents(el);
+                range.collapse(false);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+            } catch (_) {
+                // ignore
+            }
+        }
+
+        // 문서 전역 붙여넣기 폴백 (타겟이 에디터가 아닐 때도 처리)
+        document.addEventListener('paste', function(ev){
+            if (!editor) return;
+            const within = ev.composedPath ? ev.composedPath().includes(editor) : editor.contains(ev.target);
+            if (within) return; // 에디터 내부는 개별 핸들러가 처리
+
+            const cd = ev.clipboardData || window.clipboardData;
+            if (!cd) return;
+
+            const html = cd.getData('text/html');
+            const uriList = cd.getData && cd.getData('text/uri-list') ? cd.getData('text/uri-list') : '';
+
+            // 1) 이미지 URL (uri-list)
+            if (uriList) {
+                const first = uriList.split('\n').find(line => line && !line.startsWith('#')) || '';
+                if (/^https?:\/\//i.test(first) && /(\.png|\.jpg|\.jpeg|\.gif|\.webp|\.bmp)(\?.*)?$/i.test(first)) {
+                    focusEditable(editor);
+                    insertHtmlAtCursor(`<img src="${first}" style="max-width:100%;height:auto;margin:10px 0;border-radius:4px;" />`);
+                    ev.preventDefault();
+                    return;
+                }
+            }
+            // 2) HTML에 이미지가 포함된 경우
+            if (html && /<\s*img[\s>]/i.test(html)) {
+                focusEditable(editor);
+                insertHtmlAtCursor(sanitizeHtml(html));
+                ev.preventDefault();
+                return;
+            }
+            // 3) 파일/아이템 이미지
+            const items = cd.items || [];
+            for (let i=0;i<items.length;i++){
+                const it = items[i];
+                if (it && it.type && it.type.indexOf('image') !== -1){
+                    focusEditable(editor);
+                    handleImagePaste(it);
+                    ev.preventDefault();
+                    return;
+                }
+            }
+            const files = cd.files || [];
+            for (let f of files){
+                if (f && f.type && f.type.indexOf('image') !== -1){
+                    focusEditable(editor);
+                    handleImageFile(f);
+                    ev.preventDefault();
+                    return;
+                }
+            }
+            // 나머지는 기본 붙여넣기 허용
+        }, true);
     }
     
     // 표 붙여넣기 처리
@@ -169,12 +288,103 @@
             editor.appendChild(element);
         }
     }
+
+    // HTML 문자열을 커서 위치에 삽입
+    function insertHtmlAtCursor(htmlString) {
+        const selection = window.getSelection();
+        const range = selection.rangeCount ? selection.getRangeAt(0) : null;
+        const temp = document.createElement('div');
+        temp.innerHTML = htmlString;
+        const frag = document.createDocumentFragment();
+        let node;
+        while ((node = temp.firstChild)) {
+            frag.appendChild(node);
+        }
+        if (range) {
+            range.deleteContents();
+            range.insertNode(frag);
+        } else {
+            const editor = document.getElementById('detailed-content');
+            editor.appendChild(frag);
+        }
+    }
+
+    // 안전한 HTML 정제: 표/스타일/굵기/줄바꿈/이미지(data:) 허용
+    function sanitizeHtml(html) {
+        try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            // 위험 태그 제거
+            doc.querySelectorAll('script, iframe, object, embed').forEach(n => n.remove());
+            // style 태그는 제거, 인라인 스타일만 유지
+            doc.querySelectorAll('style').forEach(n => n.remove());
+
+            const allowedTags = new Set(['table','thead','tbody','tr','th','td','colgroup','col',
+                'p','br','b','strong','i','u','span','div','ul','ol','li','img']);
+            const allowedAttrs = new Set(['style','colspan','rowspan','src','srcset','alt','width','height','align']);
+
+            const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT, null);
+            const toRemove = [];
+            while (walker.nextNode()) {
+                const el = walker.currentNode;
+                if (!allowedTags.has(el.tagName.toLowerCase())) {
+                    toRemove.push(el);
+                    continue;
+                }
+                // 허용 속성만 유지
+                [...el.attributes].forEach(attr => {
+                    const name = attr.name.toLowerCase();
+                    if (!allowedAttrs.has(name)) {
+                        el.removeAttribute(attr.name);
+                    }
+                });
+                // 이미지 src 안전 처리: data:image/* 만 허용
+                if (el.tagName.toLowerCase() === 'img') {
+                    const src = el.getAttribute('src') || '';
+                    // 허용: data:, https:, http:, blob:
+                    const ok = src.startsWith('data:image/') || src.startsWith('https://') || src.startsWith('http://') || src.startsWith('blob:');
+                    if (!ok) {
+                        el.remove();
+                    }
+                    // 크기 스타일 기본값
+                    if (!el.style.maxWidth) el.style.maxWidth = '100%';
+                    if (!el.style.height) el.style.height = 'auto';
+                    el.style.margin = el.style.margin || '10px 0';
+                    el.style.borderRadius = el.style.borderRadius || '4px';
+                }
+            }
+            toRemove.forEach(n => n.remove());
+
+            // 엑셀 표 기본 테이블 스타일 보강 (없을 때만)
+            doc.querySelectorAll('table').forEach(t => {
+                if (!t.style.borderCollapse) t.style.borderCollapse = 'collapse';
+                if (!t.style.width) t.style.width = '100%';
+                if (!t.style.margin) t.style.margin = '15px 0';
+                t.style.border = t.style.border || '1px solid #e1e5e9';
+            });
+            doc.querySelectorAll('th,td').forEach(c => {
+                c.style.border = c.style.border || '1px solid #e1e5e9';
+                c.style.padding = c.style.padding || '8px';
+                c.style.textAlign = c.style.textAlign || 'left';
+            });
+            doc.querySelectorAll('tr:nth-child(even)').forEach(r => {
+                if (!r.style.backgroundColor) r.style.backgroundColor = '#f8f9fa';
+            });
+
+            return (doc.body && doc.body.innerHTML) ? doc.body.innerHTML : html;
+        } catch (e) {
+            console.warn('sanitizeHtml failed', e);
+            return html;
+        }
+    }
     
     // 전역 함수로 노출 (필요시 외부에서 사용)
     window.ContentEditor = {
         init: initContentEditor,
         handleTablePaste: handleTablePaste,
         handleImagePaste: handleImagePaste,
-        insertAtCursor: insertAtCursor
+        insertAtCursor: insertAtCursor,
+        insertHtmlAtCursor: insertHtmlAtCursor,
+        sanitizeHtml: sanitizeHtml
     };
 })();

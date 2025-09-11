@@ -4,7 +4,7 @@ from datetime import datetime
 import pytz
 from pathlib import Path
 import shutil
-from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, Response
+from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, Response, send_from_directory
 import configparser
 from timezone_config import KST, get_korean_time, get_korean_time_str
 from werkzeug.utils import secure_filename
@@ -7980,6 +7980,11 @@ def export_follow_sop_excel():
         dyn_cols_list = [dict(x) for x in dynamic_columns]
         expanded_columns = _expand_scoring_columns(dyn_cols_list)
 
+        # 스코어 총점 계산 준비
+        import json as _json
+        scoring_cols = [dict(c) for c in dyn_cols_list if dict(c).get('column_type') == 'scoring']
+        score_total_cols = [dict(c) for c in dyn_cols_list if dict(c).get('column_type') == 'score_total']
+
         # 동적 컬럼 헤더
         for col in expanded_columns:
             cell = ws.cell(row=1, column=col_idx, value=col['column_name'])
@@ -8046,8 +8051,43 @@ def export_follow_sop_excel():
                         v = group_obj.get(iid, 0)
                     ws.cell(row=row_idx, column=col_idx, value=v)
                 else:
-                    v = custom_data.get(col['column_key'], '')
-                    ws.cell(row=row_idx, column=col_idx, value=_map_value(col, v))
+                    if col.get('column_type') == 'score_total':
+                        # 총점 계산 (total_key 기준)
+                        try:
+                            stc = col
+                            conf = stc.get('scoring_config')
+                            if conf and isinstance(conf, str):
+                                try: conf = _json.loads(conf)
+                                except Exception: conf = {}
+                            total_key = (conf or {}).get('total_key') or 'default'
+                            base = (conf or {}).get('base_score', 100)
+                            total = base
+                            for sc_col in scoring_cols:
+                                sconf = sc_col.get('scoring_config')
+                                if sconf and isinstance(sconf, str):
+                                    try: sconf = _json.loads(sconf)
+                                    except Exception: sconf = {}
+                                if ((sconf or {}).get('total_key') or 'default') != total_key:
+                                    continue
+                                items_cfg = (sconf or {}).get('items') or []
+                                group_obj = custom_data.get(sc_col.get('column_key'), {})
+                                if isinstance(group_obj, str):
+                                    try: group_obj = _json.loads(group_obj)
+                                    except Exception: group_obj = {}
+                                for it in items_cfg:
+                                    iid = it.get('id')
+                                    delta = float(it.get('per_unit_delta') or 0)
+                                    cnt = 0
+                                    if isinstance(group_obj, dict) and iid in group_obj:
+                                        try: cnt = int(group_obj.get(iid) or 0)
+                                        except Exception: cnt = 0
+                                    total += cnt * delta
+                            ws.cell(row=row_idx, column=col_idx, value=total)
+                        except Exception:
+                            ws.cell(row=row_idx, column=col_idx, value='')
+                    else:
+                        v = custom_data.get(col['column_key'], '')
+                        ws.cell(row=row_idx, column=col_idx, value=_map_value(col, v))
                 col_idx += 1
         
         # 컬럼 너비 자동 조정
@@ -9695,3 +9735,43 @@ if __name__ == "__main__":
     
     print(f"partner-accident 라우트 등록됨: {'/partner-accident' in [rule.rule for rule in app.url_map.iter_rules()]}", flush=True)
     app.run(host="0.0.0.0", port=5000, debug=app.debug)
+@app.route('/upload-inline-image', methods=['POST'])
+def upload_inline_image():
+    try:
+        file = request.files.get('upload') or request.files.get('file')
+        if not file or not file.filename:
+            return jsonify({ 'error': { 'message': 'No file uploaded' } }), 400
+
+        # 확장자/크기 검증
+        allowed = {'png','jpg','jpeg','gif','webp','bmp'}
+        ext = os.path.splitext(file.filename)[1].lower().lstrip('.')
+        if ext not in allowed:
+            return jsonify({ 'error': { 'message': 'Unsupported file type' } }), 400
+        file.seek(0, os.SEEK_END)
+        size = file.tell()
+        file.seek(0)
+        if size > 10 * 1024 * 1024:  # 10MB
+            return jsonify({ 'error': { 'message': 'File too large' } }), 400
+
+        # 저장 경로
+        upload_dir = os.path.join('uploads', 'content')
+        os.makedirs(upload_dir, exist_ok=True)
+
+        # 안전한 파일명
+        import time
+        basename = secure_filename(file.filename)
+        fname = f"{int(time.time())}_{basename}"
+        path = os.path.join(upload_dir, fname)
+        file.save(path)
+
+        url = f"/uploads/content/{fname}"
+        return jsonify({ 'url': url })
+    except Exception as e:
+        logging.error(f"Inline image upload failed: {e}")
+        return jsonify({ 'error': { 'message': 'Upload failed' } }), 500
+
+
+@app.route('/uploads/content/<path:filename>')
+def serve_uploaded_content(filename):
+    directory = os.path.join('uploads', 'content')
+    return send_from_directory(directory, filename)
