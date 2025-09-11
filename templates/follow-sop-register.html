@@ -264,10 +264,11 @@
         </div>
         <div class="section-content">
             <div class="content-editor">
-                <!-- CKEditor textarea (안정 모드) -->
+                <!-- CKEditor 5 -->
                 <textarea id="detailed-content"
                           name="detailed_content"
                           class="editable-content"
+                          data-ckeditor="true"
                           placeholder="상세내용을 입력하세요."></textarea>
             </div>
         </div>
@@ -747,8 +748,8 @@ function openTableSearch(fieldKey) {
 {{ attachment_scripts() }}
 
 
-<!-- Content Editor 스크립트 추가 -->
-<script src="/static/js/content-editor.js"></script>
+<!-- CKEditor 스크립트 -->
+<script src="/static/js/ckeditor-simple.js"></script>
 
 <script>
 // 숫자 입력 유효성 검사 함수들
