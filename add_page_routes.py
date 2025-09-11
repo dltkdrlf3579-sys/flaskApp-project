@@ -597,30 +597,30 @@ def register_follow_sop():
         created_at_dt = get_korean_time()
         work_req_no = generate_followsop_number(DB_PATH, created_at_dt)
         
-    # custom_data 처리
-    custom_data = data.get('custom_data', {})
+        # custom_data 처리
+        custom_data = data.get('custom_data', {})
         if isinstance(custom_data, dict):
             import json
             custom_data_json = json.dumps(custom_data, ensure_ascii=False)
         else:
             custom_data_json = custom_data
         
-    # Follow SOP 등록 - 메인 테이블로 저장
-    upsert_data = {
-        'work_req_no': work_req_no,
-        'custom_data': custom_data_json,
-        'created_at': created_at_dt.strftime('%Y-%m-%d %H:%M:%S'),
-        'created_by': session.get('user_id', 'system'),
-        'is_deleted': 0
-    }
-    # 충돌키 지정 (work_req_no)
-    safe_upsert(
-        conn,
-        'follow_sop',
-        upsert_data,
-        conflict_cols=['work_req_no'],
-        update_cols=['custom_data', 'updated_at', 'is_deleted']
-    )
+        # Follow SOP 등록 - 메인 테이블로 저장
+        upsert_data = {
+            'work_req_no': work_req_no,
+            'custom_data': custom_data_json,
+            'created_at': created_at_dt.strftime('%Y-%m-%d %H:%M:%S'),
+            'created_by': session.get('user_id', 'system'),
+            'is_deleted': 0
+        }
+        # 충돌키 지정 (work_req_no)
+        safe_upsert(
+            conn,
+            'follow_sop',
+            upsert_data,
+            conflict_cols=['work_req_no'],
+            update_cols=['custom_data', 'updated_at', 'is_deleted']
+        )
         
         conn.commit()
         
@@ -1184,29 +1184,29 @@ def register_full_process():
         created_at_dt = get_korean_time()
         fullprocess_number = generate_fullprocess_number(DB_PATH, created_at_dt)
         
-    # custom_data 처리
-    custom_data = data.get('custom_data', {})
+        # custom_data 처리
+        custom_data = data.get('custom_data', {})
         if isinstance(custom_data, dict):
             import json
             custom_data_json = json.dumps(custom_data, ensure_ascii=False)
         else:
             custom_data_json = custom_data
         
-    # Full Process 등록 - 메인 테이블 저장
-    upsert_data = {
-        'fullprocess_number': fullprocess_number,
-        'custom_data': custom_data_json,
-        'created_at': created_at_dt.strftime('%Y-%m-%d %H:%M:%S'),
-        'created_by': session.get('user_id', 'system'),
-        'is_deleted': 0
-    }
-    safe_upsert(
-        conn,
-        'full_process',
-        upsert_data,
-        conflict_cols=['fullprocess_number'],
-        update_cols=['custom_data', 'updated_at', 'is_deleted']
-    )
+        # Full Process 등록 - 메인 테이블 저장
+        upsert_data = {
+            'fullprocess_number': fullprocess_number,
+            'custom_data': custom_data_json,
+            'created_at': created_at_dt.strftime('%Y-%m-%d %H:%M:%S'),
+            'created_by': session.get('user_id', 'system'),
+            'is_deleted': 0
+        }
+        safe_upsert(
+            conn,
+            'full_process',
+            upsert_data,
+            conflict_cols=['fullprocess_number'],
+            update_cols=['custom_data', 'updated_at', 'is_deleted']
+        )
         
         conn.commit()
         
