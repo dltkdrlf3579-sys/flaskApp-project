@@ -1836,8 +1836,8 @@ def safety_instruction_route():
         if col['column_type'] == 'dropdown':
             col['code_mapping'] = get_dropdown_options_for_display('safety_instruction', col['column_key'])
     
-    # 로컬 캐시 테이블에서 직접 조회 (삭제되지 않은 것만)
-    base_query = f"SELECT * FROM safety_instructions_cache WHERE {sql_is_deleted_false('is_deleted', conn)}"
+    # 메인 테이블에서 직접 조회 (삭제되지 않은 것만)
+    base_query = f"SELECT * FROM safety_instructions WHERE {sql_is_deleted_false('is_deleted', conn)}"
     query = base_query
     params = []
     
@@ -2082,12 +2082,12 @@ def safety_instruction_detail(issue_number):
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     
-    # 실제 데이터베이스에서 조회 시도
+    # 실제 데이터베이스에서 조회 시도 (메인 테이블 우선)
     instruction = None
     try:
         _wd = sql_is_deleted_false('is_deleted', conn)
         instruction = conn.execute(f"""
-            SELECT * FROM safety_instructions_cache 
+            SELECT * FROM safety_instructions 
             WHERE issue_number = ? AND {_wd}
         """, (issue_number,)).fetchone()
     except sqlite3.OperationalError:
@@ -2279,129 +2279,165 @@ def safety_instruction_detail(issue_number):
 
 @app.route('/update-safety-instruction', methods=['POST'])
 def update_safety_instruction():
-    """환경안전 지시서 수정 API - AttachmentService 사용"""
+    """환경안전 지시서 수정 API - 메인 테이블 사용 + 첨부 처리"""
     from board_services import AttachmentService
     conn = None
-    
+
     try:
         issue_number = request.form.get('issue_number')
-        # violation_content는 더 이상 사용하지 않음
         detailed_content = request.form.get('detailed_content', '')
-        custom_data = request.form.get('custom_data', '{}')
-        basic_info = request.form.get('basic_info', '{}')  # 기본정보 추가
-        violation_info = request.form.get('violation_info', '{}')  # 위반정보 추가
-        
-        # deleted_attachments 파싱
-        deleted_attachments_str = request.form.get('deleted_attachments', '[]')
-        try:
-            deleted_attachments = pyjson.loads(deleted_attachments_str) if deleted_attachments_str else []
-        except:
-            deleted_attachments = []
-        
-        files = request.files.getlist('files')
-        
+
         if not issue_number:
             return jsonify({"success": False, "message": "발부번호가 필요합니다."}), 400
-        
-        # JSON 파싱
+
+        # deleted_attachments 파싱
         try:
-            custom_data_dict = pyjson.loads(custom_data) if custom_data != '{}' else {}
-            basic_info_dict = pyjson.loads(basic_info) if basic_info != '{}' else {}
-            violation_info_dict = pyjson.loads(violation_info) if violation_info != '{}' else {}
-        except ValueError:  # JSONDecodeError is a subclass of ValueError
-            return jsonify({"success": False, "message": "잘못된 데이터 형식입니다."}), 400
-        
+            deleted_attachments = pyjson.loads(request.form.get('deleted_attachments', '[]'))
+        except Exception:
+            deleted_attachments = []
+
+        files = request.files.getlist('files')
+
+        # 다양한 요청 포맷 지원: base_fields/custom_data 우선, 없으면 basic_info/violation_info 합치기
+        custom_data_raw = request.form.get('custom_data', '{}')
+        base_fields_raw = request.form.get('base_fields', '{}')
+        basic_info_raw = request.form.get('basic_info', '{}')
+        violation_info_raw = request.form.get('violation_info', '{}')
+
+        try:
+            custom_data = pyjson.loads(custom_data_raw) if isinstance(custom_data_raw, str) else (custom_data_raw or {})
+        except Exception:
+            custom_data = {}
+
+        # 구버전 호환: basic_info/violation_info 병합
+        try:
+            basic_info = pyjson.loads(basic_info_raw) if isinstance(basic_info_raw, str) else (basic_info_raw or {})
+        except Exception:
+            basic_info = {}
+        try:
+            violation_info = pyjson.loads(violation_info_raw) if isinstance(violation_info_raw, str) else (violation_info_raw or {})
+        except Exception:
+            violation_info = {}
+        if basic_info or violation_info:
+            tmp = {}
+            tmp.update(basic_info)
+            tmp.update(violation_info)
+            # issue_number는 보호
+            tmp.pop('issue_number', None)
+            # custom_data에 병합 (클라이언트 전송이 우선)
+            for k, v in tmp.items():
+                custom_data.setdefault(k, v)
+
+        # base_fields도 custom_data에 흡수 (필요 시)
+        try:
+            base_fields = pyjson.loads(base_fields_raw) if isinstance(base_fields_raw, str) else (base_fields_raw or {})
+        except Exception:
+            base_fields = {}
+        if base_fields:
+            base_fields.pop('issue_number', None)
+            custom_data.update(base_fields)
+
+        # 리스트 필드 문자열을 배열로 정규화
+        for key, value in list(custom_data.items()):
+            if isinstance(value, str) and value.strip().startswith('[') and value.strip().endswith(']'):
+                try:
+                    custom_data[key] = pyjson.loads(value)
+                except Exception:
+                    pass
+
         conn = get_db_connection()
         cursor = conn.cursor()
-        
-        # safety_instructions_cache 테이블에서 기존 지시서가 있는지 확인
-        cursor.execute("SELECT issue_number FROM safety_instructions_cache WHERE issue_number = ?", (issue_number,))
-        existing = cursor.fetchone()
-        
-        if existing:
-            # 업데이트 - 기본정보와 위반정보 필드들도 함께 업데이트
-            update_fields = []
-            update_values = []
-            
-            # 기본정보 필드들 업데이트
-            for field, value in basic_info_dict.items():
-                if field != 'issue_number':  # 발부번호는 수정 불가
-                    update_fields.append(f"{field} = ?")
-                    update_values.append(value)
-            
-            # 위반정보 필드들 업데이트
-            for field, value in violation_info_dict.items():
-                update_fields.append(f"{field} = ?")
-                update_values.append(value)
-            
-            # detailed_content를 custom_data 내부에 포함
-            if detailed_content:
-                custom_data_dict['detailed_content'] = detailed_content
-            
-            # custom_data 추가
-            update_fields.append("custom_data = ?")
-            update_values.append(pyjson.dumps(custom_data_dict))
-            
-            # WHERE 조건 값 추가
-            update_values.append(issue_number)
-            
-            # UPDATE 쿼리 실행
-            update_query = f"""
-                UPDATE safety_instructions_cache 
-                SET {', '.join(update_fields)}
-                WHERE issue_number = ?
-            """
-            cursor.execute(update_query, update_values)
-        else:
-            # 새로 생성 (수정 API에서 새로 생성하는 경우는 드물지만 처리)
-            # 모든 필드를 병합
-            all_fields = {**basic_info_dict, **violation_info_dict}
-            
-            # detailed_content를 custom_data에 포함
-            if detailed_content:
-                custom_data_dict['detailed_content'] = detailed_content
-            
-            # 필드 이름과 값 준비
-            field_names = ['issue_number', 'custom_data', 'is_deleted']
-            field_values = [issue_number, pyjson.dumps(custom_data_dict), 0]
-            
-            for field, value in all_fields.items():
-                if field != 'issue_number':
-                    field_names.append(field)
-                    field_values.append(value)
-            
-            # INSERT 쿼리 실행
-            placeholders = ', '.join(['?' for _ in field_names])
-            insert_query = f"""
-                INSERT INTO safety_instructions_cache ({', '.join(field_names)})
-                VALUES ({placeholders})
-            """
-            cursor.execute(insert_query, field_values)
-        
-        # 상세내용은 이미 custom_data에 포함되어 있음 (위에서 처리됨)
-        
-        # AttachmentService 사용하여 첨부파일 처리 (기존 연결 전달)
+
+        # 기존 custom_data 로드 (리스트 필드 병합 시 필요)
+        existing_row = cursor.execute(
+            "SELECT custom_data FROM safety_instructions WHERE issue_number = ?",
+            (issue_number,)
+        ).fetchone()
+
+        existing_custom = {}
+        if existing_row and existing_row[0]:
+            if isinstance(existing_row[0], dict):
+                existing_custom = pyjson.loads(pyjson.dumps(existing_row[0]))
+            elif isinstance(existing_row[0], str):
+                try:
+                    existing_custom = pyjson.loads(existing_row[0])
+                except Exception:
+                    existing_custom = {}
+
+        # 리스트 병합 유틸
+        def is_list_field(val):
+            if isinstance(val, list):
+                return True
+            if isinstance(val, str) and val.strip():
+                return val.startswith('[') and val.endswith(']')
+            return False
+
+        for k, v in list(custom_data.items()):
+            if is_list_field(v) or is_list_field(existing_custom.get(k, [])):
+                old = existing_custom.get(k, [])
+                if isinstance(old, str):
+                    try:
+                        old = pyjson.loads(old)
+                    except Exception:
+                        old = []
+                if not isinstance(old, list):
+                    old = []
+
+                new_list = []
+                if isinstance(v, list):
+                    new_list = v
+                elif isinstance(v, str) and v.strip().startswith('['):
+                    try:
+                        parsed = pyjson.loads(v)
+                        if isinstance(parsed, list):
+                            new_list = parsed
+                    except Exception:
+                        new_list = []
+
+                # 단순 대체(프론트에서 전체 전달) 우선, 아니면 병합
+                if new_list and old:
+                    existing_custom[k] = new_list
+                else:
+                    existing_custom[k] = new_list if new_list else old
+
+        # 리스트 병합 반영 + 상세내용은 별도 컬럼
+        final_custom = dict(existing_custom)
+        for k, v in custom_data.items():
+            if not is_list_field(v):
+                final_custom[k] = v
+
+        from db.upsert import safe_upsert
+        upsert_data = {
+            'issue_number': issue_number,
+            'custom_data': pyjson.dumps(final_custom),
+            'detailed_content': detailed_content,
+            'updated_at': None  # UPSERT 유틸이 타임스탬프 처리
+        }
+        safe_upsert(
+            conn,
+            'safety_instructions',
+            upsert_data,
+            conflict_cols=['issue_number'],
+            update_cols=['custom_data', 'detailed_content', 'updated_at']
+        )
+
+        # 첨부파일 처리
         attachment_service = AttachmentService('safety_instruction', DB_PATH, conn)
-        
-        # 삭제할 첨부파일 처리
         if deleted_attachments:
             attachment_service.delete(deleted_attachments)
             logging.info(f"첨부파일 {len(deleted_attachments)}개 삭제")
-        
-        # 새 첨부파일 업로드
         if files:
             uploaded_ids = attachment_service.bulk_add(
-                issue_number, 
+                issue_number,
                 files,
                 {'uploaded_by': session.get('user_id', 'user')}
             )
             logging.info(f"첨부파일 {len(uploaded_ids)}개 업로드: {uploaded_ids}")
-        
+
         conn.commit()
         logging.info(f"Safety Instruction 업데이트 완료: {issue_number}")
-        
         return jsonify({"success": True, "message": "수정이 완료되었습니다."})
-        
+
     except Exception as e:
         import traceback
         logging.error(f"Safety Instruction 업데이트 오류: {e}")
@@ -2478,10 +2514,10 @@ def update_follow_sop():
         conn = get_db_connection(DB_PATH, timeout=30.0)
         cursor = conn.cursor()
         
-        # 기존 데이터 조회 (리스트 필드 병합을 위해)
+        # 기존 데이터 조회 (리스트 필드 병합을 위해) - 메인 테이블에서 조회
         cursor.execute("""
             SELECT custom_data 
-            FROM follow_sop_cache 
+            FROM follow_sop 
             WHERE work_req_no = ?
         """, (work_req_no,))
         
@@ -2575,23 +2611,19 @@ def update_follow_sop():
             existing_custom_data['detailed_content'] = detailed_content
             logging.info(f"detailed_content를 custom_data에 추가")
         
-        # 1. follow_sop_cache 업데이트 (병합된 데이터 사용)
-        update_query = """
-            UPDATE follow_sop_cache 
-            SET custom_data = ?,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE work_req_no = ?
-        """
-        
-        cursor.execute(update_query, (existing_custom_data, work_req_no))
-        
-        # 레코드가 없으면 INSERT
-        if cursor.rowcount == 0:
-            from db.upsert import safe_upsert
-            safe_upsert(conn, 'follow_sop_cache', {
+        # 메인 테이블에 UPSERT (issue_number와 동일한 방식)
+        from db.upsert import safe_upsert
+        safe_upsert(
+            conn,
+            'follow_sop',
+            {
                 'work_req_no': work_req_no,
-                'custom_data': existing_custom_data
-            })
+                'custom_data': existing_custom_data,
+                'updated_at': None
+            },
+            conflict_cols=['work_req_no'],
+            update_cols=['custom_data', 'updated_at']
+        )
         
         # 2. followsop_details 테이블 관련 코드 제거 (더 이상 사용하지 않음)
         
@@ -2715,10 +2747,10 @@ def update_full_process():
         conn = get_db_connection(DB_PATH, timeout=30.0)
         cursor = conn.cursor()
         
-        # 기존 데이터 조회 (리스트 필드 병합을 위해)
+        # 기존 데이터 조회 (리스트 필드 병합을 위해) - 메인 테이블
         cursor.execute("""
             SELECT custom_data 
-            FROM full_process_cache 
+            FROM full_process 
             WHERE fullprocess_number = ?
         """, (fullprocess_number,))
         
@@ -2812,23 +2844,19 @@ def update_full_process():
             existing_custom_data['detailed_content'] = detailed_content
             logging.info(f"detailed_content를 custom_data에 추가")
         
-        # 1. full_process_cache 업데이트 (병합된 데이터 사용)
-        update_query = """
-            UPDATE full_process_cache 
-            SET custom_data = ?,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE fullprocess_number = ?
-        """
-        
-        cursor.execute(update_query, (existing_custom_data, fullprocess_number))
-        
-        # 레코드가 없으면 INSERT
-        if cursor.rowcount == 0:
-            from db.upsert import safe_upsert
-            safe_upsert(conn, 'full_process_cache', {
+        # 메인 테이블 UPSERT
+        from db.upsert import safe_upsert
+        safe_upsert(
+            conn,
+            'full_process',
+            {
                 'fullprocess_number': fullprocess_number,
-                'custom_data': existing_custom_data
-            })
+                'custom_data': existing_custom_data,
+                'updated_at': None
+            },
+            conflict_cols=['fullprocess_number'],
+            update_cols=['custom_data', 'updated_at']
+        )
         
         # 2. fullprocess_details 테이블 관련 코드 제거 (더 이상 사용하지 않음)
         
@@ -4669,9 +4697,9 @@ def register_safety_instruction():
             korean_now = get_korean_time()
             year_month = f"{korean_now.year}-{korean_now.month:02d}"
         
-        # 해당 년월의 마지막 발부번호 찾기 (cache 테이블에서)
+        # 해당 년월의 마지막 발부번호 찾기 (메인 테이블에서)
         cursor.execute("""
-            SELECT issue_number FROM safety_instructions_cache 
+            SELECT issue_number FROM safety_instructions 
             WHERE issue_number LIKE ? 
             ORDER BY issue_number DESC 
             LIMIT 1
@@ -4721,21 +4749,24 @@ def register_safety_instruction():
         # 기존 custom_data와 병합
         all_custom_data.update(custom_data)
         
-        # safety_instructions_cache 테이블에 직접 등록 - created_at 추가!
-        cache_data = {
+        # 메인 테이블에 등록 - created_at은 DEFAULT 사용, 상세내용은 컬럼에 저장
+        from db.upsert import safe_upsert
+        main_data = {
             'issue_number': generated_issue_number,
-            'issue_title': f"환경안전 지시서 - {disciplined_person}",  # 제목 생성
-            'issue_date': violation_date if violation_date else get_korean_time().strftime('%Y-%m-%d'),
-            'instruction_type': discipline_type if discipline_type else '',
-            'department': department,
-            'target_audience': disciplined_person,
-            'related_regulation': violation_type if violation_type else '',
             'custom_data': pyjson.dumps(all_custom_data),
+            'detailed_content': detailed_content,
             'is_deleted': 0,
-            'created_at': get_korean_time().strftime('%Y-%m-%d %H:%M:%S'),  # created_at 명시적으로 설정
-            'updated_at': None  # 자동으로 처리됨
+            'created_at': None,   # DEFAULT CURRENT_TIMESTAMP
+            'updated_at': None    # 자동 처리
         }
-        safe_upsert(conn, 'safety_instructions_cache', cache_data)
+        # 안전한 UPSERT (issue_number 기준)
+        safe_upsert(
+            conn,
+            'safety_instructions',
+            main_data,
+            conflict_cols=['issue_number'],
+            update_cols=['custom_data', 'detailed_content', 'updated_at', 'is_deleted']
+        )
         
         # 첨부파일 처리
         if files:
@@ -4749,7 +4780,7 @@ def register_safety_instruction():
                     file_size INTEGER,
                     description TEXT,
                     upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (issue_number) REFERENCES safety_instructions_cache (issue_number)
+                    FOREIGN KEY (issue_number) REFERENCES safety_instructions (issue_number)
                 )
             """)
             
@@ -6339,7 +6370,7 @@ def get_deleted_safety_instructions():
     conn.row_factory = sqlite3.Row
     
     deleted_items = conn.execute("""
-        SELECT * FROM safety_instructions_cache 
+        SELECT * FROM safety_instructions 
         WHERE is_deleted = 1
         ORDER BY created_at DESC
     """).fetchall()
@@ -6585,10 +6616,10 @@ def delete_safety_instructions():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # safety_instructions_cache 테이블에서 소프트 삭제 (issue_number 기준)
+        # 메인 테이블에서 소프트 삭제 (issue_number 기준)
         placeholders = ','.join('?' * len(ids))
         cursor.execute(f"""
-            UPDATE safety_instructions_cache 
+            UPDATE safety_instructions 
             SET is_deleted = 1 
             WHERE issue_number IN ({placeholders})
         """, ids)
@@ -8397,9 +8428,9 @@ def export_safety_instruction_excel():
         cursor.execute(dyn_sql)
         dynamic_columns = cursor.fetchall()
         
-        # Safety Instruction 데이터 조회 - safety_instructions_cache 테이블 사용
+        # Safety Instruction 데이터 조회 - 메인 테이블 사용
         data_sql = f"""
-            SELECT * FROM safety_instructions_cache 
+            SELECT * FROM safety_instructions 
             WHERE {sql_is_deleted_false('is_deleted', conn)}
             ORDER BY created_at DESC, issue_number DESC
         """
@@ -8443,27 +8474,27 @@ def export_safety_instruction_excel():
             # 먼저 row를 dict로 변환
             row_dict = dict(row)
             col_idx = 1
-            
-            # 기본 필드 - 실제 컬럼명 사용
-            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('issue_number', ''))
-            col_idx += 1
-            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('issuer', ''))
-            col_idx += 1
-            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('violation_date', ''))
-            col_idx += 1
-            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('discipline_date', ''))
-            col_idx += 1
-            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('disciplined_person', ''))
-            col_idx += 1
-            
-            # custom_data 파싱 (있는 경우)
+
+            # custom_data 파싱 (먼저 파싱하여 기본 필드 보완)
             custom_data = {}
             if row_dict.get('custom_data'):
                 try:
                     custom_data = json.loads(row_dict.get('custom_data', '{}'))
-                except:
+                except Exception:
                     custom_data = {}
-            
+
+            # 기본 필드 - issue_number는 실제 컬럼, 나머지는 custom_data 우선
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('issue_number', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=(custom_data.get('issuer') or row_dict.get('issuer', '')))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=(custom_data.get('violation_date') or row_dict.get('violation_date', '')))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=(custom_data.get('discipline_date') or row_dict.get('discipline_date', '')))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=(custom_data.get('disciplined_person') or row_dict.get('disciplined_person', '')))
+            col_idx += 1
+
             # 동적 컬럼 데이터 - 기본 필드 제외하고 처리
             basic_column_keys = ['issue_number', 'issuer', 'violation_date', 'discipline_date', 'disciplined_person']
             def _map_value(col, value):

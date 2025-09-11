@@ -145,30 +145,8 @@ def follow_sop_route():
     where_clauses.insert(0, "(s.is_deleted = 0 OR s.is_deleted IS NULL)")
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
     
-    # 캐시 우선 + 비어있으면 메인 테이블 (safety-instruction와 동일 철학)
-    use_cache = False
-    try:
-        if hasattr(conn, 'is_postgres') and conn.is_postgres:
-            cursor.execute("""
-                SELECT EXISTS (
-                    SELECT 1 FROM information_schema.tables 
-                    WHERE table_name = 'follow_sop_cache'
-                )
-            """)
-            exists = bool(cursor.fetchone()[0])
-        else:
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='follow_sop_cache'")
-            exists = cursor.fetchone() is not None
-        if exists:
-            cursor.execute("SELECT COUNT(*) FROM follow_sop_cache")
-            use_cache = (cursor.fetchone()[0] > 0)
-    except Exception:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-        use_cache = False
-    table_name = "follow_sop_cache" if use_cache else "follow_sop"
+    # 메인 테이블 고정 사용
+    table_name = "follow_sop"
     count_query = f"""
         SELECT COUNT(*) 
         FROM {table_name} s
@@ -492,30 +470,16 @@ def follow_sop_detail(work_req_no):
     except:
         pass
     
-    # Follow SOP 정보 조회
+    # Follow SOP 정보 조회 (메인 테이블 고정)
     sop_row = None
-    
-    # cache 테이블이 존재하면 먼저 조회
-    if has_cache_table:
-        try:
-            cursor.execute("""
-                SELECT * FROM follow_sop_cache
-                WHERE work_req_no = ? AND (is_deleted = 0 OR is_deleted IS NULL)
-            """, (work_req_no,))
-            sop_row = cursor.fetchone()
-        except Exception as e:
-            logging.error(f"follow_sop_cache 조회 오류: {e}")
-    
-    # cache에 없고 main 테이블이 존재하면 조회
-    if not sop_row and has_main_table:
-        try:
-            cursor.execute("""
-                SELECT * FROM follow_sop
-                WHERE work_req_no = ?
-            """, (work_req_no,))
-            sop_row = cursor.fetchone()
-        except Exception as e:
-            logging.error(f"follow_sop 조회 오류: {e}")
+    try:
+        cursor.execute("""
+            SELECT * FROM follow_sop
+            WHERE work_req_no = ? AND (is_deleted = 0 OR is_deleted IS NULL)
+        """, (work_req_no,))
+        sop_row = cursor.fetchone()
+    except Exception as e:
+        logging.error(f"follow_sop 조회 오류: {e}")
     
     if not sop_row:
         conn.close()
@@ -633,39 +597,30 @@ def register_follow_sop():
         created_at_dt = get_korean_time()
         work_req_no = generate_followsop_number(DB_PATH, created_at_dt)
         
-        # follow_sop_cache 테이블이 없으면 생성
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS follow_sop_cache (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                work_req_no TEXT UNIQUE NOT NULL,
-                custom_data TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                created_by TEXT,
-                updated_by TEXT,
-                is_deleted INTEGER DEFAULT 0
-            )
-        """)
-        
-        # custom_data 처리
-        custom_data = data.get('custom_data', {})
+    # custom_data 처리
+    custom_data = data.get('custom_data', {})
         if isinstance(custom_data, dict):
             import json
             custom_data_json = json.dumps(custom_data, ensure_ascii=False)
         else:
             custom_data_json = custom_data
         
-        # 번호 생성에 사용한 동일한 시간으로 created_at 설정
-        created_at = created_at_dt.strftime('%Y-%m-%d %H:%M:%S')
-        
-        # Follow SOP 등록 - safe_upsert 사용
-        upsert_data = {
-            'work_req_no': work_req_no,
-            'custom_data': custom_data_json,
-            'created_at': created_at,
-            'created_by': session.get('user_id', 'system'),
-            'is_deleted': 0
-        }
-        safe_upsert(conn, 'follow_sop_cache', upsert_data)
+    # Follow SOP 등록 - 메인 테이블로 저장
+    upsert_data = {
+        'work_req_no': work_req_no,
+        'custom_data': custom_data_json,
+        'created_at': created_at_dt.strftime('%Y-%m-%d %H:%M:%S'),
+        'created_by': session.get('user_id', 'system'),
+        'is_deleted': 0
+    }
+    # 충돌키 지정 (work_req_no)
+    safe_upsert(
+        conn,
+        'follow_sop',
+        upsert_data,
+        conflict_cols=['work_req_no'],
+        update_cols=['custom_data', 'updated_at', 'is_deleted']
+    )
         
         conn.commit()
         
@@ -845,7 +800,7 @@ def full_process_route():
         except Exception:
             pass
         use_cache = False
-    table_name = "full_process_cache" if use_cache else "full_process"
+    table_name = "full_process"
     
     # 전체 건수 조회
     count_query = f"""
@@ -1099,27 +1054,15 @@ def full_process_detail(fullprocess_number):
     # Full Process 정보 조회
     process_row = None
     
-    # cache 테이블이 존재하면 먼저 조회
-    if has_cache_table:
-        try:
-            cursor.execute("""
-                SELECT * FROM full_process_cache
-                WHERE fullprocess_number = ? AND (is_deleted = 0 OR is_deleted IS NULL)
-            """, (fullprocess_number,))
-            process_row = cursor.fetchone()
-        except Exception as e:
-            logging.error(f"full_process_cache 조회 오류: {e}")
-    
-    # cache에 없고 main 테이블이 존재하면 조회
-    if not process_row and has_main_table:
-        try:
-            cursor.execute("""
-                SELECT * FROM full_process
-                WHERE fullprocess_number = ?
-            """, (fullprocess_number,))
-            process_row = cursor.fetchone()
-        except Exception as e:
-            logging.error(f"full_process 조회 오류: {e}")
+    # 메인 테이블에서만 조회
+    try:
+        cursor.execute("""
+            SELECT * FROM full_process
+            WHERE fullprocess_number = ? AND (is_deleted = 0 OR is_deleted IS NULL)
+        """, (fullprocess_number,))
+        process_row = cursor.fetchone()
+    except Exception as e:
+        logging.error(f"full_process 조회 오류: {e}")
     
     if not process_row:
         conn.close()
@@ -1241,39 +1184,29 @@ def register_full_process():
         created_at_dt = get_korean_time()
         fullprocess_number = generate_fullprocess_number(DB_PATH, created_at_dt)
         
-        # full_process_cache 테이블이 없으면 생성
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS full_process_cache (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                fullprocess_number TEXT UNIQUE NOT NULL,
-                custom_data TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                created_by TEXT,
-                updated_by TEXT,
-                is_deleted INTEGER DEFAULT 0
-            )
-        """)
-        
-        # custom_data 처리
-        custom_data = data.get('custom_data', {})
+    # custom_data 처리
+    custom_data = data.get('custom_data', {})
         if isinstance(custom_data, dict):
             import json
             custom_data_json = json.dumps(custom_data, ensure_ascii=False)
         else:
             custom_data_json = custom_data
         
-        # 번호 생성에 사용한 동일한 시간으로 created_at 설정
-        created_at = created_at_dt.strftime('%Y-%m-%d %H:%M:%S')
-        
-        # Full Process 등록 - safe_upsert 사용
-        upsert_data = {
-            'fullprocess_number': fullprocess_number,
-            'custom_data': custom_data_json,
-            'created_at': created_at,
-            'created_by': session.get('user_id', 'system'),
-            'is_deleted': 0
-        }
-        safe_upsert(conn, 'full_process_cache', upsert_data)
+    # Full Process 등록 - 메인 테이블 저장
+    upsert_data = {
+        'fullprocess_number': fullprocess_number,
+        'custom_data': custom_data_json,
+        'created_at': created_at_dt.strftime('%Y-%m-%d %H:%M:%S'),
+        'created_by': session.get('user_id', 'system'),
+        'is_deleted': 0
+    }
+    safe_upsert(
+        conn,
+        'full_process',
+        upsert_data,
+        conflict_cols=['fullprocess_number'],
+        update_cols=['custom_data', 'updated_at', 'is_deleted']
+    )
         
         conn.commit()
         
