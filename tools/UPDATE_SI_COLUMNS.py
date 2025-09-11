@@ -79,6 +79,8 @@ LABELS = {
     'period': '기간',
     'work_grade': '작업등급',
     'penalty_points': '감점',
+    # 추가: 징계 발의부서 (부서 선택 팝업)
+    'issuer_incharge_dpet': '징계 발의부서',
 }
 
 
@@ -120,6 +122,9 @@ def main():
             'is_active': 1,
             'is_deleted': 0,
         }
+        # 특정 키는 명시적으로 팝업 타입 지정
+        if key_norm == 'issuer_incharge_dpet':
+            data['column_type'] = 'popup_department'
         # Preserve existing order; assign next for new keys
         if key_norm in existing:
             # do not override column_order if exists
@@ -174,4 +179,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
