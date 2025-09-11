@@ -178,7 +178,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     
     <!-- CKEditor 5 CDN -->
-    <script src="https://cdn.ckeditor.com/ckeditor5/40.0.0/classic/ckeditor.js"></script>
+    <script src="https://cdn.ckeditor.com/ckeditor5/40.0.0/super-build/ckeditor.js"></script>
     
     <!-- RichText Utility -->
     <script>
@@ -208,14 +208,16 @@
             console.log('✅ CKEditor 5 초기화 시작');
             
             // CKEditor 5 초기화
-            ClassicEditor
+            const EditorCtor = (window.CKEDITOR && CKEDITOR.ClassicEditor) ? CKEDITOR.ClassicEditor : (window.ClassicEditor || null);
+            if (!EditorCtor) { console.error('CKEditor Classic not found'); return; }
+            EditorCtor
                 .create(element, {
                     toolbar: [
                         'heading', '|',
-                        'bold', 'italic', 'underline', 'strikethrough', '|',
+                        'fontSize', 'bold', 'italic', 'underline', 'strikethrough', '|',
                         'bulletedList', 'numberedList', '|',
                         'outdent', 'indent', '|',
-                        'link', 'blockQuote', 'insertTable', '|',
+                        'link', 'insertTable', 'uploadImage', 'blockQuote', '|',
                         'undo', 'redo', '|',
                         'fontColor', 'fontBackgroundColor', '|',
                         'alignment'
@@ -234,6 +236,21 @@
                         contentToolbar: [
                             'tableColumn', 'tableRow', 'mergeTableCells',
                             'tableProperties', 'tableCellProperties'
+                        ]
+                    },
+                    ui: { shouldNotGroupWhenFull: true },
+                    simpleUpload: {
+                        uploadUrl: '/upload-inline-image',
+                        withCredentials: false
+                    },
+                    htmlSupport: {
+                        allow: [
+                            {
+                                name: /^(?!script|iframe|object|embed).*/,
+                                attributes: true,
+                                classes: true,
+                                styles: true
+                            }
                         ]
                     }
                 })

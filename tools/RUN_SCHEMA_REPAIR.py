@@ -311,6 +311,18 @@ def ensure_main_tables(cur):
         )
     """)
 
+    # pages table for CMS catch-all route
+    exec_safe(cur, """
+        CREATE TABLE IF NOT EXISTS pages (
+            id SERIAL PRIMARY KEY,
+            url TEXT UNIQUE,
+            title TEXT,
+            content TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     # partner_change_requests (used by change-request features)
     exec_safe(cur, """
         CREATE TABLE IF NOT EXISTS partner_change_requests (

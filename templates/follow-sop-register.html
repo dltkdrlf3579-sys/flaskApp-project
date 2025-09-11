@@ -264,10 +264,9 @@
         </div>
         <div class="section-content">
             <div class="content-editor">
-                <!-- Rich text editable DIV (basic mode) -->
+                <!-- CKEditor target DIV -->
                 <div id="detailed-content"
                      class="editable-content"
-                     data-editor-mode="basic"
                      contenteditable="true"
                      placeholder="상세내용을 입력하세요."></div>
             </div>
@@ -370,7 +369,11 @@ function registerFollowSop() {
     } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
         detailedContent = window.editorInstance.getData();
     } else if (contentTextarea) {
-        detailedContent = contentTextarea.value || '';
+        if (contentTextarea.tagName === 'DIV') {
+            detailedContent = contentTextarea.innerHTML || '';
+        } else {
+            detailedContent = contentTextarea.value || '';
+        }
     }
     
     formData.append('detailed_content', detailedContent);

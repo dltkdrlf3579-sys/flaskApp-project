@@ -310,7 +310,6 @@
                      class="editable-content" 
                      contenteditable="true"
                      data-content="{{ (sop.detailed_content or '') | tojson }}"
-                     data-editor-mode="basic"
                      placeholder="상세내용을 입력하세요.">{{ sop.detailed_content | striptags if sop.detailed_content else '' }}</div>
             </div>
         </div>

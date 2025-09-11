@@ -9671,6 +9671,22 @@ def page_view(url):
                 # 미등록이면 CMS 페이지 탐색으로 폴백 (아래 로직 수행)
     
     conn = get_db_connection()
+    # Ensure pages table exists even if init hook didn't run yet
+    try:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS pages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT UNIQUE,
+                title TEXT,
+                content TEXT
+            )
+        ''')
+    except Exception as _e:
+        try:
+            import logging as _logging
+            _logging.debug(f"pages ensure failed: {_e}")
+        except Exception:
+            pass
     page = conn.execute("SELECT * FROM pages WHERE url = ?", (url,)).fetchone()
     conn.close()
     

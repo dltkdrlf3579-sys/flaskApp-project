@@ -19,6 +19,12 @@
             console.log('detailed-content 요소를 찾을 수 없습니다.');
             return;
         }
+
+        // CKEditor 모드일 때는 간섭 금지 (basic 모드만 사용)
+        if (editor.getAttribute('data-editor-mode') !== 'basic') {
+            console.log('ContentEditor skipped (not basic mode)');
+            return;
+        }
         
         console.log('✅ Content Editor 초기화');
         
@@ -190,6 +196,17 @@
                 }
             }
             // 나머지는 기본 붙여넣기 허용
+        }, true);
+
+        // Ctrl+V 감지 시, 에디터 포커스 보장 (일부 브라우저에서 타겟 미지정으로 무반응 방지)
+        document.addEventListener('keydown', function(k){
+            try {
+                if ((k.ctrlKey || k.metaKey) && (k.key === 'v' || k.key === 'V')) {
+                    if (document.activeElement !== editor) {
+                        focusEditable(editor);
+                    }
+                }
+            } catch(_){}
         }, true);
     }
     
