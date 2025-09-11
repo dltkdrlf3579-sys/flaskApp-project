@@ -13,6 +13,8 @@
 {% block popup_title %}{{ instruction.issue_number }} - 환경안전 지시서 상세정보{% endblock %}
 {% block content %}
 
+{% if instruction is not defined %}{% set instruction = {} %}{% endif %}
+
 {% if not is_popup %}
 <div class="page-header">
     <h2 class="page-title">환경안전 지시서 상세정보</h2>
