@@ -50,10 +50,10 @@
                 </div>
                 {% endif %}
                 
-                <!-- accident_content는 제외하고 일반 필드만 batch 처리 -->
+                <!-- accident_content, accident_number 제외하고 일반 필드만 batch 처리 -->
                 {% set columns = [] %}
                 {% for col in all_columns %}
-                    {% if col.column_key != 'accident_content' %}
+                    {% if col.column_key not in ['accident_content', 'accident_number'] %}
                         {% set _ = columns.append(col) %}
                     {% endif %}
                 {% endfor %}

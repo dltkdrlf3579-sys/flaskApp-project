@@ -68,10 +68,12 @@
                     <th>등록일</th>
                     <!-- 나머지는 dynamic_columns -->
                     {% for col in dynamic_columns %}
-                        {% if col.column_key == 'injured_person' %}
-                        <th data-col="injured_person">{{ col.column_name }}</th>
+                        {% if col.column_key == 'accident_number' %}
+                            {# duplicate of primary key column; skip #}
+                        {% elif col.column_key == 'injured_person' %}
+                            <th data-col="injured_person">{{ col.column_name }}</th>
                         {% else %}
-                        <th>{{ col.column_name }}</th>
+                            <th>{{ col.column_name }}</th>
                         {% endif %}
                     {% endfor %}
                 </tr>
@@ -103,7 +105,9 @@
                     
                     <!-- 나머지 dynamic columns -->
                     {% for col in dynamic_columns %}
-                        {% if col.column_key == 'accident_name' %}
+                        {% if col.column_key == 'accident_number' %}
+                            {# skip duplicate accident number cell #}
+                        {% elif col.column_key == 'accident_name' %}
                             {% set value = accident[col.column_key] or accident.get(col.column_key) %}
                             <td>{{ value if value else '-' }}</td>
                         {% elif col.column_key == 'injured_person' %}
