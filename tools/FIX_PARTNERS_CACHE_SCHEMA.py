@@ -102,6 +102,7 @@ def main():
         ('created_at', 'created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
         ('updated_at', 'updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
         ('is_deleted', 'is_deleted INTEGER DEFAULT 0'),
+        ('synced_at', 'synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
     ]
 
     try:
@@ -124,6 +125,22 @@ def main():
                     """
                 )
                 print('Converted partners_cache.is_deleted from BOOLEAN to INTEGER')
+        # Ensure custom_data JSONB with default
+        if not col_exists(cur, 'partners_cache', 'custom_data'):
+            try:
+                cur.execute("ALTER TABLE partners_cache ADD COLUMN custom_data JSONB DEFAULT '{}'::JSONB")
+            except Exception:
+                # Some Postgres versions may accept JSON default without ::JSONB
+                try:
+                    cur.execute("ALTER TABLE partners_cache ADD COLUMN custom_data JSONB DEFAULT '{}'::JSONB")
+                except Exception:
+                    pass
+
+        # Ensure UNIQUE index on business_number for ON CONFLICT
+        try:
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_partners_cache_bn ON partners_cache(business_number)")
+        except Exception:
+            pass
 
         conn.commit()
     except Exception as e:
@@ -148,4 +165,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

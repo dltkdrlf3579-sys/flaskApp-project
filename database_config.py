@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, date
 from decimal import Decimal
 import numpy as np
 import json
+import re
 from db_connection import get_db_connection
 from db.upsert import safe_upsert
 
@@ -350,10 +351,45 @@ class PartnerDataManager:
                     _skipped_missing_bn += 1
                     continue
 
-                # 숫자 컬럼 안전 변환
-                _tc = row.get('transaction_count', None)
-                if isinstance(_tc, str) and _tc.strip() == '':
-                    _tc = None
+                # 숫자/금액/카운트 안전 변환
+                def _to_int_safe(v):
+                    try:
+                        if v is None or (hasattr(pd, 'isna') and pd.isna(v)):
+                            return None
+                        if isinstance(v, (int, np.integer)):
+                            return int(v)
+                        if isinstance(v, (float, np.floating)):
+                            return int(v)
+                        s = str(v).strip()
+                        if s == '':
+                            return None
+                        s = re.sub(r"[^0-9-]", "", s)
+                        if s in ('', '-'):
+                            return None
+                        return int(s)
+                    except Exception:
+                        return None
+
+                def _to_float_safe(v):
+                    try:
+                        if v is None or (hasattr(pd, 'isna') and pd.isna(v)):
+                            return None
+                        if isinstance(v, (int, np.integer, float, np.floating)):
+                            return float(v)
+                        s = str(v).strip()
+                        if s == '':
+                            return None
+                        s = s.replace(',', '')
+                        s = re.sub(r"[^0-9+\-\.eE]", "", s)
+                        return float(s)
+                    except Exception:
+                        return None
+
+                avg_age = _to_float_safe(row.get('average_age', None))
+                revenue = _to_float_safe(row.get('annual_revenue', None))
+                trx_cnt = _to_int_safe(row.get('transaction_count', None))
+                perm_workers = _to_int_safe(row.get('permanent_workers', None))
+                hazard_flag = row.get('hazard_work_flag', row.get('hazard_work_fla', ''))
 
                 rows.append((
                     business_number,
@@ -361,24 +397,77 @@ class PartnerDataManager:
                     row.get('partner_class', ''),
                     row.get('business_type_major', ''),
                     row.get('business_type_minor', ''),
-                    row.get('hazard_work_flag', ''),
+                    hazard_flag,
                     row.get('representative', ''),
                     row.get('address', ''),
-                    row.get('average_age', None),
-                    row.get('annual_revenue', None),
-                    _tc,
-                    row.get('permanent_workers', None)
+                    avg_age,
+                    revenue,
+                    trx_cnt,
+                    perm_workers
                 ))
             
-            # 배치 삽입 (custom_data 컬럼 제거)
-            cursor.executemany('''
-                INSERT INTO partners_cache (
-                    business_number, company_name, partner_class, business_type_major,
-                    business_type_minor, hazard_work_flag, representative, address,
-                    average_age, annual_revenue, transaction_count, permanent_workers,
-                    is_deleted
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-            ''', rows)
+            # 배치 삽입 (중복 키는 업서트)
+            try:
+                cursor.executemany('''
+                    INSERT INTO partners_cache (
+                        business_number, company_name, partner_class, business_type_major,
+                        business_type_minor, hazard_work_flag, representative, address,
+                        average_age, annual_revenue, transaction_count, permanent_workers,
+                        is_deleted
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                    ON CONFLICT (business_number)
+                    DO UPDATE SET
+                        company_name = EXCLUDED.company_name,
+                        partner_class = EXCLUDED.partner_class,
+                        business_type_major = EXCLUDED.business_type_major,
+                        business_type_minor = EXCLUDED.business_type_minor,
+                        hazard_work_flag = EXCLUDED.hazard_work_flag,
+                        representative = EXCLUDED.representative,
+                        address = EXCLUDED.address,
+                        average_age = EXCLUDED.average_age,
+                        annual_revenue = EXCLUDED.annual_revenue,
+                        transaction_count = EXCLUDED.transaction_count,
+                        permanent_workers = EXCLUDED.permanent_workers,
+                        updated_at = CURRENT_TIMESTAMP
+                ''', rows)
+            except Exception as _bulk_err:
+                # Fallback: per-row insert with savepoints to skip bad rows
+                print(f"[WARN] bulk insert failed: {_bulk_err}. Fallback to per-row inserts.")
+                ok, bad = 0, 0
+                for vals in rows:
+                    try:
+                        cursor.execute("SAVEPOINT sp_row")
+                        cursor.execute('''
+                            INSERT INTO partners_cache (
+                                business_number, company_name, partner_class, business_type_major,
+                                business_type_minor, hazard_work_flag, representative, address,
+                                average_age, annual_revenue, transaction_count, permanent_workers,
+                                is_deleted
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                            ON CONFLICT (business_number)
+                            DO UPDATE SET
+                                company_name = EXCLUDED.company_name,
+                                partner_class = EXCLUDED.partner_class,
+                                business_type_major = EXCLUDED.business_type_major,
+                                business_type_minor = EXCLUDED.business_type_minor,
+                                hazard_work_flag = EXCLUDED.hazard_work_flag,
+                                representative = EXCLUDED.representative,
+                                address = EXCLUDED.address,
+                                average_age = EXCLUDED.average_age,
+                                annual_revenue = EXCLUDED.annual_revenue,
+                                transaction_count = EXCLUDED.transaction_count,
+                                permanent_workers = EXCLUDED.permanent_workers,
+                                updated_at = CURRENT_TIMESTAMP
+                        ''', vals)
+                        cursor.execute("RELEASE SAVEPOINT sp_row")
+                        ok += 1
+                    except Exception as _row_err:
+                        try:
+                            cursor.execute("ROLLBACK TO SAVEPOINT sp_row")
+                        except Exception:
+                            pass
+                        bad += 1
+                print(f"[INFO] per-row insert: ok={ok}, skipped={bad}")
             
             # 기존 is_deleted 복원
             cursor.execute("""
