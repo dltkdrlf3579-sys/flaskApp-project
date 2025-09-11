@@ -306,7 +306,13 @@ class PartnerDataManager:
             # 외부 DB에서 데이터 조회
             print("[INFO] IQADB_CONNECT310을 사용하여 데이터 조회 시작...")
             df = execute_SQL(query)
+            # 외부 DB 컬럼명이 대문자/혼합/한글일 수 있어 표준화 필요
+            df = _normalize_df(df)
             print(f"[INFO] 데이터 조회 완료: {len(df)} 건")
+            try:
+                print(f"[DEBUG] Partners DataFrame columns: {list(df.columns)}")
+            except Exception:
+                pass
             
             if df.empty:
                 print("[WARNING] 조회된 데이터가 없습니다.")
@@ -336,9 +342,19 @@ class PartnerDataManager:
             
             # 배치 삽입을 위한 데이터 준비
             rows = []
+            _skipped_missing_bn = 0
             for _, row in df.iterrows():
-                business_number = row.get('business_number', '')
-                
+                # 필수 키 누락(빈 문자열 포함) 행은 스킵하여 UNIQUE 충돌과 파이프라인 중단을 방지
+                business_number = str(row.get('business_number') or '').strip()
+                if not business_number:
+                    _skipped_missing_bn += 1
+                    continue
+
+                # 숫자 컬럼 안전 변환
+                _tc = row.get('transaction_count', None)
+                if isinstance(_tc, str) and _tc.strip() == '':
+                    _tc = None
+
                 rows.append((
                     business_number,
                     row.get('company_name', ''),
@@ -350,7 +366,7 @@ class PartnerDataManager:
                     row.get('address', ''),
                     row.get('average_age', None),
                     row.get('annual_revenue', None),
-                    row.get('transaction_count', ''),
+                    _tc,
                     row.get('permanent_workers', None)
                 ))
             
@@ -465,6 +481,11 @@ class PartnerDataManager:
                     location_category, location_detail, custom_data, is_deleted, created_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', 0, CURRENT_TIMESTAMP)
             ''', rows)
+            try:
+                if _skipped_missing_bn:
+                    print(f"[INFO] business_number 누락으로 스킵된 행: {_skipped_missing_bn}")
+            except Exception:
+                pass
             
             # 기존 custom_data와 is_deleted 복원
             cursor.execute("""
