@@ -13,7 +13,7 @@ from db_connection import get_db_connection
 
 BASIC = {
     'issue_number','created_at',
-    'issuer','issuer_id','issuer_dept','issuer_incharge_dpet',
+    'issuer','issuer_id','issuer_dept','issuer_incharge_dept',
     'classification','employment_type','employement_type',
     'primary_company','primary_company_bizno',
     'secondary_company','secondary_company_bizno',
@@ -72,4 +72,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

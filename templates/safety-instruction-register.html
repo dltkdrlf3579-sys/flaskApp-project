@@ -37,10 +37,23 @@
         <div class="section-content" id="{{ section.section_key|replace('_', '-') }}-content">
             <div class="info-table">
                 {% set all_columns = section_columns[section.section_key] %}
-                <!-- detailed_content와 violation_content는 제외 -->
+                {# 첫 번째 섹션에 고정 필드(발부번호/등록일) 표시 #}
+                {% if loop.index == 1 %}
+                <div class="info-row">
+                    <div class="info-cell span-1">
+                        <label>발부번호</label>
+                        <input type="text" value="자동 생성" readonly style="background-color: #f3f4f6; color: #6b7280; font-style: italic;">
+                    </div>
+                    <div class="info-cell span-1">
+                        <label>등록일</label>
+                        <input type="date" value="{{ today_date }}" readonly style="background-color: #f3f4f6;">
+                    </div>
+                </div>
+                {% endif %}
+                <!-- detailed_content/violation_content/issue_number/created_at 제외 -->
                 {% set columns = [] %}
                 {% for col in all_columns %}
-                    {% if col.column_key not in ['detailed_content', 'violation_content'] %}
+                    {% if col.column_key not in ['detailed_content', 'violation_content', 'issue_number', 'created_at'] %}
                         {% set _ = columns.append(col) %}
                     {% endif %}
                 {% endfor %}
