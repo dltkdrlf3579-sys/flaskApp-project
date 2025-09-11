@@ -54,13 +54,58 @@ def follow_sop_route():
             col for col in dynamic_columns if col.get('tab') == section['section_key']
         ]
 
-    # 목록 표시용 컬럼(중복 제거, 불필요 키 제외)
+    # 목록 표시용 컬럼(중복 제거, 불필요 키 제외) + 채점 항목 컬럼 인라인 확장
     excluded_keys = {'detailed_content', 'violation_content', 'work_req_no', 'registered_date', 'created_at'}
     seen_keys = set()
     display_columns = []
+
+    def _expand_scoring_columns(col):
+        try:
+            import json as _json
+            sc = col.get('scoring_config')
+            if sc and isinstance(sc, str):
+                try: sc = _json.loads(sc)
+                except Exception: sc = {}
+            if not sc or not isinstance(sc, dict):
+                return []
+            items = sc.get('items') or []
+            out = []
+            for it in items:
+                item_id = it.get('id')
+                label = it.get('label') or item_id
+                if not item_id: 
+                    continue
+                dkey = f"{col.get('column_key')}__{item_id}"
+                out.append({
+                    'column_key': dkey,
+                    'column_name': f"{col.get('column_name', col.get('column_key'))} - {label}",
+                    'column_type': 'number',
+                    'input_type': 'number_integer',
+                    'is_active': 1,
+                    'is_deleted': 0,
+                    'tab': col.get('tab'),
+                    '_virtual': 1,
+                    '_source_scoring_key': col.get('column_key'),
+                    '_source_item_id': item_id
+                })
+            return out
+        except Exception:
+            return []
+
     for col in dynamic_columns:
         key = col.get('column_key')
-        if not key or key in excluded_keys or key in seen_keys:
+        if not key or key in excluded_keys:
+            continue
+        if col.get('column_type') == 'scoring':
+            # 채점 항목을 개별 컬럼으로 확장
+            for vcol in _expand_scoring_columns(col):
+                vkey = vcol['column_key']
+                if vkey in seen_keys:
+                    continue
+                seen_keys.add(vkey)
+                display_columns.append(vcol)
+            continue
+        if key in seen_keys:
             continue
         seen_keys.add(key)
         display_columns.append(col)
@@ -80,14 +125,20 @@ def follow_sop_route():
     
     if company_name:
         search_params['company_name'] = company_name
-        # 호환: company_name 또는 company_name_1cha 키 모두 검색
-        where_clauses.append("(JSON_EXTRACT(s.custom_data, '$.company_name') LIKE ? OR JSON_EXTRACT(s.custom_data, '$.company_name_1cha') LIKE ?)")
+        # 호환: company_name 또는 company_name_1cha 키 모두 검색 (Postgres JSONB / SQLite JSON)
+        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+            where_clauses.append("((s.custom_data->>'company_name') ILIKE %s OR (s.custom_data->>'company_name_1cha') ILIKE %s)")
+        else:
+            where_clauses.append("(JSON_EXTRACT(s.custom_data, '$.company_name') LIKE ? OR JSON_EXTRACT(s.custom_data, '$.company_name_1cha') LIKE ?)")
         query_params.extend([f"%{company_name}%", f"%{company_name}%"])
     
     if business_number:
         search_params['business_number'] = business_number
-        # 호환: business_number 또는 company_name_1cha_bizno 키 모두 검색
-        where_clauses.append("(JSON_EXTRACT(s.custom_data, '$.business_number') LIKE ? OR JSON_EXTRACT(s.custom_data, '$.company_name_1cha_bizno') LIKE ?)")
+        # 호환: business_number 또는 company_name_1cha_bizno 키 모두 검색 (Postgres/SQLite 분기)
+        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+            where_clauses.append("((s.custom_data->>'business_number') ILIKE %s OR (s.custom_data->>'company_name_1cha_bizno') ILIKE %s)")
+        else:
+            where_clauses.append("(JSON_EXTRACT(s.custom_data, '$.business_number') LIKE ? OR JSON_EXTRACT(s.custom_data, '$.company_name_1cha_bizno') LIKE ?)")
         query_params.extend([f"%{business_number}%", f"%{business_number}%"])
     
     # WHERE 절 구성 (삭제되지 않은 항목만)
@@ -156,6 +207,27 @@ def follow_sop_route():
                 custom_data = {}
             if isinstance(custom_data, dict):
                 item.update(custom_data)
+
+            # 채점 항목을 개별 키로 평탄화: source_scoring_key__item_id = count
+            try:
+                for dcol in display_columns:
+                    if dcol.get('_virtual') == 1:
+                        src = dcol.get('_source_scoring_key')
+                        iid = dcol.get('_source_item_id')
+                        if not src or not iid:
+                            continue
+                        group_obj = custom_data.get(src)
+                        if isinstance(group_obj, str):
+                            try:
+                                import json as _json
+                                group_obj = _json.loads(group_obj)
+                            except Exception:
+                                group_obj = {}
+                        if isinstance(group_obj, dict):
+                            item_key = f"{src}__{iid}"
+                            item[item_key] = group_obj.get(iid, 0)
+            except Exception as _e:
+                logging.error(f"scoring flatten error: {_e}")
         # No 칼럼은 역순 번호로 설정 (총 개수에서 역순)
         item['no'] = total_count - offset - idx
         items.append(item)
@@ -687,14 +759,20 @@ def full_process_route():
     
     if company_name:
         search_params['company_name'] = company_name
-        # 호환: company_name 또는 company_1cha 키 모두 검색
-        where_clauses.append("(JSON_EXTRACT(p.custom_data, '$.company_name') LIKE ? OR JSON_EXTRACT(p.custom_data, '$.company_1cha') LIKE ?)")
+        # 호환: company_name 또는 company_1cha 키 모두 검색 (Postgres/SQLite 분기)
+        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+            where_clauses.append("((p.custom_data->>'company_name') ILIKE %s OR (p.custom_data->>'company_1cha') ILIKE %s)")
+        else:
+            where_clauses.append("(JSON_EXTRACT(p.custom_data, '$.company_name') LIKE ? OR JSON_EXTRACT(p.custom_data, '$.company_1cha') LIKE ?)")
         query_params.extend([f"%{company_name}%", f"%{company_name}%"])
     
     if business_number:
         search_params['business_number'] = business_number
-        # 호환: business_number 또는 company_1cha_bizno 키 모두 검색
-        where_clauses.append("(JSON_EXTRACT(p.custom_data, '$.business_number') LIKE ? OR JSON_EXTRACT(p.custom_data, '$.company_1cha_bizno') LIKE ?)")
+        # 호환: business_number 또는 company_1cha_bizno 키 모두 검색 (Postgres/SQLite 분기)
+        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+            where_clauses.append("((p.custom_data->>'business_number') ILIKE %s OR (p.custom_data->>'company_1cha_bizno') ILIKE %s)")
+        else:
+            where_clauses.append("(JSON_EXTRACT(p.custom_data, '$.business_number') LIKE ? OR JSON_EXTRACT(p.custom_data, '$.company_1cha_bizno') LIKE ?)")
         query_params.extend([f"%{business_number}%", f"%{business_number}%"])
     
     # WHERE 절 구성 (삭제되지 않은 항목만)

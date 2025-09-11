@@ -250,11 +250,11 @@
             }
             
             .tab-section-header.violation-info {
-                background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             }
             
             .tab-section-header.additional-info {
-                background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             }
             
             .columns-grid {
@@ -1627,12 +1627,26 @@ window.addEventListener('error', function(ev){
             (function(){
                 const scArea = document.getElementById('scoringConfig');
                 if (!scArea) return;
-                if (column.column_type === 'scoring' || column.column_type === 'score_total') {
+                if (column.column_type === 'scoring' || column.column_type === 'score_total' || column.column_type === 'number') {
                     let sc = column.scoring_config || '';
                     if (sc && typeof sc !== 'string') {
                         try { sc = JSON.stringify(sc, null, 2); } catch (e) {}
                     }
                     scArea.value = sc || '';
+                    if (column.column_type === 'number') {
+                        try {
+                            const obj = sc ? JSON.parse(sc) : {};
+                            const perEl = document.getElementById('numberPerUnit');
+                            const gradeEl = document.getElementById('numberGrade');
+                            if (perEl) perEl.value = (obj && (obj.per_unit_delta ?? ''));
+                            if (gradeEl) gradeEl.value = (obj && (obj.grade ?? ''));
+                        } catch(e) {
+                            const perEl = document.getElementById('numberPerUnit');
+                            const gradeEl = document.getElementById('numberGrade');
+                            if (perEl) perEl.value = '';
+                            if (gradeEl) gradeEl.value = '';
+                        }
+                    }
                 } else {
                     scArea.value = '';
                 }
@@ -1721,9 +1735,19 @@ window.addEventListener('error', function(ev){
             const type = document.getElementById('columnType').value;
             const el = document.getElementById('scoringConfigField');
             if (el) {
-                el.style.display = (type === 'scoring' || type === 'score_total') ? 'block' : 'none';
+                const btn = el.querySelector('button');
+                const label = document.getElementById('scoringPreviewLabel');
                 if (type === 'scoring' || type === 'score_total') {
+                    el.style.display = 'block';
+                    if (btn) btn.style.display = '';
+                    if (label) label.textContent = '설정되지 않음';
                     updateScoringPreview();
+                } else if (type === 'number') {
+                    el.style.display = 'block';
+                    if (btn) btn.style.display = 'none';
+                    if (label) label.textContent = '숫자 컬럼: 단위당 점수/등급 설정 사용';
+                } else {
+                    el.style.display = 'none';
                 }
             }
         }
@@ -2195,6 +2219,15 @@ window.addEventListener('error', function(ev){
                         resolvedInputType = (nt === 'integer') ? 'number_integer' : 'number_float';
                     }
 
+                    // 숫자형 수정 시 간단 가중치/등급을 scoring_config로 반영
+                    if (columnType === 'number') {
+                        const per = parseFloat(document.getElementById('numberPerUnit').value || '0');
+                        const grade = document.getElementById('numberGrade').value || '';
+                        const conf = { per_unit_delta: per };
+                        if (grade) conf.grade = grade;
+                        const ta = document.getElementById('scoringConfig');
+                        if (ta) ta.value = JSON.stringify(conf);
+                    }
                     const scText = (document.getElementById('scoringConfig') || {}).value || pendingColumns[index].scoring_config || null;
                     pendingColumns[index] = {
                         ...existingColumn,
@@ -2218,8 +2251,8 @@ window.addEventListener('error', function(ev){
                         alert('변경사항이 저장 대기중입니다.\n"전체 변경사항 저장" 버튼을 눌러 최종 반영하세요.');
                     }, 0);
                 }
-                } else {
-                    // 새 컬럼 추가
+            } else {
+                // 새 컬럼 추가
                     if (columnType === 'list') {
                     // 리스트 타입 처리
                     const listItemType = document.getElementById('listItemType').value;
@@ -2300,6 +2333,15 @@ window.addEventListener('error', function(ev){
                     const sectionColumns = pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete);
                     const maxOrderInSection = sectionColumns.length > 0 ? Math.max(...sectionColumns.map(c => c.column_order)) : -1;
                     
+                    // 숫자형은 간단 가중치/등급을 scoring_config로 저장
+                    if (columnType === 'number') {
+                        const per = parseFloat(document.getElementById('numberPerUnit').value || '0');
+                        const grade = document.getElementById('numberGrade').value || '';
+                        const conf = { per_unit_delta: per };
+                        if (grade) conf.grade = grade;
+                        const ta = document.getElementById('scoringConfig');
+                        if (ta) ta.value = JSON.stringify(conf);
+                    }
                     const scText = (document.getElementById('scoringConfig') || {}).value || null;
                     const newColumn = {
                         id: newId,

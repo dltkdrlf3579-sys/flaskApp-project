@@ -7,6 +7,34 @@
     min-height: 100px;
 }
 
+.scoring-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.scoring-toggle {
+    padding: 6px 10px;
+    background: #2563eb;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.scoring-summary {
+    display: flex;
+    gap: 8px;
+    font-size: 12px;
+    color: #374151;
+}
+
+.scoring-items { display: none; }
+.scoring-field.open .scoring-items { display: block; }
+
 .scoring-field .alert {
     padding: 12px 16px;
     margin: 0;
@@ -102,12 +130,39 @@
     color: #10b981;
 }
 
+/* Scoring as multiple columns (embedded like normal fields) */
+.scoring-columns {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0,1fr));
+    gap: 10px;
+}
+.scoring-columns .sc-col {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 8px;
+}
+.scoring-columns .sc-col input[type="number"] {
+    width: 100%;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    padding: 6px 8px;
+}
+.scoring-columns .sc-col .hint {
+    color: #6b7280;
+    font-size: 12px;
+}
+
 /* 총점 필드 스타일 */
 .score-total-field {
-    padding: 15px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border-radius: 8px;
-    color: white;
+    padding: 12px;
+    background: #f8f9fa;
+    border: 1px solid #e1e5e9;
+    border-radius: 4px;
+    color: #333;
 }
 
 .score-display {
@@ -115,43 +170,44 @@
 }
 
 .score-value {
-    font-size: 36px;
-    font-weight: bold;
+    font-size: 20px;
+    font-weight: 700;
     display: inline-block;
-    margin-right: 5px;
-    color: white !important;
+    margin-right: 4px;
+    color: #111 !important;
 }
 
-.score-value.excellent::after {
-    content: ' 🌟';
-}
-
-.score-value.good::after {
-    content: ' ✨';
-}
-
-.score-value.fair::after {
-    content: ' ⭐';
-}
-
-.score-value.poor::after {
-    content: ' ⚠️';
-}
+.score-value.excellent::after {}
+.score-value.good::after {}
+.score-value.fair::after {}
+.score-value.poor::after {}
 
 .score-breakdown {
-    margin-top: 10px;
+    margin-top: 6px;
     display: flex;
-    justify-content: center;
-    gap: 15px;
+    justify-content: flex-start;
+    gap: 8px;
     font-size: 12px;
     opacity: 0.9;
     flex-wrap: wrap;
 }
 
-.score-breakdown span {
-    padding: 2px 8px;
-    background: rgba(255, 255, 255, 0.2);
+.score-breakdown span { padding: 0; background: transparent; }
+
+/* Compact summary in register forms */
+.score-summary {
+    padding: 8px 12px;
+    background: #f8f9fa;
+    border: 1px solid #e1e5e9;
     border-radius: 4px;
+}
+.summary-row.compact {
+    font-size: 14px;
+    color: #333;
+}
+.summary-row.total {
+    margin-top: 4px;
+    font-weight: 700;
 }
 
 /* 반응형 디자인 */
@@ -161,6 +217,7 @@
         align-items: flex-start;
         gap: 8px;
     }
+    .scoring-columns { grid-template-columns: repeat(2, minmax(0,1fr)); }
     
     .scoring-controls {
         width: 100%;

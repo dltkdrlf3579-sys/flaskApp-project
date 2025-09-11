@@ -5,6 +5,8 @@
 {% endif %}
 
 {% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/scoring-system.css') }}">
+<script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
 {% endblock %}
 
 {% block title %}Full Process 상세정보{% endblock %}
@@ -322,6 +324,15 @@
                                 {% elif col.column_type == 'scoring' %}
                                     <!-- 채점 필드 -->
                                     <div class="scoring-field" data-field="{{ col.column_key }}" data-config="{{ col.scoring_config | default('{}') | tojson }}">
+                                        <div class="scoring-header">
+                                            <button type="button" class="scoring-toggle">채점 편집</button>
+                                            <div class="scoring-summary">
+                                                <span class="summary-total">총점: <b class="score-inline">100</b></span>
+                                                <span class="summary-count critical">중대 0</span>
+                                                <span class="summary-count major">주요 0</span>
+                                                <span class="summary-count minor">경미 0</span>
+                                            </div>
+                                        </div>
                                         <div class="scoring-items">
                                             <!-- 동적으로 생성될 채점 항목들 -->
                                         </div>
@@ -334,7 +345,8 @@
                                     
                                 {% elif col.column_type == 'score_total' %}
                                     <!-- 총점 필드 (자동 계산) -->
-                                    <div class="score-total-field">
+                                    {% set sc = (col.scoring_config|from_json) %}
+                                    <div class="score-total-field" data-total-key="{{ sc.total_key if sc and sc.total_key else 'default' }}">
                                         <div class="score-display">
                                             <span class="score-value">0</span>점
                                             <div class="score-breakdown">
@@ -1706,7 +1718,5 @@ document.addEventListener('DOMContentLoaded', function() {
 {% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
 {{ attachment_styles() }}
 {{ attachment_scripts() }}
-
-<script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
 
 {% endblock %}

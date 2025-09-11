@@ -1,36 +1,47 @@
 // 채점 시스템 JavaScript
+
+function decodeHtmlEntities(s) {
+    if (typeof s !== 'string') return s;
+    return s
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&');
+}
+
+function parseJsonDeep(text, fallback = {}) {
+    try {
+        let t = decodeHtmlEntities(text || '');
+        if (!t) return fallback;
+        let v = JSON.parse(t);
+        if (typeof v === 'string') {
+            try { v = JSON.parse(v); } catch (e2) { return fallback; }
+        }
+        return v;
+    } catch (e) {
+        return fallback;
+    }
+}
+
 function initScoringSystem() {
     console.log('🎯 Initializing scoring system...');
     
-    // 모든 채점 필드 찾기
+    // 모든 채점 필드 찾기 (.scoring-field 형태)
     const scoringFields = document.querySelectorAll('.scoring-field');
     console.log(`Found ${scoringFields.length} scoring fields`);
     
     scoringFields.forEach((field, index) => {
         console.log(`Processing field ${index}:`, field.dataset.field);
         
-        let config = {};
-        try {
-            // HTML entity decode if needed
-            let configStr = field.dataset.config || '{}';
-            configStr = configStr.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-            config = JSON.parse(configStr);
-            console.log(`Config for field ${index}:`, config);
-        } catch (e) {
-            console.error(`Failed to parse config for field ${index}:`, e, field.dataset.config);
-            config = {};
-        }
+        const config = parseJsonDeep(field.dataset.config, {});
+        console.log(`Config for field ${index}:`, config);
         const hiddenInput = field.querySelector('input[type="hidden"]');
-        let currentValue = {};
-        try {
-            let valueStr = hiddenInput.value || '{}';
-            valueStr = valueStr.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-            currentValue = JSON.parse(valueStr);
-        } catch (e) {
-            console.error('Failed to parse current value:', e);
-            currentValue = {};
-        }
+        const currentValue = parseJsonDeep(hiddenInput?.value || '{}', {});
         
+        // 헤더/토글 UI 보장
+        ensureScoringHeader(field);
+
         const itemsContainer = field.querySelector('.scoring-items');
         
         if (config.items && config.items.length > 0) {
@@ -79,6 +90,37 @@ function initScoringSystem() {
     calculateTotalScore();
 }
 
+function ensureScoringHeader(fieldEl) {
+    let header = fieldEl.querySelector('.scoring-header');
+    if (!header) {
+        header = document.createElement('div');
+        header.className = 'scoring-header';
+        header.innerHTML = `
+            <button type="button" class="scoring-toggle">채점 편집</button>
+            <div class="scoring-summary">
+                <span class="summary-total">총점: <b class="score-inline">100</b></span>
+                <span class="summary-count critical">중대 0</span>
+                <span class="summary-count major">주요 0</span>
+                <span class="summary-count minor">경미 0</span>
+            </div>
+        `;
+        fieldEl.insertBefore(header, fieldEl.firstChild);
+    }
+
+    const toggleBtn = header.querySelector('.scoring-toggle');
+    const itemsEl = fieldEl.querySelector('.scoring-items');
+    if (toggleBtn && itemsEl) {
+        // 초기 상태: 접힘
+        fieldEl.classList.remove('open');
+        itemsEl.style.display = 'none';
+        toggleBtn.addEventListener('click', () => {
+            const open = fieldEl.classList.toggle('open');
+            itemsEl.style.display = open ? 'block' : 'none';
+            toggleBtn.textContent = open ? '접기' : '채점 편집';
+        });
+    }
+}
+
 function handleScoringButton(e) {
     const btn = e.target;
     const itemId = btn.dataset.item;
@@ -112,7 +154,7 @@ function handleScoringInput(e) {
 
 function updateScoringValue(field, itemId, value) {
     const hiddenInput = field.querySelector('input[type="hidden"]');
-    const currentValue = JSON.parse(hiddenInput.value || '{}');
+    const currentValue = parseJsonDeep(hiddenInput.value || '{}', {});
     const input = field.querySelector(`input[data-item="${itemId}"]`);
     const delta = parseFloat(input.dataset.delta);
     const pointsSpan = input.parentElement.querySelector('.scoring-points');
@@ -131,77 +173,162 @@ function updateScoringValue(field, itemId, value) {
 
 function calculateTotalScore() {
     const scoringFields = document.querySelectorAll('.scoring-field');
-    const totalField = document.querySelector('.score-total-field');
-    
-    if (!totalField) return;
-    
-    let totalScore = 100; // 기본 점수
-    let criticalCount = 0;
-    let majorCount = 0;
-    let minorCount = 0;
-    let bonusCount = 0;
-    
+    // 그룹별 합산 결과
+    const groups = {};
+
     scoringFields.forEach(field => {
-        const config = JSON.parse(field.dataset.config || '{}');
+        const config = parseJsonDeep(field.dataset.config, {});
+
+        const groupKey = config.total_key || config.group || 'default';
+        if (!groups[groupKey]) {
+            const base = (typeof config.base_score === 'number') ? config.base_score : 100;
+            groups[groupKey] = {
+                base: base,
+                total: base,
+                critical: 0,
+                major: 0,
+                minor: 0,
+                bonus: 0
+            };
+        }
+
         const hiddenInput = field.querySelector('input[type="hidden"]');
-        const currentValue = JSON.parse(hiddenInput.value || '{}');
-        
-        // 등급 기준 가져오기
+        const currentValue = parseJsonDeep(hiddenInput?.value || '{}', {});
+
         const criteria = config.grade_criteria || {
             critical: { min: -999, max: -10 },
             major: { min: -9, max: -5 },
             minor: { min: -4, max: -1 },
             bonus: { min: 0.1, max: 999 }
         };
-        
-        if (config.items) {
+
+        if (Array.isArray(config.items)) {
             config.items.forEach(item => {
-                const count = currentValue[item.id] || 0;
-                const points = count * item.per_unit_delta;
-                totalScore += points;
-                
-                // 등급별 카운트
+                const count = Number(currentValue[item.id] || 0);
+                const points = count * Number(item.per_unit_delta || 0);
+                groups[groupKey].total += points;
+
                 if (points <= criteria.critical.max && points >= criteria.critical.min) {
-                    criticalCount += count;
+                    groups[groupKey].critical += count;
                 } else if (points <= criteria.major.max && points >= criteria.major.min) {
-                    majorCount += count;
+                    groups[groupKey].major += count;
                 } else if (points <= criteria.minor.max && points >= criteria.minor.min) {
-                    minorCount += count;
+                    groups[groupKey].minor += count;
                 } else if (points >= criteria.bonus.min) {
-                    bonusCount += count;
+                    groups[groupKey].bonus += count;
                 }
             });
         }
     });
-    
-    // 총점 표시 업데이트
-    const scoreValue = totalField.querySelector('.score-value');
-    const hiddenInput = totalField.querySelector('input[type="hidden"]');
-    
-    scoreValue.textContent = totalScore;
-    scoreValue.className = 'score-value ' + (totalScore >= 90 ? 'excellent' : totalScore >= 70 ? 'good' : totalScore >= 50 ? 'fair' : 'poor');
-    
-    hiddenInput.value = JSON.stringify({
-        total: totalScore,
-        critical: criticalCount,
-        major: majorCount,
-        minor: minorCount,
-        bonus: bonusCount
+
+    // .scoring-group 형태도 합산 (간단 네모 입력들)
+    document.querySelectorAll('.scoring-group').forEach(groupEl => {
+        const cfg = parseJsonDeep(groupEl.dataset.config, {});
+        const groupKey = groupEl.getAttribute('data-group') || cfg.total_key || cfg.group || 'default';
+        if (!groups[groupKey]) {
+            const base = (typeof cfg.base_score === 'number') ? cfg.base_score : 100;
+            groups[groupKey] = { base, total: base, critical: 0, major: 0, minor: 0, bonus: 0 };
+        }
+        const criteria = cfg.grade_criteria || {
+            critical: { min: -999, max: -10 },
+            major: { min: -9, max: -5 },
+            minor: { min: -4, max: -1 },
+            bonus: { min: 0.1, max: 999 }
+        };
+
+        groupEl.querySelectorAll('input.scoring-input').forEach(inp => {
+            const count = Number(inp.value || 0);
+            const delta = Number(inp.dataset.score || 0);
+            const points = count * delta;
+            groups[groupKey].total += points;
+            if (points <= criteria.critical.max && points >= criteria.critical.min) {
+                groups[groupKey].critical += count;
+            } else if (points <= criteria.major.max && points >= criteria.major.min) {
+                groups[groupKey].major += count;
+            } else if (points <= criteria.minor.max && points >= criteria.minor.min) {
+                groups[groupKey].minor += count;
+            } else if (points >= criteria.bonus.min) {
+                groups[groupKey].bonus += count;
+            }
+        });
     });
-    
-    // 등급별 카운트 업데이트
-    const criticalEl = totalField.querySelector('.critical-count');
-    const majorEl = totalField.querySelector('.major-count');
-    const minorEl = totalField.querySelector('.minor-count');
-    const bonusEl = totalField.querySelector('.bonus-count');
-    
-    if (criticalEl) criticalEl.textContent = `중대: ${criticalCount}`;
-    if (majorEl) majorEl.textContent = `주요: ${majorCount}`;
-    if (minorEl) minorEl.textContent = `경미: ${minorCount}`;
-    if (bonusEl) bonusEl.textContent = `가점: ${bonusCount}`;
+
+    // 상세의 그룹별 총점 박스 업데이트
+    document.querySelectorAll('.score-total-field').forEach(box => {
+        const key = box.getAttribute('data-total-key') || 'default';
+        const g = groups[key] || { total: 100, critical: 0, major: 0, minor: 0, bonus: 0 };
+        const scoreValue = box.querySelector('.score-value');
+        if (scoreValue) {
+            scoreValue.textContent = g.total;
+            scoreValue.className = 'score-value ' + (g.total >= 90 ? 'excellent' : g.total >= 70 ? 'good' : g.total >= 50 ? 'fair' : 'poor');
+        }
+        const hiddenInput = box.querySelector('input[type="hidden"]');
+        if (hiddenInput) {
+            hiddenInput.value = JSON.stringify({
+                total: g.total,
+                critical: g.critical,
+                major: g.major,
+                minor: g.minor,
+                bonus: g.bonus
+            });
+        }
+        const criticalEl = box.querySelector('.critical-count');
+        const majorEl = box.querySelector('.major-count');
+        const minorEl = box.querySelector('.minor-count');
+        const bonusEl = box.querySelector('.bonus-count');
+        if (criticalEl) criticalEl.textContent = `중대: ${g.critical}`;
+        if (majorEl) majorEl.textContent = `주요: ${g.major}`;
+        if (minorEl) minorEl.textContent = `경미: ${g.minor}`;
+        if (bonusEl) bonusEl.textContent = `가점: ${g.bonus}`;
+    });
+
+    // 각 채점 필드 헤더 인라인 요약 업데이트 (자기 그룹 값 적용)
+    document.querySelectorAll('.scoring-field').forEach(field => {
+        const cfg = parseJsonDeep(field.dataset.config, {});
+        const key = cfg.total_key || cfg.group || 'default';
+        const g = groups[key] || { total: 100, critical: 0, major: 0, minor: 0 };
+        const header = field.querySelector('.scoring-header');
+        if (!header) return;
+        const scoreInline = header.querySelector('.score-inline');
+        const crit = header.querySelector('.summary-count.critical');
+        const maj = header.querySelector('.summary-count.major');
+        const min = header.querySelector('.summary-count.minor');
+        if (scoreInline) scoreInline.textContent = g.total;
+        if (crit) crit.textContent = `중대 ${g.critical}`;
+        if (maj) maj.textContent = `주요 ${g.major}`;
+        if (min) min.textContent = `경미 ${g.minor}`;
+    });
 }
 
 // 페이지 로드 시 초기화
 document.addEventListener('DOMContentLoaded', function() {
     initScoringSystem();
+
+    // scoring-group 입력 변화 → hidden JSON 갱신 + 합산
+    document.querySelectorAll('.scoring-group').forEach(groupEl => {
+        const hidden = groupEl.querySelector('input[type="hidden"][data-field]');
+        const state = parseJsonDeep(hidden?.value || '{}', {});
+
+        const updateHidden = () => {
+            const obj = {};
+            groupEl.querySelectorAll('input.scoring-input').forEach(inp => {
+                const id = inp.dataset.item;
+                const v = Math.max(0, parseInt(inp.value || '0', 10));
+                if (id) obj[id] = v;
+                // 입력값 정규화
+                if (inp.value != v) inp.value = v;
+            });
+            hidden.value = JSON.stringify(obj);
+        };
+
+        // 초기화 1회
+        updateHidden();
+
+        groupEl.addEventListener('input', (e) => {
+            if (e.target && e.target.classList && e.target.classList.contains('scoring-input')) {
+                updateHidden();
+                calculateTotalScore();
+            }
+        });
+    });
 });

@@ -186,6 +186,9 @@ def ensure_column_config_tables(cur):
             )
         """)
         # Ensure commonly missing columns
+        ensure_column(cur, t, 'is_active', 'is_active INTEGER DEFAULT 1')
+        ensure_column(cur, t, 'column_order', 'column_order INTEGER DEFAULT 0')
+        ensure_column(cur, t, 'column_type', "column_type TEXT DEFAULT 'text'")
         ensure_column(cur, t, 'tab', 'tab TEXT')
         ensure_column(cur, t, 'column_span', 'column_span INTEGER DEFAULT 1')
         ensure_column(cur, t, 'linked_columns', 'linked_columns TEXT')
@@ -307,6 +310,44 @@ def ensure_main_tables(cur):
             updated_by TEXT
         )
     """)
+
+    # partner_change_requests (used by change-request features)
+    exec_safe(cur, """
+        CREATE TABLE IF NOT EXISTS partner_change_requests (
+            id SERIAL PRIMARY KEY,
+            request_number TEXT UNIQUE,
+            requester_name TEXT,
+            requester_department TEXT,
+            company_name TEXT,
+            business_number TEXT,
+            change_type TEXT,
+            current_value TEXT,
+            new_value TEXT,
+            change_reason TEXT,
+            status TEXT DEFAULT 'requested',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            custom_data JSONB,
+            is_deleted INTEGER DEFAULT 0
+        )
+    """)
+    for col, ddl in [
+        ('request_number', 'request_number TEXT UNIQUE'),
+        ('requester_name', 'requester_name TEXT'),
+        ('requester_department', 'requester_department TEXT'),
+        ('company_name', 'company_name TEXT'),
+        ('business_number', 'business_number TEXT'),
+        ('change_type', 'change_type TEXT'),
+        ('current_value', 'current_value TEXT'),
+        ('new_value', 'new_value TEXT'),
+        ('change_reason', 'change_reason TEXT'),
+        ('status', "status TEXT DEFAULT 'requested'"),
+        ('created_at', 'created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+        ('updated_at', 'updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+        ('custom_data', "custom_data JSONB"),
+        ('is_deleted', 'is_deleted INTEGER DEFAULT 0'),
+    ]:
+        ensure_column(cur, 'partner_change_requests', col, ddl)
 
 
 def ensure_caches(cur):

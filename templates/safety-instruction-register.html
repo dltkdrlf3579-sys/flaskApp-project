@@ -5,16 +5,12 @@
 {% endif %}
 
 {% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/scoring-system.css') }}">
 <script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
-
 {% endblock %}
 
-{% block title %}환경안전 지시서 등록<script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
-
-{% endblock %}
-{% block popup_title %}환경안전 지시서 등록<script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
-
-{% endblock %}
+{% block title %}환경안전 지시서 등록{% endblock %}
+{% block popup_title %}환경안전 지시서 등록{% endblock %}
 {% block content %}
 
 {% if not is_popup %}
@@ -255,12 +251,14 @@
                                 {% elif col.column_type == 'score_total' %}
                                     {% set sc = (col.scoring_config|from_json) %}
                                     <div class="score-summary" data-total-key="{{ sc.total_key if sc and sc.total_key else 'default' }}">
-                                        <div class="summary-row">Critical 불합격: <span id="critical_count">0</span> 건</div>
-                                        <div class="summary-row">Major 불합격: <span id="major_count">0</span> 건</div>
-                                        <div class="summary-row">Minor 불합격: <span id="minor_count">0</span> 건</div>
-                                        <div class="summary-row">가점: <span id="bonus_points">0</span> 점</div>
-                                        <hr>
-                                        <div class="summary-row"><b>종합 총점:</b> <span id="total_score">{{ sc.base_score if sc and sc.base_score else 100 }}</span> 점</div>
+                                        <div class="summary-row compact">
+                                            Crt: <span id="critical_count">0</span>
+                                            &nbsp;·&nbsp; Mj: <span id="major_count">0</span>
+                                            &nbsp;·&nbsp; Mi: <span id="minor_count">0</span>
+                                        </div>
+                                        <div class="summary-row total">
+                                            총점: <span id="total_score">{{ sc.base_score if sc and sc.base_score else 100 }}</span>
+                                        </div>
                                     </div>
                                 {% elif col.column_type == 'textarea' %}
                                     <!-- 텍스트영역 필드 -->
@@ -943,9 +941,11 @@ function showValidationMessage(input, message) {
 // 실시간 채점 계산 (Safety Instruction)
 function recalcScoreSafety() {
     const data = {};
-    document.querySelectorAll('.scoring-input[data-field]').forEach(inp => {
+    document.querySelectorAll('[data-field]').forEach(inp => {
         const key = inp.getAttribute('data-field');
-        data[key] = inp.value || '0';
+        if (!key) return;
+        let val = (inp.value ?? '').toString();
+        data[key] = val.length ? val : '0';
     });
     if (Object.keys(data).length === 0) return;
     fetch('/api/safety-instruction/calculate-score', {
@@ -964,7 +964,7 @@ function recalcScoreSafety() {
 }
 
 document.addEventListener('input', function(e) {
-    if (e.target && e.target.classList && e.target.classList.contains('scoring-input')) {
+    if (e.target && e.target.getAttribute && e.target.getAttribute('data-field')) {
         recalcScoreSafety();
     }
 });

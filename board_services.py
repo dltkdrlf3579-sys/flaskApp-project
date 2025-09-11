@@ -66,20 +66,47 @@ class ColumnService:
             raise ValueError(f"Unknown board type: {board_type}")
     
     def list(self, active_only=True) -> List[Dict]:
-        """컬럼 목록 조회"""
+        """컬럼 목록 조회 (관리 UI용 보호 컬럼 제외)
+
+        - 시스템/보호 컬럼은 목록에서 숨긴다
+        - 기본 필터: is_deleted=0, (옵션) is_active=1
+        """
         conn = get_db_connection(self.db_path)
         conn.row_factory = sqlite3.Row
-        
-        query = f"""
-            SELECT * FROM {self.config['column_table']}
-            {' WHERE is_active = 1' if active_only else ''}
-            ORDER BY column_order
-        """
-        
+
+        # 보호 키: 폼 전용/기본키/등록일은 숨김
+        protected_common = {"attachments","detailed_content","notes","note","created_at"}
+        per_board = {
+            'accident': {"accident_number"},
+            'safety_instruction': {"issue_number"},
+            'change_request': {"request_number"},
+            'follow_sop': {"work_req_no"},
+            'full_process': {"fullprocess_number"},
+        }
+        protected = protected_common | per_board.get(self.board_type, set())
+
+        where_clauses = [
+            "COALESCE(is_deleted, 0) = 0",
+            "COALESCE(is_system, 0) = 0",
+            f"LOWER(column_key) NOT IN ({','.join(["'"+k+"'" for k in sorted({k.lower() for k in protected} )])})",
+        ]
+        if active_only:
+            where_clauses.append("COALESCE(is_active, 1) = 1")
+
+        query = (
+            f"SELECT * FROM {self.config['column_table']} "
+            f"WHERE {' AND '.join(where_clauses)} "
+            f"ORDER BY column_order"
+        )
+
         columns = conn.execute(query).fetchall()
         conn.close()
-        
+
         return [dict(col) for col in columns]
+
+    @staticmethod
+    def _is_protected_key(column_key: str) -> bool:
+        return column_key in {"attachments", "detailed_content", "notes"}
     
     def add(self, data: Dict) -> int:
         """컬럼 추가"""
@@ -147,7 +174,22 @@ class ColumnService:
         """컬럼 수정"""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
-        
+
+        # 보호 컬럼 편집 방지
+        try:
+            row = cursor.execute(
+                f"SELECT column_key, COALESCE(is_system,0) FROM {self.config['column_table']} WHERE id = ?",
+                (column_id,)
+            ).fetchone()
+            if row:
+                col_key = row[0] if not isinstance(row, sqlite3.Row) else row[0]
+                is_system = row[1] if not isinstance(row, sqlite3.Row) else row[1]
+                if is_system == 1 or self._is_protected_key(str(col_key)):
+                    raise ValueError("Protected column cannot be modified")
+        except Exception:
+            # 조회 실패 시에도 안전하게 진행 차단
+            raise
+
         update_fields = []
         params = []
         
@@ -190,7 +232,20 @@ class ColumnService:
         """컬럼 삭제 (기본: 비활성화)"""
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
-        
+
+        # 보호 컬럼 삭제 방지
+        row = cursor.execute(
+            f"SELECT column_key, COALESCE(is_system,0) FROM {self.config['column_table']} WHERE id = ?",
+            (column_id,)
+        ).fetchone()
+        if row:
+            # sqlite3.Row/tuple 모두 대응
+            col_key = row[0]
+            is_system = row[1]
+            if is_system == 1 or self._is_protected_key(str(col_key)):
+                conn.close()
+                raise ValueError("Protected column cannot be deleted")
+
         if hard_delete:
             cursor.execute(f"DELETE FROM {self.config['column_table']} WHERE id = ?", (column_id,))
         else:
@@ -555,6 +610,36 @@ class AttachmentService:
                 is_deleted INTEGER DEFAULT 0
             )
         """)
+
+        # 호환성: 기존 테이블에 is_deleted 컬럼이 없을 수도 있으므로 보강
+        def _col_exists(table: str, col: str) -> bool:
+            try:
+                if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                    cursor.execute(
+                        "SELECT 1 FROM information_schema.columns WHERE table_name = %s AND column_name = %s",
+                        (table.lower(), col.lower())
+                    )
+                    return cursor.fetchone() is not None
+                else:
+                    cursor.execute(f"PRAGMA table_info({table})")
+                    return any(r[1].lower() == col.lower() for r in cursor.fetchall())
+            except Exception:
+                return False
+
+        try:
+            if not _col_exists(self.attachment_table, 'is_deleted'):
+                cursor.execute(f"ALTER TABLE {self.attachment_table} ADD COLUMN is_deleted INTEGER DEFAULT 0")
+        except Exception:
+            # 이미 추가되어 있거나 권한 문제 등은 무시 (list()에서 동적 WHERE 처리로 회피)
+            pass
+
+        # uploaded_at 누락 테이블 보강 (정렬 안정성)
+        try:
+            if not _col_exists(self.attachment_table, 'uploaded_at'):
+                cursor.execute(f"ALTER TABLE {self.attachment_table} ADD COLUMN uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        except Exception:
+            # 이미 존재하거나 권한 이슈는 무시 (list()에서 id로 정렬 폴백)
+            pass
         
         # 인덱스 추가 (중앙화된 id_column 사용)
         cursor.execute(f"""
@@ -589,11 +674,29 @@ class AttachmentService:
         
         conn.row_factory = sqlite3.Row
         
-        attachments = conn.execute(f"""
-            SELECT * FROM {self.attachment_table}
-            WHERE {self.id_column} = ? AND is_deleted = 0
-            ORDER BY uploaded_at DESC
-        """, (item_id,)).fetchall()
+        # 컬럼 존재 여부 체크 유틸
+        def _has_col(col: str) -> bool:
+            try:
+                if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT 1 FROM information_schema.columns WHERE table_name = %s AND column_name = %s",
+                        (self.attachment_table.lower(), col.lower())
+                    )
+                    return cur.fetchone() is not None
+                else:
+                    cur = conn.cursor()
+                    cur.execute(f"PRAGMA table_info({self.attachment_table})")
+                    return any(r[1].lower() == col.lower() for r in cur.fetchall())
+            except Exception:
+                return False
+
+        where_deleted = " AND is_deleted = 0" if _has_col('is_deleted') else ""
+        order_col = 'uploaded_at' if _has_col('uploaded_at') else 'id'
+        attachments = conn.execute(
+            f"SELECT * FROM {self.attachment_table} WHERE {self.id_column} = ?{where_deleted} ORDER BY {order_col} DESC",
+            (item_id,)
+        ).fetchall()
         
         # 새로 생성한 연결만 닫기
         if should_close:

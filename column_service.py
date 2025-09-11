@@ -9,6 +9,20 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from db_connection import get_db_connection
 
+# 시스템/폼 전용 보호 컬럼 키 (관리자 컬럼 설정 화면에서 숨김 + 수정/삭제 금지)
+PROTECTED_KEYS = {"attachments", "detailed_content", "notes", "note", "created_at"}
+
+def _protected_for_board(board_type: str) -> set[str]:
+    per_board = {
+        'accident': {"accident_number"},
+        'safety_instruction': {"issue_number"},
+        'change_request': {"request_number"},
+        'follow_sop': {"work_req_no"},
+        'full_process': {"fullprocess_number"},
+        'partner_standards': {"standard_number"},
+    }
+    return PROTECTED_KEYS | per_board.get(board_type, set())
+
 # --- Common helpers ---------------------------------------------------------
 def _to_bool(v) -> bool:
     """Lenient truthy parser for flags coming as 1/0, '1'/'0', 'true'/'false', etc."""
@@ -176,8 +190,26 @@ class ColumnConfigService:
                 except json.JSONDecodeError:
                     column_dict['dropdown_options'] = []
             result.append(column_dict)
-        
-        return result
+
+        # 보호 컬럼 및 시스템 컬럼은 관리자 목록에서 숨김
+        def _is_system_flag(v) -> bool:
+            try:
+                if isinstance(v, bool):
+                    return v
+                if isinstance(v, (int, float)):
+                    return int(v) != 0
+                s = str(v).strip().lower()
+                return s in ("1", "true", "t", "y", "yes")
+            except Exception:
+                return False
+
+        protected = _protected_for_board(self.board_type)
+        filtered = [
+            c for c in result
+            if str(c.get("column_key", "")).lower() not in protected
+            and not _is_system_flag(c.get("is_system", 0))
+        ]
+        return filtered
     
     def get_column(self, column_id: int) -> Optional[Dict[str, Any]]:
         """
@@ -225,6 +257,10 @@ class ColumnConfigService:
             # 트랜잭션 시작
             conn.execute("BEGIN IMMEDIATE")
             
+            # 보호 컬럼 키 방지
+            if column_data.get('column_key') and str(column_data['column_key']).lower() in _protected_for_board(self.board_type):
+                raise ValueError("Protected column cannot be created")
+
             # column_key 자동 생성 (필요시)
             column_key = column_data.get('column_key')
             if not column_key:
@@ -401,6 +437,20 @@ class ColumnConfigService:
         try:
             # 트랜잭션 시작
             conn.execute("BEGIN IMMEDIATE")
+
+            # 보호 컬럼은 수정 불가 (is_system=1 또는 보호 키)
+            row = cursor.execute(
+                f"SELECT column_key, COALESCE(is_system,0) FROM {self.table_name} WHERE id = ?",
+                (column_id,)
+            ).fetchone()
+            if not row:
+                conn.rollback()
+                return {'success': False, 'message': '컬럼을 찾을 수 없습니다.'}
+            col_key = row[0] if not isinstance(row, sqlite3.Row) else row[0]
+            is_system = row[1] if not isinstance(row, sqlite3.Row) else row[1]
+            if (str(col_key).lower() in _protected_for_board(self.board_type)) or _to_bool(is_system):
+                conn.rollback()
+                return {'success': False, 'message': '보호 컬럼은 수정할 수 없습니다.'}
             
             # 현재 컬럼 정보 조회
             cursor.execute(
@@ -521,6 +571,20 @@ class ColumnConfigService:
         try:
             # 트랜잭션 시작
             conn.execute("BEGIN IMMEDIATE")
+
+            # 보호 컬럼은 삭제(비활성화) 불가
+            row = cursor.execute(
+                f"SELECT column_key, COALESCE(is_system,0) FROM {self.table_name} WHERE id = ?",
+                (column_id,)
+            ).fetchone()
+            if not row:
+                conn.rollback()
+                return {'success': False, 'message': '컬럼을 찾을 수 없습니다.'}
+            col_key = row[0] if not isinstance(row, sqlite3.Row) else row[0]
+            is_system = row[1] if not isinstance(row, sqlite3.Row) else row[1]
+            if (str(col_key).lower() in _protected_for_board(self.board_type)) or _to_bool(is_system):
+                conn.rollback()
+                return {'success': False, 'message': '보호 컬럼은 삭제할 수 없습니다.'}
             
             # 소프트 삭제 (is_deleted = 1로 설정)
             cursor.execute(f"""

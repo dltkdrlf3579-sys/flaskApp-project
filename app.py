@@ -1018,6 +1018,18 @@ def boot_sync_once():
     boot_sync_done = True
 
     try:
+        # 0) 항상 코어 스키마 보장 (pages 등 기본 테이블 생성)
+        #    WSGI로 실행 시 __main__ 블록이 호출되지 않아 Postgres에서
+        #    pages 등 기본 테이블이 없어지는 문제가 발생할 수 있음.
+        #    idempotent하므로 안전하게 1회 실행한다.
+        try:
+            init_db()
+        except Exception as _e:
+            try:
+                current_app.logger.error(f"[BOOT] init_db failed: {_e}")
+            except Exception:
+                pass
+
         from database_config import maybe_daily_sync_master, maybe_one_time_sync_content, db_config
 
         ext_on = db_config.config.getboolean('DATABASE', 'EXTERNAL_DB_ENABLED', fallback=False)
@@ -1797,13 +1809,19 @@ def safety_instruction_route():
         params.extend([f"%{filters['business_number']}%", f"%{filters['business_number']}%"])
     
     if filters['violation_date_from']:
-        # JSON 필드에서 날짜 검색 (SQLite JSON 함수 사용)
-        query += " AND json_extract(custom_data, '$.violation_date') >= ?"
+        # JSON 필드에서 날짜 검색 (Postgres/SQLite 분기)
+        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+            query += " AND (custom_data->>'violation_date') >= %s"
+        else:
+            query += " AND json_extract(custom_data, '$.violation_date') >= ?"
         params.append(filters['violation_date_from'])
     
     if filters['violation_date_to']:
-        # JSON 필드에서 날짜 검색 (SQLite JSON 함수 사용)
-        query += " AND json_extract(custom_data, '$.violation_date') <= ?"
+        # JSON 필드에서 날짜 검색 (Postgres/SQLite 분기)
+        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+            query += " AND (custom_data->>'violation_date') <= %s"
+        else:
+            query += " AND json_extract(custom_data, '$.violation_date') <= ?"
         params.append(filters['violation_date_to'])
     
     # 전체 개수 조회 (ORDER BY 전에 실행)
@@ -3015,8 +3033,11 @@ def partner_change_request():
             is_dynamic = field_name not in static_cols
             
             if is_dynamic:
-                # JSON 필드 검색
-                where_conditions.append(f"json_extract(custom_data, '$.{field_name}') LIKE ?")
+                # JSON 필드 검색 (Postgres/SQLite 분기)
+                if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                    where_conditions.append(f"(custom_data->>'{field_name}') ILIKE %s")
+                else:
+                    where_conditions.append(f"json_extract(custom_data, '$.{field_name}') LIKE ?")
                 params.append(f"%{field_value}%")
             else:
                 # 일반 컬럼 검색
@@ -7928,8 +7949,39 @@ def export_follow_sop_excel():
             cell.alignment = header_align
             col_idx += 1
         
-        # 동적 컬럼 - 삭제되지 않은 것만
-        for col in dynamic_columns:
+        # 채점 항목을 개별 컬럼으로 확장한 목록 구성
+        def _expand_scoring_columns(_cols):
+            out = []
+            import json as _json
+            for c in _cols:
+                if c.get('column_type') == 'scoring':
+                    sc = c.get('scoring_config')
+                    if sc and isinstance(sc, str):
+                        try: sc = _json.loads(sc)
+                        except Exception: sc = {}
+                    items = (sc or {}).get('items') or []
+                    for it in items:
+                        iid = it.get('id')
+                        label = it.get('label') or iid
+                        if not iid:
+                            continue
+                        out.append({
+                            'column_key': f"{c['column_key']}__{iid}",
+                            'column_name': f"{c.get('column_name', c.get('column_key'))} - {label}",
+                            'column_type': 'number',
+                            '_virtual': 1,
+                            '_source_scoring_key': c['column_key'],
+                            '_source_item_id': iid
+                        })
+                else:
+                    out.append(dict(c))
+            return out
+
+        dyn_cols_list = [dict(x) for x in dynamic_columns]
+        expanded_columns = _expand_scoring_columns(dyn_cols_list)
+
+        # 동적 컬럼 헤더
+        for col in expanded_columns:
             cell = ws.cell(row=1, column=col_idx, value=col['column_name'])
             cell.font = header_font
             cell.fill = header_fill
@@ -7958,7 +8010,7 @@ def export_follow_sop_excel():
                 except:
                     custom_data = {}
             
-            # 동적 컬럼 데이터 - 활성화되고 삭제되지 않은 컬럼만
+            # 동적 컬럼 데이터 - 드롭다운/가상 채점 항목 포함
             # 드롭다운 매핑 지원
             def _map_value(col, value):
                 # 팝업형 값(dict) → name
@@ -7979,9 +8031,23 @@ def export_follow_sop_excel():
                                 return opt['value']
                 return value
 
-            for col in dynamic_columns:
-                v = custom_data.get(col['column_key'], '')
-                ws.cell(row=row_idx, column=col_idx, value=_map_value(col, v))
+            for col in expanded_columns:
+                if col.get('_virtual') == 1:
+                    src = col.get('_source_scoring_key')
+                    iid = col.get('_source_item_id')
+                    group_obj = custom_data.get(src, {})
+                    if isinstance(group_obj, str):
+                        try:
+                            group_obj = json.loads(group_obj)
+                        except Exception:
+                            group_obj = {}
+                    v = 0
+                    if isinstance(group_obj, dict):
+                        v = group_obj.get(iid, 0)
+                    ws.cell(row=row_idx, column=col_idx, value=v)
+                else:
+                    v = custom_data.get(col['column_key'], '')
+                    ws.cell(row=row_idx, column=col_idx, value=_map_value(col, v))
                 col_idx += 1
         
         # 컬럼 너비 자동 조정

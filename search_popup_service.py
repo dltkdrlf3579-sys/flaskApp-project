@@ -381,21 +381,37 @@ class SearchPopupService:
                             break
                     
                     if is_dynamic:
-                        # 동적 컬럼(JSON) 검색 (partners_cache만 해당)
-                        sql = f"""
-                            SELECT * FROM {table_name}
-                            WHERE json_extract(custom_data, '$.{search_field}') LIKE ?
-                            ORDER BY {config.get('order_by', config.get('id_field', 'id'))}
-                            LIMIT ?
-                        """
+                        # 동적 컬럼(JSON) 검색 (Postgres/SQLite 분기)
+                        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                            sql = f"""
+                                SELECT * FROM {table_name}
+                                WHERE (custom_data->>'{search_field}') ILIKE %s
+                                ORDER BY {config.get('order_by', config.get('id_field', 'id'))}
+                                LIMIT %s
+                            """
+                        else:
+                            sql = f"""
+                                SELECT * FROM {table_name}
+                                WHERE json_extract(custom_data, '$.{search_field}') LIKE ?
+                                ORDER BY {config.get('order_by', config.get('id_field', 'id'))}
+                                LIMIT ?
+                            """
                     else:
                         # 일반 컬럼 검색
-                        sql = f"""
-                            SELECT * FROM {table_name}
-                            WHERE {search_field} LIKE ?
-                            ORDER BY {config.get('order_by', config.get('id_field', 'id'))}
-                            LIMIT ?
-                        """
+                        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                            sql = f"""
+                                SELECT * FROM {table_name}
+                                WHERE {search_field} ILIKE %s
+                                ORDER BY {config.get('order_by', config.get('id_field', 'id'))}
+                                LIMIT %s
+                            """
+                        else:
+                            sql = f"""
+                                SELECT * FROM {table_name}
+                                WHERE {search_field} LIKE ?
+                                ORDER BY {config.get('order_by', config.get('id_field', 'id'))}
+                                LIMIT ?
+                            """
                     params = [f"%{query}%", limit]
                 else:
                     # 모든 검색 필드에서 검색
@@ -407,25 +423,42 @@ class SearchPopupService:
                             is_dynamic = field_info.get('is_dynamic', False)
                             
                             if is_dynamic:
-                                # 동적 컬럼(JSON) 검색
-                                where_clauses.append(f"json_extract(custom_data, '$.{field}') LIKE ?")
+                                # 동적 컬럼(JSON) 검색 (Postgres/SQLite 분기)
+                                if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                                    where_clauses.append(f"(custom_data->>'{field}') ILIKE %s")
+                                else:
+                                    where_clauses.append(f"json_extract(custom_data, '$.{field}') LIKE ?")
                             else:
                                 # 일반 컬럼 검색
-                                where_clauses.append(f"{field} LIKE ?")
+                                if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                                    where_clauses.append(f"{field} ILIKE %s")
+                                else:
+                                    where_clauses.append(f"{field} LIKE ?")
                         else:
                             field = field_info
-                            where_clauses.append(f"{field} LIKE ?")
+                            if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                                where_clauses.append(f"{field} ILIKE %s")
+                            else:
+                                where_clauses.append(f"{field} LIKE ?")
                         
                         params.append(f"%{query}%")
                     
                     where_sql = " OR ".join(where_clauses)
                     
-                    sql = f"""
-                        SELECT * FROM {table_name}
-                        WHERE {where_sql}
-                        ORDER BY {config.get('order_by', config.get('id_field', 'id'))}
-                        LIMIT ?
-                    """
+                    if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                        sql = f"""
+                            SELECT * FROM {table_name}
+                            WHERE {where_sql}
+                            ORDER BY {config.get('order_by', config.get('id_field', 'id'))}
+                            LIMIT %s
+                        """
+                    else:
+                        sql = f"""
+                            SELECT * FROM {table_name}
+                            WHERE {where_sql}
+                            ORDER BY {config.get('order_by', config.get('id_field', 'id'))}
+                            LIMIT ?
+                        """
                     params.append(limit)
                 
                 cursor.execute(sql, params)

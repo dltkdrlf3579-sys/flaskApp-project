@@ -120,6 +120,44 @@ def calculate_score(board: str, inputs: Dict[str, Any], db_path: str) -> Dict[st
                 else:
                     summary['minor_count'] += count
 
+    # Also include simple number columns that have per-column scoring config
+    for c in cols:
+        if c.get('column_type') != 'number':
+            continue
+        sc = c.get('scoring_config') or {}
+        if isinstance(sc, str):
+            try:
+                sc = json.loads(sc)
+            except Exception:
+                sc = {}
+        per_unit = sc.get('per_unit_delta')
+        if per_unit is None:
+            continue
+        try:
+            per_unit = float(per_unit)
+        except Exception:
+            continue
+        key = c.get('column_key')
+        raw = inputs.get(key, 0)
+        try:
+            count = int(str(raw).strip() or 0)
+        except Exception:
+            count = 0
+        if count <= 0:
+            continue
+        delta = int(count * per_unit)
+        summary['total_delta'] += delta
+        if per_unit > 0:
+            summary['bonus_points'] += delta
+        else:
+            # grade can be explicitly set or inferred from per_unit
+            grade = sc.get('grade') or _grade_for_per_unit(per_unit, criteria)
+            if grade == 'critical':
+                summary['critical_count'] += count
+            elif grade == 'major':
+                summary['major_count'] += count
+            else:
+                summary['minor_count'] += count
+
     summary['total_score'] = base_score + summary['total_delta']
     return summary
-

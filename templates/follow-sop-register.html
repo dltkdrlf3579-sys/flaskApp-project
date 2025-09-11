@@ -5,16 +5,12 @@
 {% endif %}
 
 {% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/scoring-system.css') }}">
 <script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
-
 {% endblock %}
 
-{% block title %}Follow SOP 등록<script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
-
-{% endblock %}
-{% block popup_title %}Follow SOP 등록<script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
-
-{% endblock %}
+{% block title %}Follow SOP 등록{% endblock %}
+{% block popup_title %}Follow SOP 등록{% endblock %}
 {% block content %}
 
 {% if not is_popup %}
@@ -76,6 +72,8 @@
                             {% set span = col.column_span|default(1)|int %}
                             {% if col.column_type == 'list' %}
                                 {% set span = 4 %}
+                            {% elif col.column_type == 'scoring' %}
+                                {% set span = 2 %}
                             {% endif %}
                             
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
@@ -186,35 +184,45 @@
                                     </div>
                                     
                                 {% elif col.column_type == 'scoring' %}
-                                    {# 채점 항목 렌더링 #}
-                                    {% set sc = (col.scoring_config|from_json) %}
-                                    {% set items = sc.items if sc and sc.items else [] %}
-                                    <div class="scoring-group" data-column="{{ col.column_key }}">
+                                    {# 간단 네모 입력들로 바로 렌더링 #}
+                                    {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}
+                                    {% set items = sc['items'] if sc and ('items' in sc) else [] %}
+                                    <div class="scoring-group scoring-columns" data-field="{{ col.column_key }}" data-config='{{ col.scoring_config|default("{}")|tojson }}' data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}">
                                         {% for it in items %}
-                                        <div class="input-group mb-1">
-                                            <span class="input-group-text" style="min-width: 160px;">{{ it.label }}</span>
-                                            <input type="number"
-                                                   min="0"
-                                                   step="1"
-                                                   id="{{ col.column_key }}_{{ it.id }}"
-                                                   class="{{ section.section_key|replace('_', '-') }}-input scoring-input form-control"
-                                                   data-field="{{ col.column_key }}_{{ it.id }}"
-                                                   data-section="{{ section.section_key }}"
+                                        <div class="sc-col">
+                                            <label class="form-label">{{ it.label }}</label>
+                                            <input type="number" min="0" step="1"
+                                                   class="scoring-input"
+                                                   data-item="{{ it.id }}"
                                                    data-score="{{ it.per_unit_delta }}"
-                                                   placeholder="건수">
-                                            <span class="input-group-text">{{ it.per_unit_delta }}점/건</span>
+                                                   data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}"
+                                                   value="0">
+                                            <small class="hint">{{ it.per_unit_delta }}점/건</small>
                                         </div>
                                         {% endfor %}
+                                        <input type="hidden"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               value='{}'>
                                     </div>
                                 {% elif col.column_type == 'score_total' %}
                                     {% set sc = (col.scoring_config|from_json) %}
-                                    <div class="score-summary" data-total-key="{{ sc.total_key if sc and sc.total_key else 'default' }}">
-                                        <div class="summary-row">Critical 불합격: <span id="critical_count">0</span> 건</div>
-                                        <div class="summary-row">Major 불합격: <span id="major_count">0</span> 건</div>
-                                        <div class="summary-row">Minor 불합격: <span id="minor_count">0</span> 건</div>
-                                        <div class="summary-row">가점: <span id="bonus_points">0</span> 점</div>
-                                        <hr>
-                                        <div class="summary-row"><b>종합 총점:</b> <span id="total_score">{{ sc.base_score if sc and sc.base_score else 100 }}</span> 점</div>
+                                    <div class="score-total-field" data-total-key="{{ sc.total_key if sc and sc.total_key else 'default' }}">
+                                        <div class="score-display">
+                                            <span class="score-value">0</span>점
+                                            <div class="score-breakdown">
+                                                <span class="critical-count">중대: 0</span>
+                                                <span class="major-count">주요: 0</span>
+                                                <span class="minor-count">경미: 0</span>
+                                                <span class="bonus-count">가점: 0</span>
+                                            </div>
+                                        </div>
+                                        <input type="hidden"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               value="{}">
                                     </div>
                                 {% elif col.column_type == 'textarea' %}
                                     <!-- 텍스트영역 필드 -->
@@ -761,39 +769,6 @@ function validateNumberInput(input) {
 }
 </script>
 
-<script>
-// 실시간 채점 계산: 서버 API로 검증
-function recalcScore() {
-    // 모든 입력값 수집
-    const data = {};
-    document.querySelectorAll('.scoring-input[data-field]').forEach(inp => {
-        const key = inp.getAttribute('data-field');
-        data[key] = inp.value || '0';
-    });
-    if (Object.keys(data).length === 0) return;
-    fetch('/api/follow-sop/calculate-score', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-    }).then(r => r.json()).then(resp => {
-        if (resp && typeof resp.total_score !== 'undefined') {
-            document.getElementById('critical_count').innerText = resp.critical_count || 0;
-            document.getElementById('major_count').innerText = resp.major_count || 0;
-            document.getElementById('minor_count').innerText = resp.minor_count || 0;
-            document.getElementById('bonus_points').innerText = resp.bonus_points || 0;
-            document.getElementById('total_score').innerText = resp.total_score || 0;
-        }
-    }).catch(e => console.warn('score calc failed', e));
-}
-
-// 입력 변경 시 자동 계산
-document.addEventListener('input', function(e) {
-    if (e.target && e.target.classList && e.target.classList.contains('scoring-input')) {
-        recalcScore();
-    }
-});
-</script>
-
-<script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
+<!-- scoring-system.js는 head에서 로드됨; 별도 서버호출 계산 제거 (클라이언트 합산) -->
 
 {% endblock %}

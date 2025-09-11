@@ -33,21 +33,14 @@
         </div>
         <div class="section-content" id="basic-info-content">
             <div class="info-table">
-                <!-- change_request_id와 created_at 추가 -->
                 <div class="info-row">
                     <div class="info-cell span-1">
-                        <label>ID</label>
-                        <input type="text" value="{{ request_data.change_request_id or request_data.id or '-' }}" readonly style="background-color: #f3f4f6;">
+                        <label>요청번호</label>
+                        <div class="value">{{ request_data.request_number or request_data.id }}</div>
                     </div>
                     <div class="info-cell span-1">
                         <label>등록일</label>
-                        <input type="text" value="{{ (request_data.created_at|date_only) if request_data.created_at else '-' }}" readonly style="background-color: #f3f4f6;">
-                    </div>
-                </div>
-                <div class="info-row">
-                    <div class="info-cell">
-                        <label>요청번호</label>
-                        <div class="value">{{ request_data.request_number or request_data.id }}</div>
+                        <div class="value">{{ (request_data.created_at|date_only) if request_data.created_at else '-' }}</div>
                     </div>
                 </div>
             </div>
