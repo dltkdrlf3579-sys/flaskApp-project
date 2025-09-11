@@ -1420,7 +1420,17 @@ def accident():
         query += " AND accident_grade LIKE %s"
         params.append(f"%{filters['accident_grade']}%")
     
-    query += " ORDER BY created_at DESC"
+    # ensure report_date column exists for sorting (safe, idempotent)
+    try:
+        _cols = conn.execute("PRAGMA table_info(accidents_cache)").fetchall()
+        _colnames = [c[1] for c in _cols]
+        if 'report_date' not in _colnames:
+            conn.execute("ALTER TABLE accidents_cache ADD COLUMN report_date DATE")
+            conn.commit()
+    except Exception:
+        pass
+
+    query += " ORDER BY (report_date IS NULL) ASC, report_date DESC, created_at DESC, accident_number DESC"
     
     # 전체 건수 조회 (ORDER BY 제거 후 COUNT)
     import re as _re
@@ -1630,7 +1640,17 @@ def partner_accident():
     total_count = conn.execute(count_query, params).fetchone()[0]
     
     # ORDER BY는 데이터 조회시에만 추가 - created_at 기준으로 최신순 정렬
-    query += " ORDER BY created_at DESC, accident_number DESC"
+    # ensure report_date column exists for sorting (safe, idempotent)
+    try:
+        _cols2 = conn.execute("PRAGMA table_info(accidents_cache)").fetchall()
+        _colnames2 = [c[1] for c in _cols2]
+        if 'report_date' not in _colnames2:
+            conn.execute("ALTER TABLE accidents_cache ADD COLUMN report_date DATE")
+            conn.commit()
+    except Exception:
+        pass
+
+    query += " ORDER BY (report_date IS NULL) ASC, report_date DESC, created_at DESC, accident_number DESC"
     
     # 페이지네이션 적용
     query += f" LIMIT {per_page} OFFSET {(page - 1) * per_page}"
@@ -4942,10 +4962,7 @@ def update_accident():
         
         accident_number = request.form.get('accident_number')
         
-        # K 사고는 수정 불가 (외부 시스템 데이터)
-        if accident_number and accident_number.startswith('K'):
-            from flask import jsonify
-            return jsonify({"success": False, "message": "K 사고는 수정할 수 없습니다. (외부 시스템 데이터)"}), 403
+        # K 사고도 수정 가능하되, 기본정보는 업데이트하지 않고 custom_data/첨부만 반영
         
         detailed_content = request.form.get('detailed_content', '')
         custom_data = request.form.get('custom_data', '{}')  # Phase 2: 동적 컬럼 데이터

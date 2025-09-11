@@ -338,11 +338,7 @@
 
     <!-- 저장 버튼 영역 -->
     <div class="save-section">
-        {% if instruction.accident_number and instruction.accident_number.startswith('ACC') %}
-            <button class="btn-save" onclick="showEditPasswordModal()">수정완료</button>
-        {% else %}
-            <button class="btn-save" disabled style="background-color: #ccc; cursor: not-allowed;">K 사고는 수정 불가</button>
-        {% endif %}
+        <button class="btn-save" onclick="showEditPasswordModal()">수정완료</button>
     </div>
 
     <!-- 비밀번호 입력 모달 -->
@@ -371,6 +367,13 @@
 const sections = {{ sections | tojson | safe }};
 const sectionColumns = {{ section_columns | tojson | safe }};
 const issueNumber = "{{ instruction.accident_number }}";
+const isDirectEntry = {{ 'true' if is_direct_entry else 'false' }};
+// 외부 연동 컬럼 키(읽기 전용)
+const externalManagedKeys = [
+  'accident_number','accident_name','workplace','accident_grade','major_category',
+  'injury_form','injury_type','accident_date','day_of_week','report_date',
+  'building','floor','location_category','location_detail'
+];
 
 // 섹션 토글
 function toggleSection(sectionId) {
@@ -464,12 +467,6 @@ function updateSafetyInstruction() {
     // 사고번호 확인 (K사고 vs ACC사고)
     const isAccidentEditable = issueNumber && issueNumber.startsWith('ACC');
     
-    // K 사고는 수정 불가
-    if (!isAccidentEditable) {
-        alert('K 사고는 수정할 수 없습니다. (외부 시스템 데이터)');
-        return;
-    }
-    
     // ACC 사고: base_fields와 custom_data 모두 전송
     // base_fields: 기본 컬럼들 (화이트리스트)
     const baseFields = {};
@@ -485,7 +482,9 @@ function updateSafetyInstruction() {
         }
     });
     
-    formData.append('base_fields', JSON.stringify(baseFields));
+    if (isAccidentEditable) {
+        formData.append('base_fields', JSON.stringify(baseFields));
+    }
     
     // custom_data: 모든 동적 필드 포함 (GPT 권장: 전체 포함)
     const customData = { ...dynamicData };
@@ -543,6 +542,32 @@ function updateSafetyInstruction() {
         alert('수정 중 오류가 발생했습니다.');
     });
 }
+
+// 외부 연동 컬럼 읽기전용 처리
+document.addEventListener('DOMContentLoaded', () => {
+  const isExternal = !isDirectEntry;
+  if (!isExternal) return;
+  const inputs = document.querySelectorAll('[data-field]');
+  inputs.forEach(el => {
+    const key = el.getAttribute('data-field');
+    if (externalManagedKeys.includes(key)) {
+      if (el.tagName === 'SELECT') {
+        el.disabled = true;
+      } else {
+        el.readOnly = true;
+      }
+      el.style.backgroundColor = '#f3f4f6';
+      const group = el.closest('.input-group');
+      if (group) {
+        const btn = group.querySelector('button');
+        if (btn) {
+          btn.disabled = true;
+          btn.classList.add('disabled');
+        }
+      }
+    }
+  });
+});
 
 // 팝업 열기 함수 (테이블 타입용)
 function openPopup(fieldKey) {
