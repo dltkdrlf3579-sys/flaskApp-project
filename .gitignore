@@ -43,8 +43,9 @@ test_*.py
 migrate_*.py
 phase*.py
 phase*.sql
-fix_*.py
-check_*.py
+# fix_*.py와 check_*.py는 tools 폴더에 필요하므로 루트에서만 제외
+/fix_*.py
+/check_*.py
 emergency_migrate.py
 complete_migration_fix.py
 complete_migration_fix.sql
