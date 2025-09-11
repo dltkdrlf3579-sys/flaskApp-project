@@ -93,7 +93,13 @@
                             {{ accident.accident_number or '-' }}
                         </a>
                     </td>
-                    <td>{{ accident.created_at | date_only if accident.created_at else '-' }}</td>
+                    <td>
+                        {% if accident.report_date %}
+                            {{ accident.report_date | date_only }}
+                        {% elif accident.created_at %}
+                            {{ accident.created_at | date_only }}
+                        {% else %}-{% endif %}
+                    </td>
                     
                     <!-- 나머지 dynamic columns -->
                     {% for col in dynamic_columns %}

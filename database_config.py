@@ -551,10 +551,11 @@ class PartnerDataManager:
                     row.get('workplace', ''),
                     row.get('accident_grade', ''),
                     row.get('major_category', ''),
-                    row.get('injury_form', ''),
+                    (row.get('injury_form', '') or row.get('unjury_form', '')),
                     row.get('injury_type', ''),
                     row.get('accident_date', ''),
                     row.get('day_of_week', ''),
+                    row.get('report_date', ''),
                     row.get('building', ''),
                     row.get('floor', ''),
                     row.get('location_category', ''),
@@ -566,9 +567,9 @@ class PartnerDataManager:
                 INSERT INTO accidents_cache (
                     accident_number, accident_name, workplace,
                     accident_grade, major_category, injury_form, injury_type,
-                    accident_date, day_of_week, building, floor,
+                    accident_date, day_of_week, report_date, building, floor,
                     location_category, location_detail, custom_data, is_deleted, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', 0, CURRENT_TIMESTAMP)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', 0, CURRENT_TIMESTAMP)
             ''', rows)
             try:
                 if _skipped_missing_bn:

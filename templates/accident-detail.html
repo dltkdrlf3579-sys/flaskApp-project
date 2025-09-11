@@ -45,7 +45,7 @@
                     </div>
                     <div class="info-cell span-1">
                         <label>등록일</label>
-                        <input type="text" value="{{ (instruction.created_at|date_only) if instruction.created_at else '-' }}" readonly style="background-color: #f3f4f6;">
+                        <input type="text" value="{{ (instruction.report_date|date_only) if instruction.report_date else ((instruction.created_at|date_only) if instruction.created_at else '-') }}" readonly style="background-color: #f3f4f6;">
                     </div>
                 </div>
                 {% endif %}
