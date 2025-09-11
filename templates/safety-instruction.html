@@ -77,12 +77,13 @@ td[data-col] .list-item-display {
                     <th class="checkbox-column"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
                     <th class="fixed-col" style="width: 60px;">No</th>
                     <!-- 하드코딩된 컬럼 헤더 (issue_number, created_at) -->
-                    <th>지시번호</th>
+                    <th>발부번호</th>
                     <th style="width: 120px;">등록일</th>
+                    {% set hidden_keys = ['detailed_content','violation_content','issue_number','created_at','attachments','notes','note'] %}
                     {% for section in sections %}
                         {% for col in section_columns[section['section_key']] %}
-                            {% if col['column_key'] not in ['detailed_content', 'violation_content', 'issue_number', 'created_at'] %}
-                            <th {% if col['column_type'] == 'list' %}data-col="{{ col['column_key'] }}"{% endif %}>{{ col['column_name'] }}</th>
+                            {% if col['column_key'] not in hidden_keys %}
+                                <th {% if col['column_type'] == 'list' %}data-col="{{ col['column_key'] }}"{% endif %}>{{ col['column_name'] }}</th>
                             {% endif %}
                         {% endfor %}
                     {% endfor %}
@@ -106,8 +107,8 @@ td[data-col] .list-item-display {
                     </td>
                     {% for section in sections %}
                         {% for col in section_columns[section['section_key']] %}
-                            {% if col['column_key'] not in ['detailed_content', 'violation_content', 'issue_number', 'created_at'] %}
-                            <td {% if col['column_type'] == 'list' %}data-col="{{ col['column_key'] }}"{% endif %}>
+                            {% if col['column_key'] not in hidden_keys %}
+                                <td {% if col['column_type'] == 'list' %}data-col="{{ col['column_key'] }}"{% endif %}>
                                 {% if col['column_type'] == 'list' %}
                                     <!-- 리스트 타입 컬럼 표시 개선 -->
                                     {% if item.custom_mapped and col['column_key'] in item.custom_mapped %}

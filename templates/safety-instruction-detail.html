@@ -86,7 +86,8 @@
                                     {% set base_key = col.column_key %}
                                     {% for s in suffixes %}
                                         {% if base_key.endswith(s) %}
-                                            {% set base_key = base_key[:-s|length] %}
+                                            {% set suffix_len = s|length %}
+                                            {% set base_key = base_key[:-(suffix_len)] %}
                                         {% endif %}
                                     {% endfor %}
                                     {% set all_keys = (dynamic_columns | map(attribute='column_key') | list) + ((custom_data.keys() | list) if custom_data else []) %}
