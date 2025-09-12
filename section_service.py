@@ -186,7 +186,14 @@ class SectionConfigService:
                         WHERE section_key LIKE 'custom_section_%'
                         """
                     )
-                custom_count = cursor.fetchone()[0]
+                _row = cursor.fetchone()
+                try:
+                    custom_count = (_row[0] if _row is not None else 0)
+                except Exception:
+                    try:
+                        custom_count = list(_row.values())[0] if _row else 0
+                    except Exception:
+                        custom_count = 0
                 section_key = f"custom_section_{custom_count + 1}"
             
             # 마지막 순서 가져오기
@@ -200,7 +207,15 @@ class SectionConfigService:
                     SELECT MAX(section_order) FROM {self.table_name}
                 """)
             
-            max_order = cursor.fetchone()[0] or 0
+            _row2 = cursor.fetchone()
+            try:
+                max_order = ((_row2[0] or 0) if _row2 is not None else 0)
+            except Exception:
+                try:
+                    vals = list(_row2.values()) if _row2 else [0]
+                    max_order = vals[0] or 0
+                except Exception:
+                    max_order = 0
             
             if self.table_name == 'section_config':
                 cursor.execute_with_returning_id(

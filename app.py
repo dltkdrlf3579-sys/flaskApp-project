@@ -26,11 +26,14 @@ import time
 
 
 def generate_manual_accident_number(cursor):
-    """수기입력 사고번호 자동 생성 (ACCYYMMDD00 형식)"""
+    """수기입력 사고번호 자동 생성 (ACCYYMMDD00 형식)
+
+    기준 테이블: accidents_cache (SOT)
+    """
     today = get_korean_time()
     date_part = today.strftime('%y%m%d')  # 240822
     pattern = f'ACC{date_part}%'
-    # 1) accidents_cache에서 조회
+    # accidents_cache에서 최신 번호 조회
     try:
         cursor.execute(
             """
@@ -45,25 +48,13 @@ def generate_manual_accident_number(cursor):
         last = cursor.fetchone()
     except Exception:
         last = None
-    # 2) 없으면 accidents 테이블에서 조회(호환)
-    if not last:
+    if last:
+        last_num = last[0] if not isinstance(last, dict) else last['accident_number']
+    else:
+        last_num = None
+    if last_num and str(last_num).startswith('ACC'):
         try:
-            cursor.execute(
-                """
-                SELECT accident_number 
-                FROM accidents 
-                WHERE accident_number LIKE ?
-                ORDER BY accident_number DESC
-                LIMIT 1
-                """,
-                (pattern,)
-            )
-            last = cursor.fetchone()
-        except Exception:
-            last = None
-    if last and last[0] and str(last[0]).startswith('ACC'):
-        try:
-            seq = int(str(last[0])[-2:]) + 1
+            seq = int(str(last_num)[-2:]) + 1
         except Exception:
             seq = 1
     else:
@@ -5928,6 +5919,119 @@ def admin_accident_codes():
                          embedded=embedded,
                          menu=MENU_CONFIG)
 
+# ===== 사고 데이터 캐시 이관 (accidents -> accidents_cache) =====
+@app.route('/admin/migrate-accidents-to-cache', methods=['POST'])
+@require_admin_auth
+def migrate_accidents_to_cache():
+    """외부 accidents 테이블 데이터를 accidents_cache로 일괄 업서트 이관
+
+    - 기준: accident_number(UNIQUE)
+    - 이미 존재하면 업데이트, 없으면 신규 생성
+    - 소스의 잔여 필드는 custom_data로 병합
+    """
+    try:
+        conn = get_db_connection()
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        # accidents 테이블 존재 여부 확인
+        try:
+            cur.execute("PRAGMA table_info(accidents)")
+            cols = cur.fetchall()
+            if not cols:
+                return jsonify({'success': False, 'message': 'accidents 테이블이 없습니다.'}), 404
+            acc_columns = [c[1] for c in cols]
+        except Exception:
+            try:
+                cur.execute(
+                    "SELECT column_name FROM information_schema.columns WHERE table_name = %s",
+                    ('accidents',)
+                )
+                acc_columns = [r[0] if not isinstance(r, dict) else r['column_name'] for r in cur.fetchall()]
+                if not acc_columns:
+                    return jsonify({'success': False, 'message': 'accidents 테이블이 없습니다.'}), 404
+            except Exception:
+                return jsonify({'success': False, 'message': 'accidents 테이블 확인 실패'}), 500
+
+        # cache 필수 컬럼 보강
+        try:
+            cur.execute("PRAGMA table_info(accidents_cache)")
+            cache_cols = [c[1] for c in cur.fetchall()]
+            ensure_cols = [
+                ('accident_number','TEXT'),('accident_name','TEXT'),('workplace','TEXT'),
+                ('accident_grade','TEXT'),('major_category','TEXT'),('injury_form','TEXT'),('injury_type','TEXT'),
+                ('accident_date','TEXT'),('day_of_week','TEXT'),('report_date','TEXT'),('created_at','TEXT'),
+                ('building','TEXT'),('floor','TEXT'),('location_category','TEXT'),('location_detail','TEXT'),
+                ('custom_data','TEXT'),('is_deleted','INTEGER')
+            ]
+            for cn, ct in ensure_cols:
+                if cn not in cache_cols:
+                    try:
+                        cur.execute(f"ALTER TABLE accidents_cache ADD COLUMN {cn} {ct}")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # 소스 데이터 조회 (삭제 제외)
+        where_notdel = sql_is_deleted_false('is_deleted', conn) if 'is_deleted' in acc_columns else '1=1'
+        src_rows = conn.execute(f"SELECT * FROM accidents WHERE {where_notdel}").fetchall()
+
+        migrated = 0
+        updated = 0
+        skipped = 0
+
+        from db.upsert import safe_upsert
+        for r in src_rows:
+            row = dict(r)
+            acc_no = row.get('accident_number')
+            if not acc_no:
+                skipped += 1
+                continue
+
+            top_keys = ['accident_number','accident_name','workplace','accident_grade','major_category',
+                        'injury_form','injury_type','accident_date','day_of_week','report_date','created_at',
+                        'building','floor','location_category','location_detail']
+            data = {k: row.get(k) for k in top_keys if k in row}
+            for dk in ('accident_date','report_date','created_at'):
+                if dk in data and data[dk] is not None:
+                    data[dk] = str(data[dk])
+
+            # custom_data 병합
+            src_cd = row.get('custom_data')
+            if isinstance(src_cd, str):
+                try:
+                    import json as _json
+                    src_cd = _json.loads(src_cd) if src_cd else {}
+                except Exception:
+                    src_cd = {}
+            elif not isinstance(src_cd, dict):
+                src_cd = {}
+            leftovers = {k: v for k, v in row.items() if (k not in data and k not in ('custom_data','id','is_deleted'))}
+            merged_cd = {}
+            merged_cd.update(src_cd)
+            merged_cd.update(leftovers)
+            data['custom_data'] = merged_cd
+            if 'is_deleted' in row:
+                data['is_deleted'] = row['is_deleted']
+
+            try:
+                exist = conn.execute("SELECT 1 FROM accidents_cache WHERE accident_number = ?", (acc_no,)).fetchone()
+                safe_upsert(conn, 'accidents_cache', data, conflict_cols=['accident_number'])
+                if exist:
+                    updated += 1
+                else:
+                    migrated += 1
+            except Exception as _e:
+                logging.error(f"업서트 실패: {acc_no}: {_e}")
+                skipped += 1
+
+        conn.commit(); conn.close()
+        return jsonify({'success': True, 'migrated': migrated, 'updated': updated, 'skipped': skipped, 'total_source': len(src_rows)})
+    except Exception as e:
+        logging.error(f"사고 캐시 이관 실패: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 @app.route("/admin/safety-instruction-codes")
 @require_admin_auth
 def admin_safety_instruction_codes():
@@ -8018,9 +8122,9 @@ def import_accidents():
                         # ACCYYMMDD 기본 형식으로 생성
                         base_number = dt.strftime('ACC%y%m%d')
                         
-                        # 같은 날짜에 이미 있는 사고 수 확인
+                        # 같은 날짜에 이미 있는 사고 수 확인 (cache 기준)
                         cursor.execute("""
-                            SELECT COUNT(*) FROM accidents 
+                            SELECT COUNT(*) FROM accidents_cache 
                             WHERE accident_number LIKE ?
                         """, (base_number + '%',))
                         count = cursor.fetchone()[0]
@@ -8036,11 +8140,14 @@ def import_accidents():
                     # 재해날짜가 없으면 기본 자동 생성 방식 사용
                     data['accident_number'] = generate_manual_accident_number(cursor)
                 
-                # 중복 확인
+                # 중복 확인 (cache 기준)
                 if skip_duplicates and data.get('accident_number'):
-                    cursor.execute("SELECT COUNT(*) FROM accidents WHERE accident_number = ?", (data['accident_number'],))
-                    if cursor.fetchone()[0] > 0:
-                        continue
+                    try:
+                        cursor.execute("SELECT COUNT(*) FROM accidents_cache WHERE accident_number = ?", (data['accident_number'],))
+                        if (cursor.fetchone() or [0])[0] > 0:
+                            continue
+                    except Exception:
+                        pass
                 
                 # 날짜 형식 처리 - 간단화
                 if data.get('accident_date'):
@@ -8059,28 +8166,82 @@ def import_accidents():
                     logging.error(f"행 {row_idx}: 사고번호가 생성되지 않음")
                     continue
                 
-                # DB 저장 - 간단화
+                # DB 저장 - SOT: accidents_cache
                 try:
-                    # 기본 필드만 먼저 저장
-                    insert_sql = """
-                        INSERT INTO accidents 
-                        (accident_number, accident_name, accident_date, created_at) 
-                        VALUES (?, ?, ?, ?)
-                    """
-                    values = [
-                        data['accident_number'],
-                        data.get('accident_name', ''),
-                        data.get('accident_date', get_korean_time().strftime('%Y-%m-%d')),
-                        get_korean_time().strftime('%Y-%m-%d %H:%M:%S')
-                    ]
-                    
-                    logging.info(f"실행할 SQL: {insert_sql}")
-                    logging.info(f"SQL 파라미터: {values}")
-                    
-                    cursor.execute(insert_sql, values)
-                    
+                    # 표준 키 정규화
+                    accident_grade = data.pop('accident_level', None)
+                    major_category = data.pop('accident_classification', None)
+                    injury_type = data.pop('disaster_type', None)
+                    injury_form = data.pop('disaster_form', None)
+
+                    top = {
+                        'accident_number': data.get('accident_number'),
+                        'accident_name': data.get('accident_name', ''),
+                        'workplace': data.get('workplace', ''),
+                        'accident_grade': accident_grade or data.get('accident_grade', ''),
+                        'major_category': major_category or data.get('major_category', ''),
+                        'injury_form': injury_form or data.get('injury_form', ''),
+                        'injury_type': injury_type or data.get('injury_type', ''),
+                        'accident_date': data.get('accident_date', get_korean_time().strftime('%Y-%m-%d')),
+                        'day_of_week': data.get('day_of_week', ''),
+                        'report_date': data.get('accident_date', get_korean_time().strftime('%Y-%m-%d')),
+                        'created_at': get_korean_time().strftime('%Y-%m-%d'),
+                        'building': data.get('building', ''),
+                        'floor': data.get('floor', ''),
+                        'location_category': data.get('location_category', ''),
+                        'location_detail': data.get('location_detail', ''),
+                    }
+
+                    # 나머지 키는 custom_data에 병합
+                    extra = {k: v for k, v in data.items() if k not in top}
+                    # 기존 dynamic custom_data와 합치기
+                    full_custom = {}
+                    full_custom.update(extra)
+                    full_custom.update(custom_data)
+
+                    cursor.execute(
+                        """
+                        INSERT INTO accidents_cache (
+                            accident_number,
+                            accident_name,
+                            workplace,
+                            accident_grade,
+                            major_category,
+                            injury_form,
+                            injury_type,
+                            accident_date,
+                            day_of_week,
+                            report_date,
+                            created_at,
+                            building,
+                            floor,
+                            location_category,
+                            location_detail,
+                            custom_data
+                        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        """,
+                        (
+                            top['accident_number'],
+                            top['accident_name'],
+                            top['workplace'],
+                            top['accident_grade'],
+                            top['major_category'],
+                            top['injury_form'],
+                            top['injury_type'],
+                            top['accident_date'],
+                            top['day_of_week'],
+                            top['report_date'],
+                            top['created_at'],
+                            top['building'],
+                            top['floor'],
+                            top['location_category'],
+                            top['location_detail'],
+                            full_custom,
+                        )
+                    )
+
                 except Exception as sql_error:
-                    logging.error(f"SQL 실행 오류: {sql_error}")
+                    logging.error(f"accidents_cache INSERT 오류: {sql_error}")
                     raise sql_error
                 
                 success_count += 1

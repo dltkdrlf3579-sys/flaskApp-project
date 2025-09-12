@@ -272,6 +272,21 @@ class PartnerDataManager:
                 synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+
+        # 인덱스 보강 (중복 방지 및 조회 성능)
+        try:
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_accidents_cache_number ON accidents_cache(accident_number)")
+        except Exception:
+            pass
+        try:
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_accidents_cache_created_at ON accidents_cache(created_at)")
+        except Exception:
+            pass
+        try:
+            # report_date가 없을 수도 있으므로 실패해도 무시
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_accidents_cache_report_date ON accidents_cache(report_date)")
+        except Exception:
+            pass
         
         # 안전지시서 캐시 테이블
         cursor.execute('''

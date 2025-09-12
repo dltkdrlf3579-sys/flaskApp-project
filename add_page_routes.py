@@ -4,6 +4,24 @@ import logging
 import sqlite3
 from flask import request, render_template, jsonify
 from db_connection import get_db_connection
+
+# 공통: fetchone() 결과 첫 번째 값 안전 추출
+def _first(row, default=0):
+    try:
+        if row is None:
+            return default
+        # sqlite3.Row 또는 tuple/리스트 인덱스 0 시도
+        try:
+            return row[0]
+        except Exception:
+            pass
+        # dict 계열 대응
+        if hasattr(row, 'values'):
+            vals = list(row.values())
+            return vals[0] if vals else default
+        return default
+    except Exception:
+        return default
 from config.menu import MENU_CONFIG
 
 # ============= Follow SOP 페이지 라우트 =============
@@ -24,7 +42,7 @@ def follow_sop_route():
     
     # 기본 섹션 확인 및 생성
     cursor.execute("SELECT COUNT(*) FROM follow_sop_sections WHERE section_key = 'basic_info'")
-    if cursor.fetchone()[0] == 0:
+    if _first(cursor.fetchone(), 0) == 0:
         cursor.execute("""
             INSERT INTO follow_sop_sections (section_key, section_name, section_order, is_active)
             VALUES ('basic_info', '기본정보', 1, 1)
@@ -154,7 +172,7 @@ def follow_sop_route():
     """
     
     cursor.execute(count_query, query_params)
-    total_count = cursor.fetchone()[0]
+    total_count = _first(cursor.fetchone(), 0)
     
     # 데이터 조회
     query = f"""
@@ -277,7 +295,7 @@ def follow_sop_route():
     try:
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM follow_sop_sections WHERE section_key='work_info' AND (is_deleted=0 OR is_deleted IS NULL)")
-        if (cursor.fetchone() or [0])[0] == 0:
+        if _first(cursor.fetchone(), 0) == 0:
             cursor.execute("INSERT OR IGNORE INTO follow_sop_sections (section_key, section_name, section_order, is_active, is_deleted) VALUES ('work_info','작업정보',2,1,0)")
             conn.commit()
     except Exception:
@@ -347,7 +365,7 @@ def follow_sop_register():
     
     # 기본 섹션 확인 및 생성
     cursor.execute("SELECT COUNT(*) FROM follow_sop_sections WHERE section_key = 'basic_info'")
-    if cursor.fetchone()[0] == 0:
+    if _first(cursor.fetchone(), 0) == 0:
         cursor.execute("""
             INSERT INTO follow_sop_sections (section_key, section_name, section_order, is_active)
             VALUES ('basic_info', '기본정보', 1, 1)
@@ -448,7 +466,7 @@ def follow_sop_detail(work_req_no):
                     WHERE table_name = 'follow_sop_cache'
                 )
             """)
-            has_cache_table = cursor.fetchone()[0]
+            has_cache_table = _first(cursor.fetchone(), 0)
         else:
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='follow_sop_cache'")
             has_cache_table = cursor.fetchone() is not None
@@ -463,7 +481,7 @@ def follow_sop_detail(work_req_no):
                     WHERE table_name = 'follow_sop'
                 )
             """)
-            has_main_table = cursor.fetchone()[0]
+            has_main_table = _first(cursor.fetchone(), 0)
         else:
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='follow_sop'")
             has_main_table = cursor.fetchone() is not None
@@ -497,7 +515,7 @@ def follow_sop_detail(work_req_no):
                     WHERE table_name = 'followsop_details'
                 )
             """)
-            details_exists = bool(cursor.fetchone()[0])
+            details_exists = bool(_first(cursor.fetchone(), 0))
         else:
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='followsop_details'")
             details_exists = cursor.fetchone() is not None
@@ -712,7 +730,7 @@ def full_process_route():
     # 기본 섹션 확인 및 생성
     try:
         cursor.execute("SELECT COUNT(*) FROM full_process_sections WHERE section_key = 'basic_info'")
-        if cursor.fetchone()[0] == 0:
+        if _first(cursor.fetchone(), 0) == 0:
             cursor.execute("""
                 INSERT INTO full_process_sections (section_key, section_name, section_order, is_active)
                 VALUES ('basic_info', '기본정보', 1, 1)
@@ -787,13 +805,13 @@ def full_process_route():
                     WHERE table_name = 'full_process_cache'
                 )
             """)
-            exists = bool(cursor.fetchone()[0])
+            exists = bool(_first(cursor.fetchone(), 0))
         else:
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='full_process_cache'")
             exists = cursor.fetchone() is not None
         if exists:
             cursor.execute("SELECT COUNT(*) FROM full_process_cache")
-            use_cache = (cursor.fetchone()[0] > 0)
+            use_cache = (_first(cursor.fetchone(), 0) > 0)
     except Exception:
         try:
             conn.rollback()
@@ -810,7 +828,7 @@ def full_process_route():
     """
     
     cursor.execute(count_query, query_params)
-    total_count = cursor.fetchone()[0]
+    total_count = _first(cursor.fetchone(), 0)
     
     # 데이터 조회
     query = f"""

@@ -90,7 +90,7 @@
                     <!-- Primary Key와 등록일만 하드코딩 -->
                     <td>
                         <a href="javascript:void(0)" 
-                           onclick="window.open('/accident-detail/{{ accident.id }}?popup=1', 'accidentDetail', 'width=1200,height=800,scrollbars=yes,resizable=yes')"
+                           onclick="window.open('/accident-detail/{{ accident.accident_number or accident.id }}?popup=1', 'accidentDetail', 'width=1200,height=800,scrollbars=yes,resizable=yes')"
                            style="color: #2f5fd3; text-decoration: none; cursor: pointer; font-weight: bold;">
                             {{ accident.accident_number or '-' }}
                         </a>
