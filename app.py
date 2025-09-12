@@ -2684,8 +2684,20 @@ def update_safety_instruction():
 
         # 리스트 병합 반영 + 상세내용은 별도 컬럼
         final_custom = dict(existing_custom)
+        def _is_empty(val):
+            try:
+                if val is None:
+                    return True
+                if isinstance(val, str) and val.strip() == '':
+                    return True
+                return False
+            except Exception:
+                return False
         for k, v in custom_data.items():
             if not is_list_field(v):
+                # 빈값은 기존값 보존 (일반 동적 컬럼 보호)
+                if _is_empty(v):
+                    continue
                 final_custom[k] = v
 
         from db.upsert import safe_upsert
@@ -2885,7 +2897,14 @@ def update_follow_sop():
                     existing_custom_data[key] = new_list if len(new_list) > 0 else existing_list
                     logging.info(f"[MERGE DEBUG] {key} 단순 대체: {len(existing_custom_data[key])}개 항목")
             else:
-                # 일반 필드는 정상 업데이트
+                # 일반 필드: 빈값은 보존, 값이 있으면 업데이트
+                try:
+                    if value is None:
+                        continue
+                    if isinstance(value, str) and value.strip() == '':
+                        continue
+                except Exception:
+                    pass
                 existing_custom_data[key] = value
         
         # detailed_content를 custom_data에 추가
