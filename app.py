@@ -5464,6 +5464,27 @@ def update_accident():
                 # injured_person이 새 데이터에 있으면 그것 사용
                 print(f"[MERGE DEBUG] injured_person 업데이트: {type(custom_data['injured_person'])}")
             
+            # K사고 보호 및 안전 병합 규칙
+            # - K사고: IQADB(원본) 기본 필드는 custom_data로 덮지 않음
+            # - 공통: 빈값('' 또는 None)은 기존 값을 덮지 않음
+            protected_keys_for_k = {
+                'accident_number','accident_name','workplace','accident_grade','major_category',
+                'injury_form','injury_type','building','floor','location_category','location_detail',
+                'accident_date','created_at','report_date','day_of_week',
+                # 확장: 책임회사/번호(원본 보호)
+                'responsible_company1','responsible_company1_no','responsible_company2','responsible_company2_no'
+            }
+
+            def _is_empty_value(v):
+                try:
+                    if v is None:
+                        return True
+                    if isinstance(v, str) and v.strip() == '':
+                        return True
+                    return False
+                except Exception:
+                    return False
+
             # 안전한 병합: 리스트 타입 필드는 병합 처리
             def is_list_field(field_value):
                 """리스트 필드인지 확인"""
@@ -5474,6 +5495,11 @@ def update_accident():
                 return False
             
             for key, value in custom_data.items():
+                # K사고는 보호 키는 덮어쓰지 않음
+                if (not is_direct_entry) and (key in protected_keys_for_k):
+                    print(f"[MERGE GUARD] K-case protected key skipped: {key}")
+                    continue
+
                 if is_list_field(value) or is_list_field(existing_custom_data.get(key, [])):
                     print(f"[MERGE DEBUG] {key} 리스트 필드로 감지, 병합 처리 시작")
                     
@@ -5532,7 +5558,10 @@ def update_accident():
                         existing_custom_data[key] = new_list if len(new_list) > 0 else existing_list
                         print(f"[MERGE DEBUG] {key} 단순 대체: {len(existing_custom_data[key])}개 항목")
                 else:
-                    # 일반 필드는 정상 업데이트
+                    # 일반 필드는 빈값이 아닐 때만 덮어씀
+                    if _is_empty_value(value):
+                        print(f"[MERGE GUARD] skip empty value for key: {key}")
+                        continue
                     existing_custom_data[key] = value
             
             # detailed_content를 custom_data에 추가
