@@ -45,11 +45,27 @@
                     </div>
                     <div class="info-cell span-1">
                         <label>등록일</label>
-                        <input type="text" value="{{
-                            (instruction.report_date|date_only) if (instruction.accident_number and instruction.accident_number.startswith('K'))
-                            else ((instruction.created_at|date_only) if instruction.created_at
-                            else ((instruction.accident_date|date_only) if instruction.accident_date else '-'))
-                        }}" readonly style="background-color: #f3f4f6;">
+                        {# K사고도 report_date가 비어있으면 created_at/accident_date로 폴백 #}
+                        {% if instruction.accident_number and instruction.accident_number.startswith('K') %}
+                            {% if instruction.report_date %}
+                                {% set reg_date = instruction.report_date|date_only %}
+                            {% elif instruction.created_at %}
+                                {% set reg_date = instruction.created_at|date_only %}
+                            {% elif instruction.accident_date %}
+                                {% set reg_date = instruction.accident_date|date_only %}
+                            {% else %}
+                                {% set reg_date = '-' %}
+                            {% endif %}
+                        {% else %}
+                            {% if instruction.created_at %}
+                                {% set reg_date = instruction.created_at|date_only %}
+                            {% elif instruction.accident_date %}
+                                {% set reg_date = instruction.accident_date|date_only %}
+                            {% else %}
+                                {% set reg_date = '-' %}
+                            {% endif %}
+                        {% endif %}
+                        <input type="text" value="{{ reg_date }}" readonly style="background-color: #f3f4f6;">
                     </div>
                 </div>
                 {% endif %}

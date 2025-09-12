@@ -4118,8 +4118,50 @@ def accident_detail(accident_id):
                     except:
                         pass
             
-            # custom_data를 accident 딕셔너리에 병합 (partner_accident와 동일하게)
-            accident.update(custom_data)
+            # custom_data 병합 시 안전 규칙 적용
+            # - K사고: 기본(원본) 필드는 보호
+            # - 공통: 빈값('' 또는 None)은 상위 필드를 덮지 않음
+            # - ACC사고: 기본 필드도 상위가 비어있을 때만 보완적으로 채움
+            base_protected_keys = {
+                'accident_number','accident_name','workplace','accident_grade','major_category',
+                'injury_form','injury_type','building','floor','location_category','location_detail',
+                'accident_date','created_at','report_date','day_of_week',
+                'responsible_company1','responsible_company1_no','responsible_company2','responsible_company2_no'
+            }
+
+            def _is_empty(v):
+                try:
+                    if v is None:
+                        return True
+                    if isinstance(v, str) and v.strip() == '':
+                        return True
+                    return False
+                except Exception:
+                    return False
+
+            safe_updates = {}
+            # 사고번호 기준으로 ACC/K 구분
+            acc_no = str(accident.get('accident_number') or '')
+            is_direct = acc_no.startswith('ACC')
+
+            for k, v in custom_data.items():
+                # 빈값은 덮어쓰지 않음
+                if _is_empty(v):
+                    continue
+                if k in base_protected_keys:
+                    if not is_direct:
+                        # K사고: 기본키 보호
+                        continue
+                    # ACC사고: 상위가 비어 있으면 보완 채움
+                    top = accident.get(k)
+                    if _is_empty(top):
+                        safe_updates[k] = v
+                else:
+                    # 비기본 키는 항상 병합 (값이 비어있지 않을 때)
+                    safe_updates[k] = v
+
+            if safe_updates:
+                accident.update(safe_updates)
             
             logging.info(f"Loaded and merged custom_data: {custom_data}")
         except Exception as e:
