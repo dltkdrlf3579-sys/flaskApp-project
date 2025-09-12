@@ -1563,27 +1563,14 @@ def partner_accident():
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     
-    # 섹션 정보 가져오기
-    # 먼저 accident_sections 테이블 사용 시도, 없으면 section_config 사용
+    # 섹션 정보 가져오기 (단일 소스: section_config via SectionConfigService)
     try:
-        _wa = sql_is_active_true('is_active', conn)
-        _wd = sql_is_deleted_false('is_deleted', conn)
-        sections = conn.execute(f"""
-            SELECT * FROM accident_sections 
-            WHERE {_wa} 
-              AND {_wd}
-            ORDER BY section_order
-        """).fetchall()
-        sections = [dict(row) for row in sections]
-    except:
-        # accident_sections 테이블이 없으면 section_config 사용
-        _wa2 = sql_is_active_true('is_active', conn)
-        sections = conn.execute(f"""
-            SELECT * FROM section_config 
-            WHERE board_type = 'accident' AND {_wa2}
-            ORDER BY section_order
-        """).fetchall()
-        sections = [dict(row) for row in sections]
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('accident', DB_PATH)
+        sections = section_service.get_sections() or []
+    except Exception as _e:
+        logging.error(f"섹션 로드 실패, 기본값 사용: {_e}")
+        sections = []
     
     # 동적 컬럼 설정 가져오기 (활성화되고 삭제되지 않은 것만)
     _wa3 = sql_is_active_true('is_active', conn)
