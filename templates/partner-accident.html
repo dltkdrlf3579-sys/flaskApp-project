@@ -66,6 +66,7 @@
                     <!-- Primary Key와 등록일만 하드코딩 -->
                     <th>사고번호</th>
                     <th>등록일</th>
+                    <th>사고명</th>
                     <!-- 나머지는 dynamic_columns -->
                     {% for col in dynamic_columns %}
                         {% if col.column_key == 'accident_number' %}
@@ -104,17 +105,23 @@
                             {{ accident.created_at | date_only }}
                         {% else %}-{% endif %}
                     </td>
+                    <td>
+                        {% set name_val = accident.accident_name or accident.get('accident_name') %}
+                        {% if not name_val and accident.custom_data %}
+                            {% if accident.custom_data is mapping %}
+                                {% set name_val = accident.custom_data.get('accident_name') %}
+                            {% endif %}
+                        {% endif %}
+                        {{ name_val if name_val else '-' }}
+                    </td>
                     
                     <!-- 나머지 dynamic columns -->
                     {% for col in dynamic_columns %}
                         {% if col.column_key == 'accident_number' %}
                             {# skip duplicate accident number cell #}
                         {% elif col.column_key == 'accident_name' %}
-                            {% set value = accident[col.column_key] or accident.get(col.column_key) %}
-                            {% if (not value) and accident.custom_data and accident.custom_data is mapping %}
-                                {% set value = accident.custom_data.get('accident_name') %}
-                            {% endif %}
-                            <td>{{ value if value else '-' }}</td>
+                            {# Printed as fixed column above; skip to avoid duplicate #}
+                            
                         {% elif col.column_key == 'injured_person' %}
                             <!-- 재해자명단 특별 처리: 첫 번째 이름 + 외 N명 형식 -->
                             {% set injured_list = accident.get('injured_person', []) %}
