@@ -470,8 +470,7 @@ function updateSafetyInstruction() {
     
     // 사고번호 확인 (K사고 vs ACC사고)
     const isAccidentEditable = issueNumber && issueNumber.startsWith('ACC');
-    
-    // ACC 사고: base_fields와 custom_data 모두 전송
+    // K사고도 편집 가능: base_fields도 항상 전송 (서버에서 안전하게 처리)
     // base_fields: 기본 컬럼들 (화이트리스트)
     const baseFields = {};
     const baseFieldsList = [
@@ -486,9 +485,7 @@ function updateSafetyInstruction() {
         }
     });
     
-    if (isAccidentEditable) {
-        formData.append('base_fields', JSON.stringify(baseFields));
-    }
+    formData.append('base_fields', JSON.stringify(baseFields));
     
     // custom_data: 모든 동적 필드 포함 (GPT 권장: 전체 포함)
     const customData = { ...dynamicData };
@@ -547,7 +544,7 @@ function updateSafetyInstruction() {
     });
 }
 
-// 외부 연동 컬럼 읽기전용 처리
+// 외부 연동 컬럼은 '음영' 표시만, 편집은 허용
 document.addEventListener('DOMContentLoaded', () => {
   const isExternal = !isDirectEntry;
   if (!isExternal) return;
@@ -555,20 +552,10 @@ document.addEventListener('DOMContentLoaded', () => {
   inputs.forEach(el => {
     const key = el.getAttribute('data-field');
     if (externalManagedKeys.includes(key)) {
-      if (el.tagName === 'SELECT') {
-        el.disabled = true;
-      } else {
-        el.readOnly = true;
-      }
+      // 편집 가능 상태 유지: disabled/readOnly 설정하지 않음
+      // 시각적 힌트만 제공 (음영 처리)
       el.style.backgroundColor = '#f3f4f6';
-      const group = el.closest('.input-group');
-      if (group) {
-        const btn = group.querySelector('button');
-        if (btn) {
-          btn.disabled = true;
-          btn.classList.add('disabled');
-        }
-      }
+      // 검색/팝업 버튼 등도 사용 가능해야 하므로 비활성화하지 않음
     }
   });
 });
