@@ -519,14 +519,14 @@ function updateSafetyInstruction() {
         formData.append('deleted_attachments', JSON.stringify(deletedAttachments));
     }
     
-    // 첨부파일 설명 정보 (GPT 권장: 객체 배열로 전송)
+    // 첨부파일 설명 정보 (행의 data-* 속성 기반으로 정확히 수집)
     const attachmentDescriptions = [];
-    document.querySelectorAll('.attachment-desc').forEach((input, index) => {
-        const row = input.closest('tr') || input.closest('.attachment-row');
+    document.querySelectorAll('#attachments-tbody .table-row').forEach((row) => {
+        const descInput = row.querySelector('.attachment-desc');
         attachmentDescriptions.push({
-            id: row ? (row.dataset.id || row.dataset.attachmentId || null) : null,
-            description: input.value || '',
-            isNew: row ? (row.dataset.isNew === 'true') : false
+            id: row.dataset.id ? parseInt(row.dataset.id) : null,
+            description: descInput ? (descInput.value || '') : '',
+            isNew: row.dataset.isNew === 'true'
         });
     });
     formData.append('attachment_data', JSON.stringify(attachmentDescriptions));
