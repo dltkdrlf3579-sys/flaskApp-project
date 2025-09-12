@@ -3912,9 +3912,8 @@ def accident_detail(accident_id):
                         print(f"[DEBUG] injured_person content: {injured_data}")
                     else:
                         print("[DEBUG] injured_person NOT FOUND in custom_data")
-                    
-                    # accident 딕셔너리에 custom_data 병합
-                    accident.update(custom_data)
+                    # 주의: 여기서는 accident에 custom_data를 즉시 병합하지 않는다.
+                    # 실제 병합은 아래의 안전 병합 로직에서 수행된다.
                 except:
                     custom_data = {}
         else:
@@ -5685,6 +5684,16 @@ def update_accident():
                 # 확장: 책임회사/번호(원본 보호)
                 'responsible_company1','responsible_company1_no','responsible_company2','responsible_company2_no'
             }
+
+            # K사고의 경우, custom_data 내에 기본(원본) 키가 남아있으면 화면 병합 시 오염을 일으킬 수 있으므로 제거
+            if not is_direct_entry and isinstance(existing_custom_data, dict):
+                removed_keys = []
+                for k in list(existing_custom_data.keys()):
+                    if k in protected_keys_for_k:
+                        existing_custom_data.pop(k, None)
+                        removed_keys.append(k)
+                if removed_keys:
+                    print(f"[MERGE CLEANUP] Removed protected keys from custom_data for K-case: {removed_keys}")
 
             def _is_empty_value(v):
                 try:
