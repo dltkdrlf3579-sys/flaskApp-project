@@ -5716,11 +5716,7 @@ def update_accident():
                 return False
             
             for key, value in custom_data.items():
-                # K사고는 보호 키는 덮어쓰지 않음
-                if (not is_direct_entry) and (key in protected_keys_for_k):
-                    print(f"[MERGE GUARD] K-case protected key skipped: {key}")
-                    continue
-
+                # 리스트 필드 병합 우선 처리
                 if is_list_field(value) or is_list_field(existing_custom_data.get(key, [])):
                     print(f"[MERGE DEBUG] {key} 리스트 필드로 감지, 병합 처리 시작")
                     
@@ -5779,7 +5775,7 @@ def update_accident():
                         existing_custom_data[key] = new_list if len(new_list) > 0 else existing_list
                         print(f"[MERGE DEBUG] {key} 단순 대체: {len(existing_custom_data[key])}개 항목")
                 else:
-                    # 일반 필드는 빈값이 아닐 때만 덮어씀
+                    # 일반 필드: 빈값은 무시하고, 값이 있으면 custom_data에 기록
                     if _is_empty_value(value):
                         print(f"[MERGE GUARD] skip empty value for key: {key}")
                         continue
