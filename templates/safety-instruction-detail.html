@@ -56,10 +56,10 @@
                 </div>
                 {% endif %}
                 
-                <!-- 상세/위반내용 + 상단 고정 필드(발부번호/등록일)는 제외 -->
+                <!-- 상세/위반내용 + 상단 고정 필드(발부번호/등록일) + 시스템(첨부/비고)은 제외 -->
                 {% set columns = [] %}
                 {% for col in all_columns %}
-                    {% if col.column_key not in ['detailed_content', 'violation_content', 'issue_number', 'created_at'] %}
+                    {% if col.column_key not in ['detailed_content', 'violation_content', 'issue_number', 'created_at', 'attachments', 'notes', 'note'] %}
                         {% set _ = columns.append(col) %}
                     {% endif %}
                 {% endfor %}

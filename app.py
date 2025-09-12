@@ -382,6 +382,14 @@ def init_db():
                 UNIQUE(board_type, section_key)
             )
         ''')
+        # 보강: is_deleted 컬럼이 없으면 추가(soft delete 일관성)
+        try:
+            cursor.execute("PRAGMA table_info(section_config)")
+            cols = [r[1].lower() for r in cursor.fetchall()]
+            if 'is_deleted' not in cols:
+                cursor.execute("ALTER TABLE section_config ADD COLUMN is_deleted INTEGER DEFAULT 0")
+        except Exception:
+            pass
         
         # 기본 섹션 데이터 삽입 (없는 경우에만)
         cursor.execute("SELECT COUNT(*) FROM section_config WHERE board_type = 'safety_instruction'")
@@ -2102,6 +2110,66 @@ def safety_instruction_register():
     logging.info(f"동적 컬럼 {len(dynamic_columns)}개 로드됨")
     logging.info(f"기본 옵션 {len(basic_options)}개 필드 로드됨")
     
+    # 동적 컬럼 타입 보정: 링크드/팝업 추론 (discipline(d)_person* 등)
+    try:
+        # 전역 키 수집
+        all_keys = {c.get('column_key') for c in dynamic_columns if c.get('column_key')}
+        suffixes = ['_id','_dept','_department','_department_code','_bizno','_company_bizno','_code','_company']
+
+        def base_key_of(key: str) -> str:
+            if not isinstance(key, str):
+                return ''
+            for s in suffixes:
+                if key.endswith(s):
+                    return key[:-len(s)]
+            return key
+
+        def infer_group(bk: str) -> str:
+            if not bk:
+                return ''
+            variants = [bk, bk + 'd']  # 오타/변형 케이스 지원(disciplined vs displined)
+            # 회사 그룹 감지: *_bizno, *_company_bizno
+            if any(((v + '_company_bizno') in all_keys) or ((v + '_bizno') in all_keys) for v in variants):
+                return 'company'
+            # 부서 그룹 감지
+            if any(((v + '_dept') in all_keys) or ((v + '_department') in all_keys) or ((v + '_department_code') in all_keys) for v in variants):
+                return 'department'
+            # 사람/ID 그룹 감지
+            if any(((v + '_id') in all_keys) for v in variants):
+                return 'person'
+            # 협력사 근로자 그룹(회사명만 있는 경우)
+            if any(((v + '_company') in all_keys) for v in variants):
+                return 'contractor'
+            return ''
+
+        popup_map = {
+            'person': 'popup_person',
+            'company': 'popup_company',
+            'department': 'popup_department',
+            'contractor': 'popup_contractor',
+        }
+
+        for col in dynamic_columns:
+            ck = col.get('column_key') or ''
+            bk = base_key_of(ck)
+            grp = infer_group(bk)
+            # 보조(링크드) 필드 렌더링 힌트 부여
+            if ck.endswith('_id') or ck.endswith('_company') or ck.endswith('_company_bizno') or ck.endswith('_bizno'):
+                col['column_type'] = 'linked_text'
+                continue
+            if ck.endswith('_dept') or ck.endswith('_department') or ck.endswith('_department_code'):
+                col['column_type'] = 'linked_dept'
+                continue
+            # 베이스 필드에 팝업 타입 지정
+            if grp and ck == bk:
+                ct = col.get('column_type')
+                if not ct or ct in ('text','popup','table','table_select'):
+                    col['column_type'] = popup_map.get(grp, ct)
+                # 입력 타입 힌트
+                col['input_type'] = col.get('input_type') or 'table'
+    except Exception as _e:
+        logging.warning(f"safety_instruction register: normalize types failed: {_e}")
+
     # 섹션 정보 로드
     from section_service import SectionConfigService
     section_service = SectionConfigService('safety_instruction', DB_PATH)
@@ -2388,6 +2456,54 @@ def safety_instruction_detail(issue_number):
     
     logging.info(f"환경안전 지시서 {issue_number} ({person_name}) 상세 페이지 로드")
     
+    # 동적 컬럼 타입 보정: 링크드/팝업 추론 (discipline(d)_person* 등)
+    try:
+        all_keys = {c.get('column_key') for c in dynamic_columns if c.get('column_key')}
+        suffixes = ['_id','_dept','_department','_department_code','_bizno','_company_bizno','_code','_company']
+        def base_key_of(key: str) -> str:
+            if not isinstance(key, str):
+                return ''
+            for s in suffixes:
+                if key.endswith(s):
+                    return key[:-len(s)]
+            return key
+        def infer_group(bk: str) -> str:
+            if not bk:
+                return ''
+            variants = [bk, bk + 'd']
+            if any(((v + '_company_bizno') in all_keys) or ((v + '_bizno') in all_keys) for v in variants):
+                return 'company'
+            if any(((v + '_dept') in all_keys) or ((v + '_department') in all_keys) or ((v + '_department_code') in all_keys) for v in variants):
+                return 'department'
+            if any(((v + '_id') in all_keys) for v in variants):
+                return 'person'
+            if any(((v + '_company') in all_keys) for v in variants):
+                return 'contractor'
+            return ''
+        popup_map = {
+            'person': 'popup_person',
+            'company': 'popup_company',
+            'department': 'popup_department',
+            'contractor': 'popup_contractor',
+        }
+        for col in dynamic_columns:
+            ck = col.get('column_key') or ''
+            bk = base_key_of(ck)
+            grp = infer_group(bk)
+            if ck.endswith('_id') or ck.endswith('_company') or ck.endswith('_company_bizno') or ck.endswith('_bizno'):
+                col['column_type'] = 'linked_text'
+                continue
+            if ck.endswith('_dept') or ck.endswith('_department') or ck.endswith('_department_code'):
+                col['column_type'] = 'linked_dept'
+                continue
+            if grp and ck == bk:
+                ct = col.get('column_type')
+                if not ct or ct in ('text','popup','table','table_select'):
+                    col['column_type'] = popup_map.get(grp, ct)
+                col['input_type'] = col.get('input_type') or 'table'
+    except Exception as _e:
+        logging.warning(f"safety_instruction detail: normalize types failed: {_e}")
+
     # 기본정보 드롭다운 옵션 로드
     basic_options = {}
     from board_services import CodeService
@@ -6178,8 +6294,9 @@ def admin_accident_columns():
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     _wa = sql_is_active_true('is_active', conn)
+    _wd = sql_is_deleted_false('is_deleted', conn)
     sections = conn.execute(
-        f"SELECT * FROM section_config WHERE board_type = 'accident' AND {_wa} ORDER BY section_order"
+        f"SELECT * FROM section_config WHERE board_type = 'accident' AND {_wa} AND {_wd} ORDER BY section_order"
     ).fetchall()
     sections = [dict(row) for row in sections]
     # 컬럼 관리 페이지에서는 사고 데이터 매핑이 필요 없음 (불필요 코드 제거)
@@ -7690,6 +7807,35 @@ def delete_safety_instruction_column(column_id):
         return jsonify(result)
     except Exception as e:
         logging.error(f"환경안전 지시서 컬럼 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+# ===== Admin utility: force delete safety-instruction columns by keys =====
+@app.route("/admin/safety-instruction-columns/force-delete-keys", methods=["POST"])
+@require_admin_auth
+def admin_force_delete_si_columns():
+    """강제 컬럼 삭제(soft delete). 관리자 전용.
+
+    Request JSON: {"keys": ["attachments","notes","note"]}
+    """
+    try:
+        data = request.get_json(force=True) or {}
+        keys = data.get('keys') or []
+        if not keys:
+            return jsonify({"success": False, "message": "keys is required"}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        placeholders = ','.join('?' * len(keys))
+        cursor.execute(
+            f"UPDATE safety_instruction_column_config SET is_deleted = 1 WHERE LOWER(column_key) IN ({placeholders})",
+            [k.lower() for k in keys]
+        )
+        affected = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True, "deleted": affected})
+    except Exception as e:
+        logging.error(f"force delete si columns error: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
 # ============= 섹션 관리 API =============
