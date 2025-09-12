@@ -263,6 +263,7 @@ class PartnerDataManager:
                 accident_date TEXT,
                 day_of_week TEXT,
                 created_at TEXT,
+                report_date TEXT,
                 building TEXT,
                 floor TEXT,
                 location_category TEXT,
@@ -272,6 +273,14 @@ class PartnerDataManager:
                 synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        # 누락 컬럼 보강 (report_date)
+        try:
+            cursor.execute("PRAGMA table_info(accidents_cache)")
+            cols_ac = [c[1] for c in cursor.fetchall()]
+            if 'report_date' not in cols_ac:
+                cursor.execute("ALTER TABLE accidents_cache ADD COLUMN report_date TEXT")
+        except Exception:
+            pass
 
         # 인덱스 보강 (중복 방지 및 조회 성능)
         try:

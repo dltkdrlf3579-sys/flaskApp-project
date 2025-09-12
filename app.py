@@ -1450,15 +1450,7 @@ def accident():
         query += " AND accident_grade LIKE %s"
         params.append(f"%{filters['accident_grade']}%")
     
-    # ensure report_date column exists for sorting (safe, idempotent)
-    try:
-        _cols = conn.execute("PRAGMA table_info(accidents_cache)").fetchall()
-        _colnames = [c[1] for c in _cols]
-        if 'report_date' not in _colnames:
-            conn.execute("ALTER TABLE accidents_cache ADD COLUMN report_date DATE")
-            conn.commit()
-    except Exception:
-        pass
+    # 정렬 컬럼(report_date)은 초기화 단계에서 보장되어야 함. 요청 중 DDL 금지.
 
     query += " ORDER BY (report_date IS NULL) ASC, report_date DESC, created_at DESC, accident_number DESC"
     
@@ -1657,15 +1649,7 @@ def partner_accident():
     total_count = conn.execute(count_query, params).fetchone()[0]
     
     # ORDER BY는 데이터 조회시에만 추가 - created_at 기준으로 최신순 정렬
-    # ensure report_date column exists for sorting (safe, idempotent)
-    try:
-        _cols2 = conn.execute("PRAGMA table_info(accidents_cache)").fetchall()
-        _colnames2 = [c[1] for c in _cols2]
-        if 'report_date' not in _colnames2:
-            conn.execute("ALTER TABLE accidents_cache ADD COLUMN report_date DATE")
-            conn.commit()
-    except Exception:
-        pass
+    # 정렬 컬럼(report_date)은 초기화 단계에서 보장되어야 함. 요청 중 DDL 금지.
 
     query += " ORDER BY (report_date IS NULL) ASC, report_date DESC, created_at DESC, accident_number DESC"
     
@@ -3691,15 +3675,26 @@ def accident_detail(accident_id):
     accident = None
     custom_data = {}
     
-    # accidents_cache 테이블에서 조회
+    # accidents_cache 테이블에서 조회 (id가 숫자일 때만 id로, 아니면 번호로)
     try:
         _wd_acc = sql_is_deleted_false('is_deleted', conn)
-        # 1) id로 조회 시도
-        accident_row = conn.execute(
-            f"SELECT * FROM accidents_cache WHERE id = %s AND {_wd_acc}",
-            (accident_id,)
-        ).fetchone()
-        # 2) 없으면 accident_number로 조회 시도 (사용자가 번호로 접근한 경우)
+        accident_row = None
+        acc_id_str = str(accident_id)
+        # id 조회는 숫자인 경우에만 시도하여 캐스팅 오류 방지
+        if acc_id_str.isdigit():
+            try:
+                accident_row = conn.execute(
+                    f"SELECT * FROM accidents_cache WHERE id = %s AND {_wd_acc}",
+                    (accident_id,)
+                ).fetchone()
+            except Exception as _e_id:
+                # 안전 회복
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                accident_row = None
+        # 번호로 조회
         if not accident_row:
             accident_row = conn.execute(
                 f"SELECT * FROM accidents_cache WHERE accident_number = %s AND {_wd_acc}",
@@ -3734,6 +3729,10 @@ def accident_detail(accident_id):
             dummy_accidents = []
     except Exception as e:
         logging.error(f"DB 조회 오류: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         dummy_accidents = []
         
     # 더미 데이터 생성 (DB에 없는 경우)
@@ -5237,9 +5236,9 @@ def update_accident():
         
         logging.info(f"업데이트 대상 사고: {accident_number}")
         
-        # ACC 사고일 때만 기본정보 업데이트 (K 사고는 수정 불가)
+        # 기본정보 업데이트 허용 (번호 접두사 무관)
         is_direct_entry = accident_number.startswith('ACC')
-        if is_direct_entry and base_fields != '{}':
+        if base_fields != '{}':
             try:
                 base_data = pyjson.loads(base_fields)
                 logging.info(f"ACC 사고 기본정보 업데이트: {base_data}")

@@ -621,51 +621,13 @@ function openPopup(fieldKey) {
     popup.focus();
 }
 
-// K사고의 basic_info 섹션 읽기 전용 처리
+// K사고도 수정 허용(프론트 차단 제거)
 document.addEventListener('DOMContentLoaded', function() {
-    // K사고인지 확인
-    if (issueNumber && issueNumber.startsWith('K')) {
-        // basic_info 섹션의 모든 입력 필드를 읽기 전용으로 설정
-        sections.forEach(section => {
-            if (section.section_key === 'basic_info') {
-                // 해당 섹션의 모든 input, select, textarea 비활성화
-                const sectionInputs = document.querySelectorAll(`[data-section="basic_info"]`);
-                sectionInputs.forEach(input => {
-                    if (input.tagName === 'SELECT') {
-                        input.disabled = true;
-                        input.style.backgroundColor = '#f3f4f6';
-                        input.style.cursor = 'not-allowed';
-                    } else if (input.tagName === 'TEXTAREA') {
-                        input.readOnly = true;
-                        input.style.backgroundColor = '#f3f4f6';
-                        input.style.cursor = 'not-allowed';
-                    } else if (input.tagName === 'INPUT') {
-                        input.readOnly = true;
-                        input.style.backgroundColor = '#f3f4f6';
-                        input.style.cursor = 'not-allowed';
-                    }
-                });
-                
-                // 팝업 버튼도 비활성화
-                const popupButtons = document.querySelectorAll('.basic_info-section button');
-                popupButtons.forEach(button => {
-                    button.disabled = true;
-                    button.style.backgroundColor = '#f3f4f6';
-                    button.style.cursor = 'not-allowed';
-                });
-            }
-        });
-    }
+    // no-op: 편집 제한 제거
 });
 
 // 비밀번호 모달 관련 함수들
 function showEditPasswordModal() {
-    // ACC 사고인지 확인
-    if (!issueNumber || !issueNumber.startsWith('ACC')) {
-        alert('K 사고는 수정할 수 없습니다. (외부 시스템 데이터)');
-        return;
-    }
-    
     document.getElementById('edit-password-modal').style.display = 'block';
     document.getElementById('edit-password-input').focus();
 }
