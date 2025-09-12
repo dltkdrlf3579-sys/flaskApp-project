@@ -1586,10 +1586,14 @@ let editingId = null;
             typeSelectEl.dataset.originalType = typeSelectEl.value || column.column_type || '';
             document.getElementById('isActive').checked = column.is_active;
             
-            // 섹션 선택 옵션 갱신 후 값 설정
+            // 섹션 선택 옵션 갱신 후 값 설정(옵션에 없는 탭이면 기본값)
             const sectionSelect = document.getElementById('columnSection');
             populateSectionSelect(sectionSelect);
-            sectionSelect.value = column.tab || 'basic_info';
+            let desiredTab = column.tab || 'basic_info';
+            sectionSelect.value = desiredTab;
+            if (!Array.from(sectionSelect.options).some(o => o.value === sectionSelect.value)) {
+                sectionSelect.value = (sections && sections.length > 0) ? sections[0].section_key : 'basic_info';
+            }
             
             // 텍스트 타입이고 span 값이 있으면 설정
             if (column.column_type === 'text' && column.column_span) {
