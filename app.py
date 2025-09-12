@@ -1487,6 +1487,23 @@ def accident():
             except Exception as e:
                 print(f"Error parsing custom_data: {e}")
         
+        # K사고와 A사고 구분해서 등록일 필드 설정
+        accident_number = accident.get('accident_number', '')
+        if accident_number.startswith('K'):
+            # K사고는 report_date를 등록일로 사용
+            accident['display_created_at'] = accident.get('report_date', accident.get('created_at', '-'))
+        else:
+            # ACC사고는 created_at을 등록일로 사용
+            accident['display_created_at'] = accident.get('created_at', '-')
+        
+        # accident_name이 없으면 custom_data에서 찾기
+        if not accident.get('accident_name') and accident.get('custom_data'):
+            try:
+                if isinstance(accident['custom_data'], dict):
+                    accident['accident_name'] = accident['custom_data'].get('accident_name', '-')
+            except:
+                pass
+        
         accidents.append(accident)
     
     # 드롭다운 매핑 (리스트 전체 기준) - 상단 분기에서도 동일하게 적용
@@ -4021,6 +4038,42 @@ def accident_detail(accident_id):
             except Exception:
                 return (c.get('column_order') or 0, c.get('id') or 0)
         cols.sort(key=_order_key)
+        
+        # 첫 번째 섹션(basic_info)에 사고번호와 등록일을 강제로 맨 앞에 추가
+        if section['section_key'] == 'basic_info':
+            # 기존 컬럼에서 사고번호와 등록일 제거
+            cols = [c for c in cols if c.get('column_key') not in ['accident_number', 'created_at', 'report_date']]
+            
+            # 사고번호와 등록일을 강제로 첫 번째 줄에 추가
+            mandatory_cols = []
+            
+            # 사고번호 - 항상 첫 번째
+            mandatory_cols.append({
+                'column_key': 'accident_number',
+                'column_name': '사고번호',
+                'column_type': 'text',
+                'tab': 'basic_info',
+                'column_order': -2,
+                'is_active': 1,
+                'is_readonly': 1,
+                'column_span': 1
+            })
+            
+            # 등록일 - 항상 두 번째 (K사고는 report_date, A사고는 created_at)
+            mandatory_cols.append({
+                'column_key': 'created_at',  # 템플릿에서 K/A 구분 처리
+                'column_name': '등록일',
+                'column_type': 'date',
+                'tab': 'basic_info',
+                'column_order': -1,
+                'is_active': 1,
+                'is_readonly': 1,
+                'column_span': 1
+            })
+            
+            # 강제 컬럼을 앞에 추가
+            cols = mandatory_cols + cols
+        
         section_columns[section['section_key']] = cols
         logging.info(f"섹션 '{section['section_name']}': {len(section_columns[section['section_key']])}개 컬럼")
     
@@ -4382,6 +4435,44 @@ def accident_register():
             except Exception:
                 return (c.get('column_order') or 0, c.get('id') or 0)
         cols.sort(key=_order_key)
+        
+        # 첫 번째 섹션(basic_info)에 사고번호와 등록일을 강제로 맨 앞에 추가
+        if section['section_key'] == 'basic_info':
+            # 기존 컬럼에서 사고번호와 등록일 제거
+            cols = [c for c in cols if c.get('column_key') not in ['accident_number', 'created_at', 'report_date']]
+            
+            # 사고번호와 등록일을 강제로 첫 번째 줄에 추가
+            mandatory_cols = []
+            
+            # 사고번호 - 항상 첫 번째 (등록 시 자동 생성)
+            mandatory_cols.append({
+                'column_key': 'accident_number',
+                'column_name': '사고번호',
+                'column_type': 'text',
+                'tab': 'basic_info',
+                'column_order': -2,
+                'is_active': 1,
+                'is_readonly': 1,
+                'column_span': 1,
+                'default_value': 'ACC' + get_korean_time().strftime('%y%m%d%H%M')  # 자동 생성
+            })
+            
+            # 등록일 - 항상 두 번째
+            mandatory_cols.append({
+                'column_key': 'created_at',
+                'column_name': '등록일',
+                'column_type': 'date',
+                'tab': 'basic_info',
+                'column_order': -1,
+                'is_active': 1,
+                'is_readonly': 1,
+                'column_span': 1,
+                'default_value': get_korean_time().strftime('%Y-%m-%d')
+            })
+            
+            # 강제 컬럼을 앞에 추가
+            cols = mandatory_cols + cols
+        
         section_columns[section['section_key']] = cols
         logging.info(f"섹션 '{section['section_name']}': {len(section_columns[section['section_key']])}개 컬럼")
     

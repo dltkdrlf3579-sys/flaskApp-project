@@ -46,7 +46,7 @@
                     <div class="info-cell span-1">
                         <label>등록일</label>
                         <input type="text" value="{{
-                            (instruction.report_date|date_only) if instruction.report_date
+                            (instruction.report_date|date_only) if (instruction.accident_number and instruction.accident_number.startswith('K'))
                             else ((instruction.created_at|date_only) if instruction.created_at
                             else ((instruction.accident_date|date_only) if instruction.accident_date else '-'))
                         }}" readonly style="background-color: #f3f4f6;">
