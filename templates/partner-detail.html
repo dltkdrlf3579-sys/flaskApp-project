@@ -33,17 +33,7 @@
         </div>
         <div class="section-content" id="basic-info-content">
             <div class="info-table">
-                <!-- partner_standards_id와 created_at 추가 -->
-                <div class="info-row">
-                    <div class="info-cell span-1">
-                        <label>ID</label>
-                        <input type="text" value="{{ partner.partner_standards_id or '-' }}" readonly style="background-color: #f3f4f6;">
-                    </div>
-                    <div class="info-cell span-1">
-                        <label>등록일</label>
-                        <input type="text" value="{{ (partner.created_at|date_only) if partner.created_at else '-' }}" readonly style="background-color: #f3f4f6;">
-                    </div>
-                </div>
+                {# ID/등록일은 업체정보에 불필요하므로 숨김 #}
                 <div class="info-row">
                     <div class="info-cell">
                         <label>사업자번호</label>
