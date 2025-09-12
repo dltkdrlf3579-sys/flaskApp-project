@@ -1491,6 +1491,8 @@ def accident():
                     custom_data = accident['custom_data']
                 else:
                     custom_data = json.loads(accident['custom_data'])
+                # Ensure fallback reads parsed dict, not raw string
+                accident['custom_data'] = custom_data
 
                 def _is_empty(v):
                     try:
@@ -5692,15 +5694,7 @@ def update_accident():
                 'responsible_company1','responsible_company1_no','responsible_company2','responsible_company2_no'
             }
 
-            # K사고의 경우, custom_data 내에 기본(원본) 키가 남아있으면 화면 병합 시 오염을 일으킬 수 있으므로 제거
-            if not is_direct_entry and isinstance(existing_custom_data, dict):
-                removed_keys = []
-                for k in list(existing_custom_data.keys()):
-                    if k in protected_keys_for_k:
-                        existing_custom_data.pop(k, None)
-                        removed_keys.append(k)
-                if removed_keys:
-                    print(f"[MERGE CLEANUP] Removed protected keys from custom_data for K-case: {removed_keys}")
+            # 주의: 화면 렌더 단계에서 안전 병합을 적용하므로 custom_data 키를 삭제하지 않는다
 
             def _is_empty_value(v):
                 try:
