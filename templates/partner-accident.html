@@ -96,7 +96,9 @@
                         </a>
                     </td>
                     <td>
-                        {% if accident.report_date %}
+                        {% if accident.display_created_at %}
+                            {{ accident.display_created_at | date_only }}
+                        {% elif accident.report_date %}
                             {{ accident.report_date | date_only }}
                         {% elif accident.created_at %}
                             {{ accident.created_at | date_only }}
@@ -109,6 +111,9 @@
                             {# skip duplicate accident number cell #}
                         {% elif col.column_key == 'accident_name' %}
                             {% set value = accident[col.column_key] or accident.get(col.column_key) %}
+                            {% if (not value) and accident.custom_data and accident.custom_data is mapping %}
+                                {% set value = accident.custom_data.get('accident_name') %}
+                            {% endif %}
                             <td>{{ value if value else '-' }}</td>
                         {% elif col.column_key == 'injured_person' %}
                             <!-- 재해자명단 특별 처리: 첫 번째 이름 + 외 N명 형식 -->
