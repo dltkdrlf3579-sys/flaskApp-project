@@ -19,7 +19,12 @@ Notes:
 """
 
 import sys
+import os
+# Add parent directory to path to import modules
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import json
+import sqlite3
 import argparse
 import logging
 from typing import Dict, Any, List
@@ -91,9 +96,14 @@ def parse_custom_data(raw) -> Dict[str, Any]:
 
 
 def migrate_safety_instructions(conn, dry_run=False) -> int:
-    cache_table = 'safety_instructions_cache'
-    if not has_rows(conn, cache_table):
-        logging.info("[SI] No cache rows to migrate")
+    cache_candidates = ['safety_instructions_cache', 'safety_instruction_cache']
+    cache_table = None
+    for name in cache_candidates:
+        if has_rows(conn, name):
+            cache_table = name
+            break
+    if not cache_table:
+        logging.info("[SI] No cache rows to migrate (checked: safety_instructions_cache, safety_instruction_cache)")
         return 0
 
     rows = read_cache_rows(conn, cache_table)
@@ -363,7 +373,35 @@ def main():
     try:
         conn = get_db_connection()
         conn.row_factory = None
+        # Backend info
+        try:
+            if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                logging.info("DB backend: PostgreSQL")
+            else:
+                logging.info("DB backend: SQLite")
+        except Exception:
+            pass
+
         logging.info("Starting one-time migration from caches -> main tables")
+
+        # Quick table presence report
+        report = []
+        for tbl in [
+            'safety_instructions_cache','safety_instruction_cache','safety_instructions',
+            'follow_sop_cache','followsop_cache','follow_sop',
+            'full_process_cache','fullprocess_cache','full_process',
+            'change_requests_cache','partner_change_requests'
+        ]:
+            try:
+                if table_exists(conn, tbl):
+                    cur = conn.cursor()
+                    cur.execute(f"SELECT COUNT(*) FROM {tbl}")
+                    cnt = (cur.fetchone() or [0])[0]
+                    report.append(f"- {tbl}: {cnt} rows")
+            except Exception as e:
+                report.append(f"- {tbl}: error ({e})")
+        if report:
+            logging.info("Table snapshot:\n" + "\n".join(report))
 
         total = 0
         # Safety Instruction
