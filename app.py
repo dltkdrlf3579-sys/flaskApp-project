@@ -2621,7 +2621,7 @@ def update_follow_sop():
         if base_fields:
             custom_data.update(base_fields)
         
-        conn = get_db_connection(DB_PATH, timeout=30.0)
+        conn = get_db_connection(timeout=30.0)
         cursor = conn.cursor()
         
         # 기존 데이터 조회 (리스트 필드 병합을 위해) - 메인 테이블에서 조회
@@ -2854,7 +2854,7 @@ def update_full_process():
         if base_fields:
             custom_data.update(base_fields)
         
-        conn = get_db_connection(DB_PATH, timeout=30.0)
+        conn = get_db_connection(timeout=30.0)
         cursor = conn.cursor()
         
         # 기존 데이터 조회 (리스트 필드 병합을 위해) - 메인 테이블
@@ -3802,7 +3802,7 @@ def accident_detail(accident_id):
     #     })
     
     # DB에서 실제 사고 데이터 가져오기
-    conn = get_db_connection(DB_PATH, timeout=30.0, row_factory=True)
+    conn = get_db_connection(timeout=30.0, row_factory=True)
     cursor = conn.cursor()
     
     # accidents_cache에서 먼저 찾기
@@ -4564,7 +4564,7 @@ def register_change_request():
         year_month = today.strftime('%Y%m')
         request_number_prefix = f"CR-{year_month}-"
         
-        conn = get_db_connection(DB_PATH, timeout=30.0)
+        conn = get_db_connection(timeout=30.0)
         cursor = conn.cursor()
         
         # request_id 초기화
@@ -4754,7 +4754,7 @@ def register_accident():
         date_part = korean_now.strftime('%y%m%d')  # YYMMDD 형식
         accident_number_prefix = f"ACC{date_part}"
         
-        conn = get_db_connection(DB_PATH, timeout=30.0)
+        conn = get_db_connection(timeout=30.0)
         cursor = conn.cursor()
         
         # 오늘 날짜의 마지막 사고번호 찾기
@@ -4984,7 +4984,7 @@ def register_safety_instruction():
         logging.info(f"동적 컬럼 데이터: {custom_data}")
         logging.info(f"첨부파일 개수: {len(files)}")
         
-        conn = get_db_connection(DB_PATH, timeout=30.0)
+        conn = get_db_connection(timeout=30.0)
         cursor = conn.cursor()
         
         # 발부번호 자동 생성 (YYYY-MM-00 형식)
@@ -5204,8 +5204,8 @@ def update_partner():
             from flask import jsonify
             return jsonify({"success": False, "message": "협력사를 찾을 수 없습니다."})
         
-        print(f"Connecting to database: {DB_PATH}")
-        conn = get_db_connection(DB_PATH, timeout=30.0)
+        print(f"Connecting to database (unified backend)")
+        conn = get_db_connection(timeout=30.0)
         cursor = conn.cursor()
         
         logging.info(f"업데이트 대상 협력사: {business_number}")
@@ -5291,7 +5291,7 @@ def update_partner():
             
             # 새로운 연결로 다시 확인
             logging.info("새 연결로 데이터 지속성 확인...")
-            verify_conn = get_db_connection(DB_PATH)
+            verify_conn = get_db_connection()
             verify_result = verify_conn.execute("SELECT COUNT(*) FROM partner_attachments WHERE business_number = ?", (business_number,)).fetchone()
             logging.info(f"새 연결 확인: {business_number} 협력사 첨부파일 개수: {verify_result[0]}개")
             verify_conn.close()
@@ -5407,7 +5407,7 @@ def update_accident():
         print(f"Attachment data: {attachment_data}")
         
         print(f"Connecting to database: {DB_PATH}")
-        conn = get_db_connection(DB_PATH, timeout=30.0)
+        conn = get_db_connection(timeout=30.0)
         cursor = conn.cursor()
         
         # 사고번호가 없으면 자동 생성 (수기입력용)
@@ -5753,7 +5753,7 @@ def update_accident():
             
             # 새로운 연결로 다시 확인
             logging.info("새 연결로 데이터 지속성 확인...")
-            verify_conn = get_db_connection(DB_PATH)
+            verify_conn = get_db_connection()
             verify_result = verify_conn.execute("SELECT COUNT(*) FROM accident_attachments WHERE accident_number = %s", (accident_number,)).fetchone()
             logging.info(f"새 연결 확인: {accident_number} 사고 첨부파일 개수: {verify_result[0]}개")
             verify_conn.close()

@@ -156,14 +156,14 @@
                                     {% if col.column_key in basic_options %}
                                         {% for opt in basic_options[col.column_key] %}
                                         <option value="{{ opt.code }}" 
-                                                {% if opt.code == col_value %}selected{% endif %}>
+                                                {% if opt.code == col_value or opt.value == col_value %}selected{% endif %}>
                                             {{ opt.value }}
                                         </option>
                                         {% endfor %}
                                     {% elif col.dropdown_options_mapped %}
                                         {% for opt in col.dropdown_options_mapped %}
                                         <option value="{{ opt.code }}"
-                                                {% if opt.code == col_value %}selected{% endif %}>
+                                                {% if opt.code == col_value or opt.value == col_value %}selected{% endif %}>
                                             {{ opt.value }}
                                         </option>
                                         {% endfor %}

@@ -518,113 +518,90 @@ class PartnerDataManager:
             return False
     
     def sync_accidents_from_external_db(self):
-        """외부 DB에서 사고 데이터 동기화 (custom_data 보존)"""
+        """외부 DB에서 사고 데이터 동기화 (안전 업서트, 기존값 보존)
+
+        - 전량 삭제 금지, UPSERT 기반
+        - created_at/custom_data/is_deleted 보존 (UPDATE 시 미갱신)
+        - 단일 백엔드(get_db_connection) 사용으로 운영/개발 일관성 보장
+        """
         if not IQADB_AVAILABLE:
             print("[ERROR] IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
             return False
-        
+
         try:
-            # config.ini에서 ACCIDENTS_QUERY 가져오기
             query = self.config.get('MASTER_DATA_QUERIES', 'ACCIDENTS_QUERY')
             print(f"[INFO] 실행할 사고 쿼리: {query[:100]}...")
-            
-            # 외부 DB에서 데이터 조회
+
             print("[INFO] IQADB_CONNECT310을 사용하여 사고 데이터 조회 시작...")
             df = execute_SQL(query)
-            df = _normalize_df(df)  # 컬럼명 정규화 (소문자화 & 공백 제거)
+            df = _normalize_df(df)
             print(f"[INFO] 사고 데이터 조회 완료: {len(df)} 건")
-            
+
             if df.empty:
                 print("[WARNING] 조회된 사고 데이터가 없습니다.")
                 return False
-            
-            # DataFrame을 SQLite에 저장
-            conn = get_db_connection(self.local_db_path, timeout=30.0)
+
+            conn = get_db_connection(timeout=30.0)
             cursor = conn.cursor()
-            
-            # PRAGMA 설정
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA busy_timeout=5000")
-            cursor.execute("PRAGMA synchronous=NORMAL")
-            
-            # 트랜잭션 시작
-            cursor.execute("BEGIN IMMEDIATE")
-            
-            # 기존 custom_data와 is_deleted 보존을 위해 백업
-            cursor.execute("""
-                CREATE TEMP TABLE accidents_backup AS 
-                SELECT accident_number, custom_data, is_deleted 
-                FROM accidents_cache
-                WHERE accident_number IS NOT NULL
-            """)
-            
-            # 기존 사고 캐시 데이터 삭제
-            cursor.execute("DELETE FROM accidents_cache")
-            
-            # 배치 삽입을 위한 데이터 준비
-            rows = []
-            for _, row in df.iterrows():
-                # UNIQUE 키 누락 행 스킵 (Postgres 파이프라인 오류 방지)
-                acc_no = (row.get('accident_number') or '').strip()
-                if not acc_no:
-                    continue
-                # created_at은 서버 기본값 사용(CURRENT_TIMESTAMP) – 문자열 파싱 실패 방지
-                rows.append(tuple(_to_sqlite_safe(dfv) for dfv in (
-                    acc_no,
-                    row.get('accident_name', ''),
-                    row.get('workplace', ''),
-                    row.get('accident_grade', ''),
-                    row.get('major_category', ''),
-                    (row.get('injury_form', '') or row.get('unjury_form', '')),
-                    row.get('injury_type', ''),
-                    row.get('accident_date', ''),
-                    row.get('day_of_week', ''),
-                    row.get('report_date', ''),
-                    row.get('building', ''),
-                    row.get('floor', ''),
-                    row.get('location_category', ''),
-                    row.get('location_detail', '')
-                )))
-            
-            # 배치 삽입
-            cursor.executemany('''
-                INSERT INTO accidents_cache (
-                    accident_number, accident_name, workplace,
-                    accident_grade, major_category, injury_form, injury_type,
-                    accident_date, day_of_week, report_date, building, floor,
-                    location_category, location_detail, custom_data, is_deleted, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', 0, CURRENT_TIMESTAMP)
-            ''', rows)
             try:
-                if _skipped_missing_bn:
-                    print(f"[INFO] business_number 누락으로 스킵된 행: {_skipped_missing_bn}")
+                cursor.execute("BEGIN")
             except Exception:
                 pass
-            
-            # 기존 custom_data와 is_deleted 복원
-            cursor.execute("""
-                UPDATE accidents_cache 
-                SET custom_data = COALESCE(
-                    (SELECT custom_data FROM accidents_backup 
-                     WHERE accidents_backup.accident_number = accidents_cache.accident_number),
-                    '{}'
-                ),
-                is_deleted = COALESCE(
-                    (SELECT is_deleted FROM accidents_backup 
-                     WHERE accidents_backup.accident_number = accidents_cache.accident_number),
-                    0
-                )
-            """)
-            
-            # 임시 테이블 삭제
-            cursor.execute("DROP TABLE accidents_backup")
-            
-            conn.commit()
+
+            from db.upsert import safe_upsert
+            from timezone_config import get_korean_time
+
+            processed = 0
+            for _, row in df.iterrows():
+                acc_no = str(row.get('accident_number') or '').strip()
+                if not acc_no:
+                    continue
+
+                def g(k, alt=''):
+                    return _to_sqlite_safe(row.get(k, alt))
+
+                created_val = row.get('created_at')
+                if not created_val:
+                    created_val = get_korean_time().strftime('%Y-%m-%d %H:%M:%S')
+
+                data = {
+                    'accident_number': acc_no,
+                    'accident_name': g('accident_name'),
+                    'workplace': g('workplace'),
+                    'accident_grade': g('accident_grade'),
+                    'major_category': g('major_category'),
+                    'injury_form': g('injury_form') or g('unjury_form'),
+                    'injury_type': g('injury_type'),
+                    'accident_date': g('accident_date'),
+                    'day_of_week': g('day_of_week'),
+                    'report_date': g('report_date'),
+                    'building': g('building'),
+                    'floor': g('floor'),
+                    'location_category': g('location_category'),
+                    'location_detail': g('location_detail'),
+                    'custom_data': '{}',
+                    'is_deleted': 0,
+                    'created_at': created_val
+                }
+
+                update_cols = [
+                    'accident_name','workplace','accident_grade','major_category',
+                    'injury_form','injury_type','accident_date','day_of_week','report_date',
+                    'building','floor','location_category','location_detail'
+                ]
+
+                safe_upsert(conn, 'accidents_cache', data, conflict_cols=['accident_number'], update_cols=update_cols)
+                processed += 1
+
+            try:
+                conn.commit()
+            except Exception:
+                pass
             conn.close()
-            
-            print(f"[SUCCESS] ✅ 사고 데이터 {len(df)}건 동기화 완료 (custom_data 보존)")
+
+            print(f"[SUCCESS] ✅ 사고 데이터 {processed}건 업서트 완료 (기존값 보존)")
             return True
-            
+
         except Exception as e:
             print(f"[ERROR] ❌ 사고 데이터 동기화 실패: {e}")
             traceback.print_exc()
