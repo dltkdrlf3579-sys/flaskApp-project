@@ -1360,7 +1360,7 @@ def accident():
 
     # Normalize table/popup types for base columns using sibling keys
     try:
-        suffixes = ['_id', '_dept', '_bizno', '_code', '_company']
+        suffixes = ['_id', '_dept', '_bizno', '_business_number', '_code', '_company']
         def base_key_of(key: str) -> str:
             if not isinstance(key, str):
                 return ''
@@ -1375,7 +1375,7 @@ def accident():
                 return ''
             # support irregular 'd' variant like incharge -> incharged_code
             variants = [bk, bk + 'd']
-            if any((v + '_bizno') in key_set for v in variants):
+            if any(((v + '_bizno') in key_set) or ((v + '_business_number') in key_set) for v in variants):
                 return 'company'
             if any((v + '_dept') in key_set for v in variants):
                 return 'person'
@@ -2114,7 +2114,7 @@ def safety_instruction_register():
     try:
         # 전역 키 수집
         all_keys = {c.get('column_key') for c in dynamic_columns if c.get('column_key')}
-        suffixes = ['_id','_dept','_department','_department_code','_bizno','_company_bizno','_code','_company']
+        suffixes = ['_id','_dept','_department','_department_code','_bizno','_company_bizno','_business_number','_code','_company']
 
         def base_key_of(key: str) -> str:
             if not isinstance(key, str):
@@ -2138,7 +2138,7 @@ def safety_instruction_register():
             if any(((v + '_id') in all_keys) for v in variants):
                 return 'person'
             # 회사 그룹: *_bizno, *_company_bizno
-            if any(((v + '_company_bizno') in all_keys) or ((v + '_bizno') in all_keys) for v in variants):
+            if any(((v + '_company_bizno') in all_keys) or ((v + '_bizno') in all_keys) or ((v + '_business_number') in all_keys) for v in variants):
                 return 'company'
             # 부서 그룹
             if any(((v + '_dept') in all_keys) or ((v + '_department') in all_keys) or ((v + '_department_code') in all_keys) for v in variants):
@@ -2157,7 +2157,7 @@ def safety_instruction_register():
             bk = base_key_of(ck)
             grp = infer_group(bk)
             # 보조(링크드) 필드 렌더링 힌트 부여
-            if ck.endswith('_id') or ck.endswith('_company') or ck.endswith('_company_bizno') or ck.endswith('_bizno'):
+            if ck.endswith('_id') or ck.endswith('_company') or ck.endswith('_company_bizno') or ck.endswith('_bizno') or ck.endswith('_business_number'):
                 col['column_type'] = 'linked_text'
                 continue
             if ck.endswith('_dept') or ck.endswith('_department') or ck.endswith('_department_code'):
@@ -2462,7 +2462,7 @@ def safety_instruction_detail(issue_number):
     # 동적 컬럼 타입 보정: 링크드/팝업 추론 (discipline(d)_person* 등)
     try:
         all_keys = {c.get('column_key') for c in dynamic_columns if c.get('column_key')}
-        suffixes = ['_id','_dept','_department','_department_code','_bizno','_company_bizno','_code','_company']
+        suffixes = ['_id','_dept','_department','_department_code','_bizno','_company_bizno','_business_number','_code','_company']
         def base_key_of(key: str) -> str:
             if not isinstance(key, str):
                 return ''
@@ -2484,7 +2484,7 @@ def safety_instruction_detail(issue_number):
             if any(((v + '_id') in all_keys) for v in variants):
                 return 'person'
             # company 다음
-            if any(((v + '_company_bizno') in all_keys) or ((v + '_bizno') in all_keys) for v in variants):
+            if any(((v + '_company_bizno') in all_keys) or ((v + '_bizno') in all_keys) or ((v + '_business_number') in all_keys) for v in variants):
                 return 'company'
             # department 마지막
             if any(((v + '_dept') in all_keys) or ((v + '_department') in all_keys) or ((v + '_department_code') in all_keys) for v in variants):
@@ -2500,7 +2500,7 @@ def safety_instruction_detail(issue_number):
             ck = col.get('column_key') or ''
             bk = base_key_of(ck)
             grp = infer_group(bk)
-            if ck.endswith('_id') or ck.endswith('_company') or ck.endswith('_company_bizno') or ck.endswith('_bizno'):
+            if ck.endswith('_id') or ck.endswith('_company') or ck.endswith('_company_bizno') or ck.endswith('_bizno') or ck.endswith('_business_number'):
                 col['column_type'] = 'linked_text'
                 continue
             if ck.endswith('_dept') or ck.endswith('_department') or ck.endswith('_department_code'):
@@ -3914,6 +3914,13 @@ def accident_detail(accident_id):
                         print("[DEBUG] injured_person NOT FOUND in custom_data")
                     # 주의: 여기서는 accident에 custom_data를 즉시 병합하지 않는다.
                     # 실제 병합은 아래의 안전 병합 로직에서 수행된다.
+                    # 다만 화면 표시 품질을 위해 created_at 같은 표시용 기본 필드는
+                    # 상위에 값이 비어 있을 경우에 한해 폴백으로 보강한다.
+                    try:
+                        if (not accident.get('created_at')) and isinstance(custom_data, dict) and custom_data.get('created_at'):
+                            accident['created_at'] = custom_data.get('created_at')
+                    except Exception:
+                        pass
                 except:
                     custom_data = {}
         else:
