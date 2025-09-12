@@ -41,7 +41,7 @@ BOARD_CONFIGS = {
         'board_type': 'follow_sop',
         'display_name': 'Follow SOP',
         'number_prefix': 'FS',
-        'cache_table': 'follow_sop_cache',
+        'cache_table': 'follow_sop',
         'column_table': 'follow_sop_column_config',
         'upload_path': 'uploads/follow_sop/',
     },
@@ -49,7 +49,7 @@ BOARD_CONFIGS = {
         'board_type': 'full_process',
         'display_name': 'Full Process',
         'number_prefix': 'FP',
-        'cache_table': 'full_process_cache',
+        'cache_table': 'full_process',
         'column_table': 'full_process_column_config',
         'upload_path': 'uploads/full_process/',
     }

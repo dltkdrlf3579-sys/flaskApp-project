@@ -1256,7 +1256,7 @@ class PartnerDataManager:
         query = '''
             SELECT 
                 pc.*,
-                pd.detailed_content,
+                pd.detail_content AS detailed_content,
                 pd.updated_at as detail_updated_at
             FROM partners_cache pc
             LEFT JOIN partner_details pd ON pc.business_number = pd.business_number

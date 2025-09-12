@@ -5450,7 +5450,7 @@ def update_partner():
         # partner_details safe_upsert 사용
         detail_data = {
             'business_number': business_number,
-            'detailed_content': detailed_content,
+            'detail_content': detailed_content,
             'updated_at': None  # 자동으로 처리됨
         }
         safe_upsert(conn, 'partner_details', detail_data)
@@ -9284,55 +9284,77 @@ def export_safety_instruction_excel():
                 cell.alignment = header_align
                 col_idx += 1
         
-        # 데이터 작성
-        for row_idx, row in enumerate(data, 2):
-            # 먼저 row를 dict로 변환
+        # 데이터를 목록 페이지와 동일한 방식으로 처리
+        data_list = []
+        for row in data:
             row_dict = dict(row)
-            col_idx = 1
-
-            # custom_data 파싱 (먼저 파싱하여 기본 필드 보완)
-            custom_data = {}
+            
+            # custom_data 파싱 및 플래튼 (목록 페이지와 동일)
             if row_dict.get('custom_data'):
                 try:
-                    custom_data = json.loads(row_dict.get('custom_data', '{}'))
-                except Exception:
-                    custom_data = {}
+                    import json as pyjson
+                    raw = row_dict.get('custom_data')
+                    
+                    # dict/str 분기 처리
+                    if isinstance(raw, dict):
+                        custom_data = raw
+                    elif isinstance(raw, str):
+                        custom_data = pyjson.loads(raw) if raw else {}
+                    else:
+                        custom_data = {}
+                    
+                    # 기본 필드를 보호하면서 custom_data 병합
+                    BASE_FIELDS = {'issue_number', 'created_at', 'updated_at', 'is_deleted', 'synced_at'}
+                    for k, v in custom_data.items():
+                        if k not in BASE_FIELDS:
+                            row_dict[k] = v
+                except Exception as e:
+                    logging.error(f"Custom data parsing error: {e}")
+            
+            data_list.append(row_dict)
+        
+        # smart_apply_mappings 적용 (드롭다운 코드를 라벨로 변환)
+        from common_mapping import smart_apply_mappings
+        if data_list:
+            data_list = smart_apply_mappings(
+                data_list, 
+                'safety_instruction', 
+                [dict(col) for col in dynamic_columns],
+                DB_PATH
+            )
+        
+        # 데이터 작성
+        for row_idx, row_dict in enumerate(data_list, 2):
+            col_idx = 1
 
-            # 기본 필드 - issue_number는 실제 컬럼, 나머지는 custom_data 우선
+            # 기본 필드
             ws.cell(row=row_idx, column=col_idx, value=row_dict.get('issue_number', ''))
             col_idx += 1
-            ws.cell(row=row_idx, column=col_idx, value=(custom_data.get('issuer') or row_dict.get('issuer', '')))
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('issuer', ''))
             col_idx += 1
-            ws.cell(row=row_idx, column=col_idx, value=(custom_data.get('violation_date') or row_dict.get('violation_date', '')))
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('violation_date', ''))
             col_idx += 1
-            ws.cell(row=row_idx, column=col_idx, value=(custom_data.get('discipline_date') or row_dict.get('discipline_date', '')))
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('discipline_date', ''))
             col_idx += 1
-            ws.cell(row=row_idx, column=col_idx, value=(custom_data.get('disciplined_person') or row_dict.get('disciplined_person', '')))
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('disciplined_person', ''))
             col_idx += 1
 
             # 동적 컬럼 데이터 - 기본 필드 제외하고 처리
             basic_column_keys = ['issue_number', 'issuer', 'violation_date', 'discipline_date', 'disciplined_person']
-            def _map_value(col, value):
-                if isinstance(value, dict):
-                    return value.get('name', str(value))
-                if col['column_type'] == 'list' and isinstance(value, list):
-                    try:
-                        return json.dumps(value, ensure_ascii=False)
-                    except Exception:
-                        return str(value)
-                if col['column_type'] == 'dropdown' and value:
-                    opts = get_dropdown_options_for_display('safety_instruction', col['column_key'])
-                    if opts:
-                        for opt in opts:
-                            if opt['code'] == value:
-                                return opt['value']
-                return value
-
+            
             for col in dynamic_columns:
                 if col['column_key'] not in basic_column_keys:
                     col_key = col['column_key']
-                    v = row_dict.get(col_key, '') or (custom_data.get(col_key, '') if custom_data else '')
-                    ws.cell(row=row_idx, column=col_idx, value=_map_value(col, v))
+                    value = row_dict.get(col_key, '')
+                    
+                    # 리스트는 JSON 문자열로 변환
+                    if col['column_type'] == 'list' and isinstance(value, list):
+                        try:
+                            value = json.dumps(value, ensure_ascii=False)
+                        except Exception:
+                            value = str(value)
+                    
+                    ws.cell(row=row_idx, column=col_idx, value=value)
                     col_idx += 1
         
         # 컬럼 너비 자동 조정
