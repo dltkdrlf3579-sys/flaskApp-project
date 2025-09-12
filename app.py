@@ -1491,6 +1491,8 @@ def accident():
                     custom_data = accident['custom_data']
                 else:
                     custom_data = json.loads(accident['custom_data'])
+                # ensure dict form is available to templates and later fallbacks
+                accident['custom_data'] = custom_data
                 # Ensure fallback reads parsed dict, not raw string
                 accident['custom_data'] = custom_data
 
@@ -1542,21 +1544,16 @@ def accident():
             # ACC사고는 created_at을 등록일로 사용
             accident['display_created_at'] = accident.get('created_at', '-')
         
-        # accident_name 최종 폴백
+        # accident_name 최종 폴백 (parsed custom_data 우선)
         if not accident.get('accident_name'):
-            # custom_data에 값이 있으면 사용, 아니면 '-'
+            nm = None
             try:
                 cd = accident.get('custom_data')
                 if isinstance(cd, dict):
                     nm = cd.get('accident_name')
-                    if nm and str(nm).strip():
-                        accident['accident_name'] = nm
-                    else:
-                        accident['accident_name'] = '-'
-                else:
-                    accident['accident_name'] = '-'
             except Exception:
-                accident['accident_name'] = '-'
+                nm = None
+            accident['accident_name'] = (nm if (nm and str(nm).strip()) else '-')
         
         accidents.append(accident)
     
