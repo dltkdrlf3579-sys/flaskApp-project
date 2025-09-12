@@ -2444,6 +2444,9 @@ def safety_instruction_detail(issue_number):
             ('primary_company_bizno', 'primary_bizno'),
             ('secondary_company_business_number', 'secondary_company_bizno'),
             ('subcontractor_business_number', 'subcontractor_bizno'),
+            # 지원: disciplined <=/=> disciplined_person (신규 컬럼명 호환)
+            ('disciplined_person', 'disciplined'),
+            ('disciplined_person_id', 'disciplined_id'),
         ]
         _alias_fill(instruction_dict, alias_pairs)
         if isinstance(custom_data, dict) and custom_data:

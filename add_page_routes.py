@@ -60,6 +60,48 @@ def follow_sop_route():
     """)
     dynamic_columns_rows = cursor.fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    # 링크드/팝업 타입 보정
+    try:
+        all_keys = {c.get('column_key') for c in dynamic_columns if c.get('column_key')}
+        suffixes = ['_id','_dept','_department','_department_code','_bizno','_company_bizno','_code','_company']
+        def base_key_of(k: str) -> str:
+            if not isinstance(k, str):
+                return ''
+            for s in suffixes:
+                if k.endswith(s):
+                    return k[:-len(s)]
+            return k
+        def infer_group(bk: str) -> str:
+            if not bk:
+                return ''
+            variants = [bk, bk+'d']
+            if any(((v+'_company_bizno') in all_keys) or ((v+'_bizno') in all_keys) for v in variants):
+                return 'company'
+            if any(((v+'_dept') in all_keys) or ((v+'_department') in all_keys) or ((v+'_department_code') in all_keys) for v in variants):
+                return 'department'
+            if any(((v+'_id') in all_keys) for v in variants):
+                return 'person'
+            if any(((v+'_company') in all_keys) for v in variants):
+                return 'contractor'
+            return ''
+        popup_map = {'person':'popup_person','company':'popup_company','department':'popup_department','contractor':'popup_contractor'}
+        for col in dynamic_columns:
+            ck = col.get('column_key') or ''
+            bk = base_key_of(ck)
+            grp = infer_group(bk)
+            if ck.endswith('_id') or ck.endswith('_company') or ck.endswith('_company_bizno') or ck.endswith('_bizno'):
+                col['column_type'] = 'linked_text'
+                continue
+            if ck.endswith('_dept') or ck.endswith('_department') or ck.endswith('_department_code'):
+                col['column_type'] = 'linked_dept'
+                continue
+            if grp and ck == bk:
+                ct = col.get('column_type')
+                if not ct or ct in ('text','popup','table','table_select'):
+                    col['column_type'] = popup_map.get(grp, ct)
+                col['input_type'] = col.get('input_type') or 'table'
+    except Exception as _e:
+        logging.warning(f"follow_sop list: normalize types failed: {_e}")
     try:
         logging.info(f"[FOLLOW_SOP] dynamic_columns={len(dynamic_columns)} first={[c.get('column_key') for c in dynamic_columns[:5]]}")
     except Exception:
@@ -382,6 +424,48 @@ def follow_sop_register():
     """)
     dynamic_columns_rows = cursor.fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    # 링크드/팝업 타입 보정
+    try:
+        all_keys = {c.get('column_key') for c in dynamic_columns if c.get('column_key')}
+        suffixes = ['_id','_dept','_department','_department_code','_bizno','_company_bizno','_code','_company']
+        def base_key_of(k: str) -> str:
+            if not isinstance(k, str):
+                return ''
+            for s in suffixes:
+                if k.endswith(s):
+                    return k[:-len(s)]
+            return k
+        def infer_group(bk: str) -> str:
+            if not bk:
+                return ''
+            variants = [bk, bk+'d']
+            if any(((v+'_company_bizno') in all_keys) or ((v+'_bizno') in all_keys) for v in variants):
+                return 'company'
+            if any(((v+'_dept') in all_keys) or ((v+'_department') in all_keys) or ((v+'_department_code') in all_keys) for v in variants):
+                return 'department'
+            if any(((v+'_id') in all_keys) for v in variants):
+                return 'person'
+            if any(((v+'_company') in all_keys) for v in variants):
+                return 'contractor'
+            return ''
+        popup_map = {'person':'popup_person','company':'popup_company','department':'popup_department','contractor':'popup_contractor'}
+        for col in dynamic_columns:
+            ck = col.get('column_key') or ''
+            bk = base_key_of(ck)
+            grp = infer_group(bk)
+            if ck.endswith('_id') or ck.endswith('_company') or ck.endswith('_company_bizno') or ck.endswith('_bizno'):
+                col['column_type'] = 'linked_text'
+                continue
+            if ck.endswith('_dept') or ck.endswith('_department') or ck.endswith('_department_code'):
+                col['column_type'] = 'linked_dept'
+                continue
+            if grp and ck == bk:
+                ct = col.get('column_type')
+                if not ct or ct in ('text','popup','table','table_select'):
+                    col['column_type'] = popup_map.get(grp, ct)
+                col['input_type'] = col.get('input_type') or 'table'
+    except Exception as _e:
+        logging.warning(f"follow_sop register: normalize types failed: {_e}")
     try:
         logging.info(f"[FULL_PROCESS] dynamic_columns={len(dynamic_columns)} first={[c.get('column_key') for c in dynamic_columns[:5]]}")
     except Exception:
@@ -557,6 +641,48 @@ def follow_sop_detail(work_req_no):
         ORDER BY column_order
     """)
     dynamic_columns = [dict(row) for row in cursor.fetchall()]
+    # 링크드/팝업 타입 보정
+    try:
+        all_keys = {c.get('column_key') for c in dynamic_columns if c.get('column_key')}
+        suffixes = ['_id','_dept','_department','_department_code','_bizno','_company_bizno','_code','_company']
+        def base_key_of(k: str) -> str:
+            if not isinstance(k, str):
+                return ''
+            for s in suffixes:
+                if k.endswith(s):
+                    return k[:-len(s)]
+            return k
+        def infer_group(bk: str) -> str:
+            if not bk:
+                return ''
+            variants = [bk, bk+'d']
+            if any(((v+'_company_bizno') in all_keys) or ((v+'_bizno') in all_keys) for v in variants):
+                return 'company'
+            if any(((v+'_dept') in all_keys) or ((v+'_department') in all_keys) or ((v+'_department_code') in all_keys) for v in variants):
+                return 'department'
+            if any(((v+'_id') in all_keys) for v in variants):
+                return 'person'
+            if any(((v+'_company') in all_keys) for v in variants):
+                return 'contractor'
+            return ''
+        popup_map = {'person':'popup_person','company':'popup_company','department':'popup_department','contractor':'popup_contractor'}
+        for col in dynamic_columns:
+            ck = col.get('column_key') or ''
+            bk = base_key_of(ck)
+            grp = infer_group(bk)
+            if ck.endswith('_id') or ck.endswith('_company') or ck.endswith('_company_bizno') or ck.endswith('_bizno'):
+                col['column_type'] = 'linked_text'
+                continue
+            if ck.endswith('_dept') or ck.endswith('_department') or ck.endswith('_department_code'):
+                col['column_type'] = 'linked_dept'
+                continue
+            if grp and ck == bk:
+                ct = col.get('column_type')
+                if not ct or ct in ('text','popup','table','table_select'):
+                    col['column_type'] = popup_map.get(grp, ct)
+                col['input_type'] = col.get('input_type') or 'table'
+    except Exception as _e:
+        logging.warning(f"follow_sop detail: normalize types failed: {_e}")
     
     # 기본정보 필드 추가 (work_req_no만 하드코딩, created_at은 column_config에서 가져옴)
     basic_fields = [
@@ -752,6 +878,48 @@ def full_process_route():
     """)
     dynamic_columns_rows = cursor.fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+    # 링크드/팝업 타입 보정
+    try:
+        all_keys = {c.get('column_key') for c in dynamic_columns if c.get('column_key')}
+        suffixes = ['_id','_dept','_department','_department_code','_bizno','_company_bizno','_code','_company']
+        def base_key_of(k: str) -> str:
+            if not isinstance(k, str):
+                return ''
+            for s in suffixes:
+                if k.endswith(s):
+                    return k[:-len(s)]
+            return k
+        def infer_group(bk: str) -> str:
+            if not bk:
+                return ''
+            variants = [bk, bk+'d']
+            if any(((v+'_company_bizno') in all_keys) or ((v+'_bizno') in all_keys) for v in variants):
+                return 'company'
+            if any(((v+'_dept') in all_keys) or ((v+'_department') in all_keys) or ((v+'_department_code') in all_keys) for v in variants):
+                return 'department'
+            if any(((v+'_id') in all_keys) for v in variants):
+                return 'person'
+            if any(((v+'_company') in all_keys) for v in variants):
+                return 'contractor'
+            return ''
+        popup_map = {'person':'popup_person','company':'popup_company','department':'popup_department','contractor':'popup_contractor'}
+        for col in dynamic_columns:
+            ck = col.get('column_key') or ''
+            bk = base_key_of(ck)
+            grp = infer_group(bk)
+            if ck.endswith('_id') or ck.endswith('_company') or ck.endswith('_company_bizno') or ck.endswith('_bizno'):
+                col['column_type'] = 'linked_text'
+                continue
+            if ck.endswith('_dept') or ck.endswith('_department') or ck.endswith('_department_code'):
+                col['column_type'] = 'linked_dept'
+                continue
+            if grp and ck == bk:
+                ct = col.get('column_type')
+                if not ct or ct in ('text','popup','table','table_select'):
+                    col['column_type'] = popup_map.get(grp, ct)
+                col['input_type'] = col.get('input_type') or 'table'
+    except Exception as _e:
+        logging.warning(f"full_process register/detail: normalize types failed: {_e}")
     
     # 섹션별로 컬럼 분류
     section_columns = {}
