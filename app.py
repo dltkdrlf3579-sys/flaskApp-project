@@ -2081,7 +2081,8 @@ def safety_instruction_register():
     is_popup = request.args.get('popup') == '1'
     
     # 현재 날짜 추가 (한국 시간)
-    from timezone_config import get_korean_time
+    # 상단에서 이미 get_korean_time을 임포트함. 함수 내부 재임포트로 인한
+    # UnboundLocalError를 방지하기 위해 재임포트를 제거한다.
     today_date = get_korean_time().strftime('%Y-%m-%d')
     
     return render_template('safety-instruction-register.html',
@@ -5379,32 +5380,44 @@ def update_accident():
         
         logging.info(f"업데이트 대상 사고: {accident_number}")
         
-        # 기본정보 업데이트 허용 (번호 접두사 무관)
+        # 기본정보 업데이트 정책
+        # - K사고: 기본정보 미수정 (custom_data/첨부만 반영)
+        # - ACC사고: 기본정보 수정 허용하되, 빈값('' 또는 None)은 덮어쓰지 않음
         is_direct_entry = accident_number.startswith('ACC')
-        if base_fields != '{}':
+        if is_direct_entry and base_fields != '{}':
             try:
                 base_data = pyjson.loads(base_fields)
-                logging.info(f"ACC 사고 기본정보 업데이트: {base_data}")
-                
+                logging.info(f"ACC 사고 기본정보 업데이트 요청: {base_data}")
+
                 # 허용된 필드만 업데이트 (SQL injection 방지)
                 allowed_fields = [
                     'accident_name', 'accident_date', 'workplace', 'accident_grade',
                     'major_category', 'injury_form', 'injury_type', 'building', 'floor',
                     'location_category', 'location_detail', 'created_at', 'day_of_week'
                 ]
-                
-                # 업데이트할 필드와 값 준비
+
+                def _is_empty(v):
+                    try:
+                        if v is None:
+                            return True
+                        if isinstance(v, str) and v.strip() == '':
+                            return True
+                        return False
+                    except Exception:
+                        return False
+
+                # 업데이트할 필드와 값 준비 (빈값은 스킵)
                 update_fields = []
                 update_values = []
                 for field in allowed_fields:
                     if field in base_data:
                         value = base_data[field]
-                        # PostgreSQL 호환성: 날짜/타임스탬프 필드의 빈 문자열을 NULL로 변환
-                        if field in ['accident_date', 'created_at'] and value == '':
-                            value = None
+                        if _is_empty(value):
+                            # 빈값은 기존 데이터를 덮어쓰지 않음
+                            continue
                         update_fields.append(f"{field} = %s")
                         update_values.append(value)
-                
+
                 if update_fields:
                     update_values.append(accident_number)  # WHERE 절용
                     update_query = f"""
@@ -5414,6 +5427,8 @@ def update_accident():
                     """
                     cursor.execute(update_query, update_values)
                     logging.info(f"ACC 사고 기본정보 업데이트 완료: {len(update_fields)}개 필드")
+                else:
+                    logging.info("ACC 사고 기본정보 변경 없음(모든 값이 빈값/미포함)")
             except Exception as e:
                 logging.error(f"ACC 사고 기본정보 업데이트 중 오류: {e}")
         
