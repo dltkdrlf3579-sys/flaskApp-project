@@ -5786,10 +5786,14 @@ def update_accident():
                     
                     print(f"[MERGE DEBUG] {key} - 기존: {len(existing_list)}개, 새로: {len(new_list)}개")
                     
-                    # 추가정보/오버라이드 키는 사용자가 보낸 값으로 그대로 덮어쓰기(빈 배열 포함)
+                    # 추가정보/오버라이드 키는 우선 대체하되, 완전 빈 배열이면 기존값 보존
                     if key in overwrite_keys:
-                        existing_custom_data[key] = new_list
-                        print(f"[MERGE DEBUG] {key} 추가정보/오버라이드 → 전체 대체: {len(new_list)}개")
+                        if len(new_list) == 0 and len(existing_list) > 0:
+                            existing_custom_data[key] = existing_list
+                            print(f"[MERGE DEBUG] {key} 추가정보/오버라이드 → 빈 배열 무시, 기존 유지: {len(existing_list)}개")
+                        else:
+                            existing_custom_data[key] = new_list
+                            print(f"[MERGE DEBUG] {key} 추가정보/오버라이드 → 전체 대체: {len(new_list)}개")
                     # 그 외: 프론트에서 전체 배열을 보냈다면 그대로 사용, 아니면 병합
                     elif len(new_list) > 0 and len(existing_list) > 0:
                         # 새로운 데이터에 기존 데이터의 첫 번째 항목이 포함되어 있다면 전체 교체로 간주
@@ -5821,16 +5825,11 @@ def update_accident():
                         print(f"[MERGE DEBUG] {key} 단순 대체: {len(existing_custom_data[key])}개 항목")
                 else:
                     # 일반 필드
-                    if key in overwrite_keys:
-                        # 추가정보/오버라이드 키: 빈값도 포함하여 덮어쓰기 허용
-                        existing_custom_data[key] = value
-                        print(f"[MERGE DEBUG] {key} 추가정보/오버라이드 → 값 대체: '{value}'")
-                    else:
-                        # 일반 키: 빈값은 무시하고, 값이 있으면 custom_data에 기록
-                        if _is_empty_value(value):
-                            print(f"[MERGE GUARD] skip empty value for key: {key}")
-                            continue
-                        existing_custom_data[key] = value
+                    # 값이 비어있으면 공통적으로 보존
+                    if _is_empty_value(value):
+                        print(f"[MERGE GUARD] skip empty/blank for key: {key}")
+                        continue
+                    existing_custom_data[key] = value
             
             # detailed_content를 custom_data에 추가
             if final_content:
