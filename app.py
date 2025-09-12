@@ -2183,18 +2183,16 @@ def safety_instruction_detail(issue_number):
         # 메인 테이블에 없으면 캐시에서 폴백
         try:
             cache_row = conn.execute(
-                "SELECT issue_number, custom_data, created_at FROM safety_instructions_cache WHERE issue_number = ?",
+                "SELECT * FROM safety_instructions_cache WHERE issue_number = ?",
                 (issue_number,)
             ).fetchone()
             if cache_row:
                 logging.info("[SI detail] 메인 없음 → 캐시 폴백 사용")
-                instruction = {
-                    'issue_number': cache_row['issue_number'],
-                    'created_at': cache_row['created_at'],
-                    'custom_data': cache_row['custom_data'],
-                    'detailed_content': None,
-                    'is_deleted': 0,
-                }
+                # 캐시의 모든 컬럼을 dict로 반영하여 동적 컬럼 키가 바로 매칭되도록 함
+                instruction = dict(cache_row)
+                # 메인 스키마와의 최소 호환 필드 보정
+                instruction.setdefault('detailed_content', instruction.get('detailed_content'))
+                instruction.setdefault('is_deleted', 0)
             else:
                 logging.warning(f"환경안전 지시서를 찾을 수 없습니다: {issue_number}")
                 conn.close()
@@ -2285,14 +2283,20 @@ def safety_instruction_detail(issue_number):
     if not custom_data:
         try:
             cache_row = conn.execute(
-                "SELECT custom_data FROM safety_instructions_cache WHERE issue_number = ?",
+                "SELECT * FROM safety_instructions_cache WHERE issue_number = ?",
                 (issue_number,)
             ).fetchone()
-            if cache_row and cache_row['custom_data']:
-                cache_cd = _parse_json_maybe(cache_row['custom_data'])
+            if cache_row:
+                cache_map = dict(cache_row)
+                cache_cd = _parse_json_maybe(cache_map.get('custom_data'))
+                # 캐시의 명시 컬럼값으로 먼저 보강 (custom_data보다 우선)
+                for k, v in cache_map.items():
+                    if k in ('custom_data',):
+                        continue
+                    if k not in instruction_dict or instruction_dict.get(k) in (None, ''):
+                        instruction_dict[k] = v
                 if isinstance(cache_cd, dict) and cache_cd:
                     logging.info("[SI detail] custom_data 비어있음 → cache.custom_data 병합")
-                    # 상세내용도 폴백
                     if not instruction_dict.get('detailed_content') and cache_cd.get('detailed_content'):
                         instruction_dict['detailed_content'] = cache_cd.get('detailed_content')
                     for k, v in cache_cd.items():

@@ -2021,17 +2021,28 @@ let editingId = null;
                         successCount++;
                         console.log(`섹션 '${newSection.section_name}' 추가 성공`);
                         
-                        // 임시 ID를 실제 ID로 업데이트
+                        // 임시 ID를 실제 ID로 업데이트 + 서버가 반환한 실제 section_key로 동기화
                         const tempSection = sections.find(s => s.section_key === newSection.section_key && s._isNew);
                         if (tempSection) {
                             tempSection.id = data.section_id;
+                            if (data.section_key && data.section_key !== tempSection.section_key) {
+                                // 새 섹션키로 교체
+                                const oldKey = tempSection.section_key;
+                                tempSection.section_key = data.section_key;
+                                // 이미 대기 중인 컬럼들(tab)도 새 키로 업데이트
+                                try {
+                                    (pendingColumns || []).forEach(c => {
+                                        if (c.tab === oldKey) c.tab = data.section_key;
+                                    });
+                                } catch (e) { console.warn('tab 재매핑 중 오류', e); }
+                            }
                             delete tempSection._isNew;
                         }
                         
                         // 원본 섹션 목록에 추가
                         originalSections.push({
                             id: data.section_id,
-                            section_key: newSection.section_key,
+                            section_key: (data.section_key || newSection.section_key),
                             section_name: newSection.section_name,
                             section_order: sections.length
                         });

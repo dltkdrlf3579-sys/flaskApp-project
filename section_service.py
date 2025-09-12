@@ -137,25 +137,57 @@ class SectionConfigService:
         return []
     
     def add_section(self, section_data):
-        """새 섹션 추가"""
+        """새 섹션 추가
+
+        - 클라이언트가 section_key를 제공하면 우선 사용 (유효성/중복 검사 후)
+        - 제공되지 않았거나 중복일 경우 custom_section_N 형태로 자동 생성
+        """
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
         try:
             # 자동으로 section_key 생성 (custom_section_1, custom_section_2 등)
-            if self.table_name == 'section_config':
-                cursor.execute("""
-                    SELECT COUNT(*) FROM section_config 
-                    WHERE board_type = ? AND section_key LIKE 'custom_section_%'
-                """, (self.board_type,))
-            else:
-                cursor.execute(f"""
-                    SELECT COUNT(*) FROM {self.table_name} 
-                    WHERE section_key LIKE 'custom_section_%'
-                """)
-            
-            custom_count = cursor.fetchone()[0]
-            section_key = f"custom_section_{custom_count + 1}"
+            # 1) 클라이언트 제공 key 우선 사용 시도
+            raw_key = (section_data.get('section_key') or '').strip()
+            use_client_key = False
+            if raw_key:
+                # 키 유효성: 소문자/숫자/언더스코어, 문자로 시작
+                import re
+                if re.fullmatch(r'[a-z][a-z0-9_]*', raw_key):
+                    # 중복 검사 (보드 범위)
+                    if self.table_name == 'section_config':
+                        cursor.execute(
+                            "SELECT COUNT(*) FROM section_config WHERE board_type = ? AND LOWER(section_key) = LOWER(?)",
+                            (self.board_type, raw_key)
+                        )
+                    else:
+                        cursor.execute(
+                            f"SELECT COUNT(*) FROM {self.table_name} WHERE LOWER(section_key) = LOWER(?)",
+                            (raw_key,)
+                        )
+                    exists = (cursor.fetchone() or [0])[0] > 0
+                    if not exists:
+                        section_key = raw_key
+                        use_client_key = True
+            # 2) 자동 생성 (client key 없거나/중복/무효)
+            if not use_client_key:
+                if self.table_name == 'section_config':
+                    cursor.execute(
+                        """
+                        SELECT COUNT(*) FROM section_config 
+                        WHERE board_type = ? AND section_key LIKE 'custom_section_%'
+                        """,
+                        (self.board_type,)
+                    )
+                else:
+                    cursor.execute(
+                        f"""
+                        SELECT COUNT(*) FROM {self.table_name} 
+                        WHERE section_key LIKE 'custom_section_%'
+                        """
+                    )
+                custom_count = cursor.fetchone()[0]
+                section_key = f"custom_section_{custom_count + 1}"
             
             # 마지막 순서 가져오기
             if self.table_name == 'section_config':
@@ -171,26 +203,32 @@ class SectionConfigService:
             max_order = cursor.fetchone()[0] or 0
             
             if self.table_name == 'section_config':
-                cursor.execute_with_returning_id("""
+                cursor.execute_with_returning_id(
+                    """
                     INSERT INTO section_config 
                     (board_type, section_key, section_name, section_order, is_active)
                     VALUES (?, ?, ?, ?, 1)
-                """, (
-                    self.board_type,
-                    section_key,
-                    section_data['section_name'],
-                    max_order + 1
-                ))
+                    """,
+                    (
+                        self.board_type,
+                        section_key,
+                        section_data['section_name'],
+                        max_order + 1,
+                    ),
+                )
             else:
-                cursor.execute_with_returning_id(f"""
+                cursor.execute_with_returning_id(
+                    f"""
                     INSERT INTO {self.table_name} 
                     (section_key, section_name, section_order, is_active)
                     VALUES (?, ?, ?, 1)
-                """, (
-                    section_key,
-                    section_data['section_name'],
-                    max_order + 1
-                ))
+                    """,
+                    (
+                        section_key,
+                        section_data['section_name'],
+                        max_order + 1,
+                    ),
+                )
             
             conn.commit()
             section_id = cursor.lastrowid
@@ -198,7 +236,7 @@ class SectionConfigService:
             return {
                 'success': True,
                 'section_id': section_id,
-                'section_key': section_key
+                'section_key': section_key,
             }
             
         except Exception as e:
