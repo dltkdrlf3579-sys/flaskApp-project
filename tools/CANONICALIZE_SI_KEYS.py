@@ -39,14 +39,17 @@ from db_connection import get_db_connection
 
 
 MAPPINGS = {
-    # old_key -> new_key
+    # old_key -> new_key (target is the user's canonical list)
     'issuer_department': 'issuer_dept',
     'primary_business_number': 'primary_company_bizno',
     'primary_company_business_number': 'primary_company_bizno',
-    'secondary_company': 'subcontractor',
-    'secondary_company_bizno': 'subcontractor_bizno',
-    'secondary_company_business_number': 'subcontractor_bizno',
-    'subcontractor_business_number': 'subcontractor_bizno',
+    'subcontractor': 'secondary_company',
+    'subcontractor_bizno': 'secondary_company_bizno',
+    'subcontractor_business_number': 'secondary_company_bizno',
+    'secondary_company_business_number': 'secondary_company_bizno',
+    'safety_violation_grade': 'violation_grade',
+    'tema': 'team',
+    'department': 'dept',
 }
 
 # special: discipline_department -> issuer_incharge_dept (if target empty)
@@ -61,8 +64,8 @@ DESIRED_TYPES = {
     'issuer_incharge_dept': 'popup_department',
     'primary_company': 'popup_company',
     'primary_company_bizno': 'linked_text',
-    'subcontractor': 'popup_company',
-    'subcontractor_bizno': 'linked_text',
+    'secondary_company': 'popup_company',
+    'secondary_company_bizno': 'linked_text',
 }
 
 BASIC_TAB = 'basic_info'
@@ -153,8 +156,8 @@ def canonicalize_columns(cur) -> Dict[str, Any]:
     ensure_column(cur, 'issuer_incharge_dept', '징계 발의부서', DESIRED_TYPES['issuer_incharge_dept'])
     ensure_column(cur, 'primary_company', '1차사명', DESIRED_TYPES['primary_company'])
     ensure_column(cur, 'primary_company_bizno', '1차사 사업자번호', DESIRED_TYPES['primary_company_bizno'])
-    ensure_column(cur, 'subcontractor', '하도사명', DESIRED_TYPES['subcontractor'])
-    ensure_column(cur, 'subcontractor_bizno', '하도사 사업자번호', DESIRED_TYPES['subcontractor_bizno'])
+    ensure_column(cur, 'secondary_company', '하도사명', DESIRED_TYPES['secondary_company'])
+    ensure_column(cur, 'secondary_company_bizno', '하도사 사업자번호', DESIRED_TYPES['secondary_company_bizno'])
 
     return { 'renames': renames }
 
@@ -274,4 +277,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
