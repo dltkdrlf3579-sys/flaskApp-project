@@ -1731,29 +1731,71 @@ def partner_accident():
     accidents = conn.execute(query, params).fetchall()
     accidents = [dict(row) for row in accidents]
     
-    # No 컬럼 추가 (역순 번호)
+    # No 컬럼 추가 (역순 번호) 및 안전 병합/표시 보정
     offset = (page - 1) * per_page
     for i, accident in enumerate(accidents):
         accident['no'] = total_count - offset - i
-        
-        # custom_data 파싱 및 플래튼 (PostgreSQL JSONB vs SQLite JSON 호환)
+
+        # custom_data 파싱 (dict 보장)
+        custom_data = {}
         if accident.get('custom_data'):
             try:
                 import json as pyjson
-                
-                # PostgreSQL JSONB는 이미 dict로 반환됨, SQLite는 JSON 문자열
                 if isinstance(accident['custom_data'], dict):
                     custom_data = accident['custom_data']
                 else:
                     custom_data = pyjson.loads(accident['custom_data'])
-                
-                # accident_name이 이미 있으면 custom_data의 빈 값으로 덮어쓰지 않음
-                if 'accident_name' in custom_data and not custom_data['accident_name']:
-                    del custom_data['accident_name']
-                
-                accident.update(custom_data)  # 최상위 레벨에 병합
+                accident['custom_data'] = custom_data
             except Exception as e:
                 logging.error(f"custom_data 파싱 오류: {e}")
+                custom_data = {}
+
+        # 안전 병합: K사고 기본키 보호 + 빈값 미덮어쓰기
+        def _is_empty(v):
+            try:
+                if v is None:
+                    return True
+                if isinstance(v, str) and v.strip() == '':
+                    return True
+                return False
+            except Exception:
+                return False
+
+        protected_keys_for_k = {
+            'accident_number','accident_name','workplace','accident_grade','major_category',
+            'injury_form','injury_type','building','floor','location_category','location_detail',
+            'accident_date','created_at','report_date','day_of_week',
+            'responsible_company1','responsible_company1_no','responsible_company2','responsible_company2_no'
+        }
+
+        acc_no = str(accident.get('accident_number') or '')
+        is_direct = acc_no.startswith('ACC')
+        if custom_data:
+            safe_updates = {}
+            for k, v in custom_data.items():
+                if _is_empty(v):
+                    continue
+                if k in protected_keys_for_k and not is_direct:
+                    # K사고 보호
+                    continue
+                # 허용: 상위가 비어있거나 일반키
+                if _is_empty(accident.get(k)) or k not in protected_keys_for_k:
+                    safe_updates[k] = v
+            if safe_updates:
+                accident.update(safe_updates)
+
+        # 등록일 표기 필드
+        if acc_no.startswith('K'):
+            accident['display_created_at'] = accident.get('report_date', accident.get('created_at', '-'))
+        else:
+            accident['display_created_at'] = accident.get('created_at', '-')
+
+        # 사고명 최종 폴백 (상위 없으면 custom_data에서)
+        if not accident.get('accident_name'):
+            nm = None
+            if isinstance(custom_data, dict):
+                nm = custom_data.get('accident_name')
+            accident['accident_name'] = (nm if (nm and str(nm).strip()) else '-')
     
     conn.close()
     
