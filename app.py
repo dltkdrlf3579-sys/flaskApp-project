@@ -3677,17 +3677,24 @@ def accident_detail(accident_id):
             {'section_key': 'additional', 'section_name': '추가정보', 'section_order': 4},
         ]
     
-    # 실제 DB에서 사고 데이터 조회
+    # 실제 DB에서 사고 데이터 조회 (id 우선, 실패 시 accident_number로 폴백)
     accident = None
     custom_data = {}
     
     # accidents_cache 테이블에서 조회
     try:
         _wd_acc = sql_is_deleted_false('is_deleted', conn)
-        accident_row = conn.execute(f"""
-            SELECT * FROM accidents_cache 
-            WHERE id = %s AND {_wd_acc}
-        """, (accident_id,)).fetchone()
+        # 1) id로 조회 시도
+        accident_row = conn.execute(
+            f"SELECT * FROM accidents_cache WHERE id = %s AND {_wd_acc}",
+            (accident_id,)
+        ).fetchone()
+        # 2) 없으면 accident_number로 조회 시도 (사용자가 번호로 접근한 경우)
+        if not accident_row:
+            accident_row = conn.execute(
+                f"SELECT * FROM accidents_cache WHERE accident_number = %s AND {_wd_acc}",
+                (accident_id,)
+            ).fetchone()
         
         if accident_row:
             accident = dict(accident_row)
@@ -3844,7 +3851,7 @@ def accident_detail(accident_id):
     attachments = attachment_service.list(accident['accident_number'])
     logging.info(f"Accident {accident['accident_number']}: {len(attachments)} attachments found")
     
-    # 동적 컬럼 설정 가져오기 - safety-instruction과 동일한 방식 (활성화되고 삭제되지 않은 것만)
+    # 동적 컬럼 설정 가져오기 (활성+미삭제)
     _wa3 = sql_is_active_true('is_active', conn)
     _wd3 = sql_is_deleted_false('is_deleted', conn)
     dynamic_columns_rows = conn.execute(
@@ -3962,13 +3969,18 @@ def accident_detail(accident_id):
             code_options = get_dropdown_options_for_display('accident', col.get('column_key'))
             col['dropdown_options_mapped'] = code_options if code_options else []
     
-    # 섹션별로 컬럼 그룹핑 - safety-instruction과 동일한 방식
+    # 섹션별로 컬럼 그룹핑 + 섹션 내 정렬(column_order, id)
     section_columns = {}
     for section in sections:
-        section_columns[section['section_key']] = [
-            col for col in dynamic_columns 
-            if col.get('tab') == section['section_key']
-        ]
+        cols = [col for col in dynamic_columns if col.get('tab') == section['section_key']]
+        # 안정적인 정렬: column_order -> id
+        def _order_key(c):
+            try:
+                return (int(c.get('column_order') or 0), int(c.get('id') or 0))
+            except Exception:
+                return (c.get('column_order') or 0, c.get('id') or 0)
+        cols.sort(key=_order_key)
+        section_columns[section['section_key']] = cols
         logging.info(f"섹션 '{section['section_name']}': {len(section_columns[section['section_key']])}개 컬럼")
     
     # 하위 호환성을 위한 변수 유지 (템플릿이 아직 하드코딩된 경우)
@@ -4299,12 +4311,17 @@ def accident_register():
     sections = section_service.get_sections()
     logging.info(f"섹션 {len(sections)}개 로드됨")
     
-    # 섹션별로 컬럼 분류 (동적) - safety-instruction과 동일한 방식
+    # 섹션별로 컬럼 분류 (동적) + 섹션 내 정렬(column_order, id)
     section_columns = {}
     for section in sections:
-        section_columns[section['section_key']] = [
-            col for col in dynamic_columns if col.get('tab') == section['section_key']
-        ]
+        cols = [col for col in dynamic_columns if col.get('tab') == section['section_key']]
+        def _order_key(c):
+            try:
+                return (int(c.get('column_order') or 0), int(c.get('id') or 0))
+            except Exception:
+                return (c.get('column_order') or 0, c.get('id') or 0)
+        cols.sort(key=_order_key)
+        section_columns[section['section_key']] = cols
         logging.info(f"섹션 '{section['section_name']}': {len(section_columns[section['section_key']])}개 컬럼")
     
     # 하위 호환성을 위한 변수 유지 (템플릿이 아직 하드코딩된 경우)
