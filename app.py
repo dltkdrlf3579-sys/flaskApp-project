@@ -1927,11 +1927,13 @@ def safety_instruction_route():
 
             _alias_fill_row(instruction, [
                 ('issuer_department', 'issuer_dept'),
+                ('discipline_department', 'issuer_incharge_dept'),
                 ('primary_business_number', 'primary_company_bizno'),
                 ('primary_company_business_number', 'primary_company_bizno'),
+                ('primary_business_number', 'primary_bizno'),
+                ('primary_company_bizno', 'primary_bizno'),
                 ('secondary_company_business_number', 'secondary_company_bizno'),
                 ('subcontractor_business_number', 'subcontractor_bizno'),
-                ('discipline_department', 'issuer_incharge_dept'),
             ])
         except Exception:
             pass
@@ -2178,9 +2180,29 @@ def safety_instruction_detail(issue_number):
     #             break
     
     if not instruction:
-        logging.warning(f"환경안전 지시서를 찾을 수 없습니다: {issue_number}")
-        conn.close()
-        return "환경안전 지시서 정보를 찾을 수 없습니다.", 404
+        # 메인 테이블에 없으면 캐시에서 폴백
+        try:
+            cache_row = conn.execute(
+                "SELECT issue_number, custom_data, created_at FROM safety_instructions_cache WHERE issue_number = ?",
+                (issue_number,)
+            ).fetchone()
+            if cache_row:
+                logging.info("[SI detail] 메인 없음 → 캐시 폴백 사용")
+                instruction = {
+                    'issue_number': cache_row['issue_number'],
+                    'created_at': cache_row['created_at'],
+                    'custom_data': cache_row['custom_data'],
+                    'detailed_content': None,
+                    'is_deleted': 0,
+                }
+            else:
+                logging.warning(f"환경안전 지시서를 찾을 수 없습니다: {issue_number}")
+                conn.close()
+                return "환경안전 지시서 정보를 찾을 수 없습니다.", 404
+        except Exception as _e:
+            logging.error(f"SI 캐시 폴백 실패: {_e}")
+            conn.close()
+            return "환경안전 지시서 정보를 찾을 수 없습니다.", 404
     
     # 동적 컬럼 설정 가져오기 (활성+미삭제)
     _wa = sql_is_active_true('is_active', conn)
@@ -2230,24 +2252,57 @@ def safety_instruction_detail(issue_number):
     attachments = attachment_service.list(issue_number)
     logging.info(f"Safety instruction {issue_number}: {len(attachments)} attachments found")
     
-    conn.close()
-    
     # instruction을 항상 dict로 변환하여 템플릿에서 일관되게 처리
     if isinstance(instruction, dict):
         instruction_dict = instruction
     else:
         # SQLite Row 객체를 dict로 변환
         instruction_dict = dict(instruction)
-    
+
     # custom_data 파싱 및 병합
     custom_data = {}
-    if instruction_dict.get('custom_data'):
-        try:
-            custom_data = pyjson.loads(instruction_dict['custom_data'])
-            # custom_data의 내용을 instruction_dict에 병합
+    def _parse_json_maybe(v):
+        if v is None:
+            return {}
+        if isinstance(v, dict):
+            return v
+        if isinstance(v, str):
+            s = v.strip()
+            if not s or s in ('{}', 'null', 'None'):
+                return {}
+            try:
+                return pyjson.loads(s)
+            except Exception:
+                return {}
+        return {}
+
+    if 'custom_data' in instruction_dict:
+        custom_data = _parse_json_maybe(instruction_dict.get('custom_data'))
+        if isinstance(custom_data, dict):  # custom_data 조건 제거!
             instruction_dict.update(custom_data)
-        except:
-            custom_data = {}
+
+    # 메인 custom_data가 비었으면 캐시에서 보강
+    if not custom_data:
+        try:
+            cache_row = conn.execute(
+                "SELECT custom_data FROM safety_instructions_cache WHERE issue_number = ?",
+                (issue_number,)
+            ).fetchone()
+            if cache_row and cache_row['custom_data']:
+                cache_cd = _parse_json_maybe(cache_row['custom_data'])
+                if isinstance(cache_cd, dict) and cache_cd:
+                    logging.info("[SI detail] custom_data 비어있음 → cache.custom_data 병합")
+                    # 상세내용도 폴백
+                    if not instruction_dict.get('detailed_content') and cache_cd.get('detailed_content'):
+                        instruction_dict['detailed_content'] = cache_cd.get('detailed_content')
+                    for k, v in cache_cd.items():
+                        instruction_dict.setdefault(k, v)
+                    custom_data = cache_cd
+        except Exception as _e:
+            logging.debug(f"SI cache merge skip: {_e}")
+    
+    # DB 연결 종료
+    conn.close()
 
     # 키 호환 레이어: 구/신 키를 양방향으로 보완하여 UI가 둘 다 찾을 수 있도록 함
     try:
@@ -2259,12 +2314,16 @@ def safety_instruction_detail(issue_number):
                     d[old] = d[new]
 
         alias_pairs = [
+            # 부서/담당
             ('issuer_department', 'issuer_dept'),
+            ('discipline_department', 'issuer_incharge_dept'),
+            # 사업자번호 계열 (다양한 키 보정)
             ('primary_business_number', 'primary_company_bizno'),
             ('primary_company_business_number', 'primary_company_bizno'),
+            ('primary_business_number', 'primary_bizno'),
+            ('primary_company_bizno', 'primary_bizno'),
             ('secondary_company_business_number', 'secondary_company_bizno'),
             ('subcontractor_business_number', 'subcontractor_bizno'),
-            ('discipline_department', 'issuer_incharge_dept'),
         ]
         _alias_fill(instruction_dict, alias_pairs)
         if isinstance(custom_data, dict) and custom_data:
