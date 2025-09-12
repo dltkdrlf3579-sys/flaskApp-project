@@ -8365,23 +8365,12 @@ def export_accidents_excel():
         header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
         header_align = Alignment(horizontal="center", vertical="center")
         
-        # 헤더 작성 (ACCIDENTS_QUERY와 동일한 14개 필드)
-        headers = [
-            '사고번호', '사고명', '사업장', '사고등급', '대분류',
-            '재해형태', '재해유형', '재해날짜', '요일', '등록일',
-            '건물', '층', '장소구분', '세부위치'
-        ]
-        
-        # 기본 컬럼과 중복되지 않는 커스텀 동적 컬럼만 추가
-        basic_column_keys = [
-            'accident_number', 'accident_name', 'workplace', 'accident_grade', 'major_category',
-            'injury_form', 'injury_type', 'accident_date', 'day_of_week', 'created_at',
-            'building', 'floor', 'location_category', 'location_detail'
-        ]
-        
-        custom_columns = [col for col in dynamic_columns if col['column_key'] not in basic_column_keys]
-        for col in custom_columns:
-            headers.append(col['column_name'])
+        # 헤더 작성: 목록 테이블과 동일 구성 (사고번호, 등록일, 사고명 + 동적 컬럼)
+        headers = ['사고번호', '등록일', '사고명']
+        # 목록에서 숨기는 기본 키는 제외
+        skip_keys = {'accident_number', 'created_at', 'accident_name'}
+        custom_columns = [col for col in dynamic_columns if col.get('column_key') not in skip_keys]
+        headers.extend([col['column_name'] for col in custom_columns])
         
         # 헤더 쓰기
         for col_idx, header in enumerate(headers, 1):
@@ -8414,64 +8403,51 @@ def export_accidents_excel():
                 return date_str.split(' ')[0]  # 2025-09-07 0:00:00 → 2025-09-07
             return date_str
         
-        # 데이터 쓰기
+        # 데이터 쓰기 (목록 화면과 동일한 병합/폴백 적용)
         for row_idx, accident_row in enumerate(accidents, 2):
-            accident = dict(accident_row)
-            
-            # 기본 필드 쓰기 (드롭다운 코드는 실제 값으로 변환, 날짜는 시분초 제거)
-            ws.cell(row=row_idx, column=1, value=accident.get('accident_number', ''))
-            ws.cell(row=row_idx, column=2, value=accident.get('accident_name', ''))
-            ws.cell(row=row_idx, column=3, value=get_display_value('workplace', accident.get('workplace', '')))
-            ws.cell(row=row_idx, column=4, value=get_display_value('accident_grade', accident.get('accident_grade', '')))
-            ws.cell(row=row_idx, column=5, value=get_display_value('major_category', accident.get('major_category', '')))
-            ws.cell(row=row_idx, column=6, value=get_display_value('injury_form', accident.get('injury_form', '')))
-            ws.cell(row=row_idx, column=7, value=get_display_value('injury_type', accident.get('injury_type', '')))
-            ws.cell(row=row_idx, column=8, value=format_date(accident.get('accident_date', '')))
-            ws.cell(row=row_idx, column=9, value=accident.get('day_of_week', ''))
-            ws.cell(row=row_idx, column=10, value=format_date(accident.get('created_at', '')))
-            ws.cell(row=row_idx, column=11, value=get_display_value('building', accident.get('building', '')))
-            ws.cell(row=row_idx, column=12, value=accident.get('floor', ''))
-            ws.cell(row=row_idx, column=13, value=get_display_value('location_category', accident.get('location_category', '')))
-            ws.cell(row=row_idx, column=14, value=accident.get('location_detail', ''))
-            
-            # 동적 컬럼 데이터 쓰기
-            custom_data = {}
-            if accident.get('custom_data'):
-                try:
-                    if isinstance(accident['custom_data'], str):
-                        custom_data = pyjson.loads(accident['custom_data'])
-                    else:
-                        custom_data = accident['custom_data']  # PostgreSQL JSONB
-                except:
-                    custom_data = {}
-            
-            for col_idx, col in enumerate(custom_columns, 15):
-                value = custom_data.get(col['column_key'], '')
-                
-                # list 타입 데이터 처리 (재해자 정보) - 전체 데이터 표시
-                if col['column_type'] == 'list' and isinstance(value, list):
-                    # 엑셀에서는 전체 재해자 정보를 JSON 형태로 표시 (빈 리스트는 빈 문자열)
+            rec = dict(accident_row)
+            # custom_data 파싱
+            custom = {}
+            try:
+                raw = rec.get('custom_data')
+                if isinstance(raw, dict):
+                    custom = raw
+                elif isinstance(raw, str) and raw:
+                    custom = pyjson.loads(raw)
+            except Exception:
+                custom = {}
+            # 사고명 폴백
+            if not rec.get('accident_name'):
+                nm = custom.get('accident_name')
+                if nm and str(nm).strip():
+                    rec['accident_name'] = nm
+            # 등록일 계산
+            acc_no = str(rec.get('accident_number') or '')
+            if acc_no.startswith('K'):
+                display_created = rec.get('report_date') or rec.get('created_at')
+            else:
+                display_created = rec.get('created_at')
+            # 고정 열
+            ws.cell(row=row_idx, column=1, value=rec.get('accident_number', ''))
+            ws.cell(row=row_idx, column=2, value=format_date(display_created))
+            ws.cell(row=row_idx, column=3, value=rec.get('accident_name', ''))
+            # 동적 열: 화면과 동일 키 순서로, custom 우선 → 상위값
+            start_col = 4
+            for offset, col in enumerate(custom_columns):
+                key = col['column_key']
+                value = custom.get(key, rec.get(key, ''))
+                if col.get('column_type') == 'list' and isinstance(value, list):
                     try:
                         value = pyjson.dumps(value, ensure_ascii=False) if value else ''
-                    except:
+                    except Exception:
                         value = str(value) if value else ''
-                
-                # popup 타입 데이터 처리
                 elif isinstance(value, dict):
-                    if 'name' in value:
-                        value = value['name']
-                    else:
-                        value = str(value)
-                
-                # 드롭다운 타입인 경우 코드를 실제 값으로 변환
-                elif col['column_type'] == 'dropdown' and value:
-                    value = get_display_value(col['column_key'], value)
-                
-                # 날짜 타입인 경우 시분초 제거
-                elif col['column_type'] in ['date', 'datetime'] and value:
+                    value = value.get('name') or str(value)
+                elif col.get('column_type') == 'dropdown' and value:
+                    value = get_display_value(key, value)
+                elif col.get('column_type') in ['date','datetime'] and value:
                     value = format_date(value)
-                
-                ws.cell(row=row_idx, column=col_idx, value=value)
+                ws.cell(row=row_idx, column=start_col + offset, value=value)
         
         # 컬럼 너비 자동 조정
         for column in ws.columns:
