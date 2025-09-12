@@ -1915,6 +1915,26 @@ def safety_instruction_route():
             except Exception as e:
                 logging.error(f"Custom data parsing error: {e}")
                 pass
+
+        # 키 호환 레이어 적용 (구/신 키 양방향 보완)
+        try:
+            def _alias_fill_row(d, pairs):
+                for old, new in pairs:
+                    if old in d and (new not in d or d.get(new) in (None, '')):
+                        d[new] = d[old]
+                    if new in d and (old not in d or d.get(old) in (None, '')):
+                        d[old] = d[new]
+
+            _alias_fill_row(instruction, [
+                ('issuer_department', 'issuer_dept'),
+                ('primary_business_number', 'primary_company_bizno'),
+                ('primary_company_business_number', 'primary_company_bizno'),
+                ('secondary_company_business_number', 'secondary_company_bizno'),
+                ('subcontractor_business_number', 'subcontractor_bizno'),
+                ('discipline_department', 'issuer_incharge_dept'),
+            ])
+        except Exception:
+            pass
     
     # smart_apply_mappings 적용 (드롭다운 코드를 라벨로 변환)
     if safety_instructions:
@@ -2228,6 +2248,29 @@ def safety_instruction_detail(issue_number):
             instruction_dict.update(custom_data)
         except:
             custom_data = {}
+
+    # 키 호환 레이어: 구/신 키를 양방향으로 보완하여 UI가 둘 다 찾을 수 있도록 함
+    try:
+        def _alias_fill(d, pairs):
+            for old, new in pairs:
+                if old in d and (new not in d or d.get(new) in (None, '')):
+                    d[new] = d[old]
+                if new in d and (old not in d or d.get(old) in (None, '')):
+                    d[old] = d[new]
+
+        alias_pairs = [
+            ('issuer_department', 'issuer_dept'),
+            ('primary_business_number', 'primary_company_bizno'),
+            ('primary_company_business_number', 'primary_company_bizno'),
+            ('secondary_company_business_number', 'secondary_company_bizno'),
+            ('subcontractor_business_number', 'subcontractor_bizno'),
+            ('discipline_department', 'issuer_incharge_dept'),
+        ]
+        _alias_fill(instruction_dict, alias_pairs)
+        if isinstance(custom_data, dict) and custom_data:
+            _alias_fill(custom_data, alias_pairs)
+    except Exception:
+        pass
     
     # person_name 추출
     person_name = instruction_dict.get('disciplined_person', '알 수 없음')
