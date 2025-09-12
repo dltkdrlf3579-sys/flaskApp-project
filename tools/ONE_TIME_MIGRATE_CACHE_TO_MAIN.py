@@ -26,6 +26,14 @@ from typing import Dict, Any, List
 
 from db_connection import get_db_connection
 from db.upsert import safe_upsert
+import configparser
+
+try:
+    # Optional external DB access (IQADB)
+    from database_config import execute_SQL, IQADB_AVAILABLE
+except Exception:
+    execute_SQL = None
+    IQADB_AVAILABLE = False
 
 
 def table_exists(conn, table: str) -> bool:
@@ -159,6 +167,178 @@ def migrate_generic(conn, cache_candidates: List[str], main_table: str, key_col:
     return migrated
 
 
+def _norm_key(k: str) -> str:
+    return ''.join((k or '').strip().lower().replace('_', '').split())
+
+
+def _pick(src: Dict[str, Any], *keys):
+    for k in keys:
+        if k in src and src[k] not in (None, ''):
+            return src[k]
+    # try normalized matching (handles localized/underscores/spaces)
+    nmap = { _norm_key(k): v for k, v in src.items() }
+    for k in keys:
+        nk = _norm_key(k)
+        if nk in nmap and nmap[nk] not in (None, ''):
+            return nmap[nk]
+    return ''
+
+
+def _next_cr_number(conn, base_yyyymm: str) -> str:
+    prefix = f"CR-{base_yyyymm}-"
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT request_number FROM partner_change_requests
+            WHERE request_number LIKE ?
+            ORDER BY request_number DESC
+            LIMIT 1
+            """,
+            (prefix + '%',)
+        )
+        row = cur.fetchone()
+        if row and row[0]:
+            try:
+                last = int(str(row[0])[-2:])
+            except Exception:
+                last = 0
+            seq = str(last + 1).zfill(2)
+        else:
+            seq = '01'
+        return f"{prefix}{seq}"
+    except Exception:
+        return f"{prefix}01"
+
+
+def _yyyymm_from_any(val: Any) -> str:
+    from datetime import datetime
+    import pandas as pd
+    if not val:
+        return datetime.now().strftime('%Y%m')
+    try:
+        if isinstance(val, str):
+            # common patterns
+            for fmt in ('%Y-%m-%d', '%Y/%m/%d', '%Y.%m.%d', '%Y-%m-%d %H:%M:%S'):
+                try:
+                    dt = datetime.strptime(val[:19], fmt)
+                    return dt.strftime('%Y%m')
+                except Exception:
+                    continue
+        # pandas/np datetime
+        if 'Timestamp' in str(type(val)):
+            return pd.to_datetime(val).strftime('%Y%m')
+    except Exception:
+        pass
+    return datetime.now().strftime('%Y%m')
+
+
+def migrate_change_requests(conn, dry_run=False) -> int:
+    """One-time import of change requests into partner_change_requests.
+    Prefers external query CHANGE_REQUESTS_QUERY; falls back to change_requests_cache.
+    """
+    migrated = 0
+
+    # Try external query first
+    query = None
+    try:
+        cfg = configparser.ConfigParser()
+        cfg.read('config.ini', encoding='utf-8')
+        if cfg.has_option('CONTENT_DATA_QUERIES', 'CHANGE_REQUESTS_QUERY'):
+            query = cfg.get('CONTENT_DATA_QUERIES', 'CHANGE_REQUESTS_QUERY')
+        elif cfg.has_option('MASTER_DATA_QUERIES', 'CHANGE_REQUESTS_QUERY'):
+            query = cfg.get('MASTER_DATA_QUERIES', 'CHANGE_REQUESTS_QUERY')
+    except Exception:
+        query = None
+
+    def upsert_row(row_dict: Dict[str, Any]):
+        nonlocal migrated
+        cd = dict(row_dict)
+        # Standard fields mapping
+        req_no = _pick(row_dict, 'request_number', '요청번호', 'cr_no', 'cr_number', 'req_no')
+        requester = _pick(row_dict, 'requester_name', '요청자', '신청자', 'req_name')
+        req_dept = _pick(row_dict, 'requester_department', '요청부서', '신청부서', 'req_name_dept', 'department')
+        comp = _pick(row_dict, 'company_name', '회사명', '업체명', 'compname')
+        bizno = _pick(row_dict, 'business_number', '사업자번호', 'compname_bizno', 'bizno')
+        ctype = _pick(row_dict, 'change_type', '변경유형', '항목')
+        curv = _pick(row_dict, 'current_value', '현값', '기존값')
+        newv = _pick(row_dict, 'new_value', '신값', '변경값', '변경후')
+        reason = _pick(row_dict, 'change_reason', '변경사유', '사유')
+        status = _pick(row_dict, 'status', '상태') or 'requested'
+        created = _pick(row_dict, 'created_at', '요청일자', '등록일', 'requested_at')
+
+        # Auto-generate request_number if missing
+        if not str(req_no).strip():
+            yyyymm = _yyyymm_from_any(created)
+            req_no = _next_cr_number(conn, yyyymm)
+
+        data = {
+            'request_number': str(req_no),
+            'requester_name': str(requester or ''),
+            'requester_department': str(req_dept or ''),
+            'company_name': str(comp or ''),
+            'business_number': str(bizno or ''),
+            'change_type': str(ctype or ''),
+            'current_value': str(curv or ''),
+            'new_value': str(newv or ''),
+            'change_reason': str(reason or ''),
+            'status': str(status or 'requested'),
+            'custom_data': cd,
+            'updated_at': None,
+        }
+        if not dry_run:
+            safe_upsert(
+                conn,
+                'partner_change_requests',
+                data,
+                conflict_cols=['request_number'],
+                update_cols=['requester_name', 'requester_department', 'company_name', 'business_number',
+                             'change_type', 'current_value', 'new_value', 'change_reason', 'status',
+                             'custom_data', 'updated_at']
+            )
+        migrated += 1
+
+    used_external = False
+    if query and execute_SQL and IQADB_AVAILABLE:
+        try:
+            import pandas as pd
+            df = execute_SQL(query)
+            if hasattr(df, 'empty') and not df.empty:
+                # Normalize column names to lower
+                try:
+                    df.columns = [str(c) for c in df.columns]
+                except Exception:
+                    pass
+                for _, r in df.iterrows():
+                    row = r.to_dict() if hasattr(r, 'to_dict') else dict(r)
+                    # Ensure JSON-serializable values
+                    for k, v in list(row.items()):
+                        try:
+                            import pandas as pd
+                            from datetime import datetime, date
+                            if pd.isna(v):
+                                row[k] = None
+                            elif isinstance(v, (pd.Timestamp, datetime, date)):
+                                row[k] = str(v)
+                        except Exception:
+                            pass
+                    upsert_row(row)
+                used_external = True
+                logging.info(f"[CR] Migrated {migrated} from external query")
+        except Exception as e:
+            logging.warning(f"[CR] External query migration failed: {e}")
+
+    if not used_external:
+        # Fallback to cache
+        cache_rows = read_cache_rows(conn, 'change_requests_cache') if table_exists(conn, 'change_requests_cache') else []
+        for r in cache_rows:
+            cd = parse_custom_data(r.get('custom_data'))
+            base = dict(r)
+            base.update(cd)
+            upsert_row(base)
+
+    return migrated
+
 def drop_table(conn, table: str):
     try:
         cur = conn.cursor()
@@ -192,6 +372,8 @@ def main():
         total += migrate_generic(conn, ['follow_sop_cache', 'followsop_cache'], 'follow_sop', 'work_req_no', dry_run=args.dry_run)
         # Full Process (try both aliases)
         total += migrate_generic(conn, ['full_process_cache', 'fullprocess_cache'], 'full_process', 'fullprocess_number', dry_run=args.dry_run)
+        # Change Requests (prefer external query; fallback to cache)
+        total += migrate_change_requests(conn, dry_run=args.dry_run)
 
         if not args.dry_run:
             conn.commit()
@@ -199,7 +381,7 @@ def main():
         logging.info(f"Done. Migrated total rows: {total}")
 
         if args.drop_caches and not args.dry_run:
-            for tbl in ['safety_instructions_cache', 'follow_sop_cache', 'followsop_cache', 'full_process_cache', 'fullprocess_cache']:
+            for tbl in ['safety_instructions_cache', 'follow_sop_cache', 'followsop_cache', 'full_process_cache', 'fullprocess_cache', 'change_requests_cache']:
                 if table_exists(conn, tbl):
                     drop_table(conn, tbl)
             conn.commit()
@@ -222,4 +404,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

@@ -122,6 +122,18 @@ class SectionConfigService:
                 {'section_key': 'violation_info', 'section_name': '위반정보', 'section_order': 2},
                 {'section_key': 'additional', 'section_name': '추가기입정보', 'section_order': 3}
             ]
+        if self.board_type == 'follow_sop':
+            return [
+                {'section_key': 'basic_info', 'section_name': '기본정보', 'section_order': 1},
+                {'section_key': 'work_info', 'section_name': '작업정보', 'section_order': 2},
+                {'section_key': 'additional', 'section_name': '추가기입정보', 'section_order': 3}
+            ]
+        if self.board_type == 'full_process':
+            return [
+                {'section_key': 'basic_info', 'section_name': '기본정보', 'section_order': 1},
+                {'section_key': 'process_info', 'section_name': '프로세스정보', 'section_order': 2},
+                {'section_key': 'additional', 'section_name': '추가기입정보', 'section_order': 3}
+            ]
         return []
     
     def add_section(self, section_data):

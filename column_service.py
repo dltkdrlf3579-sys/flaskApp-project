@@ -71,28 +71,26 @@ class ColumnConfigService:
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
-        # 컬럼 설정 테이블
-        # Postgres에서는 AUTOINCREMENT 문법이 없어 CREATE는 생략하고
-        # 아래 보강 로직(ALTER)만 수행한다.
-        if not (hasattr(conn, 'is_postgres') and conn.is_postgres):
-            cursor.execute(f"""
-                CREATE TABLE IF NOT EXISTS {self.table_name} (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    column_key TEXT UNIQUE NOT NULL,
-                    column_name TEXT NOT NULL,
-                    column_type TEXT NOT NULL,
-                    column_order INTEGER DEFAULT 999,
-                    is_active INTEGER DEFAULT 1,
-                    is_required INTEGER DEFAULT 0,
-                    dropdown_options TEXT,  -- JSON 형식
-                    tab TEXT,
-                    column_span INTEGER DEFAULT 1,
-                    linked_columns TEXT,
-                    is_deleted INTEGER DEFAULT 0,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+        # 컬럼 설정 테이블 (PostgreSQL/SQLite 모두 생성 가능)
+        # CompatConnection이 AUTOINCREMENT → SERIAL 변환을 처리하므로 공통 DDL 사용
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS {self.table_name} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                column_key TEXT UNIQUE NOT NULL,
+                column_name TEXT NOT NULL,
+                column_type TEXT NOT NULL,
+                column_order INTEGER DEFAULT 999,
+                is_active INTEGER DEFAULT 1,
+                is_required INTEGER DEFAULT 0,
+                dropdown_options TEXT,
+                tab TEXT,
+                column_span INTEGER DEFAULT 1,
+                linked_columns TEXT,
+                is_deleted INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         
         # 데이터 테이블 체크는 스킵 - 컬럼 설정에는 불필요
         # IQADB 테이블은 존재하지 않을 수 있음

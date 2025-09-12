@@ -1006,17 +1006,19 @@ let editingId = null;
         // 드롭다운 옵션 미리보기 로드
         async function loadOptionPreview(columnKey) {
             try {
-                const response = await fetch(`/api/dropdown-codes/${columnKey}`);
+                const params = new URLSearchParams({ column_key: columnKey });
+                const response = await fetch(`/api/change-request/dropdown-codes?${params.toString()}`);
                 const data = await response.json();
                 
-                if (data.success && data.codes && data.codes.length > 0) {
+                if ((data.success && data.codes) || Array.isArray(data)) {
+                    const codes = data.codes || data; // v2 API or generic API
                     const previewDiv = document.getElementById('optionPreview');
                     const previewBody = document.getElementById('optionPreviewBody');
                     
-                    previewBody.innerHTML = data.codes.map(code => `
+                    previewBody.innerHTML = codes.map(code => `
                         <tr>
-                            <td><code>${code.code}</code></td>
-                            <td>${code.value}</td>
+                            <td><code>${code.code || code.option_code}</code></td>
+                            <td>${code.value || code.option_value}</td>
                         </tr>
                     `).join('');
                     
