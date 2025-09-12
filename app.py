@@ -5447,6 +5447,11 @@ def update_partner():
         
         # 1. 협력사 상세내용 업데이트 (partner_details 테이블)
         logging.info(f"상세내용 업데이트: {detailed_content[:50]}...")
+        # partner_details: business_number를 고유키로 사용하도록 인덱스 보장 (PostgreSQL ON CONFLICT 요구)
+        try:
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_partner_details_business_number ON partner_details (business_number)")
+        except Exception as _e_idx:
+            logging.debug(f"Ensure unique index skipped/failed: {_e_idx}")
         # partner_details safe_upsert 사용
         detail_data = {
             'business_number': business_number,
