@@ -747,10 +747,22 @@ function openContractorSearch(fieldKey) {
         const mainField = document.getElementById(fieldKey) || document.querySelector(`[data-field="${fieldKey}"]`);
         if (mainField) mainField.value = data.worker_name || '';
 
-        const pairs = [["_id","worker_id"], ["_company_name","company_name"], ["_business_number","business_number"]];
-        pairs.forEach(([suffix, src]) => {
-            const field = document.getElementById(fieldKey + suffix) || document.querySelector(`[data-field="${fieldKey + suffix}"]`);
-            if (field) field.value = data[src] || '';
+        const mappings = [
+            { targets: ['_id'], src: 'worker_id' },
+            { targets: ['_company', '_company_name'], src: 'company_name' },
+            { targets: ['_bizno', '_company_bizno', '_business_number'], src: 'business_number' },
+        ];
+        mappings.forEach(m => {
+            m.targets.forEach(suffix => {
+                const field = document.getElementById(fieldKey + suffix) || document.querySelector(`[data-field="${fieldKey + suffix}"]`);
+                if (field) {
+                    field.value = data[m.src] || '';
+                    if (field.tagName === 'INPUT' || field.tagName === 'TEXTAREA') {
+                        field.readOnly = true;
+                        field.style.backgroundColor = '#f8f9fa';
+                    }
+                }
+            });
         });
     };
     

@@ -885,20 +885,21 @@ function openContractorSearch(fieldKey) {
         if (mainField) {
             mainField.value = data.worker_name || '';
         }
-        
-        const linkedFields = ['_id', '_company_name', '_business_number'];
-        linkedFields.forEach(suffix => {
-            const field = document.getElementById(fieldKey + suffix);
-            if (field) {
-                let value = '';
-                if (suffix === '_id') value = data.worker_id || '';
-                else if (suffix === '_company_name') value = data.company_name || '';
-                else if (suffix === '_business_number') value = data.business_number || '';
-                
-                field.value = value;
-                field.readOnly = true;
-                field.style.backgroundColor = '#f8f9fa';
-            }
+        // Robust sibling fill: support multiple suffix variants
+        const mappings = [
+            { targets: ['_id'], src: 'worker_id' },
+            { targets: ['_company', '_company_name'], src: 'company_name' },
+            { targets: ['_bizno', '_company_bizno', '_business_number'], src: 'business_number' },
+        ];
+        mappings.forEach(m => {
+            m.targets.forEach(suffix => {
+                const el = document.getElementById(fieldKey + suffix);
+                if (el) {
+                    el.value = data[m.src] || '';
+                    el.readOnly = true;
+                    el.style.backgroundColor = '#f8f9fa';
+                }
+            });
         });
     };
     

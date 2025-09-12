@@ -2128,18 +2128,21 @@ def safety_instruction_register():
             if not bk:
                 return ''
             variants = [bk, bk + 'd']  # 오타/변형 케이스 지원(disciplined vs displined)
-            # 회사 그룹 감지: *_bizno, *_company_bizno
-            if any(((v + '_company_bizno') in all_keys) or ((v + '_bizno') in all_keys) for v in variants):
-                return 'company'
-            # 부서 그룹 감지
-            if any(((v + '_dept') in all_keys) or ((v + '_department') in all_keys) or ((v + '_department_code') in all_keys) for v in variants):
-                return 'department'
-            # 사람/ID 그룹 감지
-            if any(((v + '_id') in all_keys) for v in variants):
-                return 'person'
-            # 협력사 근로자 그룹(회사명만 있는 경우)
+            # 특수 규칙: 징계대상자는 기본 contractor로 간주
+            if bk in {'disciplined_person'}:
+                return 'contractor'
+            # 협력사 근로자 그룹 우선 (회사명 키 존재)
             if any(((v + '_company') in all_keys) for v in variants):
                 return 'contractor'
+            # 사람/ID 그룹
+            if any(((v + '_id') in all_keys) for v in variants):
+                return 'person'
+            # 회사 그룹: *_bizno, *_company_bizno
+            if any(((v + '_company_bizno') in all_keys) or ((v + '_bizno') in all_keys) for v in variants):
+                return 'company'
+            # 부서 그룹
+            if any(((v + '_dept') in all_keys) or ((v + '_department') in all_keys) or ((v + '_department_code') in all_keys) for v in variants):
+                return 'department'
             return ''
 
         popup_map = {
@@ -2444,9 +2447,6 @@ def safety_instruction_detail(issue_number):
             ('primary_company_bizno', 'primary_bizno'),
             ('secondary_company_business_number', 'secondary_company_bizno'),
             ('subcontractor_business_number', 'subcontractor_bizno'),
-            # 지원: disciplined <=/=> disciplined_person (신규 컬럼명 호환)
-            ('disciplined_person', 'disciplined'),
-            ('disciplined_person_id', 'disciplined_id'),
         ]
         _alias_fill(instruction_dict, alias_pairs)
         if isinstance(custom_data, dict) and custom_data:
@@ -2474,14 +2474,21 @@ def safety_instruction_detail(issue_number):
             if not bk:
                 return ''
             variants = [bk, bk + 'd']
-            if any(((v + '_company_bizno') in all_keys) or ((v + '_bizno') in all_keys) for v in variants):
-                return 'company'
-            if any(((v + '_dept') in all_keys) or ((v + '_department') in all_keys) or ((v + '_department_code') in all_keys) for v in variants):
-                return 'department'
-            if any(((v + '_id') in all_keys) for v in variants):
-                return 'person'
+            # 특수 규칙: 징계대상자 기본 contractor
+            if bk in {'disciplined_person'}:
+                return 'contractor'
+            # contractor 우선
             if any(((v + '_company') in all_keys) for v in variants):
                 return 'contractor'
+            # person 다음
+            if any(((v + '_id') in all_keys) for v in variants):
+                return 'person'
+            # company 다음
+            if any(((v + '_company_bizno') in all_keys) or ((v + '_bizno') in all_keys) for v in variants):
+                return 'company'
+            # department 마지막
+            if any(((v + '_dept') in all_keys) or ((v + '_department') in all_keys) or ((v + '_department_code') in all_keys) for v in variants):
+                return 'department'
             return ''
         popup_map = {
             'person': 'popup_person',
@@ -4691,7 +4698,6 @@ def accident_register():
     is_popup = request.args.get('popup') == '1'
     
     # 현재 날짜 추가 (한국 시간)
-    from timezone_config import get_korean_time
     today_date = get_korean_time().strftime('%Y-%m-%d')
     
     return render_template('accident-register.html',
