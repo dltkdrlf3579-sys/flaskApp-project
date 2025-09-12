@@ -24,7 +24,7 @@ BOARD_CONFIGS = {
         'board_type': 'safety_instruction',
         'display_name': '환경안전 지시서',
         'number_prefix': 'SI',
-        'cache_table': 'safety_instructions_cache',
+        'cache_table': 'safety_instructions',
         'column_table': 'safety_instruction_column_config',
         'upload_path': 'uploads/safety_instruction/',
     },

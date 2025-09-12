@@ -2341,7 +2341,7 @@ def safety_instruction_detail(issue_number):
         # 메인 테이블에 없으면 캐시에서 폴백
         try:
             cache_row = conn.execute(
-                "SELECT * FROM safety_instructions_cache WHERE issue_number = ?",
+                "SELECT * FROM safety_instructions WHERE issue_number = ?",
                 (issue_number,)
             ).fetchone()
             if cache_row:
@@ -2440,7 +2440,7 @@ def safety_instruction_detail(issue_number):
     # 캐시에서 항상 보강: 메인에 키가 있어도 비어있으면 캐시로 채움
     try:
         cache_row = conn.execute(
-            "SELECT * FROM safety_instructions_cache WHERE issue_number = ?",
+            "SELECT * FROM safety_instructions WHERE issue_number = ?",
             (issue_number,)
         ).fetchone()
         if cache_row:
@@ -6377,7 +6377,7 @@ def admin_cache_counts():
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        tables = ['partners_cache','accidents_cache','safety_instructions_cache',
+        tables = ['partners_cache','accidents_cache','safety_instructions',
                  'departments_cache','buildings_cache','contractors_cache','employees_cache']
         counts = {}
         for t in tables:
@@ -9265,7 +9265,7 @@ def export_safety_instruction_excel():
         # 헤더 작성
         col_idx = 1
         
-        # 기본 필드 (safety_instructions_cache 테이블의 주요 컬럼)
+        # 기본 필드 (safety_instructions 테이블의 주요 컬럼)
         basic_headers = ['발부번호', '발부자', '위반일자', '징계일자', '피징계자']
         for header in basic_headers:
             cell = ws.cell(row=1, column=col_idx, value=header)
