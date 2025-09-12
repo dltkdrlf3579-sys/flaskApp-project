@@ -5730,6 +5730,31 @@ def update_accident():
                 if isinstance(field_value, str) and field_value.strip():
                     return field_value.startswith('[') and field_value.endswith(']')
                 return False
+
+            # 추가정보 섹션 키를 조회하여 '덮어쓰기 허용' 집합 구성
+            additional_keys = set()
+            try:
+                _tab_rows = cursor.execute(
+                    "SELECT column_key, tab FROM accident_column_config"
+                ).fetchall()
+                for _r in _tab_rows:
+                    try:
+                        k = _r['column_key'] if hasattr(_r, 'keys') else _r[0]
+                        t = _r['tab'] if hasattr(_r, 'keys') else (_r[1] if len(_r) > 1 else None)
+                    except Exception:
+                        k, t = None, None
+                    if k and (t == 'additional'):
+                        additional_keys.add(k)
+            except Exception:
+                pass
+
+            # 명시적 우선 키(요청된 필드들): 추가정보와 동일하게 덮어쓰기 허용
+            override_always = {
+                'company_1cha','company_1cha_bizno',
+                'accident_company','accident_company_bizno',
+                'accident_time'
+            }
+            overwrite_keys = additional_keys | override_always
             
             for key, value in custom_data.items():
                 # 리스트 필드 병합 우선 처리
@@ -5761,8 +5786,12 @@ def update_accident():
                     
                     print(f"[MERGE DEBUG] {key} - 기존: {len(existing_list)}개, 새로: {len(new_list)}개")
                     
-                    # 프론트에서 전체 배열을 보냈다면 그대로 사용, 아니면 병합
-                    if len(new_list) > 0 and len(existing_list) > 0:
+                    # 추가정보/오버라이드 키는 사용자가 보낸 값으로 그대로 덮어쓰기(빈 배열 포함)
+                    if key in overwrite_keys:
+                        existing_custom_data[key] = new_list
+                        print(f"[MERGE DEBUG] {key} 추가정보/오버라이드 → 전체 대체: {len(new_list)}개")
+                    # 그 외: 프론트에서 전체 배열을 보냈다면 그대로 사용, 아니면 병합
+                    elif len(new_list) > 0 and len(existing_list) > 0:
                         # 새로운 데이터에 기존 데이터의 첫 번째 항목이 포함되어 있다면 전체 교체로 간주
                         first_existing_id = existing_list[0].get('id', '') if existing_list and isinstance(existing_list[0], dict) else ''
                         has_existing_data = any(
@@ -5787,15 +5816,21 @@ def update_accident():
                             existing_custom_data[key] = merged_list
                             print(f"[MERGE DEBUG] {key} 병합 완료: 기존 {len(existing_list)}개 + 새로 {len(new_list)}개 = 최종 {len(merged_list)}개 항목")
                     else:
-                        # 하나가 비어있으면 비어있지 않은 것을 사용
+                        # 하나가 비어있으면 비어있지 않은 것을 사용 (일반 키)
                         existing_custom_data[key] = new_list if len(new_list) > 0 else existing_list
                         print(f"[MERGE DEBUG] {key} 단순 대체: {len(existing_custom_data[key])}개 항목")
                 else:
-                    # 일반 필드: 빈값은 무시하고, 값이 있으면 custom_data에 기록
-                    if _is_empty_value(value):
-                        print(f"[MERGE GUARD] skip empty value for key: {key}")
-                        continue
-                    existing_custom_data[key] = value
+                    # 일반 필드
+                    if key in overwrite_keys:
+                        # 추가정보/오버라이드 키: 빈값도 포함하여 덮어쓰기 허용
+                        existing_custom_data[key] = value
+                        print(f"[MERGE DEBUG] {key} 추가정보/오버라이드 → 값 대체: '{value}'")
+                    else:
+                        # 일반 키: 빈값은 무시하고, 값이 있으면 custom_data에 기록
+                        if _is_empty_value(value):
+                            print(f"[MERGE GUARD] skip empty value for key: {key}")
+                            continue
+                        existing_custom_data[key] = value
             
             # detailed_content를 custom_data에 추가
             if final_content:
