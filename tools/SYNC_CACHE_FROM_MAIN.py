@@ -133,6 +133,30 @@ def ensure_cache_table(conn, cache_table: str, pk: str):
     except Exception:
         pass
 
+    # Postgres: id 시퀀스가 뒤처진 경우를 방지하기 위해 MAX(id)+1로 리셋
+    try:
+        if getattr(conn, 'is_postgres', False):
+            # 일부 환경에서 id 컬럼이 없을 수 있으므로 존재 확인
+            cur.execute(
+                "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = %s AND column_name = 'id'",
+                (cache_table,)
+            )
+            has_id = (cur.fetchone() or [0])[0] > 0
+            if has_id:
+                cur.execute(
+                    """
+                    SELECT setval(
+                        pg_get_serial_sequence(%s, 'id'),
+                        COALESCE((SELECT MAX(id) FROM %s), 0) + 1,
+                        false
+                    )
+                    """,
+                    (cache_table, cache_table)
+                )
+    except Exception:
+        # SQLite 또는 시퀀스가 없는 경우 무시
+        pass
+
 
 def add_missing_columns(conn, cache_table: str, main_cols: List[Tuple[str, str]]):
     # 캐시에 없는 메인 컬럼 추가(유형은 보수적으로 TEXT)
@@ -264,4 +288,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

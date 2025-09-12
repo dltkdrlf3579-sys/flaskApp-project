@@ -1337,6 +1337,23 @@ def accident():
     ).fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
 
+    # 정렬 일관성 보장: 섹션 순서(section_order) → 섹션 내 column_order → id
+    try:
+        sec_order_map = {s['section_key']: int(s.get('section_order') or 0) for s in sections}
+        def _to_int(v):
+            try:
+                return int(v)
+            except Exception:
+                return 0
+        def _sort_key(c):
+            so = sec_order_map.get(c.get('tab'), 999)
+            co = _to_int(c.get('column_order'))
+            cid = _to_int(c.get('id'))
+            return (so, co, cid)
+        dynamic_columns.sort(key=_sort_key)
+    except Exception:
+        pass
+
     # 키 집합은 활성/비활성 모두 포함하여 그룹 추론에 사용 (렌더는 활성만)
     try:
         _wd4 = sql_is_deleted_false('is_deleted', conn)
@@ -2257,31 +2274,33 @@ def safety_instruction_detail(issue_number):
         if isinstance(custom_data, dict):  # custom_data 조건 제거!
             instruction_dict.update(custom_data)
 
-    # 메인 custom_data가 비었으면 캐시에서 보강
-    if not custom_data:
-        try:
-            cache_row = conn.execute(
-                "SELECT * FROM safety_instructions_cache WHERE issue_number = ?",
-                (issue_number,)
-            ).fetchone()
-            if cache_row:
-                cache_map = dict(cache_row)
-                cache_cd = _parse_json_maybe(cache_map.get('custom_data'))
-                # 캐시의 명시 컬럼값으로 먼저 보강 (custom_data보다 우선)
-                for k, v in cache_map.items():
-                    if k in ('custom_data',):
-                        continue
+    # 캐시에서 항상 보강: 메인에 키가 있어도 비어있으면 캐시로 채움
+    try:
+        cache_row = conn.execute(
+            "SELECT * FROM safety_instructions_cache WHERE issue_number = ?",
+            (issue_number,)
+        ).fetchone()
+        if cache_row:
+            cache_map = dict(cache_row)
+            cache_cd = _parse_json_maybe(cache_map.get('custom_data'))
+            # 캐시의 명시 컬럼값으로 먼저 보강 (custom_data보다 우선)
+            for k, v in cache_map.items():
+                if k == 'custom_data':
+                    continue
+                if k not in instruction_dict or instruction_dict.get(k) in (None, ''):
+                    instruction_dict[k] = v
+            # custom_data 병합: 메인에 없거나 빈 값만 채움
+            if isinstance(cache_cd, dict) and cache_cd:
+                merged_cd = dict(custom_data) if isinstance(custom_data, dict) else {}
+                for k, v in cache_cd.items():
+                    if k not in merged_cd or merged_cd.get(k) in (None, '', []):
+                        merged_cd[k] = v
+                    # instruction_dict에도 없으면 채움
                     if k not in instruction_dict or instruction_dict.get(k) in (None, ''):
                         instruction_dict[k] = v
-                if isinstance(cache_cd, dict) and cache_cd:
-                    logging.info("[SI detail] custom_data 비어있음 → cache.custom_data 병합")
-                    if not instruction_dict.get('detailed_content') and cache_cd.get('detailed_content'):
-                        instruction_dict['detailed_content'] = cache_cd.get('detailed_content')
-                    for k, v in cache_cd.items():
-                        instruction_dict.setdefault(k, v)
-                    custom_data = cache_cd
-        except Exception as _e:
-            logging.debug(f"SI cache merge skip: {_e}")
+                custom_data = merged_cd
+    except Exception as _e:
+        logging.debug(f"SI cache merge skip: {_e}")
     
     # DB 연결 종료
     conn.close()
