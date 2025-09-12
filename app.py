@@ -5399,8 +5399,8 @@ def update_accident():
                 for field in allowed_fields:
                     if field in base_data:
                         value = base_data[field]
-                        # PostgreSQL 호환성: 날짜 필드의 빈 문자열을 NULL로 변환
-                        if field == 'accident_date' and value == '':
+                        # PostgreSQL 호환성: 날짜/타임스탬프 필드의 빈 문자열을 NULL로 변환
+                        if field in ['accident_date', 'created_at'] and value == '':
                             value = None
                         update_fields.append(f"{field} = %s")
                         update_values.append(value)
