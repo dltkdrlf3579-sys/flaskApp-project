@@ -116,6 +116,13 @@ class SectionConfigService:
     
     def _get_default_sections(self):
         """기본 섹션 반환 (폴백용)"""
+        if self.board_type == 'accident':
+            return [
+                {'section_key': 'basic_info', 'section_name': '기본정보', 'section_order': 1},
+                {'section_key': 'accident_info', 'section_name': '사고정보', 'section_order': 2},
+                {'section_key': 'location_info', 'section_name': '장소정보', 'section_order': 3},
+                {'section_key': 'additional', 'section_name': '추가정보', 'section_order': 4}
+            ]
         if self.board_type == 'safety_instruction':
             return [
                 {'section_key': 'basic_info', 'section_name': '기본정보', 'section_order': 1},
@@ -321,19 +328,46 @@ class SectionConfigService:
         cursor = conn.cursor()
         
         try:
-            # 섹션을 soft delete로 처리 (is_deleted = 1)
-            if self.table_name == 'section_config':
-                cursor.execute("""
-                    UPDATE section_config 
-                    SET is_deleted = 1
-                    WHERE id = ? AND board_type = ?
-                """, (section_id, self.board_type))
+            # soft delete가 불가능하면 hard delete로 폴백
+            def _has_col(table: str, col: str) -> bool:
+                try:
+                    if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                        cursor.execute(
+                            "SELECT 1 FROM information_schema.columns WHERE table_name = %s AND column_name = %s",
+                            (table.lower(), col.lower())
+                        )
+                        return cursor.fetchone() is not None
+                    else:
+                        cursor.execute(f"PRAGMA table_info({table})")
+                        return any(r[1].lower() == col.lower() for r in cursor.fetchall())
+                except Exception:
+                    return False
+
+            table = 'section_config' if self.table_name == 'section_config' else self.table_name
+            has_deleted = _has_col(table, 'is_deleted')
+
+            if table == 'section_config':
+                if has_deleted:
+                    cursor.execute("""
+                        UPDATE section_config 
+                        SET is_deleted = 1
+                        WHERE id = ? AND board_type = ?
+                    """, (section_id, self.board_type))
+                else:
+                    # 하드 삭제 폴백
+                    cursor.execute("""
+                        DELETE FROM section_config 
+                        WHERE id = ? AND board_type = ?
+                    """, (section_id, self.board_type))
             else:
-                cursor.execute(f"""
-                    UPDATE {self.table_name} 
-                    SET is_deleted = 1
-                    WHERE id = ?
-                """, (section_id,))
+                if has_deleted:
+                    cursor.execute(f"""
+                        UPDATE {table} 
+                        SET is_deleted = 1
+                        WHERE id = ?
+                    """, (section_id,))
+                else:
+                    cursor.execute(f"DELETE FROM {table} WHERE id = ?", (section_id,))
             
             conn.commit()
             return {'success': True}
