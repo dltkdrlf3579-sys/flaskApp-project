@@ -6,9 +6,10 @@ import json
 try:
     import psycopg
     from psycopg.rows import dict_row
-    from psycopg.types.json import Jsonb
+    from psycopg.types.json import Jsonb as _PgJsonb
     PSYCOPG_AVAILABLE = True
     PSYCOPG_VERSION = 3
+    JSON_ADAPTER = _PgJsonb
 except ImportError:
     try:
         import psycopg2
@@ -20,12 +21,12 @@ except ImportError:
             @staticmethod
             def __call__(cursor):
                 return psycopg2.extras.RealDictCursor
-        class Jsonb:
-            def __init__(self, obj):
-                self.obj = json.dumps(obj) if not isinstance(obj, str) else obj
+        # psycopg2는 Json 어댑터 사용
+        JSON_ADAPTER = psycopg2.extras.Json
     except ImportError:
         PSYCOPG_AVAILABLE = False
         PSYCOPG_VERSION = None
+        JSON_ADAPTER = None
 
 
 class SqliteRowCompat:
@@ -255,9 +256,13 @@ class CompatConnection:
     def _convert_single_param(self, param):
         """개별 파라미터 변환 (psycopg Json 어댑터 포함)"""
         if self.is_postgres and PSYCOPG_AVAILABLE:
-            # PostgreSQL: dict/list를 psycopg Jsonb 어댑터로 변환
+            # PostgreSQL: dict/list를 JSON 어댑터로 변환 (psycopg3: Jsonb, psycopg2: Json)
             if isinstance(param, (dict, list)):
-                return Jsonb(param)
+                try:
+                    return JSON_ADAPTER(param)
+                except Exception:
+                    # 안전 폴백: 문자열로 직렬화
+                    return json.dumps(param, ensure_ascii=False)
         elif isinstance(param, (dict, list)):
             # SQLite 또는 psycopg 없을 때: JSON 문자열로 변환
             return json.dumps(param, ensure_ascii=False)

@@ -2203,7 +2203,8 @@ let editingId = null;
                     alert('모든 변경사항이 저장되었습니다.');
                 }
                 
-                // 서버 상태 반영 (최종 새로고침)
+                // 서버 상태 반영 (최종 새로고침): 섹션과 컬럼 모두 재로드
+                await loadSections();
                 loadColumns();
                 
             } catch (error) {
@@ -2231,6 +2232,21 @@ let editingId = null;
             
             // 컬럼 다시 로드
             loadColumns();
+        }
+
+        // 서버에서 섹션 목록을 다시 로드하고 UI 갱신
+        async function loadSections() {
+            try {
+                const resp = await fetch('/api/accident-sections');
+                const data = await resp.json();
+                if (data && data.success && Array.isArray(data.sections)) {
+                    sections = data.sections;
+                    renderSections();
+                    renderColumns();
+                }
+            } catch (e) {
+                console.error('섹션 로드 실패:', e);
+            }
         }
         
         function updatePreview() {

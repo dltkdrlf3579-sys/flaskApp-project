@@ -1305,25 +1305,10 @@ def accident():
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     
-    # 섹션 정보 가져오기
-    try:
-        _wa = sql_is_active_true('is_active', conn)
-        _wd = sql_is_deleted_false('is_deleted', conn)
-        sections = conn.execute(f"""
-            SELECT * FROM accident_sections 
-            WHERE {_wa}
-              AND {_wd}
-            ORDER BY section_order
-        """).fetchall()
-        sections = [dict(row) for row in sections]
-    except:
-        _wa2 = sql_is_active_true('is_active', conn)
-        sections = conn.execute(f"""
-            SELECT * FROM section_config 
-            WHERE board_type = 'accident' AND {_wa2}
-            ORDER BY section_order
-        """).fetchall()
-        sections = [dict(row) for row in sections]
+    # 섹션 정보 가져오기 (단일 소스: section_config via SectionConfigService)
+    from section_service import SectionConfigService
+    section_service = SectionConfigService('accident', DB_PATH)
+    sections = section_service.get_sections() or []
     
     # 동적 컬럼 설정 가져오기
     _wa3 = sql_is_active_true('is_active', conn)
@@ -1411,6 +1396,26 @@ def accident():
     except Exception as _e:
         logging.error(f"accident_detail: normalize popup types failed: {_e}")
     
+    # 섹션 키 정규화: 잘못된/없음(tab) → 유효 섹션으로 귀속 (목록도 동일 기준)
+    try:
+        known_keys = {s.get('section_key') for s in sections if s.get('section_key')}
+        alias_map = {'violation_info': 'accident_info'}
+        fallback_key = (
+            ('additional' if 'additional' in known_keys else None)
+            or ('basic_info' if 'basic_info' in known_keys else None)
+            or (next(iter(known_keys)) if known_keys else None)
+        )
+        for col in dynamic_columns:
+            tab = col.get('tab')
+            if tab in alias_map and alias_map[tab] in known_keys:
+                col['tab'] = alias_map[tab]
+                tab = col['tab']
+            if not tab or tab not in known_keys:
+                if fallback_key:
+                    col['tab'] = fallback_key
+    except Exception as _e:
+        logging.warning(f"섹션 키 정규화(목록) 경고: {_e}")
+
     # 섹션별로 컬럼 그룹핑
     section_columns = {}
     for section in sections:
