@@ -69,7 +69,7 @@
                     <th>사고명</th>
                     <!-- 나머지는 dynamic_columns -->
                     {% for col in dynamic_columns %}
-                        {% if col.column_key == 'accident_number' %}
+                        {% if col.column_key in ['accident_number','created_at'] %}
                             {# duplicate of primary key column; skip #}
                         {% elif col.column_key == 'injured_person' %}
                             <th data-col="injured_person">{{ col.column_name }}</th>
@@ -117,7 +117,7 @@
                     
                     <!-- 나머지 dynamic columns -->
                     {% for col in dynamic_columns %}
-                        {% if col.column_key == 'accident_number' %}
+                        {% if col.column_key in ['accident_number','created_at'] %}
                             {# skip duplicate accident number cell #}
                         {% elif col.column_key == 'accident_name' %}
                             {# Printed as fixed column above; skip to avoid duplicate #}
