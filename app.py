@@ -3978,6 +3978,33 @@ def accident_detail(accident_id):
             code_options = get_dropdown_options_for_display('accident', col.get('column_key'))
             col['dropdown_options_mapped'] = code_options if code_options else []
     
+    # 섹션 키 정규화: 잘못된/없음(tab) → 유효 섹션으로 귀속
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('accident', DB_PATH)
+        sections = section_service.get_sections() or []
+        known_keys = {s.get('section_key') for s in sections if s.get('section_key')}
+        # 과거 키 호환
+        alias_map = {'violation_info': 'accident_info'}
+        # 기본 귀속 섹션 선택 우선순위: additional → basic_info → 첫 섹션
+        fallback_key = (
+            ('additional' if 'additional' in known_keys else None)
+            or ('basic_info' if 'basic_info' in known_keys else None)
+            or (next(iter(known_keys)) if known_keys else None)
+        )
+        for col in dynamic_columns:
+            tab = col.get('tab')
+            # alias 보정
+            if tab in alias_map and alias_map[tab] in known_keys:
+                col['tab'] = alias_map[tab]
+                tab = col['tab']
+            # 유효하지 않으면 fallback으로 귀속
+            if not tab or tab not in known_keys:
+                if fallback_key:
+                    col['tab'] = fallback_key
+    except Exception as _e:
+        logging.warning(f"섹션 키 정규화 중 경고: {_e}")
+
     # 섹션별로 컬럼 그룹핑 + 섹션 내 정렬(column_order, id)
     section_columns = {}
     for section in sections:
@@ -4319,7 +4346,27 @@ def accident_register():
     section_service = SectionConfigService('accident', DB_PATH)
     sections = section_service.get_sections()
     logging.info(f"섹션 {len(sections)}개 로드됨")
-    
+
+    # 섹션 키 정규화: 잘못된/없음(tab) → 유효 섹션으로 귀속
+    try:
+        known_keys = {s.get('section_key') for s in sections if s.get('section_key')}
+        alias_map = {'violation_info': 'accident_info'}
+        fallback_key = (
+            ('additional' if 'additional' in known_keys else None)
+            or ('basic_info' if 'basic_info' in known_keys else None)
+            or (next(iter(known_keys)) if known_keys else None)
+        )
+        for col in dynamic_columns:
+            tab = col.get('tab')
+            if tab in alias_map and alias_map[tab] in known_keys:
+                col['tab'] = alias_map[tab]
+                tab = col['tab']
+            if not tab or tab not in known_keys:
+                if fallback_key:
+                    col['tab'] = fallback_key
+    except Exception as _e:
+        logging.warning(f"섹션 키 정규화(등록화면) 경고: {_e}")
+
     # 섹션별로 컬럼 분류 (동적) + 섹션 내 정렬(column_order, id)
     section_columns = {}
     for section in sections:
