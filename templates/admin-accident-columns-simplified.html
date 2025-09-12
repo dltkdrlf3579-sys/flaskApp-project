@@ -1008,6 +1008,11 @@ let editingId = null;
         
         function renderSection(containerId, columns) {
             const container = document.getElementById(containerId);
+            if (!container) {
+                // 섹션 키가 변경되어 기존 컨테이너가 없을 수 있음 (저장 직후)
+                // 섹션 전체를 다시 그리도록 호출 측에서 renderSections()를 함께 호출해야 함
+                return;
+            }
             container.innerHTML = '';
             
             columns.forEach((column, index) => {
@@ -2086,6 +2091,10 @@ let editingId = null;
                 sectionChanges = {};
                 sectionsToDelete = [];
                 sectionsToAdd = [];
+
+                // 섹션 DOM 갱신 (키 변경/삭제 반영) 후, 보류 컬럼 기준 1차 렌더
+                try { renderSections(); } catch(e) { console.warn('섹션 렌더링 오류', e); }
+                try { renderColumns(); } catch(e) { /* 섹션 컨테이너 부재 등은 무시 */ }
                 
                 // 컬럼 변경사항 처리
                 for (const column of pendingColumns) {
@@ -2188,7 +2197,8 @@ let editingId = null;
                     alert('모든 변경사항이 저장되었습니다.');
                 }
                 
-                loadColumns(); // 새로고침
+                // 서버 상태 반영 (최종 새로고침)
+                loadColumns();
                 
             } catch (error) {
                 console.error('저장 중 오류:', error);
