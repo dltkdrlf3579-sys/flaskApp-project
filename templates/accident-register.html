@@ -550,6 +550,13 @@ function registerAccident() {
             }
         });
     }
+
+    // 서버 측에서 설명 배열을 사용할 수 있도록 attachment_data 전송
+    try {
+        formData.append('attachment_data', JSON.stringify(attachmentData));
+    } catch (e) {
+        console.warn('attachment_data 직렬화 실패:', e);
+    }
     
     // FormData 내용 확인
     console.log('=== FormData 전송 내용 ===');

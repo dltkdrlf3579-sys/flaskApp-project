@@ -1476,16 +1476,52 @@ def accident():
         accident = dict(row)
         accident['no'] = total_count - offset - idx
         
-        # custom_data 파싱
+        # 안전 병합: custom_data를 파싱하여 빈값 미덮어쓰기 + K사고 기본필드 보호
         if accident.get('custom_data'):
             try:
                 if isinstance(accident['custom_data'], dict):
                     custom_data = accident['custom_data']
                 else:
                     custom_data = json.loads(accident['custom_data'])
-                accident.update(custom_data)
+
+                def _is_empty(v):
+                    try:
+                        if v is None:
+                            return True
+                        if isinstance(v, str) and v.strip() == '':
+                            return True
+                        return False
+                    except Exception:
+                        return False
+
+                protected_keys_for_k = {
+                    'accident_number','accident_name','workplace','accident_grade','major_category',
+                    'injury_form','injury_type','building','floor','location_category','location_detail',
+                    'accident_date','created_at','report_date','day_of_week',
+                    'responsible_company1','responsible_company1_no','responsible_company2','responsible_company2_no'
+                }
+
+                acc_no = str(accident.get('accident_number') or '')
+                is_direct = acc_no.startswith('ACC')
+
+                safe_updates = {}
+                for k, v in custom_data.items():
+                    if _is_empty(v):
+                        continue
+                    if k in protected_keys_for_k:
+                        if not is_direct:
+                            # K사고: 기본 필드 보호
+                            continue
+                        # ACC: 상위가 비어 있을 때만 보완
+                        if _is_empty(accident.get(k)):
+                            safe_updates[k] = v
+                    else:
+                        safe_updates[k] = v
+
+                if safe_updates:
+                    accident.update(safe_updates)
             except Exception as e:
-                print(f"Error parsing custom_data: {e}")
+                print(f"Error parsing/merging custom_data: {e}")
         
         # K사고와 A사고 구분해서 등록일 필드 설정
         accident_number = accident.get('accident_number', '')
@@ -1496,13 +1532,21 @@ def accident():
             # ACC사고는 created_at을 등록일로 사용
             accident['display_created_at'] = accident.get('created_at', '-')
         
-        # accident_name이 없으면 custom_data에서 찾기
-        if not accident.get('accident_name') and accident.get('custom_data'):
+        # accident_name 최종 폴백
+        if not accident.get('accident_name'):
+            # custom_data에 값이 있으면 사용, 아니면 '-'
             try:
-                if isinstance(accident['custom_data'], dict):
-                    accident['accident_name'] = accident['custom_data'].get('accident_name', '-')
-            except:
-                pass
+                cd = accident.get('custom_data')
+                if isinstance(cd, dict):
+                    nm = cd.get('accident_name')
+                    if nm and str(nm).strip():
+                        accident['accident_name'] = nm
+                    else:
+                        accident['accident_name'] = '-'
+                else:
+                    accident['accident_name'] = '-'
+            except Exception:
+                accident['accident_name'] = '-'
         
         accidents.append(accident)
     
