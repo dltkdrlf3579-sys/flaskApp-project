@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}협력사 사고 컬럼 관리 - 관리자{% endblock %}
+{% block title %}Follow SOP 컬럼 관리 - 관리자{% endblock %}
 {% block content %}
 <style>
 .admin-container {
@@ -129,7 +129,7 @@
             background: #f8f9ff;
         }
         
-        .add-section-btn {
+.add-section-btn {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             padding: 15px 30px;
@@ -142,11 +142,7 @@
             max-width: 300px;
             font-weight: 600;
         }
-        
-        .add-section-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
-        }
+        .add-section-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }
         
         .section-title {
             cursor: pointer;
@@ -157,10 +153,9 @@
             font-weight: 600;
         }
         
-        .section-title:hover {
-            background-color: rgba(102, 126, 234, 0.1);
-            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
-        }
+            .section-title:hover {
+                background-color: #f3f4f6;
+            }
         
         .tab-section-header input {
             font-weight: 600;
@@ -193,12 +188,34 @@
             background: #ffe8e8 !important;
             border: 2px dashed #d32f2f;
         }
+        
+        /* Bootstrap Icons 강제 표시 */
+        .bi::before {
+            display: inline-block;
+            font-family: 'bootstrap-icons' !important;
+            font-style: normal;
+            font-weight: normal !important;
+            font-variant: normal;
+            text-transform: none;
+            line-height: 1;
+            vertical-align: -.125em;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        .bi-trash::before {
+            content: "\f5de" !important;
+        }
+        
+        .bi-pencil::before {
+            content: "\f4ca" !important;
+        }
     </style>
 
 <div class="admin-container">
     <div class="admin-header">
         <div class="container">
-            <h1><i class="bi bi-gear-fill"></i> 협력사 사고 컬럼 관리</h1>
+            <h1><i class="bi bi-gear-fill"></i> Follow SOP 컬럼 관리</h1>
         </div>
     </div>
     
@@ -221,18 +238,10 @@
                 font-size: 18px;
                 font-weight: 600;
             }
-            
-            .tab-section-header.basic-info {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            }
-            
-            .tab-section-header.violation-info {
-                background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-            }
-            
-            .tab-section-header.additional-info {
-                background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-            }
+
+            .tab-section-header.basic_info { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+            .tab-section-header.work_info { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+            .tab-section-header.additional { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
             
             .columns-grid {
                 display: grid;
@@ -257,20 +266,9 @@
             }
             
             /* span 클래스들 */
-            .column-card-small.span-2 {
-                grid-column: span 2;
-                background: linear-gradient(90deg, #f8f9fa 0%, #e9ecef 100%);
-            }
-            
-            .column-card-small.span-3 {
-                grid-column: span 3;
-                background: linear-gradient(90deg, #f8f9fa 0%, #dee2e6 100%);
-            }
-            
-            .column-card-small.span-4 {
-                grid-column: span 4;
-                background: linear-gradient(90deg, #f8f9fa 0%, #ced4da 100%);
-            }
+            .column-card-small.span-2 { grid-column: span 2; background: linear-gradient(90deg, #f8f9fa 0%, #e9ecef 100%); }
+            .column-card-small.span-3 { grid-column: span 3; background: linear-gradient(90deg, #f8f9fa 0%, #dee2e6 100%); }
+            .column-card-small.span-4 { grid-column: span 4; background: linear-gradient(90deg, #f8f9fa 0%, #ced4da 100%); }
             
             .column-card-small:hover {
                 border-color: #2f5fd3;
@@ -342,13 +340,14 @@
                     <!-- 섹션들이 JavaScript로 동적 생성됨 -->
                 </div>
                 
+                <!-- 새 컬럼 추가 버튼 -->
+                <div class="add-column-btn" onclick="showAddModal()">
+                    <i class="bi bi-plus-circle"></i> 새 컬럼 추가
+                </div>
+
                 <!-- 새 섹션 추가 버튼 -->
                 <div class="add-section-btn" onclick="showAddSectionModal()">
                     <i class="bi bi-plus-square"></i> 새 섹션 추가
-                </div>
-                
-                <div class="add-column-btn" onclick="showAddModal()">
-                    <i class="bi bi-plus-circle"></i> 새 컬럼 추가
                 </div>
                 
                 <div class="mt-3 d-flex justify-content-end gap-2">
@@ -406,7 +405,7 @@
                         
                         <div class="mb-3">
                             <label class="form-label">입력 타입 <span class="text-danger">*</span></label>
-                            <select class="form-select" id="columnType" onchange="toggleOptionsField(); toggleTableField(); toggleSpanField(); toggleListField(); toggleNumberField(); checkTypeChange();">
+                            <select class="form-select" id="columnType" onchange="toggleOptionsField(); toggleTableField(); toggleSpanField(); toggleListField(); toggleNumberField(); toggleScoringField(); checkTypeChange();">
                                 <option value="" disabled selected>타입을 선택하세요</option>
                                 <option value="text">텍스트</option>
                                 <option value="dropdown">드롭다운</option>
@@ -415,14 +414,16 @@
                                 <option value="number">숫자</option>
                                 <option value="table">테이블</option>
                                 <option value="list">리스트</option>
+                                <option value="scoring">채점</option>
+                                <option value="score_total">총점(자동)</option>
                             </select>
                             <div id="typeChangeWarning" class="alert alert-warning mt-2" style="display: none; font-size: 13px; padding: 8px 12px;">
                                 <i class="bi bi-exclamation-triangle"></i> 타입 변경 시 기존 데이터가 삭제될 수 있습니다.
                             </div>
                         </div>
                         
-                        <!-- 텍스트 타입일 때 span 설정 -->
-                        <div class="mb-3" id="spanField" style="display: none;">
+        <!-- 텍스트 타입일 때 span 설정 -->
+        <div class="mb-3" id="spanField" style="display: none;">
                             <label class="form-label">차지할 칸 수</label>
                             <div class="btn-group w-100" role="group">
                                 <input type="radio" class="btn-check" name="columnSpan" id="span1" value="1" checked>
@@ -446,22 +447,6 @@
                                 </label>
                             </div>
                             <small class="text-muted">텍스트 필드가 차지할 너비를 선택하세요</small>
-                        </div>
-
-                        <!-- 숫자 설정 영역 (정수/실수) -->
-                        <div class="mb-3" id="numberConfigField" style="display: none;">
-                            <label class="form-label">숫자 형식</label>
-                            <div class="d-flex gap-3 align-items-center">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="numberType" id="numberTypeInteger" value="integer" checked>
-                                    <label class="form-check-label" for="numberTypeInteger">정수</label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="numberType" id="numberTypeFloat" value="float">
-                                    <label class="form-check-label" for="numberTypeFloat">실수</label>
-                                </div>
-                            </div>
-                            <small class="text-muted">정수는 소수점을 허용하지 않습니다. 실수는 소수점 입력이 가능합니다.</small>
                         </div>
                         
                         <!-- 테이블 설정 영역 -->
@@ -562,8 +547,390 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">취소</button>
-                    <button type="button" class="btn btn-primary" onclick="try{saveColumnToQueue()}catch(e){alert('저장 함수 에러: ' + (e && e.message ? e.message : e));}">입력 완료</button>
+                    <button type="button" id="saveColumnBtn" class="btn btn-primary" onclick="try{saveColumnToQueue()}catch(e){alert('저장 함수 에러: ' + (e && e.message ? e.message : e));}">입력 완료</button>
                 </div>
+            </div>
+        </div>
+
+        <!-- 숫자 설정 영역 (정수/실수 + 채점 가중치) -->
+        <div class="mb-3" id="numberConfigField" style="display: none;">
+            <label class="form-label">숫자 형식</label>
+            <div class="d-flex gap-3 align-items-center mb-2">
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="numberType" id="numberTypeInteger" value="integer" checked>
+                    <label class="form-check-label" for="numberTypeInteger">정수</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="numberType" id="numberTypeFloat" value="float">
+                    <label class="form-check-label" for="numberTypeFloat">실수</label>
+                </div>
+            </div>
+            <div class="row g-2 align-items-end">
+                <div class="col-auto">
+                    <label class="form-label mb-1">단위당 점수</label>
+                    <input type="number" class="form-control" id="numberPerUnit" placeholder="예: -10">
+                </div>
+                <div class="col-auto">
+                    <label class="form-label mb-1">등급</label>
+                    <select class="form-select" id="numberGrade">
+                        <option value="">자동</option>
+                        <option value="critical">Critical</option>
+                        <option value="major">Major</option>
+                        <option value="minor">Minor</option>
+                        <option value="bonus">Bonus</option>
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <small class="text-muted">이 값들을 설정하면 이 숫자 컬럼이 총점 계산에 반영됩니다.</small>
+                </div>
+            </div>
+        </div>
+
+                <!-- 채점 설정 영역 -->
+        <div class="mb-3" id="scoringConfigField" style="display: none;">
+            <label class="form-label">채점 설정</label>
+            <div class="d-flex align-items-center gap-2">
+                <button type="button" class="btn btn-primary" onclick="toggleScoringInline()">
+                    <i class="bi bi-menu-down"></i> 설정 펼치기
+                </button>
+                <span id="scoringPreviewLabel" class="text-muted">설정되지 않음</span>
+            </div>
+            <textarea class="form-control" id="scoringConfig" rows="3" style="display:none;"></textarea>
+
+            <!-- 인라인 채점 설정 패널 (드롭다운처럼 펼침) -->
+            <div id="scoringInlinePanel" class="mt-2" style="display:none;">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="row g-3 mb-2">
+                            <div class="col-md-4">
+                                <label class="form-label">그룹 키 (total_key)</label>
+                                <input type="text" id="scoringTotalKey" class="form-control" placeholder="예: sop 또는 contractor" value="default">
+                                <small class="text-muted">같은 그룹 키끼리 합산되어 하나의 총점으로 계산됩니다.</small>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">기본 점수</label>
+                            <input type="number" id="scoringBaseScore" class="form-control" value="100" min="0" style="width: 150px;">
+                        </div>
+
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h6 class="mb-0">채점 항목</h6>
+                            <button type="button" class="btn btn-success btn-sm" onclick="addScoringItem()">
+                                <i class="bi bi-plus-circle"></i> 항목 추가
+                            </button>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 36px;"></th>
+                                        <th>라벨</th>
+                                        <th style="width: 140px;">단위당 점수</th>
+                                        <th style="width: 120px;">최대 건수</th>
+                                        <th style="width: 120px;">ID</th>
+                                        <th style="width: 60px;">삭제</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="scoringItemsList">
+                                    <!-- 동적으로 생성 -->
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="mt-3">
+                            <h6 class="mb-2">등급 기준</h6>
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <div class="card border-danger">
+                                        <div class="card-header bg-danger text-white">
+                                            <i class="bi bi-x-octagon"></i> 중대 (Critical)
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="row g-2">
+                                                <div class="col-6">
+                                                    <label class="form-label small">최소값</label>
+                                                    <input type="number" id="criticalMin" class="form-control" value="-999">
+                                                </div>
+                                                <div class="col-6">
+                                                    <label class="form-label small">최대값</label>
+                                                    <input type="number" id="criticalMax" class="form-control" value="-10">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card border-warning">
+                                        <div class="card-header bg-warning">
+                                            <i class="bi bi-exclamation-circle"></i> 주요 (Major)
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="row g-2">
+                                                <div class="col-6">
+                                                    <label class="form-label small">최소값</label>
+                                                    <input type="number" id="majorMin" class="form-control" value="-9">
+                                                </div>
+                                                <div class="col-6">
+                                                    <label class="form-label small">최대값</label>
+                                                    <input type="number" id="majorMax" class="form-control" value="-5">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card border-info">
+                                        <div class="card-header bg-info text-white">
+                                            <i class="bi bi-info-circle"></i> 경미 (Minor)
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="row g-2">
+                                                <div class="col-6">
+                                                    <label class="form-label small">최소값</label>
+                                                    <input type="number" id="minorMin" class="form-control" value="-4">
+                                                </div>
+                                                <div class="col-6">
+                                                    <label class="form-label small">최대값</label>
+                                                    <input type="number" id="minorMax" class="form-control" value="-1">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card border-success">
+                                        <div class="card-header bg-success text-white">
+                                            <i class="bi bi-star"></i> 가점 (Bonus)
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="row g-2">
+                                                <div class="col-6">
+                                                    <label class="form-label small">최소값</label>
+                                                    <input type="number" id="bonusMin" class="form-control" value="0.1" step="0.1">
+                                                </div>
+                                                <div class="col-6">
+                                                    <label class="form-label small">최대값</label>
+                                                    <input type="number" id="bonusMax" class="form-control" value="999">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mt-3">
+                            <h6>설정 미리보기</h6>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h6>채점 항목 요약</h6>
+                                    <div id="scoringItemsSummary" class="border rounded p-3 mb-3"></div>
+                                </div>
+                                <div class="col-md-6">
+                                    <h6>등급 기준 요약</h6>
+                                    <div id="gradeCriteriaSummary" class="border rounded p-3 mb-3"></div>
+                                    <div class="mt-2 text-muted">그룹 키: <code id="previewTotalKey">default</code></div>
+                                </div>
+                            </div>
+                            <h6>JSON 설정값</h6>
+                            <pre id="scoringJsonPreview" class="border rounded p-3 bg-light" style="max-height: 300px; overflow-y: auto;"></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
+    </div>
+</div>
+
+
+<!-- 채점 설정 모달 -->
+<div class="modal fade" id="scoringConfigModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl" style="margin-top: 50px; max-width: 1200px;">
+        <div class="modal-content">
+            <div class="modal-header bg-light">
+                <h5 class="modal-title">
+                    <i class="bi bi-clipboard-check"></i> 채점표 설정
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- 탭 메뉴 -->
+                <ul class="nav nav-tabs mb-3" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="scoring-items-tab" data-bs-toggle="tab" data-bs-target="#scoring-items" type="button">
+                            <i class="bi bi-list-check"></i> 채점 항목
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="grade-criteria-tab" data-bs-toggle="tab" data-bs-target="#grade-criteria" type="button">
+                            <i class="bi bi-award"></i> 등급 기준
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="scoring-preview-tab" data-bs-toggle="tab" data-bs-target="#scoring-preview" type="button">
+                            <i class="bi bi-eye"></i> 미리보기
+                        </button>
+                    </li>
+                </ul>
+
+                <!-- 탭 내용 -->
+                <div class="tab-content">
+                    <!-- 채점 항목 탭 -->
+                    <div class="tab-pane fade show active" id="scoring-items" role="tabpanel">
+                        <div class="alert alert-info mb-3">
+                            <i class="bi bi-info-circle"></i> 각 항목별로 단위당 점수를 설정합니다. 음수는 감점, 양수는 가점입니다.
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">기본 점수</label>
+                            <input type="number" id="scoringBaseScore" class="form-control" value="100" min="0" style="width: 150px;">
+                        </div>
+
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="mb-0">채점 항목</h6>
+                            <button type="button" class="btn btn-success btn-sm" onclick="addScoringItem()">
+                                <i class="bi bi-plus-circle"></i> 항목 추가
+                            </button>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="table table-bordered">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th width="40">순서</th>
+                                        <th>항목명</th>
+                                        <th width="150">단위당 점수</th>
+                                        <th width="120">최대 횟수</th>
+                                        <th width="120">최대 점수</th>
+                                        <th width="80">작업</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="scoringItemsList">
+                                    <!-- 동적으로 생성됨 -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- 등급 기준 탭 -->
+                    <div class="tab-pane fade" id="grade-criteria" role="tabpanel">
+                        <div class="alert alert-info mb-3">
+                            <i class="bi bi-info-circle"></i> 점수 범위에 따른 등급 분류 기준을 설정합니다.
+                        </div>
+
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <div class="card border-danger">
+                                    <div class="card-header bg-danger text-white">
+                                        <i class="bi bi-exclamation-triangle"></i> 중대 (Critical)
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row g-2">
+                                            <div class="col-6">
+                                                <label class="form-label small">최소값</label>
+                                                <input type="number" id="criticalMin" class="form-control" value="-999">
+                                            </div>
+                                            <div class="col-6">
+                                                <label class="form-label small">최대값</label>
+                                                <input type="number" id="criticalMax" class="form-control" value="-10">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card border-warning">
+                                    <div class="card-header bg-warning">
+                                        <i class="bi bi-exclamation-circle"></i> 주요 (Major)
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row g-2">
+                                            <div class="col-6">
+                                                <label class="form-label small">최소값</label>
+                                                <input type="number" id="majorMin" class="form-control" value="-9">
+                                            </div>
+                                            <div class="col-6">
+                                                <label class="form-label small">최대값</label>
+                                                <input type="number" id="majorMax" class="form-control" value="-5">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card border-info">
+                                    <div class="card-header bg-info text-white">
+                                        <i class="bi bi-info-circle"></i> 경미 (Minor)
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row g-2">
+                                            <div class="col-6">
+                                                <label class="form-label small">최소값</label>
+                                                <input type="number" id="minorMin" class="form-control" value="-4">
+                                            </div>
+                                            <div class="col-6">
+                                                <label class="form-label small">최대값</label>
+                                                <input type="number" id="minorMax" class="form-control" value="-1">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card border-success">
+                                    <div class="card-header bg-success text-white">
+                                        <i class="bi bi-star"></i> 가점 (Bonus)
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="row g-2">
+                                            <div class="col-6">
+                                                <label class="form-label small">최소값</label>
+                                                <input type="number" id="bonusMin" class="form-control" value="0.1" step="0.1">
+                                            </div>
+                                            <div class="col-6">
+                                                <label class="form-label small">최대값</label>
+                                                <input type="number" id="bonusMax" class="form-control" value="999">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 미리보기 탭 -->
+                    <div class="tab-pane fade" id="scoring-preview" role="tabpanel">
+                        <div class="alert alert-success mb-3">
+                            <i class="bi bi-check-circle"></i> 설정된 채점표 미리보기
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6>채점 항목 요약</h6>
+                                <div id="scoringItemsSummary" class="border rounded p-3 mb-3">
+                                    <!-- 동적으로 생성됨 -->
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <h6>등급 기준 요약</h6>
+                                <div id="gradeCriteriaSummary" class="border rounded p-3 mb-3">
+                                    <!-- 동적으로 생성됨 -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <h6>JSON 설정값</h6>
+                        <pre id="scoringJsonPreview" class="border rounded p-3 bg-light" style="max-height: 300px; overflow-y: auto;"></pre>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary" onclick="saveScoringConfig()">
+                    <i class="bi bi-check-lg"></i> 저장
+                </button>
             </div>
         </div>
     </div>
@@ -607,10 +974,30 @@
     </div>
 </div>
 
+<!-- Sortable.js CDN 먼저 로드 -->
+<script src="/static/js/Sortable.min.js"></script>
+<!-- Sortable 초기화 헬퍼 -->
+<script src="/static/js/sortable-init.js"></script>
+
 <script>
+// Sortable.js 로드 확인
+if (typeof Sortable !== 'undefined') {
+    console.log('✅ Sortable.js loaded successfully');
+} else {
+    console.error('❌ Sortable.js failed to load');
+}
+
+window.addEventListener('error', function(ev){
+    try { alert('스크립트 오류: ' + (ev && ev.message ? ev.message : ev)); } catch(e) {}
+});
+
+// no-op (inline onclick already wraps with try/catch)
+
 let columns = [];
 let pendingColumns = []; // 모든 변경사항을 담는 단순 배열
 let sections = {{ sections | tojson | safe }};  // 섹션 정보
+let sectionsToDelete = [];  // 삭제할 섹션 추적
+let sectionsToAdd = [];  // 새로 추가할 섹션 추적
 let originalSections = JSON.parse(JSON.stringify({{ sections | tojson | safe }}));  // 원본 섹션 정보 보관
 let sectionChanges = {};  // 섹션 변경사항 추적
 let editingId = null;
@@ -688,7 +1075,7 @@ let editingId = null;
                             ${section.section_name}
                         </span>
                         <small style="margin-left: 10px; color: #999;">(더블클릭으로 이름 변경)</small>
-                        ${section.section_key !== 'basic_info' && section.section_key !== 'violation_info' ? 
+                        ${section.section_key !== 'basic_info' && section.section_key !== 'work_info' ? 
                             `<button class="btn btn-sm btn-danger float-end" onclick="deleteSection(${section.id}, '${section.section_name}')">
                                 <i class="bi bi-trash"></i> 삭제
                             </button>` : ''}
@@ -701,22 +1088,18 @@ let editingId = null;
             });
         }
         
-        // 삭제할 섹션 ID 추적
-        let sectionsToDelete = [];
-        
-        // 새로 추가할 섹션 추적
-        let sectionsToAdd = [];
-        
+        // 섹션명 편집 활성화
         // 섹션 삭제
         function deleteSection(sectionId, sectionName) {
             // 기본 섹션은 삭제 불가
             const section = sections.find(s => s.id === sectionId);
             if (!section) return;
             
-            if (section.section_key === 'basic_info' || section.section_key === 'violation_info') {
-                alert('기본 섹션은 삭제할 수 없습니다.');
-                return;
-            }
+            // 기본 섹션 보호 제거 - 모든 섹션 삭제 가능
+            // if (section.section_key === 'basic_info' || section.section_key === 'work_info') {
+            //     // alert('기본 섹션은 삭제할 수 없습니다.');
+            //     return;
+            // }
             
             // 새로 추가했지만 아직 저장되지 않은 섹션인 경우
             if (section._isNew) {
@@ -768,7 +1151,6 @@ let editingId = null;
             alert('섹션이 삭제 예정입니다. "전체 변경사항 저장" 버튼을 눌러 적용하세요.');
         }
         
-        // 섹션명 편집 활성화
         function enableSectionEdit(sectionId, element) {
             // 이미 편집 중인 경우 무시
             if (element.tagName === 'INPUT') {
@@ -903,45 +1285,45 @@ let editingId = null;
                 return;
             }
             
-            // 임시 ID 생성 (음수로 설정하여 새 섹션임을 표시)
-            const tempId = -(sectionsToAdd.length + 1);
-            
-            // section_key 생성 (section_name을 snake_case로 변환)
-            const sectionKey = sectionName.toLowerCase()
-                .replace(/\s+/g, '_')
-                .replace(/[^a-z0-9_]/g, '');
-            
-            // 새 섹션 객체 생성
-            const newSection = {
-                id: tempId,
-                section_key: sectionKey,
-                section_name: sectionName,
-                section_order: sections.length + 1,
-                _isNew: true  // 새 섹션임을 표시
-            };
-            
-            // 추가할 섹션 목록에 추가
-            sectionsToAdd.push({
-                section_name: sectionName,
-                section_key: sectionKey
+            fetch('/api/follow-sop-sections', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ section_name: sectionName })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // 새 섹션 정보 추가
+                    sections.push({
+                        id: data.section_id,
+                        section_key: data.section_key,
+                        section_name: sectionName,
+                        section_order: sections.length + 1
+                    });
+                    
+                    // UI 다시 렌더링
+                    renderSections();
+                    loadColumns();
+                    
+                    // 모달 닫기
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('sectionModal'));
+                    modal.hide();
+                    
+                    alert('새 섹션이 추가되었습니다.');
+                } else {
+                    alert('섹션 추가 실패: ' + (data.error || '알 수 없는 오류'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('섹션 추가 중 오류가 발생했습니다.');
             });
-            
-            // 로컬 섹션 배열에 추가
-            sections.push(newSection);
-            
-            // UI 다시 렌더링
-            renderSections();
-            loadColumns();
-            
-            // 모달 닫기
-            const modal = bootstrap.Modal.getInstance(document.getElementById('sectionModal'));
-            modal.hide();
-            
-            alert('새 섹션이 추가 예정입니다. "전체 변경사항 저장" 버튼을 눌러 적용하세요.');
         }
         
         function loadColumns() {
-            fetch('/api/accident-columns')
+            fetch('/api/follow-sop-columns')
                 .then(response => response.json())
                 .then(data => {
                     // 모든 컬럼을 표시 (비활성 포함)
@@ -959,10 +1341,16 @@ let editingId = null;
                             _toDelete: false
                         };
                         
-                        // 메타데이터에서 테이블 정보 복원
-                        if (col.table_group) column._tableGroup = col.table_group;
-                        if (col.table_type) column._tableType = col.table_type;
-                        if (col.table_name) column._tableName = col.table_name;
+                        // 메타데이터에서 테이블 정보 복원 (실제 테이블/팝업/링크드 타입에만 적용)
+                        (function(){
+                            const ctype = (col.column_type || '').toString();
+                            const isTableish = (ctype === 'table' || ctype.startsWith('popup_') || ctype.startsWith('linked_'));
+                            if (isTableish) {
+                                if (col.table_group) column._tableGroup = col.table_group;
+                                if (col.table_type) column._tableType = col.table_type;
+                                if (col.table_name) column._tableName = col.table_name;
+                            }
+                        })();
                         
                         // column_span이 없으면 기본값 1 설정
                         if (!column.column_span && column.column_type === 'text') {
@@ -1008,11 +1396,6 @@ let editingId = null;
         
         function renderSection(containerId, columns) {
             const container = document.getElementById(containerId);
-            if (!container) {
-                // 섹션 키가 변경되어 기존 컨테이너가 없을 수 있음 (저장 직후)
-                // 섹션 전체를 다시 그리도록 호출 측에서 renderSections()를 함께 호출해야 함
-                return;
-            }
             container.innerHTML = '';
             
             columns.forEach((column, index) => {
@@ -1049,11 +1432,11 @@ let editingId = null;
                         <div class="column-key">${column.column_key}</div>
                         <div class="column-controls">
                             <span class="column-type-badge">${getTypeLabel(column.column_type)}</span>
-                            <div style="display: flex; gap: 5px;">
-                                <button class="btn btn-sm btn-link p-0" onclick="editColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''}>
+                            <div style="display: flex; gap: 5px; align-items: center;">
+                                <button class="btn btn-sm btn-link p-0" onclick="editColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''} title="편집">
                                     <i class="bi bi-pencil" style="font-size: 14px;"></i>
                                 </button>
-                                <button class="btn btn-sm btn-link p-0 text-danger" onclick="deleteColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''}>
+                                <button class="btn btn-sm btn-link p-0 text-danger" onclick="deleteColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''} title="삭제">
                                     <i class="bi bi-trash" style="font-size: 14px;"></i>
                                 </button>
                                 <div class="form-check form-switch" style="margin: 0;">
@@ -1096,6 +1479,7 @@ let editingId = null;
             
             // Sortable 초기화 (섹션 간 이동 및 섹션 내 순서 변경 가능)
             if (window.Sortable) {
+                console.log(`Initializing Sortable for ${containerId}`);
                 sortableInstances[containerId] = new Sortable(container, {
                     group: 'shared', // 모든 섹션이 같은 그룹
                     animation: 150,
@@ -1170,6 +1554,8 @@ let editingId = null;
                 'popup_contractor': '협력사 근로자',
                 'popup_department': '부서',
                 'popup_building': '건물',
+                'scoring': '채점',
+                'score_total': '총점(자동)',
                 'linked_dept': '연결-부서',
                 'linked_text': '연결-텍스트'
             };
@@ -1208,6 +1594,7 @@ let editingId = null;
             document.getElementById('span1').checked = true;
             toggleOptionsField();
             toggleTableField();
+            toggleScoringField();
             toggleSpanField();
             toggleListField();
             toggleNumberField();
@@ -1233,16 +1620,34 @@ let editingId = null;
             document.getElementById('columnKey').value = column.column_key;
             document.getElementById('columnKey').disabled = !column._isNew;
             
-            // 테이블 타입 관련 처리
             const typeSelectEl = document.getElementById('columnType');
             const isPopup = column.column_type && column.column_type.startsWith('popup_');
             const isLinked = column.column_type && column.column_type.startsWith('linked_');
-            const looksTable = isPopup || isLinked || column.input_type === 'table' || column._tableType || column.table_type;
-            if (column._tableGroup || looksTable) {
-                // 테이블 그룹으로 판단되면 강제로 'table'로 고정
+            // 실제 타입/입력타입 기준으로만 테이블 판단 (메타 플래그는 무시)
+            let looksTable = (column.column_type === 'table') || isPopup || isLinked || (column.input_type === 'table');
+            // 보강: 형식이 깨진 경우 키 기반으로 그룹 추론
+            if (!looksTable) {
+                const suffixes = ['_id','_dept','_bizno','_code','_company'];
+                let baseKey = column.column_key || '';
+                suffixes.forEach(s => { if (baseKey.endsWith(s)) baseKey = baseKey.slice(0, -s.length); });
+                const sibling = (pendingColumns || []).find(c => String(c.id) !== String(column.id) && (
+                    c.column_key === baseKey || suffixes.some(s => c.column_key === baseKey + s)
+                ));
+                if (sibling && ( (sibling.column_type||'').startsWith('popup_') || (sibling.column_type||'').startsWith('linked_') || sibling._tableType || sibling.input_type === 'table' || sibling._tableGroup )) {
+                    looksTable = true;
+                }
+            }
+            // 타입 우선순위: dropdown은 테이블로 강제하지 않음
+            if (column.column_type === 'dropdown') {
+                typeSelectEl.value = 'dropdown';
+                typeSelectEl.disabled = false;
+                document.getElementById('tableConfigField').style.display = 'none';
+                document.getElementById('tableColumnsPreview').style.display = 'none';
+            } else if (looksTable) {
+                // 테이블/팝업/링크드 계열 처리
                 typeSelectEl.value = 'table';
-                // 테이블 그룹은 타입 변경 불가
-                typeSelectEl.disabled = true;
+                // 팝업/링크드는 타입 변경 불가, 순수 table은 변경 허용
+                typeSelectEl.disabled = (isPopup || isLinked);
                 
                 // popup 타입들은 타입 변경 불가
                 if (column.column_type === 'popup_person' || 
@@ -1265,7 +1670,7 @@ let editingId = null;
                     document.getElementById('tableConfigField').style.display = 'block';
                     
                     // 미리보기 업데이트
-                    const config = tableColumnMappings[column._tableType];
+                    const config = tableColumnMappings[column._tableType] || tableColumnMappings[selectedTableType || ''] || null;
                     if (config) {
                         let previewHtml = `<small class="text-muted">연결된 테이블: </small>`;
                         previewHtml += `<span class="badge bg-info">${config.name}</span>`;
@@ -1312,11 +1717,13 @@ let editingId = null;
                     document.getElementById('tableConfigField').style.display = 'block';
                 }
             } else {
-                const resolvedType = (column.column_type === 'table' || column.input_type === 'table' || column._tableType || column.table_type) ? 'table' : column.column_type;
+                // 일반 컬럼 또는 테이블 컬럼 처리
+                const resolvedType = (column.column_type === 'table' || column.input_type === 'table') ? 'table' : column.column_type;
                 typeSelectEl.value = resolvedType || '';
                 // 일반 컬럼은 타입 변경 가능
                 typeSelectEl.disabled = false;
                 if (resolvedType === 'table') {
+                    // 테이블 타입이면 테이블 설정 영역 보이기
                     document.getElementById('tableConfigField').style.display = 'block';
                 }
             }
@@ -1328,8 +1735,6 @@ let editingId = null;
             const sectionSelect = document.getElementById('columnSection');
             populateSectionSelect(sectionSelect);
             let desiredTab = column.tab || 'basic_info';
-            // 호환: 예전 키 보정 (accident는 violation_info가 아님)
-            if (desiredTab === 'violation_info') desiredTab = 'accident_info';
             sectionSelect.value = desiredTab;
             if (!Array.from(sectionSelect.options).some(o => o.value === sectionSelect.value)) {
                 sectionSelect.value = (sections && sections.length > 0) ? sections[0].section_key : 'basic_info';
@@ -1378,11 +1783,36 @@ let editingId = null;
                 document.getElementById('dropdownOptions').value = '';
                 document.getElementById('optionPreview').style.display = 'none';
             }
+
+            // 채점 설정 복원
+            (function(){
+                const scArea = document.getElementById('scoringConfig');
+                if (!scArea) return;
+                if (column.column_type === 'scoring' || column.column_type === 'score_total' || column.column_type === 'number') {
+                    let sc = column.scoring_config || '';
+                    if (sc && typeof sc !== 'string') {
+                        try { sc = JSON.stringify(sc, null, 2); } catch (e) {}
+                    }
+                    scArea.value = sc || '';
+                    if (column.column_type === 'number') {
+                        try {
+                            const obj = sc ? JSON.parse(sc) : {};
+                            const perEl = document.getElementById('numberPerUnit');
+                            const gradeEl = document.getElementById('numberGrade');
+                            if (perEl) perEl.value = (obj && (obj.per_unit_delta ?? ''));
+                            if (gradeEl) gradeEl.value = (obj && (obj.grade ?? ''));
+                        } catch(e) {
+                            const perEl = document.getElementById('numberPerUnit');
+                            const gradeEl = document.getElementById('numberGrade');
+                            if (perEl) perEl.value = '';
+                            if (gradeEl) gradeEl.value = '';
+                        }
+                    }
+                } else {
+                    scArea.value = '';
+                }
+            })();
             
-            // 드롭다운 옵션 프리뷰 및 서브타입 복원
-            toggleOptionsField();
-            toggleSpanField();
-            toggleListField();
             // 리스트/숫자 서브타입 복원
             if (column.column_type === 'list') {
                 const listSel = document.getElementById('listItemType');
@@ -1397,12 +1827,17 @@ let editingId = null;
                     floatRadio.checked = !isInt;
                 }
             }
+
+            toggleOptionsField();
+            toggleSpanField();
             
             // linked 타입이 아닌 경우에만 toggleTableField 호출
             if (column.column_type !== 'linked_text' && column.column_type !== 'linked_dept') {
                 toggleTableField();
             }
+            toggleListField();
             toggleNumberField();
+            toggleScoringField();
             
             const modalElement = document.getElementById('columnModal');
             let modalInstance = bootstrap.Modal.getInstance(modalElement);
@@ -1459,8 +1894,279 @@ let editingId = null;
 
         function toggleNumberField() {
             const type = document.getElementById('columnType').value;
-            const el = document.getElementById('numberConfigField');
-            if (el) el.style.display = (type === 'number' ? 'block' : 'none');
+            document.getElementById('numberConfigField').style.display = 
+                type === 'number' ? 'block' : 'none';
+        }
+
+        function toggleScoringField() {
+            const type = document.getElementById('columnType').value;
+            const el = document.getElementById('scoringConfigField');
+            if (el) {
+                const btn = el.querySelector('button');
+                const label = document.getElementById('scoringPreviewLabel');
+                if (type === 'scoring' || type === 'score_total') {
+                    el.style.display = 'block';
+                    if (btn) btn.style.display = '';
+                    if (label) label.textContent = '설정되지 않음';
+                    // 타입 전환 시 인라인 패널 초기화
+                    try { toggleScoringInline(true); } catch(e) {}
+                    updateScoringPreview();
+                } else if (type === 'number') {
+                    el.style.display = 'block';
+                    if (btn) btn.style.display = 'none';
+                    if (label) label.textContent = '숫자 컬럼: 단위당 점수/등급 설정 사용';
+                    const p = document.getElementById('scoringInlinePanel');
+                    if (p) p.style.display = 'none';
+                } else {
+                    el.style.display = 'none';
+                    const p = document.getElementById('scoringInlinePanel');
+                    if (p) p.style.display = 'none';
+                }
+            }
+        }
+
+        // 인라인 채점 편집 패널 토글 & 초기화
+        function toggleScoringInline(forceInit = false) {
+            const panel = document.getElementById('scoringInlinePanel');
+            if (!panel) return;
+
+            if (!forceInit) {
+                panel.style.display = (panel.style.display === 'none' || panel.style.display === '') ? 'block' : 'none';
+            } else {
+                panel.style.display = 'block';
+            }
+
+            // 현재 설정 로드 후 렌더링
+            const ta = document.getElementById('scoringConfig');
+            let config = {};
+            try { config = JSON.parse(ta.value || '{}'); } catch(e) { config = {}; }
+
+            document.getElementById('scoringBaseScore').value = config.base_score || 100;
+            const tk = document.getElementById('scoringTotalKey');
+            if (tk) tk.value = config.total_key || 'default';
+            scoringItems = Array.isArray(config.items) ? config.items : [];
+            renderScoringItems();
+
+            if (config.grade_criteria) {
+                document.getElementById('criticalMin').value = config.grade_criteria.critical?.min || -999;
+                document.getElementById('criticalMax').value = config.grade_criteria.critical?.max || -10;
+                document.getElementById('majorMin').value = config.grade_criteria.major?.min || -9;
+                document.getElementById('majorMax').value = config.grade_criteria.major?.max || -5;
+                document.getElementById('minorMin').value = config.grade_criteria.minor?.min || -4;
+                document.getElementById('minorMax').value = config.grade_criteria.minor?.max || -1;
+                document.getElementById('bonusMin').value = config.grade_criteria.bonus?.min || 0.1;
+                document.getElementById('bonusMax').value = config.grade_criteria.bonus?.max || 999;
+            }
+            updateScoringPreview();
+        }
+
+        // 새로운 채점 모달 관련 함수들
+        let scoringItems = [];
+        let scoringItemCounter = 0;
+
+        function openScoringModal() {
+            const ta = document.getElementById('scoringConfig');
+            let config = {};
+            try {
+                config = JSON.parse(ta.value || '{}');
+            } catch(e) {
+                config = {};
+            }
+
+            // 기본 점수 설정
+            document.getElementById('scoringBaseScore').value = config.base_score || 100;
+
+            // 채점 항목 로드
+            scoringItems = config.items || [];
+            renderScoringItems();
+
+            // 등급 기준 로드
+            if (config.grade_criteria) {
+                document.getElementById('criticalMin').value = config.grade_criteria.critical?.min || -999;
+                document.getElementById('criticalMax').value = config.grade_criteria.critical?.max || -10;
+                document.getElementById('majorMin').value = config.grade_criteria.major?.min || -9;
+                document.getElementById('majorMax').value = config.grade_criteria.major?.max || -5;
+                document.getElementById('minorMin').value = config.grade_criteria.minor?.min || -4;
+                document.getElementById('minorMax').value = config.grade_criteria.minor?.max || -1;
+                document.getElementById('bonusMin').value = config.grade_criteria.bonus?.min || 0.1;
+                document.getElementById('bonusMax').value = config.grade_criteria.bonus?.max || 999;
+            }
+
+            // 미리보기 업데이트
+            updateScoringPreview();
+
+            // 모달 열기
+            const modal = new bootstrap.Modal(document.getElementById('scoringConfigModal'));
+            modal.show();
+        }
+
+        function addScoringItem(item = null) {
+            const newItem = item || {
+                id: `item_${++scoringItemCounter}`,
+                label: '',
+                per_unit_delta: -5,
+                max_count: 10
+            };
+            scoringItems.push(newItem);
+            renderScoringItems();
+        }
+
+        function renderScoringItems() {
+            const container = document.getElementById('scoringItemsList');
+            container.innerHTML = '';
+
+            scoringItems.forEach((item, index) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="text-center">${index + 1}</td>
+                    <td>
+                        <input type="text" class="form-control" value="${item.label || ''}" 
+                               onchange="updateScoringItem(${index}, 'label', this.value)">
+                    </td>
+                    <td>
+                        <input type="number" class="form-control" value="${item.per_unit_delta || 0}" 
+                               step="0.1" onchange="updateScoringItem(${index}, 'per_unit_delta', parseFloat(this.value))">
+                    </td>
+                    <td>
+                        <input type="number" class="form-control" value="${item.max_count || 1}" 
+                               min="1" onchange="updateScoringItem(${index}, 'max_count', parseInt(this.value))">
+                    </td>
+                    <td class="text-center">
+                        ${(item.per_unit_delta || 0) * (item.max_count || 1)}
+                    </td>
+                    <td class="text-center">
+                        <button type="button" class="btn btn-sm btn-danger" onclick="removeScoringItem(${index})">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                `;
+                container.appendChild(row);
+            });
+
+            if (scoringItems.length === 0) {
+                container.innerHTML = '<tr><td colspan="6" class="text-center text-muted">채점 항목을 추가해주세요</td></tr>';
+            }
+        }
+
+        function updateScoringItem(index, field, value) {
+            if (scoringItems[index]) {
+                scoringItems[index][field] = value;
+                renderScoringItems();
+                updateScoringPreview();
+            }
+        }
+
+        function removeScoringItem(index) {
+            scoringItems.splice(index, 1);
+            renderScoringItems();
+            updateScoringPreview();
+        }
+
+        function updateScoringPreview() {
+            const config = buildScoringConfig();
+            
+            // 항목 요약
+            const itemsSummary = document.getElementById('scoringItemsSummary');
+            if (itemsSummary) {
+                let html = `<div class="mb-2">기본 점수: <strong>${config.base_score}점</strong></div>`;
+                if (config.items.length > 0) {
+                    html += '<ul class="mb-0">';
+                    config.items.forEach(item => {
+                        const total = item.per_unit_delta * item.max_count;
+                        const type = item.per_unit_delta < 0 ? 'danger' : 'success';
+                        html += `<li>${item.label}: <span class="text-${type}">${item.per_unit_delta}점</span> × ${item.max_count}회 = <strong>${total}점</strong></li>`;
+                    });
+                    html += '</ul>';
+                } else {
+                    html += '<p class="text-muted mb-0">채점 항목이 없습니다</p>';
+                }
+                itemsSummary.innerHTML = html;
+            }
+
+            // 등급 기준 요약
+            const criteriaSummary = document.getElementById('gradeCriteriaSummary');
+            if (criteriaSummary && config.grade_criteria) {
+                const gc = config.grade_criteria;
+                criteriaSummary.innerHTML = `
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <span class="badge bg-danger">중대</span> ${gc.critical.min} ~ ${gc.critical.max}점
+                        </div>
+                        <div class="col-6">
+                            <span class="badge bg-warning">주요</span> ${gc.major.min} ~ ${gc.major.max}점
+                        </div>
+                        <div class="col-6">
+                            <span class="badge bg-info">경미</span> ${gc.minor.min} ~ ${gc.minor.max}점
+                        </div>
+                        <div class="col-6">
+                            <span class="badge bg-success">가점</span> ${gc.bonus.min} ~ ${gc.bonus.max}점
+                        </div>
+                    </div>
+                `;
+            }
+
+            // 그룹 키 미리보기
+            const pk = document.getElementById('previewTotalKey');
+            if (pk) pk.textContent = (config.total_key || 'default');
+
+            // JSON 미리보기
+            const jsonPreview = document.getElementById('scoringJsonPreview');
+            if (jsonPreview) {
+                jsonPreview.textContent = JSON.stringify(config, null, 2);
+            }
+
+            // 메인 화면 레이블 업데이트
+            const label = document.getElementById('scoringPreviewLabel');
+            if (label) {
+                if (config.items.length > 0) {
+                    label.innerHTML = `<span class="text-success">✓ ${config.items.length}개 항목 설정됨</span>`;
+                } else {
+                    label.innerHTML = '<span class="text-muted">설정되지 않음</span>';
+                }
+            }
+        }
+
+        function buildScoringConfig() {
+            const type = document.getElementById('columnType').value;
+            const baseScore = parseInt(document.getElementById('scoringBaseScore')?.value || '100');
+            const totalKey = (document.getElementById('scoringTotalKey')?.value || 'default').trim() || 'default';
+            
+            const config = {
+                type: type === 'score_total' ? 'score_total' : 'scoring',
+                total_key: totalKey,
+                base_score: baseScore,
+                items: scoringItems.filter(item => item.label),
+                grade_criteria: {
+                    critical: {
+                        min: parseFloat(document.getElementById('criticalMin')?.value || '-999'),
+                        max: parseFloat(document.getElementById('criticalMax')?.value || '-10')
+                    },
+                    major: {
+                        min: parseFloat(document.getElementById('majorMin')?.value || '-9'),
+                        max: parseFloat(document.getElementById('majorMax')?.value || '-5')
+                    },
+                    minor: {
+                        min: parseFloat(document.getElementById('minorMin')?.value || '-4'),
+                        max: parseFloat(document.getElementById('minorMax')?.value || '-1')
+                    },
+                    bonus: {
+                        min: parseFloat(document.getElementById('bonusMin')?.value || '0.1'),
+                        max: parseFloat(document.getElementById('bonusMax')?.value || '999')
+                    }
+                }
+            };
+            
+            return config;
+        }
+
+        function saveScoringConfig() {
+            const config = buildScoringConfig();
+            document.getElementById('scoringConfig').value = JSON.stringify(config, null, 2);
+            updateScoringPreview();
+            
+            // 모달 닫기
+            const modal = bootstrap.Modal.getInstance(document.getElementById('scoringConfigModal'));
+            modal.hide();
         }
         
         function updateMappingFields() {
@@ -1632,6 +2338,7 @@ let editingId = null;
             if (editingId) {
                 const existingColumn = pendingColumns.find(c => String(c.id) === String(editingId));
                 if (existingColumn && existingColumn.column_type && existingColumn.column_type.startsWith('linked_')) {
+                    // suffix 매칭으로 tableType 추론
                     let detected = null;
                     for (const [tKey, cfg] of Object.entries(tableColumnMappings)) {
                         for (let i = 1; i < cfg.columns.length; i++) {
@@ -1648,12 +2355,13 @@ let editingId = null;
                         const baseExists = pendingColumns.some(c => !c._toDelete && c.column_key === baseKey);
                         if (!baseExists) {
                             const baseOrder = Math.max(0, (pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete).map(c => c.column_order).reduce((a,b)=>Math.max(a,b), -1)) + 1);
+                            // 이름에서 마지막 토큰 제거하여 기본명 추정
                             let baseName = columnName;
                             const lastToken = detected.config.columns.find(c=>c.key_suffix===detected.suffix)?.name.split(' ').slice(-1)[0] || '';
                             if (lastToken && baseName.endsWith(' ' + lastToken)) {
                                 baseName = baseName.slice(0, -(' ' + lastToken).length);
                             }
-                            const baseType = detected.config.columns[0].type;
+                            const baseType = detected.config.columns[0].type; // popup_* 등
                             const newId = Date.now() + Math.floor(Math.random()*1000);
                             const newBase = {
                                 id: newId,
@@ -1692,8 +2400,10 @@ let editingId = null;
                     // 테이블 컬럼 타입 보존/복원 로직
                     const suffixes = ['_id','_dept','_bizno','_code','_company'];
                     const isLinkedField = suffixes.some(s => (columnKey || '').endsWith(s));
-                    const baseKeyHints = { 'incharged_person': 'person', 'incharge': 'department', 'company_1cha': 'company', 'company_2cha': 'company' };
+                    // 힌트 매핑 (기지 키 → 테이블 타입)
+                    const baseKeyHints = { 'incharged_person': 'person', 'incharge': 'department', 'company_1cha': 'company', 'company_1st': 'company' };
                     const keyHint = baseKeyHints[existingColumn.column_key] || baseKeyHints[columnKey] || null;
+                    // 형제 컬럼으로 테이블 타입 추론
                     let siblingType = null;
                     const baseKey = (function(k){ let b=k||''; suffixes.forEach(s=>{ if(b.endsWith(s)) b=b.slice(0,-s.length);}); return b; })(columnKey || existingColumn.column_key || '');
                     const siblings = (pendingColumns||[]).filter(c => String(c.id)!==String(existingColumn.id));
@@ -1701,6 +2411,7 @@ let editingId = null;
                     else if (siblings.some(c => c.column_key === baseKey + '_code')) siblingType = 'department';
                     else if (siblings.some(c => c.column_key === baseKey + '_dept')) siblingType = 'person';
                     else if (siblings.some(c => c.column_key === baseKey + '_company')) siblingType = 'contractor';
+                    // 최종 테이블 타입 추정
                     const looksLikeTable = (
                         (existingColumn.column_type && (existingColumn.column_type.startsWith('popup_') || existingColumn.column_type.startsWith('linked_')))
                         || existingColumn.input_type === 'table'
@@ -1708,12 +2419,13 @@ let editingId = null;
                         || !!existingColumn.table_type
                     );
                     const tableTypeGuess = existingColumn._tableType || keyHint || siblingType || (looksLikeTable ? (existingColumn._tableType || null) : null);
+                    // 최종 타입 결정
                     let newType = existingColumn._tableGroup ? existingColumn.column_type : columnType;
                     if (!isLinkedField && (!newType || newType === 'text') && tableTypeGuess) {
                         const popupMap = { person:'popup_person', department:'popup_department', company:'popup_company', building:'popup_building', contractor:'popup_contractor' };
                         newType = popupMap[tableTypeGuess] || newType || 'text';
                     }
-                    // 입력 서브타입 결정
+                    // 입력 서브타입 계산 (table/list/number)
                     let resolvedInputType = null;
                     if (newType === 'table') {
                         resolvedInputType = 'table';
@@ -1727,6 +2439,26 @@ let editingId = null;
                         resolvedInputType = (nt === 'integer') ? 'number_integer' : 'number_float';
                     }
 
+            // 숫자형 수정 시 간단 가중치/등급을 scoring_config로 반영
+            if (columnType === 'number') {
+                        const per = parseFloat(document.getElementById('numberPerUnit').value || '0');
+                        const grade = document.getElementById('numberGrade').value || '';
+                        const conf = { per_unit_delta: per };
+                        if (grade) conf.grade = grade;
+                        const ta = document.getElementById('scoringConfig');
+                        if (ta) ta.value = JSON.stringify(conf);
+                    }
+            // 채점/총점 타입은 인라인 편집 상태를 즉시 반영하여 저장 (별도 저장 버튼 누르지 않아도 됨)
+            let scText;
+            if (columnType === 'scoring' || columnType === 'score_total') {
+                try {
+                    scText = JSON.stringify(buildScoringConfig());
+                } catch (e) {
+                    scText = (document.getElementById('scoringConfig') || {}).value || existingColumn.scoring_config || null;
+                }
+            } else {
+                scText = (document.getElementById('scoringConfig') || {}).value || existingColumn.scoring_config || null;
+            }
                     pendingColumns[index] = {
                         ...existingColumn,
                         column_name: columnName,
@@ -1736,11 +2468,12 @@ let editingId = null;
                         tab: selectedSection, // 섹션 정보 추가
                         is_active: isActive,
                         dropdown_options: dropdownOptions,
+                        scoring_config: scText,
                         input_type: resolvedInputType,
                         _modified: !existingColumn._isNew, // 새 컬럼이 아니면 수정됨 표시
-                        // 테이블 관련 정보 유지
-                        _tableGroup: existingColumn._tableGroup,
-                        _tableType: existingColumn._tableType,
+                        // 테이블 관련 정보 유지/보강
+                        _tableGroup: existingColumn._tableGroup || baseKey,
+                        _tableType: existingColumn._tableType || tableTypeGuess || null,
                         _tableName: existingColumn._tableName
                     };
                     try { renderColumns(); } catch(e) {}
@@ -1774,7 +2507,7 @@ let editingId = null;
                     console.log(`리스트 컬럼 생성:`, newColumn);
                     
                     alert(`✅ 리스트 컬럼이 생성되었습니다:\n\n${columnName}\n\n"전체 변경사항 저장" 버튼을 눌러야 최종 반영됩니다.`);
-                
+                    
                 } else if (columnType === 'table') {
                     // 테이블 타입: 선택된 테이블 설정 확인
                     const selectedTable = document.getElementById('selectedTableConfig').value;
@@ -1826,6 +2559,22 @@ let editingId = null;
                 } else {
                     // 일반 타입
                     const newId = Date.now();
+                    // 숫자형이면 간단 가중치/등급을 scoring_config로 반영
+                    if (columnType === 'number') {
+                        const per = parseFloat(document.getElementById('numberPerUnit').value || '0');
+                        const grade = document.getElementById('numberGrade').value || '';
+                        const conf = { per_unit_delta: per };
+                        if (grade) conf.grade = grade;
+                        const ta = document.getElementById('scoringConfig');
+                        if (ta) ta.value = JSON.stringify(conf);
+                    }
+                    let scText;
+                    if (columnType === 'scoring' || columnType === 'score_total') {
+                        try { scText = JSON.stringify(buildScoringConfig()); }
+                        catch(e){ scText = (document.getElementById('scoringConfig') || {}).value || null; }
+                    } else {
+                        scText = (document.getElementById('scoringConfig') || {}).value || null;
+                    }
                     
                     // 선택된 섹션의 마지막 순서 계산
                     const sectionColumns = pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete);
@@ -1840,9 +2589,11 @@ let editingId = null;
                         tab: selectedSection, // 섹션 정보 추가
                         is_active: isActive,
                         dropdown_options: dropdownOptions,
+                        scoring_config: scText,
                         column_order: maxOrderInSection + 1, // 섹션 내 순서로 설정
                         _isNew: true
                     };
+                    // 숫자 서브타입 저장
                     if (columnType === 'number') {
                         const nsel = document.querySelector('input[name="numberType"]:checked');
                         const nt = nsel ? nsel.value : 'float';
@@ -1973,10 +2724,8 @@ let editingId = null;
             // 변경사항이 있는지 확인
             const hasColumnChanges = pendingColumns.some(c => c._isNew || c._modified || c._toDelete);
             const hasSectionChanges = Object.keys(sectionChanges).length > 0;
-            const hasSectionDeletes = sectionsToDelete.length > 0;
-            const hasSectionAdds = sectionsToAdd.length > 0;
             
-            if (!hasColumnChanges && !hasSectionChanges && !hasSectionDeletes && !hasSectionAdds) {
+            if (!hasColumnChanges && !hasSectionChanges) {
                 alert('변경사항이 없습니다.');
                 return;
             }
@@ -1989,13 +2738,30 @@ let editingId = null;
                 let successCount = 0;
                 let errorCount = 0;
                 
-                // 먼저 섹션 변경사항 저장
+                // 먼저 섹션 삭제 처리
+                for (const sectionId of sectionsToDelete) {
+                    const sid = parseInt(sectionId, 10);
+                    if (!sid) { console.warn('Skip delete: invalid sectionId', sectionId); continue; }
+                    const response = await fetch(`/api/follow-sop-sections/${sid}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    if (response.ok) {
+                        successCount++;
+                        console.log(`섹션 ID ${sectionId} 삭제 성공`);
+                    } else {
+                        errorCount++;
+                        console.error(`섹션 ID ${sectionId} 삭제 실패`);
+                    }
+                }
+                
+                // 섹션 변경사항 저장
                 for (const [sectionId, change] of Object.entries(sectionChanges)) {
                     const sid = parseInt(sectionId, 10);
                     if (!sid) { console.warn('Skip update: invalid sectionId', sectionId, change); continue; }
                     if (!change.is_new) {
                         // 기존 섹션 이름 변경
-                        const response = await fetch(`/api/accident-sections/${sid}`, {
+                        const response = await fetch(`/api/follow-sop-sections/${sid}`, {
                             method: 'PUT',
                             headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify({ section_name: change.section_name })
@@ -2016,98 +2782,16 @@ let editingId = null;
                     }
                 }
                 
-                // 새 섹션 추가 처리
-                for (const newSection of sectionsToAdd) {
-                    const response = await fetch('/api/accident-sections', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            section_name: newSection.section_name,
-                            section_key: newSection.section_key
-                        })
-                    });
-                    
-                    if (response.ok) {
-                        const data = await response.json();
-                        successCount++;
-                        console.log(`섹션 '${newSection.section_name}' 추가 성공`);
-                        
-                        // 임시 ID를 실제 ID로 업데이트 + 서버가 반환한 실제 section_key로 동기화
-                        const tempSection = sections.find(s => s.section_key === newSection.section_key && s._isNew);
-                        if (tempSection) {
-                            tempSection.id = data.section_id;
-                            if (data.section_key && data.section_key !== tempSection.section_key) {
-                                // 새 섹션키로 교체
-                                const oldKey = tempSection.section_key;
-                                tempSection.section_key = data.section_key;
-                                // 이미 대기 중인 컬럼들(tab)도 새 키로 업데이트
-                                try {
-                                    (pendingColumns || []).forEach(c => {
-                                        if (c.tab === oldKey) c.tab = data.section_key;
-                                    });
-                                } catch (e) { console.warn('tab 재매핑 중 오류', e); }
-                            }
-                            delete tempSection._isNew;
-                        }
-                        
-                        // 원본 섹션 목록에 추가
-                        originalSections.push({
-                            id: data.section_id,
-                            section_key: (data.section_key || newSection.section_key),
-                            section_name: newSection.section_name,
-                            section_order: sections.length
-                        });
-                    } else {
-                        errorCount++;
-                        console.error(`섹션 '${newSection.section_name}' 추가 실패`);
-                    }
-                }
-                
-                // 섹션 삭제 처리
-                const failedSections = [];
-                for (const sectionId of sectionsToDelete) {
-                    const sid = parseInt(sectionId, 10);
-                    if (!sid) { console.warn('Skip delete: invalid sectionId', sectionId); continue; }
-                    const response = await fetch(`/api/accident-sections/${sid}`, {
-                        method: 'DELETE',
-                        headers: {'Content-Type': 'application/json'}
-                    });
-                    
-                    if (response.ok) {
-                        successCount++;
-                        console.log(`섹션 ID ${sectionId} 삭제 성공`);
-                        // 원본에서도 제거
-                        originalSections = originalSections.filter(s => s.id !== sectionId);
-                    } else {
-                        errorCount++;
-                        const result = await response.json();
-                        const section = sections.find(s => s.id === sectionId);
-                        const sectionName = section ? section.section_name : `ID ${sectionId}`;
-                        failedSections.push(`${sectionName}: ${result.error || '알 수 없는 오류'}`);
-                        console.error(`섹션 ID ${sectionId} 삭제 실패:`, result);
-                        
-                        // 삭제 실패한 섹션은 다시 추가
-                        if (section && !sections.find(s => s.id === sectionId)) {
-                            sections.push(section);
-                        }
-                    }
-                }
-                
                 // 섹션 변경사항 초기화
                 sectionChanges = {};
                 sectionsToDelete = [];
-                sectionsToAdd = [];
-
-                // 섹션 DOM 갱신 (키 변경/삭제 반영) 후, 보류 컬럼 기준 1차 렌더
-                try { renderSections(); } catch(e) { console.warn('섹션 렌더링 오류', e); }
-                try { renderColumns(); } catch(e) { /* 섹션 컨테이너 부재 등은 무시 */ }
                 
                 // 컬럼 변경사항 처리
                 for (const column of pendingColumns) {
                     if (column._toDelete && !column._isNew) {
                         // 기존 컬럼 삭제 처리
                         console.log('삭제 처리 중:', column.id, column.column_name);
-                        const response = await fetch(`/api/accident-columns/${column.id}`, {
+                        const response = await fetch(`/api/follow-sop-columns/${column.id}`, {
                             method: 'DELETE'
                         });
                         const result = await response.json();
@@ -2129,6 +2813,7 @@ let editingId = null;
                             column_span: column.column_span || 1, // span 정보 추가
                             is_active: column.is_active ? 1 : 0,
                             dropdown_options: column.dropdown_options,
+                            scoring_config: column.scoring_config || null,
                             column_order: column.column_order,
                             tab: column.tab || 'additional',  // 탭 정보 추가 (기본값: additional)
                             // 입력 서브타입 설정 (table/list/number)
@@ -2139,12 +2824,12 @@ let editingId = null;
                                 return null;
                             })(),
                             // 테이블 정보도 저장 (메타데이터로)
-                            table_group: column._tableGroup || null,
-                            table_type: column._tableType || null,
-                            table_name: column._tableName || null
+                            table_group: (column.column_type === 'table' || (column.column_type||'').startsWith('popup_') || (column.column_type||'').startsWith('linked_')) ? (column._tableGroup || null) : null,
+                            table_type: (column.column_type === 'table' || (column.column_type||'').startsWith('popup_') || (column.column_type||'').startsWith('linked_')) ? (column._tableType || null) : null,
+                            table_name: (column.column_type === 'table') ? (column._tableName || null) : null
                         };
                         console.log('추가 처리 중:', data);
-                        const response = await fetch('/api/accident-columns', {
+                        const response = await fetch('/api/follow-sop-columns', {
                             method: 'POST',
                             headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify(data)
@@ -2153,7 +2838,18 @@ let editingId = null;
                             successCount++;
                         } else {
                             errorCount++;
-                            console.error('추가 실패:', data);
+                            try {
+                                const errorResult = await response.json();
+                                const errorMessage = errorResult.message || '알 수 없는 오류가 발생했습니다.';
+                                console.error('추가 실패:', data, errorMessage);
+                                // 중요한 에러는 즉시 사용자에게 알림
+                                if (errorMessage.includes('동일한 컬럼키') || errorMessage.includes('이미 사용 중')) {
+                                    alert(`컬럼 추가 실패: ${errorMessage}`);
+                                    return; // 이후 작업 중단
+                                }
+                            } catch (e) {
+                                console.error('추가 실패:', data, '응답 파싱 오류');
+                            }
                         }
                     } else if (column._modified && !column._toDelete) {
                         // 기존 컬럼 수정
@@ -2164,6 +2860,7 @@ let editingId = null;
                             column_span: column.column_span || 1, // span 정보 추가
                             is_active: column.is_active ? 1 : 0,
                             dropdown_options: column.dropdown_options,
+                            scoring_config: column.scoring_config || null,
                             column_order: column.column_order,
                             tab: column.tab || 'additional',  // 탭 정보 추가 (기본값: additional)
                             // 입력 서브타입 설정 (table/list/number)
@@ -2174,12 +2871,12 @@ let editingId = null;
                                 return null;
                             })(),
                             // 테이블 정보도 저장 (메타데이터로)
-                            table_group: column._tableGroup || null,
-                            table_type: column._tableType || null,
-                            table_name: column._tableName || null
+                            table_group: (column.column_type === 'table' || (column.column_type||'').startsWith('popup_') || (column.column_type||'').startsWith('linked_')) ? (column._tableGroup || null) : null,
+                            table_type: (column.column_type === 'table' || (column.column_type||'').startsWith('popup_') || (column.column_type||'').startsWith('linked_')) ? (column._tableType || null) : null,
+                            table_name: (column.column_type === 'table') ? (column._tableName || null) : null
                         };
                         console.log('수정 처리 중:', column.id, data);
-                        const response = await fetch(`/api/accident-columns/${column.id}`, {
+                        const response = await fetch(`/api/follow-sop-columns/${column.id}`, {
                             method: 'PUT',
                             headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify(data)
@@ -2194,18 +2891,12 @@ let editingId = null;
                 }
                 
                 if (errorCount > 0) {
-                    let errorMessage = `일부 변경사항 저장 중 오류가 발생했습니다.\n성공: ${successCount}, 실패: ${errorCount}`;
-                    if (failedSections && failedSections.length > 0) {
-                        errorMessage += '\n\n섹션 삭제 실패:\n' + failedSections.join('\n');
-                    }
-                    alert(errorMessage);
+                    alert(`일부 변경사항 저장 중 오류가 발생했습니다.\n성공: ${successCount}, 실패: ${errorCount}`);
                 } else {
                     alert('모든 변경사항이 저장되었습니다.');
                 }
                 
-                // 서버 상태 반영 (최종 새로고침): 섹션과 컬럼 모두 재로드
-                await loadSections();
-                loadColumns();
+                loadColumns(); // 새로고침
                 
             } catch (error) {
                 console.error('저장 중 오류:', error);
@@ -2215,38 +2906,14 @@ let editingId = null;
         
         function resetChanges() {
             const hasChanges = pendingColumns.some(c => c._isNew || c._modified || c._toDelete);
-            const hasSectionDeletes = sectionsToDelete.length > 0;
             
-            if (hasChanges || hasSectionDeletes) {
+            if (hasChanges) {
                 if (!confirm('모든 변경사항을 취소하시겠습니까?')) {
                     return;
                 }
             }
             
-            // 섹션 삭제 목록 초기화
-            sectionsToDelete = [];
-            sectionChanges = {};
-            
-            // 섹션 다시 로드
-            loadSections();
-            
-            // 컬럼 다시 로드
-            loadColumns();
-        }
-
-        // 서버에서 섹션 목록을 다시 로드하고 UI 갱신
-        async function loadSections() {
-            try {
-                const resp = await fetch('/api/accident-sections');
-                const data = await resp.json();
-                if (data && data.success && Array.isArray(data.sections)) {
-                    sections = data.sections;
-                    renderSections();
-                    renderColumns();
-                }
-            } catch (e) {
-                console.error('섹션 로드 실패:', e);
-            }
+            loadColumns(); // 원본 다시 로드
         }
         
         function updatePreview() {
@@ -2259,7 +2926,7 @@ let editingId = null;
         // 드롭다운 옵션 미리보기 로드
         async function loadOptionPreview(columnKey) {
             try {
-            const boardType = 'accident';
+            const boardType = 'follow_sop';
             const response = await fetch(`/api/${boardType}/dropdown-codes?column_key=${encodeURIComponent(columnKey)}`);
                 const data = await response.json();
                 
@@ -2299,7 +2966,7 @@ let editingId = null;
             const top = (window.screen.height - height) / 2;
             
             const codeEditorWindow = window.open(
-                `/admin/accident-codes?column_key=${columnKey}&embedded=true`,
+                `/admin/followsop-codes?column_key=${columnKey}&embedded=true`,
                 'codeEditor',
                 `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
             );
@@ -2555,10 +3222,5 @@ let editingId = null;
             }
         });
 </script>
-
-<!-- Sortable.js CDN 추가 -->
-<script src="/static/js/Sortable.min.js"></script>
-<!-- Sortable 초기화 헬퍼 -->
-<script src="/static/js/sortable-init.js"></script>
 
 {% endblock %}

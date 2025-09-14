@@ -308,7 +308,7 @@
     (function() {
         // 로컬 스코프로 격리
         var {{ col.column_key }}_data = [];
-        
+
         // 렌더링 함수를 먼저 정의
         function renderTable_{{ col.column_key }}() {
             var tbody = document.getElementById('{{ col.column_key }}_tbody');
@@ -559,13 +559,12 @@
                        'workerPopup', 'width=900,height=600,scrollbars=yes');
         };
         
+        // removeItem 함수를 전역으로 노출
         window.removeItem_{{ col.column_key }} = function(index) {
-            if (confirm('정말 삭제하시겠습니까?')) {
-                console.log('{{ col.column_key }} 삭제 인덱스:', index);
-                {{ col.column_key }}_data.splice(index, 1);
-                console.log('{{ col.column_key }} 삭제 후 데이터:', {{ col.column_key }}_data);
-                renderTable_{{ col.column_key }}();
-            }
+            console.log('{{ col.column_key }} 삭제 인덱스:', index);
+            {{ col.column_key }}_data.splice(index, 1);
+            console.log('{{ col.column_key }} 삭제 후 데이터:', {{ col.column_key }}_data);
+            renderTable_{{ col.column_key }}();
         };
     })();
     </script>

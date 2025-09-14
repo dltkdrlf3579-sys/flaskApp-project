@@ -365,13 +365,14 @@
                     <!-- 섹션들이 JavaScript로 동적 생성됨 -->
                 </div>
                 
+                <!-- 새 컬럼 추가 버튼 -->
+                <div class="add-column-btn" onclick="showAddModal()">
+                    <i class="bi bi-plus-circle"></i> 새 컬럼 추가
+                </div>
+
                 <!-- 새 섹션 추가 버튼 -->
                 <div class="add-section-btn" onclick="showAddSectionModal()">
                     <i class="bi bi-plus-square"></i> 새 섹션 추가
-                </div>
-                
-                <div class="add-column-btn" onclick="showAddModal()">
-                    <i class="bi bi-plus-circle"></i> 새 컬럼 추가
                 </div>
                 
                 <div class="mt-3 d-flex justify-content-end gap-2">
@@ -939,7 +940,7 @@ let editingId = null;
             if (!section) return;
             
             if (section.section_key === 'basic_info' || section.section_key === 'violation_info') {
-                alert('기본 섹션은 삭제할 수 없습니다.');
+                // alert('기본 섹션은 삭제할 수 없습니다.');
                 return;
             }
             

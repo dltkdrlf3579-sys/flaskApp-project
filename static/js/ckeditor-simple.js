@@ -11,6 +11,12 @@ window.initCKEditor = function(elementId) {
         return;
     }
     
+    // 이미 초기화되었는지 확인
+    if (window[`editor_${elementId}`] || element.classList.contains('ck-editor__editable')) {
+        console.log(`CKEditor already initialized for #${elementId}`);
+        return;
+    }
+    
     // 기존 내용 가져오기
     let initialContent = '';
     if (element.hasAttribute('data-content')) {
@@ -26,6 +32,9 @@ window.initCKEditor = function(elementId) {
     }
     
     // CKEditor 5 Classic 생성
+    // 글로벌 업로드 대기 카운터
+    window.__ckeditorPendingUploads = window.__ckeditorPendingUploads || 0;
+
     ClassicEditor
         .create(element, {
             language: 'ko',
@@ -61,11 +70,24 @@ window.initCKEditor = function(elementId) {
                 editor.setData(initialContent);
             }
             
-            // 전역 변수로 저장
+            // 전역 변수로 저장 (여러 방식으로 접근 가능하도록)
             window[`editor_${elementId}`] = editor;
             window.editorInstance = editor;
+            
+            // detailed-content ID인 경우 추가 전역 변수 설정
+            if (elementId === 'detailed-content') {
+                window['editor_detailed-content'] = editor;  // 하이픈 포함 버전
+            }
+            
             window.RichText = {
+                hasPendingUploads: function() {
+                    return (window.__ckeditorPendingUploads || 0) > 0;
+                },
                 getData: function() {
+                    if ((window.__ckeditorPendingUploads || 0) > 0) {
+                        alert('이미지 업로드가 완료될 때까지 기다려 주세요.');
+                        throw new Error('Uploads are still in progress');
+                    }
                     return editor.getData();
                 }
             };
@@ -101,6 +123,7 @@ window.initCKEditor = function(elementId) {
 
 // 이미지 업로드 함수
 function uploadImage(file, editor) {
+    window.__ckeditorPendingUploads = (window.__ckeditorPendingUploads || 0) + 1;
     const formData = new FormData();
     formData.append('upload', file);
     
@@ -121,17 +144,24 @@ function uploadImage(file, editor) {
     })
     .catch(error => {
         console.error('Image upload error:', error);
+    })
+    .finally(() => {
+        window.__ckeditorPendingUploads = Math.max(0, (window.__ckeditorPendingUploads || 1) - 1);
     });
 }
 
 // DOM 준비되면 자동 초기화
 document.addEventListener('DOMContentLoaded', function() {
-    // data-ckeditor="true" 속성이 있는 요소 찾기
-    const editorElements = document.querySelectorAll('[data-ckeditor="true"], #detailed-content');
+    // data-ckeditor="true" 속성이 있는 요소만 찾기 (중복 방지)
+    const editorElements = document.querySelectorAll('[data-ckeditor="true"]');
+    
+    // 이미 초기화된 요소 추적
+    const initializedElements = new Set();
     
     editorElements.forEach(element => {
-        if (element.id) {
+        if (element.id && !initializedElements.has(element.id)) {
             initCKEditor(element.id);
+            initializedElements.add(element.id);
         }
     });
 });

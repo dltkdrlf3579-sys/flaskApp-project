@@ -230,9 +230,13 @@
 <!-- 공통 첨부파일 JavaScript -->
 {% macro attachment_scripts() %}
 <script>
-// 전역 변수
-let pendingFiles = [];
-let deletedAttachments = [];
+// 전역 변수 - 이미 선언된 경우 재사용
+if (typeof pendingFiles === 'undefined') {
+    window.pendingFiles = [];
+}
+if (typeof deletedAttachments === 'undefined') {
+    window.deletedAttachments = [];
+}
 
 function handleFileUpload(files) {
     const tbody = document.getElementById('attachments-tbody');
@@ -275,21 +279,27 @@ function handleFileUpload(files) {
 }
 
 function markFileForDeletion(button) {
-    const row = button.closest('.table-row');
-    const attachmentId = row.dataset.id;
-    
-    if (attachmentId && !row.dataset.isNew) {
-        deletedAttachments.push(parseInt(attachmentId));
-    }
-    
-    row.remove();
-    updateRowNumbers();
-    updateFileCount();
-    
-    // 파일이 모두 삭제된 경우
-    const tbody = document.getElementById('attachments-tbody');
-    if (tbody.children.length === 0) {
-        tbody.innerHTML = '<div class="table-row no-data" id="no-data-row"><div class="col-full">등록된 첨부파일이 없습니다.</div></div>';
+    // 첫 번째 확인: 정말 삭제할 것인지
+    if (confirm('정말 삭제하시겠습니까?')) {
+        const row = button.closest('.table-row');
+        const attachmentId = row.dataset.id;
+
+        if (attachmentId && !row.dataset.isNew) {
+            deletedAttachments.push(parseInt(attachmentId));
+        }
+
+        row.remove();
+        updateRowNumbers();
+        updateFileCount();
+
+        // 파일이 모두 삭제된 경우
+        const tbody = document.getElementById('attachments-tbody');
+        if (tbody.children.length === 0) {
+            tbody.innerHTML = '<div class="table-row no-data" id="no-data-row"><div class="col-full">등록된 첨부파일이 없습니다.</div></div>';
+        }
+
+        // 두 번째 알림: 저장 버튼을 눌러야 최종 삭제됨을 안내
+        alert('삭제 처리되었습니다.\n\n최종적으로 삭제를 완료하려면 "수정완료" 또는 "등록완료" 버튼을 클릭해주세요.');
     }
 }
 

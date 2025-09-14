@@ -30,7 +30,7 @@ UPSERT_REGISTRY = {
     },
     'partner_details': {
         'conflict_cols': ['business_number'],
-        'update_cols': ['detail_content', 'updated_at']
+        'update_cols': ['detailed_content', 'updated_at']
     },
     'followsop_details': {
         'conflict_cols': ['work_req_no'],

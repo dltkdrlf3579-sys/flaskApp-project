@@ -123,12 +123,14 @@
                                            
                                 {% elif col.column_type in ['linked', 'linked_text', 'linked_dept'] %}
                                     <!-- 연결된 필드 (읽기 전용) -->
-                                    <input type="text" 
-                                           id="{{ col.column_key }}" 
-                                           class="{{ section.section_key|replace('_', '-') }}-input linked-field" 
+                                    <input type="text"
+                                           id="{{ col.column_key }}"
+                                           class="{{ section.section_key|replace('_', '-') }}-input linked-field"
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            data-linked-type="{{ col.column_type }}"
+                                           {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                           {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                            readonly
                                            style="background-color: #e9ecef; cursor: not-allowed;">
                                            
@@ -151,12 +153,14 @@
                                 {% elif col.column_type == 'popup_person' %}
                                     <!-- 담당자 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                data-input-type="popup_person"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                placeholder="담당자 검색"
                                                readonly
                                                style="background-color: #f8f9fa;">
@@ -169,12 +173,14 @@
                                 {% elif col.column_type == 'popup_company' %}
                                     <!-- 업체 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                data-input-type="popup_company"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                placeholder="업체 검색"
                                                readonly
                                                style="background-color: #f8f9fa;">
@@ -188,12 +194,14 @@
                                 {% elif col.column_type == 'popup_building' %}
                                     <!-- 건물 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                data-input-type="popup_building"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                placeholder="건물 검색"
                                                readonly
                                                style="background-color: #f8f9fa;">
@@ -207,12 +215,14 @@
                                 {% elif col.column_type == 'popup_department' %}
                                     <!-- 부서 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                data-input-type="popup_department"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                placeholder="부서 검색"
                                                readonly
                                                style="background-color: #f8f9fa;">
@@ -226,12 +236,14 @@
                                 {% elif col.column_type == 'popup_contractor' %}
                                     <!-- 협력사 근로자 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                data-input-type="popup_contractor"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                placeholder="협력사 근로자 검색"
                                                readonly
                                                style="background-color: #f8f9fa;">
@@ -285,16 +297,18 @@
                                 {% elif col.column_type == 'table' or col.input_type == 'table' %}
                                     <!-- 테이블 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                data-input-type="table"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                placeholder="검색하여 선택"
                                                readonly
                                                style="background-color: #f8f9fa;">
-                                        <button class="btn btn-sm btn-primary" 
+                                        <button class="btn btn-sm btn-primary"
                                                 onclick="openPopup('{{ col.column_key }}')">
                                             검색
                                         </button>
@@ -321,24 +335,28 @@
                                            
                                 {% elif col.column_type in ['linked', 'linked_text', 'linked_dept'] %}
                                     <!-- 연결된 필드 (읽기 전용) -->
-                                    <input type="text" 
-                                           id="{{ col.column_key }}" 
-                                           class="{{ section.section_key|replace('_', '-') }}-input linked-field" 
+                                    <input type="text"
+                                           id="{{ col.column_key }}"
+                                           class="{{ section.section_key|replace('_', '-') }}-input linked-field"
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            data-linked-type="{{ col.column_type }}"
+                                           {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                           {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                            readonly
                                            style="background-color: #e9ecef; cursor: not-allowed;">
                                            
                                 {% elif col.column_type == 'popup_person' %}
                                     <!-- 담당자 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                data-input-type="popup_person"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                placeholder="담당자 검색"
                                                readonly
                                                style="background-color: #f8f9fa;">
@@ -351,12 +369,14 @@
                                 {% elif col.column_type == 'popup_company' %}
                                     <!-- 업체 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                data-input-type="popup_company"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                placeholder="업체 검색"
                                                readonly
                                                style="background-color: #f8f9fa;">
@@ -369,12 +389,14 @@
                                 {% elif col.column_type == 'popup_building' %}
                                     <!-- 건물 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                data-input-type="popup_building"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                placeholder="건물 검색"
                                                readonly
                                                style="background-color: #f8f9fa;">
@@ -387,12 +409,14 @@
                                 {% elif col.column_type == 'popup_department' %}
                                     <!-- 부서 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                data-input-type="popup_department"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                placeholder="부서 검색"
                                                readonly
                                                style="background-color: #f8f9fa;">
@@ -405,12 +429,14 @@
                                 {% elif col.column_type == 'popup_contractor' %}
                                     <!-- 협력사 근로자 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                data-input-type="popup_contractor"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                placeholder="협력사 근로자 검색"
                                                readonly
                                                style="background-color: #f8f9fa;">
@@ -540,6 +566,36 @@ function collectDynamicFields() {
     return data;
 }
 
+// 섹션별로 필드를 그룹화하는 함수
+function groupFieldsBySection(dynamicData) {
+    const sectionGroups = {};
+
+    // 모든 섹션의 컬럼을 순회하면서 그룹화
+    Object.keys(sectionColumns).forEach(sectionKey => {
+        const columns = sectionColumns[sectionKey] || [];
+
+        columns.forEach(col => {
+            // 해당 섹션의 그룹이 없으면 생성
+            if (!sectionGroups[sectionKey]) {
+                sectionGroups[sectionKey] = {};
+            }
+
+            const fieldKey = col.column_key;
+            // dynamicData에 해당 필드가 있으면 섹션 그룹에 추가
+            if (dynamicData[fieldKey] !== undefined) {
+                sectionGroups[sectionKey][fieldKey] = dynamicData[fieldKey];
+            }
+        });
+    });
+
+    console.log('=== 섹션별 그룹화 결과 ===');
+    Object.keys(sectionGroups).forEach(sectionKey => {
+        console.log(`${sectionKey}:`, sectionGroups[sectionKey]);
+    });
+
+    return sectionGroups;
+}
+
 // 등록 함수
 function registerSafetyInstruction() {
     console.log('=== 환경안전 지시서 등록 시작 ===');
@@ -564,55 +620,24 @@ function registerSafetyInstruction() {
     const dynamicData = collectDynamicFields();
     console.log('=== collectDynamicFields 결과 ===');
     console.log('전체 데이터:', dynamicData);
-    
-    // 각 필드의 타입 확인
-    for (const [key, value] of Object.entries(dynamicData)) {
-        if (Array.isArray(value)) {
-            console.log(`  ${key}: 배열 (${value.length}개 항목)`);
-        } else if (typeof value === 'string' && value.startsWith('[')) {
-            console.log(`  ${key}: JSON 문자열 "${value.substring(0, 50)}..."`);
-        } else {
-            console.log(`  ${key}: ${typeof value} = "${value}"`);
-        }
-    }
-    
-    // 각 필드를 FormData에 추가
-    for (const [key, value] of Object.entries(dynamicData)) {
-        // 배열은 JSON 문자열로 변환해서 추가
-        if (Array.isArray(value)) {
-            formData.append(key, JSON.stringify(value));
-        } else {
-            formData.append(key, value);
-        }
-    }
-    
-    // base_fields 처리 (기본 컬럼들)
-    const baseFields = {};
-    const baseFieldsList = [
-        'issue_number', 'instruction_name', 'instruction_date', 'workplace',
-        'instruction_type', 'violation_category', 'created_at'
-    ];
-    
-    baseFieldsList.forEach(field => {
-        if (dynamicData[field] !== undefined) {
-            baseFields[field] = dynamicData[field];
+
+    // 섹션별로 필드 그룹화
+    const sectionGroups = groupFieldsBySection(dynamicData);
+
+    // 각 섹션별로 FormData에 추가
+    Object.keys(sectionGroups).forEach(sectionKey => {
+        const sectionData = sectionGroups[sectionKey];
+
+        // 빈 섹션은 건너뛰기
+        if (Object.keys(sectionData).length > 0) {
+            console.log(`섹션 ${sectionKey} 전송:`, sectionData);
+            formData.append(sectionKey, JSON.stringify(sectionData));
         }
     });
-    formData.append('base_fields', JSON.stringify(baseFields));
-    
-    // custom_data 처리 (모든 동적 필드 포함)
-    const customData = { ...dynamicData };
-    
-    // 리스트 필드 검증 - 리스트 필드가 올바르게 포함되었는지 확인
-    for (const [key, value] of Object.entries(customData)) {
-        if (Array.isArray(value)) {
-            console.log(`✅ 리스트 필드 ${key}: 배열로 정상 포함됨, 항목 수: ${value.length}`);
-        } else if (typeof value === 'string' && value.startsWith('[')) {
-            console.log(`❌ 리스트 필드 ${key}: 문자열로 포함됨 (이중 인코딩 문제!)`, value);
-        }
-    }
-    
-    formData.append('custom_data', JSON.stringify(customData));
+
+    // 하위 호환성을 위해 custom_data도 전체 데이터로 보관
+    // (서버가 섹션별 데이터를 못 읽을 경우 대비)
+    formData.append('custom_data', JSON.stringify(dynamicData));
     
     // 첨부파일 처리
     const attachmentData = [];
@@ -713,26 +738,7 @@ function openPersonSearch(fieldKey) {
         return;
     }
     
-    window.receivePersonSelection = function(fieldKey, data) {
-        const mainField = document.getElementById(fieldKey);
-        if (mainField) {
-            mainField.value = data.employee_name || data.name || '';
-        }
-        
-        const idField = document.getElementById(fieldKey + '_id');
-        if (idField) {
-            idField.value = data.employee_id || data.id || '';
-            idField.readOnly = true;
-            idField.style.backgroundColor = '#f8f9fa';
-        }
-        
-        const deptField = document.getElementById(fieldKey + '_dept');
-        if (deptField) {
-            deptField.value = data.department_name || data.department || '';
-            deptField.readOnly = true;
-            deptField.style.backgroundColor = '#f8f9fa';
-        }
-    };
+    // receivePersonSelection 함수는 popup-handler.js에서 통합 처리됨
     
     popup.focus();
 }
@@ -760,23 +766,7 @@ function openCompanySearch(fieldKey) {
         return;
     }
     
-    window.receiveCompanySelection = function(fieldKey, data) {
-        document.getElementById(fieldKey).value = data.company_name || '';
-        
-        const businessNumberFields = [
-            fieldKey + '_business_number',
-            fieldKey + '_bizno'
-        ];
-        
-        businessNumberFields.forEach(fieldId => {
-            const bnField = document.getElementById(fieldId);
-            if (bnField) {
-                bnField.value = data.business_number || '';
-                bnField.readOnly = true;
-                bnField.style.backgroundColor = '#f8f9fa';
-            }
-        });
-    };
+    // receiveCompanySelection 함수는 popup-handler.js에서 통합 처리됨
     
     popup.focus();
 }
@@ -804,15 +794,7 @@ function openBuildingSearch(fieldKey) {
         return;
     }
     
-    window.receiveBuildingSelection = function(fieldKey, data) {
-        document.getElementById(fieldKey).value = data.building_name || '';
-        const codeField = document.getElementById(fieldKey + '_code');
-        if (codeField) {
-            codeField.value = data.building_code || '';
-            codeField.readOnly = true;
-            codeField.style.backgroundColor = '#f8f9fa';
-        }
-    };
+    // receiveBuildingSelection 함수는 popup-handler.js에서 통합 처리됨
     
     popup.focus();
 }
@@ -840,19 +822,7 @@ function openDepartmentSearch(fieldKey) {
         return;
     }
     
-    window.receiveDepartmentSelection = function(fieldKey, data) {
-        const mainField = document.getElementById(fieldKey);
-        if (mainField) {
-            mainField.value = data.dept_name || data.department_name || '';
-        }
-        
-        const codeField = document.getElementById(fieldKey + '_code');
-        if (codeField) {
-            codeField.value = data.dept_code || data.department_code || '';
-            codeField.readOnly = true;
-            codeField.style.backgroundColor = '#f8f9fa';
-        }
-    };
+    // receiveDepartmentSelection 함수는 popup-handler.js에서 통합 처리됨
     
     popup.focus();
 }
@@ -880,28 +850,7 @@ function openContractorSearch(fieldKey) {
         return;
     }
     
-    window.receiveContractorSelection = function(fieldKey, data) {
-        const mainField = document.getElementById(fieldKey);
-        if (mainField) {
-            mainField.value = data.worker_name || '';
-        }
-        // Robust sibling fill: support multiple suffix variants
-        const mappings = [
-            { targets: ['_id'], src: 'worker_id' },
-            { targets: ['_company', '_company_name'], src: 'company_name' },
-            { targets: ['_bizno', '_company_bizno', '_business_number'], src: 'business_number' },
-        ];
-        mappings.forEach(m => {
-            m.targets.forEach(suffix => {
-                const el = document.getElementById(fieldKey + suffix);
-                if (el) {
-                    el.value = data[m.src] || '';
-                    el.readOnly = true;
-                    el.style.backgroundColor = '#f8f9fa';
-                }
-            });
-        });
-    };
+    // receiveContractorSelection 함수는 popup-handler.js에서 통합 처리됨
     
     popup.focus();
 }

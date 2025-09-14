@@ -52,15 +52,15 @@
                 {% endif %}
                 
                 {% set all_columns = section_columns[section.section_key] if section.section_key in section_columns else [] %}
-                <!-- detailed_content와 violation_content는 제외 -->
+                <!-- detailed_content, violation_content, work_req_no, created_at 제외 -->
                 {% set columns = [] %}
                 {% for col in all_columns %}
-                    {% if col.column_key not in ['detailed_content', 'violation_content'] %}
+                    {% if col.column_key not in ['detailed_content', 'violation_content', 'work_req_no', 'created_at'] %}
                         {% set _ = columns.append(col) %}
                     {% endif %}
                 {% endfor %}
                 {% set columns_per_row = 4 %}
-                
+
                 <!-- batch 방식으로 4개씩 묶어서 처리 -->
                 {% for chunk in columns | batch(columns_per_row, '') %}
                 <div class="info-row">
@@ -127,15 +127,7 @@
                                     {% set col_value = sop[col.column_key] | default('', true) %}
                                 {% endif %}
                                 
-                                {% if col.column_key == 'work_req_no' %}
-                                    <!-- 점검번호는 수정 불가 -->
-                                    <div class="value">{{ col_value or '-' }}</div>
-                                    
-                                {% elif col.column_key == 'created_at' %}
-                                    <!-- 등록일은 수정 불가 -->
-                                    <div class="value">{{ (col_value|date_only) if col_value else '-' }}</div>
-                                    
-                                {% elif col.column_type == 'dropdown' %}
+                                {% if col.column_type == 'dropdown' %}
                                     <!-- 드롭다운 필드 -->
                                     <select class="{{ section.section_key|replace('_', '-') }}-input" 
                                             data-field="{{ col.column_key }}"
@@ -181,11 +173,13 @@
                                            
                                 {% elif render_type in ['linked','linked_text','linked_dept'] %}
                                     <!-- 연결된 필드 (읽기 전용) -->
-                                    <input type="text" 
+                                    <input type="text"
                                            id="{{ col.column_key }}"
-                                           class="{{ section.section_key|replace('_', '-') }}-input" 
+                                           class="{{ section.section_key|replace('_', '-') }}-input"
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
+                                           {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                           {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                            value="{{ col_value }}"
                                            readonly
                                            style="background-color: #f3f4f6;">
@@ -193,11 +187,13 @@
                                 {% elif render_type in ['popup','popup_person','popup_company','popup_department','popup_building','popup_contractor'] or (col.column_type and col.column_type.startswith('popup')) %}
                                     <!-- 팝업 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
+                                        <input type="text"
                                                id="{{ col.column_key }}"
-                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                value="{{ col_value }}"
                                                readonly>
                                         <button class="btn btn-sm btn-primary" 
@@ -209,12 +205,14 @@
                                 {% elif col.column_type == 'table' or col.input_type == 'table' %}
                                     <!-- 테이블 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
+                                        <input type="text"
                                                id="{{ col.column_key }}"
-                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                data-input-type="table"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                value="{{ col_value }}"
                                                readonly>
                                         <button class="btn btn-sm btn-primary" 
@@ -306,11 +304,12 @@
         <div class="section-content">
             <div class="content-editor">
                 <!-- CKEditor 5 -->
+                <!-- 디버그: detailed_content 값 확인 -->
+                <div style="display:none" id="debug-detailed-content">{{ sop.detailed_content or '(비어있음)' }}</div>
                 <textarea id="detailed-content"
                           class="editable-content"
                           data-ckeditor="true"
-                          data-content="{{ (sop.detailed_content or '') | tojson }}"
-                          placeholder="상세내용을 입력하세요."></textarea>
+                          placeholder="상세내용을 입력하세요.">{{ sop.detailed_content if sop.detailed_content else '' }}</textarea>
             </div>
         </div>
     </div>
@@ -394,20 +393,50 @@ function collectDynamicFields() {
     return data;
 }
 
+// 섹션별 필드 그룹화 함수
+function groupFieldsBySection(dynamicData) {
+    const sectionGroups = {};
+
+    // 모든 섹션의 컬럼을 순회하면서 그룹화
+    Object.keys(sectionColumns).forEach(sectionKey => {
+        const columns = sectionColumns[sectionKey] || [];
+        columns.forEach(col => {
+            // 해당 섹션의 그룹이 없으면 생성
+            if (!sectionGroups[sectionKey]) {
+                sectionGroups[sectionKey] = {};
+            }
+            const fieldKey = col.column_key;
+            // dynamicData에 해당 필드가 있으면 섹션 그룹에 추가
+            if (dynamicData[fieldKey] !== undefined) {
+                sectionGroups[sectionKey][fieldKey] = dynamicData[fieldKey];
+            }
+        });
+    });
+
+    console.log('=== 섹션별 그룹화 결과 ===');
+    Object.keys(sectionGroups).forEach(sectionKey => {
+        console.log(`${sectionKey}:`, sectionGroups[sectionKey]);
+    });
+
+    return sectionGroups;
+}
+
 // 수정 함수
 function updateFollowSop() {
     const formData = new FormData();
-    
+
     // work_req_no (중요: issue_number가 아닌 work_req_no)
     formData.append('work_req_no', issueNumber);
-    
+
     // 상세내용 처리 - data-content 패턴과 에디터 초기화 지원
     const contentElement = document.getElementById('detailed-content');
     let detailedContent = '';
-    
+
     // CKEditor가 있다면 CKEditor에서 값 가져오기
     if (window.RichText && typeof window.RichText.getData === 'function') {
         detailedContent = window.RichText.getData();
+    } else if (window['editor_detailed-content'] && typeof window['editor_detailed-content'].getData === 'function') {
+        detailedContent = window['editor_detailed-content'].getData();
     } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
         detailedContent = window.editorInstance.getData();
     } else if (contentElement) {
@@ -418,13 +447,22 @@ function updateFollowSop() {
             detailedContent = contentElement.value || '';
         }
     }
-    
+
     formData.append('detailed_content', detailedContent);
-    
+
     // 동적 필드 수집
     const dynamicData = collectDynamicFields();
-    
-    // custom_data 구성
+
+    // 섹션별로 그룹화해서 전송
+    const sectionGroups = groupFieldsBySection(dynamicData);
+
+    // 각 섹션별로 FormData에 추가
+    Object.keys(sectionGroups).forEach(sectionKey => {
+        console.log(`Sending section ${sectionKey}:`, sectionGroups[sectionKey]);
+        formData.append(sectionKey, JSON.stringify(sectionGroups[sectionKey]));
+    });
+
+    // 하위 호환성을 위해 custom_data도 전송 (전체 데이터)
     formData.append('custom_data', JSON.stringify(dynamicData));
     
     // 새 첨부파일 처리 (공통 컴포넌트 변수 사용)
@@ -468,8 +506,11 @@ function updateFollowSop() {
             }
             {% endif %}
             
-            // 현재 창 새로고침 (캐시 무시)
-            window.location.href = window.location.href + '&t=' + new Date().getTime();
+            // 현재 창 새로고침 (캐시 무시) - 기존 t 파라미터 제거 후 추가
+            var url = window.location.href;
+            url = url.replace(/[?&]t=\d+/g, '');  // 모든 t 파라미터 제거
+            var separator = url.indexOf('?') !== -1 ? '&' : '?';
+            window.location.href = url + separator + 't=' + new Date().getTime();
         } else {
             alert('수정 실패: ' + (data.message || '알 수 없는 오류'));
         }
@@ -525,38 +566,97 @@ function openPopup(fieldKey) {
     popup.focus();
 }
 
-// 테이블 선택 결과 수신 함수
-window.receiveTableSelection = function(selectedItem) {
-    const fieldKey = window.currentFieldKey;
-    if (!fieldKey) return;
-    
-    const mainField = document.getElementById(fieldKey);
-    if (mainField) {
-        mainField.value = selectedItem.display_value || selectedItem.name || '';
-    }
-    
-    // _id 필드가 있으면 업데이트
-    const idField = document.getElementById(fieldKey + '_id');
-    if (idField && selectedItem.id) {
-        idField.value = selectedItem.id;
-    }
+// 디버깅 헬퍼 함수 (개발자 도구 Console에서 사용)
+window.debugFields = function() {
+    console.log('=== 디버깅 시작 ===');
+
+    // 1. data-field 속성이 있는 요소들 확인
+    const fieldsWithDataAttr = document.querySelectorAll('[data-field]');
+    console.log(`data-field 속성이 있는 요소: ${fieldsWithDataAttr.length}개`);
+
+    // 2. 각 필드의 값 확인
+    fieldsWithDataAttr.forEach(field => {
+        const fieldKey = field.dataset.field;
+        const value = field.value;
+        const section = field.dataset.section;
+        console.log(`  ${fieldKey} (섹션: ${section}): "${value}"`);
+    });
+
+    // 3. collectDynamicFields 실행
+    console.log('\n=== collectDynamicFields 실행 ===');
+    const collected = collectDynamicFields();
+    console.log('수집된 데이터:', collected);
+
+    // 4. 비어있지 않은 필드만 표시
+    const nonEmpty = {};
+    Object.keys(collected).forEach(key => {
+        if (collected[key] && collected[key] !== '') {
+            nonEmpty[key] = collected[key];
+        }
+    });
+    console.log('\n값이 있는 필드:', nonEmpty);
+
+    // 5. 섹션별 그룹화
+    console.log('\n=== 섹션별 그룹화 ===');
+    const grouped = groupFieldsBySection(collected);
+    console.log('그룹화 결과:', grouped);
+
+    return {
+        total: fieldsWithDataAttr.length,
+        collected: collected,
+        nonEmpty: nonEmpty,
+        grouped: grouped
+    };
 };
+
+// 테스트 데이터 입력 함수
+window.fillTestData = function() {
+    console.log('테스트 데이터 입력 중...');
+
+    // 각 필드에 테스트 값 입력
+    const testData = {
+        'company_name': '테스트회사',
+        'work_type': '정기점검',
+        'department': '안전팀',
+        'work_status': '진행중',
+        'contractor': '협력업체A',
+        'work_date': '2025-01-13'
+    };
+
+    Object.keys(testData).forEach(fieldKey => {
+        const field = document.getElementById(fieldKey);
+        if (field) {
+            field.value = testData[fieldKey];
+            console.log(`✓ ${fieldKey}: ${testData[fieldKey]}`);
+        } else {
+            console.log(`✗ ${fieldKey}: 필드를 찾을 수 없음`);
+        }
+    });
+
+    // 상세내용도 입력
+    const detailContent = document.getElementById('detailed-content');
+    if (detailContent) {
+        if (window.RichText && typeof window.RichText.setData === 'function') {
+            window.RichText.setData('<p>테스트 상세내용입니다.</p>');
+        } else {
+            detailContent.innerHTML = '<p>테스트 상세내용입니다.</p>';
+        }
+        console.log('✓ 상세내용 입력 완료');
+    }
+
+    console.log('\n테스트 데이터 입력 완료!');
+    console.log('이제 debugFields()를 실행해서 확인하거나');
+    console.log('저장 버튼을 클릭해보세요.');
+};
+
+// 테이블 선택 결과 수신 함수
+// receive*Selection 함수들은 popup-handler.js에서 통합 처리됨
 
 // DOMContentLoaded 시 에디터 초기화 및 엔터키 이벤트 추가
 document.addEventListener('DOMContentLoaded', function() {
-    // 에디터 초기화 - data-content 패턴 적용
-    const contentElement = document.getElementById('detailed-content');
-    if (contentElement && contentElement.hasAttribute('data-content')) {
-        try {
-            const contentData = JSON.parse(contentElement.getAttribute('data-content'));
-            if (contentData) {
-                contentElement.innerHTML = contentData;
-            }
-        } catch(e) {
-            console.warn('상세내용 초기화 실패:', e);
-        }
-    }
-    
+    // CKEditor는 ckeditor-simple.js에서 자동으로 초기화됨
+    // data-ckeditor="true" 속성이 있는 요소를 찾아서 처리
+
     // 비밀번호 입력 엔터 키 이벤트
     const passwordInput = document.getElementById('edit-password-input');
     if (passwordInput) {

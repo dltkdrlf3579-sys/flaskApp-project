@@ -202,12 +202,14 @@
                                        onkeypress="return isNumberKey(event, this)"
                                        placeholder="숫자만 입력하세요">
                             {% elif render_type in ['linked', 'linked_text', 'linked_dept'] %}
-                                <!-- 연결된 필드 (읽기 전용) -->
-                                <input type="text" 
+                                <!-- 연결된 필드 (읽기 전용) - table_group 기반 연동 -->
+                                <input type="text"
                                        id="{{ col.column_key }}"
-                                       class="{{ section.section_key }}-input linked-field" 
+                                       class="{{ section.section_key }}-input linked-field"
                                        data-field="{{ col.column_key }}"
                                        data-section="{{ section.section_key }}"
+                                       {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                       {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                        value="{{ col_value }}"
                                        readonly
                                        style="background-color: #f3f4f6;">
@@ -216,11 +218,13 @@
                                 <!-- ⚠️ IMPORTANT: 버튼 클래스는 btn-primary 유지 (파란색), 아이콘 없이 "검색" 텍스트만 사용 -->
                                 <!-- DO NOT CHANGE: btn-outline-secondary나 btn-outline-primary로 변경 금지 -->
                                 <div class="input-group">
-                                    <input type="text" 
+                                    <input type="text"
                                            id="{{ col.column_key }}"
-                                           class="{{ section.section_key }}-input" 
+                                           class="{{ section.section_key }}-input"
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
+                                           {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                           {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                            value="{{ col_value }}"
                                            readonly>
                                     <button class="btn btn-sm btn-primary" 
@@ -300,17 +304,38 @@
                             {% elif render_type == 'popup_contractor' %}
                                 <!-- 협력사 근로자 검색 필드 -->
                                 <div class="input-group">
-                                    <input type="text" 
-                                           id="{{ col.column_key }}" 
-                                           class="{{ section.section_key }}-input" 
+                                    <input type="text"
+                                           id="{{ col.column_key }}"
+                                           class="{{ section.section_key }}-input"
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
+                                           {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                           {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                            data-input-type="popup_contractor"
                                            value="{{ col_value }}"
                                            readonly
                                            style="background-color: #f8f9fa;">
-                                    <button class="btn btn-sm btn-primary" 
+                                    <button class="btn btn-sm btn-primary"
                                             onclick="openContractorSearch('{{ col.column_key }}')">
+                                        검색
+                                    </button>
+                                </div>
+                            {% elif col.column_type == 'popup_company' %}
+                                <!-- 업체 검색 필드 -->
+                                <div class="input-group">
+                                    <input type="text"
+                                           id="{{ col.column_key }}"
+                                           class="{{ section.section_key }}-input"
+                                           data-field="{{ col.column_key }}"
+                                           data-section="{{ section.section_key }}"
+                                           {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                           {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
+                                           data-input-type="popup_company"
+                                           value="{{ col_value }}"
+                                           readonly
+                                           style="background-color: #f8f9fa;">
+                                    <button class="btn btn-sm btn-primary"
+                                            onclick="openCompanySearch('{{ col.column_key }}')">
                                         검색
                                     </button>
                                 </div>
@@ -347,7 +372,7 @@
                           class="editable-content" 
                           placeholder="사고 상세내용을 입력하세요."
                           rows="10" 
-                          style="width: 100%; min-height: 200px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;" data-ckeditor="true">{{ accident.detailed_content | striptags if accident.detailed_content else '' }}</textarea>
+                          style="width: 100%; min-height: 200px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;" data-ckeditor="true">{{ accident.detailed_content if accident.detailed_content else '' }}</textarea>
             </div>
         </div>
     </div>
@@ -594,13 +619,12 @@ function openPopup(fieldKey) {
     
     // 컬럼 설정에서 테이블 정보 가져오기
     const fieldConfig = columns.find(col => col.column_key === fieldKey);
-    if (!fieldConfig || !fieldConfig.input_type_config) {
+    if (!fieldConfig || !fieldConfig.table_name) {
         alert('테이블 설정을 찾을 수 없습니다.');
         return;
     }
-    
-    const tableConfig = JSON.parse(fieldConfig.input_type_config);
-    const popupUrl = `/search-popup?type=table&field=${fieldKey}&table=${tableConfig.table_name}`;
+
+    const popupUrl = `/search-popup?type=table&field=${fieldKey}&table=${fieldConfig.table_name}`;
     const popup = window.open(popupUrl, 'tableSearch', popupOptions);
     
     if (!popup || popup.closed) {
@@ -608,20 +632,15 @@ function openPopup(fieldKey) {
         return;
     }
     
-    window.receiveTableSelection = function(fieldKey, data) {
-        const mainField = document.getElementById(fieldKey);
-        if (mainField && data.display_value) {
-            mainField.value = data.display_value;
-        }
-        
-        // 숨겨진 ID 필드 업데이트
-        const idField = document.getElementById(fieldKey + '_id');
-        if (idField && data.id) {
-            idField.value = data.id;
-        }
-    };
+    // receiveTableSelection 함수는 popup-handler.js에서 통합 처리됨
     
     popup.focus();
+}
+
+// 테이블 팝업 열기 함수 (공통 컴포넌트용)
+function openTablePopup(fieldKey) {
+    // openPopup과 동일한 로직 사용
+    openPopup(fieldKey);
 }
 
 // K사고도 수정 허용(프론트 차단 제거)
@@ -697,24 +716,7 @@ function openPersonSearch(fieldKey) {
         return;
     }
     
-    window.receivePersonSelection = function(fieldKey, data) {
-        const mainField = document.getElementById(fieldKey);
-        if (mainField) {
-            mainField.value = data.employee_name || data.name || '';
-        }
-        
-        // ID 필드 업데이트
-        const idField = document.getElementById(fieldKey + '_id');
-        if (idField) {
-            idField.value = data.employee_id || data.id || '';
-        }
-        
-        // 부서 필드 업데이트 (귀책담당자 부서)
-        const deptField = document.getElementById(fieldKey + '_dept');
-        if (deptField) {
-            deptField.value = data.department_name || data.department || '';
-        }
-    };
+    // receivePersonSelection 함수는 popup-handler.js에서 통합 처리됨
     
     popup.focus();
 }
@@ -743,20 +745,7 @@ function openCompanySearch(fieldKey) {
         return;
     }
     
-    window.receiveCompanySelection = function(fieldKey, data) {
-        document.getElementById(fieldKey).value = data.company_name || '';
-        
-        // 사업자번호 linked 필드들 업데이트 (다양한 패턴 지원)
-        const businessNumberFields = [
-            fieldKey + '_business_number',  // 기본 패턴
-            fieldKey + '_bizno'             // 실제 사용되는 패턴
-        ];
-        
-        businessNumberFields.forEach(fieldId => {
-            const bnField = document.getElementById(fieldId);
-            if (bnField) bnField.value = data.business_number || '';
-        });
-    };
+    // receiveCompanySelection 함수는 popup-handler.js에서 통합 처리됨
     
     popup.focus();
 }
@@ -847,72 +836,14 @@ function openBuildingSearch(fieldKey) {
         return;
     }
     
-    window.receiveBuildingSelection = function(fieldKey, data) {
-        document.getElementById(fieldKey).value = data.building_name || '';
-        const codeField = document.getElementById(fieldKey + '_code');
-        if (codeField) codeField.value = data.building_code || '';
-    };
+    // receiveBuildingSelection 함수는 popup-handler.js에서 통합 처리됨
     
     popup.focus();
 }
 
-// 누락된 팝업 핸들러들 추가 (전역 스코프에서)
-window.receiveDepartmentSelection = function(fieldKey, data) {
-    const mainField = document.getElementById(fieldKey);
-    if (mainField) {
-        mainField.value = data.dept_name || data.department_name || '';
-        mainField.readOnly = true;
-        mainField.style.backgroundColor = '#f3f4f6';
-    }
-    
-    const codeField = document.getElementById(fieldKey + '_code');
-    if (codeField) {
-        codeField.value = data.dept_code || data.department_code || '';
-        codeField.readOnly = true;
-        codeField.style.backgroundColor = '#f3f4f6';
-    }
-    
-    // linked 필드들도 업데이트 (귀책담당자 등)
-    const linkedFields = ['_name', '_dept_code', '_dept_name'];
-    linkedFields.forEach(suffix => {
-        const field = document.getElementById(fieldKey + suffix);
-        if (field) {
-            let value = '';
-            if (suffix === '_name') value = data.dept_name || data.department_name || '';
-            else if (suffix === '_dept_code') value = data.dept_code || data.department_code || '';
-            else if (suffix === '_dept_name') value = data.dept_name || data.department_name || '';
-            
-            field.value = value;
-            field.readOnly = true;
-            field.style.backgroundColor = '#f3f4f6';
-        }
-    });
-};
+// receive*Selection 함수들은 popup-handler.js에서 통합 처리됨
 
-window.receiveContractorSelection = function(fieldKey, data) {
-    const mainField = document.getElementById(fieldKey);
-    if (mainField) {
-        mainField.value = data.worker_name || '';
-        mainField.readOnly = true;
-        mainField.style.backgroundColor = '#f3f4f6';
-    }
-    
-    // linked 필드들 업데이트 (귀책사 사업자번호 등)
-    const linkedFields = ['_id', '_company_name', '_business_number'];
-    linkedFields.forEach(suffix => {
-        const field = document.getElementById(fieldKey + suffix);
-        if (field) {
-            let value = '';
-            if (suffix === '_id') value = data.worker_id || '';
-            else if (suffix === '_company_name') value = data.company_name || '';
-            else if (suffix === '_business_number') value = data.business_number || '';
-            
-            field.value = value;
-            field.readOnly = true;
-            field.style.backgroundColor = '#f3f4f6';
-        }
-    });
-};
+// receiveContractorSelection 함수는 popup-handler.js에서 통합 처리됨
 
 // 숫자 입력 유효성 검사 함수들
 function isNumberKey(evt, inputEl) {

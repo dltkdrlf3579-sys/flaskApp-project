@@ -4,6 +4,7 @@ import logging
 import sqlite3
 from flask import request, render_template, jsonify
 from db_connection import get_db_connection
+from column_utils import normalize_column_types
 
 # 공통: fetchone() 결과 첫 번째 값 안전 추출
 def _first(row, default=0):
@@ -60,48 +61,8 @@ def follow_sop_route():
     """)
     dynamic_columns_rows = cursor.fetchall()
     dynamic_columns = [dict(row) for row in dynamic_columns_rows]
-    # 링크드/팝업 타입 보정
-    try:
-        all_keys = {c.get('column_key') for c in dynamic_columns if c.get('column_key')}
-        suffixes = ['_id','_dept','_department','_department_code','_bizno','_company_bizno','_code','_company']
-        def base_key_of(k: str) -> str:
-            if not isinstance(k, str):
-                return ''
-            for s in suffixes:
-                if k.endswith(s):
-                    return k[:-len(s)]
-            return k
-        def infer_group(bk: str) -> str:
-            if not bk:
-                return ''
-            variants = [bk, bk+'d']
-            if any(((v+'_company_bizno') in all_keys) or ((v+'_bizno') in all_keys) for v in variants):
-                return 'company'
-            if any(((v+'_dept') in all_keys) or ((v+'_department') in all_keys) or ((v+'_department_code') in all_keys) for v in variants):
-                return 'department'
-            if any(((v+'_id') in all_keys) for v in variants):
-                return 'person'
-            if any(((v+'_company') in all_keys) for v in variants):
-                return 'contractor'
-            return ''
-        popup_map = {'person':'popup_person','company':'popup_company','department':'popup_department','contractor':'popup_contractor'}
-        for col in dynamic_columns:
-            ck = col.get('column_key') or ''
-            bk = base_key_of(ck)
-            grp = infer_group(bk)
-            if ck.endswith('_id') or ck.endswith('_company') or ck.endswith('_company_bizno') or ck.endswith('_bizno'):
-                col['column_type'] = 'linked_text'
-                continue
-            if ck.endswith('_dept') or ck.endswith('_department') or ck.endswith('_department_code'):
-                col['column_type'] = 'linked_dept'
-                continue
-            if grp and ck == bk:
-                ct = col.get('column_type')
-                if not ct or ct in ('text','popup','table','table_select'):
-                    col['column_type'] = popup_map.get(grp, ct)
-                col['input_type'] = col.get('input_type') or 'table'
-    except Exception as _e:
-        logging.warning(f"follow_sop list: normalize types failed: {_e}")
+    # 컬럼 타입 정규화 - 공통 함수 사용
+    dynamic_columns = normalize_column_types(dynamic_columns)
     try:
         logging.info(f"[FOLLOW_SOP] dynamic_columns={len(dynamic_columns)} first={[c.get('column_key') for c in dynamic_columns[:5]]}")
     except Exception:
@@ -453,11 +414,14 @@ def follow_sop_register():
             ck = col.get('column_key') or ''
             bk = base_key_of(ck)
             grp = infer_group(bk)
-            if ck.endswith('_id') or ck.endswith('_company') or ck.endswith('_company_bizno') or ck.endswith('_bizno'):
-                col['column_type'] = 'linked_text'
-                continue
-            if ck.endswith('_dept') or ck.endswith('_department') or ck.endswith('_department_code'):
+            # dept 관련은 별도 처리 유지
+            if ck.endswith(('_dept', '_department', '_department_code')):
                 col['column_type'] = 'linked_dept'
+                continue
+            # 나머지 linked 필드는 determine_linked_type 사용
+            if (ck.endswith('_id') or ck.endswith('_bizno') or
+                ck.endswith('_company') or ck.endswith('_company_bizno')):
+                col['column_type'] = determine_linked_type(col)
                 continue
             if grp and ck == bk:
                 ct = col.get('column_type')
@@ -466,6 +430,10 @@ def follow_sop_register():
                 col['input_type'] = col.get('input_type') or 'table'
     except Exception as _e:
         logging.warning(f"follow_sop register: normalize types failed: {_e}")
+
+    # 컬럼 타입 정규화 - 공통 함수 사용 (DB의 잘못된 타입도 자동 수정)
+    dynamic_columns = normalize_column_types(dynamic_columns)
+
     try:
         logging.info(f"[FULL_PROCESS] dynamic_columns={len(dynamic_columns)} first={[c.get('column_key') for c in dynamic_columns[:5]]}")
     except Exception:
@@ -479,20 +447,18 @@ def follow_sop_register():
     # created_at 기준으로 번호 생성
     work_req_no = generate_followsop_number(DB_PATH, created_at_dt)
     
-    # work_req_no는 column_config에 없으므로 하드코딩
+    # work_req_no와 created_at을 하드코딩
     basic_fields = [
-        {'column_key': 'work_req_no', 'column_name': '점검번호', 'column_type': 'text', 
-         'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info', 'default_value': work_req_no}
+        {'column_key': 'work_req_no', 'column_name': '점검번호', 'column_type': 'text',
+         'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info', 'default_value': work_req_no},
+        {'column_key': 'created_at', 'column_name': '등록일', 'column_type': 'datetime',
+         'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info', 'default_value': created_at}
     ]
-    
-    # created_at이 column_config에 있으면 거기서 가져오고 default_value만 설정
-    for col in dynamic_columns:
-        if col['column_key'] == 'created_at':
-            col['default_value'] = created_at
-            break
-    
-    # basic_info의 dynamic_columns 추가
-    basic_info_dynamic = [col for col in dynamic_columns if col.get('tab') == 'basic_info']
+
+    # basic_info의 dynamic_columns 추가 (work_req_no, created_at 제외)
+    basic_info_dynamic = [col for col in dynamic_columns
+                         if col.get('tab') == 'basic_info'
+                         and col.get('column_key') not in ['work_req_no', 'created_at']]
     basic_fields.extend(basic_info_dynamic)
     
     # 섹션별로 컬럼 분류
@@ -529,12 +495,10 @@ def follow_sop_register():
 def follow_sop_detail(work_req_no):
     """Follow SOP 상세정보 페이지"""
     import json
-    import sqlite3
     logging.info(f"Follow SOP 상세 정보 조회: {work_req_no}")
-    
+
     # 테이블 존재 여부를 먼저 확인
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
     # 사용 가능한 테이블 확인
@@ -572,50 +536,37 @@ def follow_sop_detail(work_req_no):
     except:
         pass
     
-    # Follow SOP 정보 조회 (메인 테이블 고정)
-    sop_row = None
+    # Follow SOP 정보 조회 - 필요한 모든 컬럼 명시
+    sop = {}
     try:
         cursor.execute("""
-            SELECT * FROM follow_sop
+            SELECT work_req_no, custom_data, detailed_content,
+                   created_at, created_by, updated_at, updated_by, is_deleted
+            FROM follow_sop
             WHERE work_req_no = ? AND (is_deleted = 0 OR is_deleted IS NULL)
         """, (work_req_no,))
         sop_row = cursor.fetchone()
+
+        if sop_row:
+            # 명시한 순서대로 매핑 (컬럼 추가/삭제 시 여기만 수정)
+            sop = {
+                'work_req_no': sop_row[0],
+                'custom_data': sop_row[1],
+                'detailed_content': sop_row[2],
+                'created_at': sop_row[3],
+                'created_by': sop_row[4],
+                'updated_at': sop_row[5],
+                'updated_by': sop_row[6],
+                'is_deleted': sop_row[7]
+            }
     except Exception as e:
         logging.error(f"follow_sop 조회 오류: {e}")
-    
-    if not sop_row:
+
+    if not sop:
         conn.close()
         return "Follow SOP를 찾을 수 없습니다.", 404
     
-    sop = dict(sop_row)
-    
-    # details 테이블에서 상세내용 병합 (테이블 존재 확인 후 조회)
-    try:
-        details_exists = False
-        if hasattr(conn, 'is_postgres') and conn.is_postgres:
-            cursor.execute("""
-                SELECT EXISTS (
-                    SELECT 1 FROM information_schema.tables 
-                    WHERE table_name = 'followsop_details'
-                )
-            """)
-            details_exists = bool(_first(cursor.fetchone(), 0))
-        else:
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='followsop_details'")
-            details_exists = cursor.fetchone() is not None
-        if details_exists:
-            detail_row = cursor.execute("""
-                SELECT detailed_content FROM followsop_details
-                WHERE work_req_no = ?
-            """, (work_req_no,)).fetchone()
-            if detail_row and detail_row['detailed_content']:
-                sop['detailed_content'] = detail_row['detailed_content']
-    except Exception as e:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-        logging.error(f"followsop_details 조회 오류(롤백): {e}")
+    # details 테이블 조회는 custom_data 평탄화 후에 수행 (아래에서 처리)
     
     # custom_data 평탄화 (safety-instruction 방식)
     custom_data = {}
@@ -628,6 +579,45 @@ def follow_sop_detail(work_req_no):
             custom_data = {}
         if isinstance(custom_data, dict):
             sop.update(custom_data)
+    
+    # follow_sop_details 테이블에서 detailed_content 조회
+    try:
+        cursor.execute("""
+            SELECT detailed_content
+            FROM follow_sop_details
+            WHERE work_req_no = ?
+        """, (work_req_no,))
+        detail_row = cursor.fetchone()
+        if detail_row and detail_row[0]:
+            sop['detailed_content'] = detail_row[0]
+            print(f"[FS DETAIL DEBUG] Loaded detailed_content from follow_sop_details: {len(detail_row[0])} chars")
+            print(f"[FS DETAIL DEBUG] detailed_content value: {detail_row[0][:100]}")  # 디버깅용
+        else:
+            # 메인 테이블에서 읽기 시도
+            try:
+                cursor.execute("""
+                    SELECT detailed_content
+                    FROM follow_sop
+                    WHERE work_req_no = ?
+                """, (work_req_no,))
+                main_row = cursor.fetchone()
+                if main_row and main_row[0]:
+                    sop['detailed_content'] = main_row[0]
+                    print(f"[FS DETAIL DEBUG] Loaded detailed_content from main table: {len(main_row[0])} chars")
+                else:
+                    sop['detailed_content'] = ''
+                    print("[FS DETAIL DEBUG] No detailed_content found, using empty string")
+            except:
+                sop['detailed_content'] = ''
+                print("[FS DETAIL DEBUG] No detailed_content column in main table")
+    except Exception as e:
+        print(f"[FS DETAIL DEBUG] Failed to load from follow_sop_details: {e}")
+        # 기존 custom_data에서 읽기 (하위 호환성)
+        if 'detailed_content' not in sop:
+            sop['detailed_content'] = ''
+
+    # 최종 확인
+    print(f"[FS DETAIL DEBUG] Final sop.detailed_content: {sop.get('detailed_content', 'NOT SET')[:100]}")
     
     # 섹션별 컬럼 정보 가져오기
     from section_service import SectionConfigService
@@ -670,11 +660,14 @@ def follow_sop_detail(work_req_no):
             ck = col.get('column_key') or ''
             bk = base_key_of(ck)
             grp = infer_group(bk)
-            if ck.endswith('_id') or ck.endswith('_company') or ck.endswith('_company_bizno') or ck.endswith('_bizno'):
-                col['column_type'] = 'linked_text'
-                continue
-            if ck.endswith('_dept') or ck.endswith('_department') or ck.endswith('_department_code'):
+            # dept 관련은 별도 처리 유지
+            if ck.endswith(('_dept', '_department', '_department_code')):
                 col['column_type'] = 'linked_dept'
+                continue
+            # 나머지 linked 필드는 determine_linked_type 사용
+            if (ck.endswith('_id') or ck.endswith('_bizno') or
+                ck.endswith('_company') or ck.endswith('_company_bizno')):
+                col['column_type'] = determine_linked_type(col)
                 continue
             if grp and ck == bk:
                 ct = col.get('column_type')
@@ -683,14 +676,23 @@ def follow_sop_detail(work_req_no):
                 col['input_type'] = col.get('input_type') or 'table'
     except Exception as _e:
         logging.warning(f"follow_sop detail: normalize types failed: {_e}")
-    
-    # 기본정보 필드 추가 (work_req_no만 하드코딩, created_at은 column_config에서 가져옴)
+
+    # 컬럼 타입 정규화 - 공통 함수 사용 (DB의 잘못된 타입도 자동 수정)
+    dynamic_columns = normalize_column_types(dynamic_columns)
+
+    # 기본정보 필드 추가 (work_req_no, created_at 하드코딩)
     basic_fields = [
-        {'column_key': 'work_req_no', 'column_name': '점검번호', 'column_type': 'text', 
-         'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info'}
+        {'column_key': 'work_req_no', 'column_name': '점검번호', 'column_type': 'text',
+         'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info'},
+        {'column_key': 'created_at', 'column_name': '등록일', 'column_type': 'text',
+         'is_required': 0, 'is_readonly': 1, 'tab': 'basic_info'}
     ]
-    
-    # basic_info 섹션의 dynamic_columns 추가 (created_at 포함)
+
+    # dynamic_columns에서 work_req_no와 created_at 완전히 제거
+    dynamic_columns = [col for col in dynamic_columns
+                      if col.get('column_key') not in ['work_req_no', 'created_at']]
+
+    # basic_info 섹션의 dynamic_columns 추가
     basic_info_dynamic = [col for col in dynamic_columns if col.get('tab') == 'basic_info']
     basic_fields.extend(basic_info_dynamic)
     
@@ -705,12 +707,23 @@ def follow_sop_detail(work_req_no):
     # 디버깅용 로그
     logging.info(f"Follow SOP Detail - sections: {sections}")
     logging.info(f"Follow SOP Detail - section_columns: {section_columns}")
-    
+
+    # 첨부파일 정보 가져오기
+    attachments = []
+    try:
+        from board_services import AttachmentService
+        attachment_service = AttachmentService('follow_sop', DB_PATH)
+        attachments = attachment_service.get_list(work_req_no)
+        logging.info(f"[DEBUG] Loaded {len(attachments)} attachments for {work_req_no}")
+    except Exception as e:
+        logging.error(f"첨부파일 조회 오류: {e}")
+        attachments = []
+
     conn.close()
-    
+
     # 팝업 여부 확인
     is_popup = request.args.get('popup') == '1'
-    
+
     # 전역 키(활성 컬럼) 전달
     all_keys = [c.get('column_key') for c in dynamic_columns if c.get('column_key')]
     return render_template('follow-sop-detail.html',
@@ -719,6 +732,7 @@ def follow_sop_detail(work_req_no):
                          sections=sections,
                          section_columns=section_columns,
                          all_column_keys=all_keys,
+                         attachments=attachments,  # 첨부파일 데이터 추가
                          is_popup=is_popup,
                          menu=MENU_CONFIG)
 
@@ -727,32 +741,78 @@ def register_follow_sop():
     """새 Follow SOP 등록"""
     conn = None
     try:
-        # safety-instruction과 동일한 방식으로 form data 처리
         import json
         from timezone_config import get_korean_time_str, get_korean_time
         from db.upsert import safe_upsert
-        
-        data = json.loads(request.form.get('data', '{}'))
+        from section_service import SectionConfigService
+
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
+        # 섹션 정보 동적으로 가져오기
+        section_service = SectionConfigService('follow_sop', DB_PATH)
+        sections = section_service.get_sections()
+
+        # 섹션이 없으면 기본값 사용 (하위 호환성)
+        if not sections:
+            sections = [
+                {'section_key': 'basic_info'},
+                {'section_key': 'work_info'},
+                {'section_key': 'additional'}
+            ]
+
+        # 모든 필드를 모을 딕셔너리
+        all_fields = {}
+
+        # 각 섹션별로 데이터 수집
+        for section in sections:
+            section_key = section['section_key']
+            section_data_str = request.form.get(section_key, '{}')
+            logging.info(f"[FS REGISTER DEBUG] 섹션 {section_key} raw: {section_data_str[:500]}")
+            try:
+                section_data = json.loads(section_data_str)
+                all_fields.update(section_data)
+                logging.info(f"[FS REGISTER] 섹션 {section_key} 데이터: {section_data}")
+                # 실제 값 확인
+                for k, v in section_data.items():
+                    if v and v not in ('', [], None):
+                        logging.info(f"  -> {k}: {str(v)[:100]}")
+            except Exception as e:
+                logging.warning(f"[FS REGISTER] 섹션 {section_key} 파싱 실패: {e}")
+
+        # 하위 호환성: custom_data가 있으면 병합
+        custom_data_raw = request.form.get('custom_data', '{}')
+        try:
+            custom_data_compat = json.loads(custom_data_raw)
+            if custom_data_compat:
+                all_fields.update(custom_data_compat)
+                logging.info(f"[FS REGISTER] custom_data 병합: {custom_data_compat}")
+        except Exception:
+            pass
+
+        # 최종 custom_data
+        custom_data = all_fields
+
         # created_at 기준으로 work_req_no 생성 (FS + yyMMddhhmm + 카운터)
         from id_generator import generate_followsop_number
         created_at_dt = get_korean_time()
         work_req_no = generate_followsop_number(DB_PATH, created_at_dt)
-        
-        # custom_data 처리
-        custom_data = data.get('custom_data', {})
+
+        # detailed_content 가져오기
+        detailed_content = request.form.get('detailed_content', '')
+        logging.info(f"[FS REGISTER] detailed_content 길이: {len(detailed_content)}")
+
+        # custom_data를 JSON 문자열로 변환
         if isinstance(custom_data, dict):
-            import json
             custom_data_json = json.dumps(custom_data, ensure_ascii=False)
         else:
             custom_data_json = custom_data
-        
-        # Follow SOP 등록 - 메인 테이블로 저장
+
+        # Follow SOP 등록 - 메인 테이블로 저장 (detailed_content 포함)
         upsert_data = {
             'work_req_no': work_req_no,
             'custom_data': custom_data_json,
+            'detailed_content': detailed_content,  # 메인 테이블에도 저장
             'created_at': created_at_dt.strftime('%Y-%m-%d %H:%M:%S'),
             'created_by': session.get('user_id', 'system'),
             'is_deleted': 0
@@ -763,9 +823,21 @@ def register_follow_sop():
             'follow_sop',
             upsert_data,
             conflict_cols=['work_req_no'],
-            update_cols=['custom_data', 'updated_at', 'is_deleted']
+            update_cols=['custom_data', 'detailed_content', 'updated_at', 'is_deleted']
         )
-        
+
+        # Details 테이블 저장 (단일 경로)
+        try:
+            from db.upsert import safe_upsert as _su
+            _su(conn, 'follow_sop_details', {
+                'work_req_no': work_req_no,
+                'detailed_content': detailed_content,
+                'updated_at': None
+            })
+            logging.info("[FS REGISTER] details 테이블에도 저장 완료")
+        except Exception as _e_det:
+            logging.warning(f"[FS REGISTER] details upsert warning: {_e_det}")
+
         conn.commit()
         
         return jsonify({
@@ -907,11 +979,14 @@ def full_process_route():
             ck = col.get('column_key') or ''
             bk = base_key_of(ck)
             grp = infer_group(bk)
-            if ck.endswith('_id') or ck.endswith('_company') or ck.endswith('_company_bizno') or ck.endswith('_bizno'):
-                col['column_type'] = 'linked_text'
-                continue
-            if ck.endswith('_dept') or ck.endswith('_department') or ck.endswith('_department_code'):
+            # dept 관련은 별도 처리 유지
+            if ck.endswith(('_dept', '_department', '_department_code')):
                 col['column_type'] = 'linked_dept'
+                continue
+            # 나머지 linked 필드는 determine_linked_type 사용
+            if (ck.endswith('_id') or ck.endswith('_bizno') or
+                ck.endswith('_company') or ck.endswith('_company_bizno')):
+                col['column_type'] = determine_linked_type(col)
                 continue
             if grp and ck == bk:
                 ct = col.get('column_type')
@@ -920,7 +995,10 @@ def full_process_route():
                 col['input_type'] = col.get('input_type') or 'table'
     except Exception as _e:
         logging.warning(f"full_process register/detail: normalize types failed: {_e}")
-    
+
+    # 컬럼 타입 정규화 - 공통 함수 사용 (DB의 잘못된 타입도 자동 수정)
+    dynamic_columns = normalize_column_types(dynamic_columns)
+
     # 섹션별로 컬럼 분류
     section_columns = {}
     for section in sections:
@@ -1159,12 +1237,18 @@ def full_process_register():
     fullprocess_number = generate_fullprocess_number(DB_PATH, created_at_dt)
     
     basic_fields = [
-        {'column_key': 'fullprocess_number', 'column_name': '평가번호', 'column_type': 'text', 
+        {'column_key': 'fullprocess_number', 'column_name': '평가번호', 'column_type': 'text',
          'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info', 'default_value': fullprocess_number},
-        {'column_key': 'created_at', 'column_name': '등록일', 'column_type': 'datetime', 
+        {'column_key': 'created_at', 'column_name': '등록일', 'column_type': 'datetime',
          'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info', 'default_value': created_at}
     ]
-    
+
+    # basic_info의 dynamic_columns 추가 (fullprocess_number, created_at 제외)
+    basic_info_dynamic = [col for col in dynamic_columns
+                         if col.get('tab') == 'basic_info'
+                         and col.get('column_key') not in ['fullprocess_number', 'created_at']]
+    basic_fields.extend(basic_info_dynamic)
+
     # 섹션별로 컬럼 분류
     section_columns = {'basic_info': basic_fields}
     for section in sections:
@@ -1194,12 +1278,10 @@ def full_process_register():
 def full_process_detail(fullprocess_number):
     """Full Process 상세정보 페이지"""
     import json
-    import sqlite3
     logging.info(f"Full Process 상세 정보 조회: {fullprocess_number}")
-    
+
     # 테이블 존재 여부를 먼저 확인
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
     # 사용 가능한 테이블 확인
@@ -1237,52 +1319,45 @@ def full_process_detail(fullprocess_number):
     except:
         pass
     
-    # Full Process 정보 조회
-    process_row = None
-    
-    # 메인 테이블에서만 조회
+    # Full Process 정보 조회 - 필요한 모든 컬럼 명시 (follow-sop 방식)
+    process = {}
+
     try:
-        cursor.execute("""
-            SELECT * FROM full_process
+        # 테이블의 모든 컬럼 이름 가져오기
+        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+            cursor.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'full_process'
+                ORDER BY ordinal_position
+            """)
+            columns = [row[0] for row in cursor.fetchall()]
+        else:
+            cursor.execute("PRAGMA table_info(full_process)")
+            columns = [row[1] for row in cursor.fetchall()]
+
+        # 동적으로 SELECT 쿼리 생성
+        select_columns = ', '.join(columns)
+        cursor.execute(f"""
+            SELECT {select_columns}
+            FROM full_process
             WHERE fullprocess_number = ? AND (is_deleted = 0 OR is_deleted IS NULL)
         """, (fullprocess_number,))
+
         process_row = cursor.fetchone()
+
+        if process_row:
+            # 컬럼 이름과 값을 매핑하여 딕셔너리 생성
+            process = {columns[i]: process_row[i] for i in range(len(columns))}
+            logging.info(f"[DEBUG] Loaded process data with columns: {list(process.keys())}")
     except Exception as e:
         logging.error(f"full_process 조회 오류: {e}")
-    
-    if not process_row:
+
+    if not process:
         conn.close()
         return "Full Process를 찾을 수 없습니다.", 404
     
-    process = dict(process_row)
-    
-    # details 테이블에서 상세내용 병합 (테이블 존재 확인 후 조회)
-    try:
-        details_exists = False
-        if hasattr(conn, 'is_postgres') and conn.is_postgres:
-            cursor.execute("""
-                SELECT EXISTS (
-                    SELECT 1 FROM information_schema.tables 
-                    WHERE table_name = 'fullprocess_details'
-                )
-            """)
-            details_exists = bool(cursor.fetchone()[0])
-        else:
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='fullprocess_details'")
-            details_exists = cursor.fetchone() is not None
-        if details_exists:
-            detail_row = cursor.execute("""
-                SELECT detailed_content FROM fullprocess_details
-                WHERE fullprocess_number = ?
-            """, (fullprocess_number,)).fetchone()
-            if detail_row and detail_row['detailed_content']:
-                process['detailed_content'] = detail_row['detailed_content']
-    except Exception as e:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-        logging.error(f"fullprocess_details 조회 오류(롤백): {e}")
+    # 삭제 - 이 부분은 아래에서 처리함
     
     # custom_data 평탄화 (safety-instruction 방식)
     custom_data = {}
@@ -1295,11 +1370,37 @@ def full_process_detail(fullprocess_number):
             custom_data = {}
         if isinstance(custom_data, dict):
             process.update(custom_data)
-    
-    # 섹션별 컬럼 정보 가져오기
+
+    # 섹션별 컬럼 정보 가져오기 (섹션 로드를 먼저 해야 함)
     from section_service import SectionConfigService
     section_service = SectionConfigService('full_process', DB_PATH)
     sections = section_service.get_sections()
+
+    # full_process는 follow_sop와 같이 custom_data에 모든 데이터가 저장됨
+    # 별도의 섹션 컬럼이 없으므로 섹션별 데이터 병합은 불필요
+    section_data = {}
+    logging.info(f"[DEBUG] All data merged from custom_data: {list(custom_data.keys())}")
+    
+    # full_process_details 테이블에서 detailed_content 조회 (follow_sop와 동일한 방식)
+    try:
+        cursor.execute("""
+            SELECT detailed_content 
+            FROM full_process_details 
+            WHERE fullprocess_number = ?
+        """, (fullprocess_number,))
+        detail_row = cursor.fetchone()
+        if detail_row and detail_row[0]:
+            process['detailed_content'] = detail_row[0]
+            logging.info(f"Loaded detailed_content from full_process_details: {len(detail_row[0])} chars")
+        else:
+            # 기존 custom_data에서 읽기 (하위 호환성)
+            if 'detailed_content' not in process:
+                process['detailed_content'] = ''
+    except Exception as e:
+        logging.warning(f"Failed to load from full_process_details: {e}")
+        # 기존 custom_data에서 읽기 (하위 호환성)
+        if 'detailed_content' not in process:
+            process['detailed_content'] = ''
     
     # 동적 컬럼 설정 가져오기
     cursor.execute("""
@@ -1320,12 +1421,20 @@ def full_process_detail(fullprocess_number):
     
     # 기본정보 필드 추가 (하드코딩)
     basic_fields = [
-        {'column_key': 'fullprocess_number', 'column_name': '평가번호', 'column_type': 'text', 
+        {'column_key': 'fullprocess_number', 'column_name': '평가번호', 'column_type': 'text',
          'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info'},
-        {'column_key': 'created_at', 'column_name': '등록일', 'column_type': 'datetime', 
+        {'column_key': 'created_at', 'column_name': '등록일', 'column_type': 'datetime',
          'is_required': 1, 'is_readonly': 1, 'tab': 'basic_info'}
     ]
-    
+
+    # dynamic_columns에서 fullprocess_number와 created_at 완전히 제거
+    dynamic_columns = [col for col in dynamic_columns
+                      if col.get('column_key') not in ['fullprocess_number', 'created_at']]
+
+    # basic_info 섹션의 dynamic_columns 추가
+    basic_info_dynamic = [col for col in dynamic_columns if col.get('tab') == 'basic_info']
+    basic_fields.extend(basic_info_dynamic)
+
     # 섹션별로 컬럼 분류
     section_columns = {'basic_info': basic_fields}
     for section in sections:
@@ -1336,18 +1445,54 @@ def full_process_detail(fullprocess_number):
     
     conn.close()
     
+    # 드롭다운 옵션 로드
+    basic_options = {}
+    try:
+        from app import get_dropdown_options_for_display as _get_opts
+        for col in dynamic_columns:
+            if col.get('column_type') == 'dropdown':
+                col_key = col.get('column_key')
+                if col_key:
+                    opts = _get_opts('full_process', col_key)
+                    if opts:
+                        basic_options[col_key] = opts
+    except Exception as e:
+        logging.error(f"Failed to load dropdown options: {e}")
+
+    # 첨부파일 정보 가져오기
+    attachments = []
+    try:
+        from board_services import AttachmentService
+        attachment_service = AttachmentService('full_process', DB_PATH)
+        attachments = attachment_service.get_list(fullprocess_number)
+        logging.info(f"[DEBUG] Loaded {len(attachments)} attachments for {fullprocess_number}")
+    except Exception as e:
+        logging.error(f"첨부파일 조회 오류: {e}")
+        attachments = []
+
     # 팝업 여부 확인
     is_popup = request.args.get('popup') == '1'
-    
+
     # 전역 키(활성 컬럼) 전달
     all_keys = [c.get('column_key') for c in dynamic_columns if c.get('column_key')]
+
+    # 디버깅: 템플릿에 전달되는 데이터 확인
+    logging.info(f"[TEMPLATE DEBUG] process keys: {list(process.keys())}")
+    logging.info(f"[TEMPLATE DEBUG] custom_data keys: {list(custom_data.keys())}")
+    logging.info(f"[TEMPLATE DEBUG] issue_date in process: {process.get('issue_date')}")
+    logging.info(f"[TEMPLATE DEBUG] department in process: {process.get('department')}")
+    logging.info(f"[TEMPLATE DEBUG] manager in process: {process.get('manager')}")
+
     return render_template('full-process-detail.html',
                          process=process,
                          instruction=process,  # 템플릿 호환용 별칭
                          custom_data=custom_data,
+                         section_data=section_data,  # 섹션별 데이터 추가
                          sections=sections,
                          section_columns=section_columns,
                          all_column_keys=all_keys,
+                         basic_options=basic_options,  # 드롭다운 옵션 추가
+                         attachments=attachments,  # 첨부파일 데이터 추가
                          is_popup=is_popup,
                          menu=MENU_CONFIG)
 
@@ -1356,32 +1501,78 @@ def register_full_process():
     """새 Full Process 등록"""
     conn = None
     try:
-        # safety-instruction과 동일한 방식으로 form data 처리
         import json
         from timezone_config import get_korean_time_str, get_korean_time
         from db.upsert import safe_upsert
-        
-        data = json.loads(request.form.get('data', '{}'))
+        from section_service import SectionConfigService
+
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
+        # 섹션 정보 동적으로 가져오기
+        section_service = SectionConfigService('full_process', DB_PATH)
+        sections = section_service.get_sections()
+
+        # 섹션이 없으면 기본값 사용 (하위 호환성)
+        if not sections:
+            sections = [
+                {'section_key': 'basic_info'},
+                {'section_key': 'process_info'},
+                {'section_key': 'additional'}
+            ]
+
+        # 모든 필드를 모을 딕셔너리
+        all_fields = {}
+
+        # 각 섹션별로 데이터 수집
+        for section in sections:
+            section_key = section['section_key']
+            section_data_str = request.form.get(section_key, '{}')
+            logging.info(f"[FP REGISTER DEBUG] 섹션 {section_key} raw: {section_data_str[:500]}")
+            try:
+                section_data = json.loads(section_data_str)
+                all_fields.update(section_data)
+                logging.info(f"[FP REGISTER] 섹션 {section_key} 데이터: {section_data}")
+                # 실제 값 확인
+                for k, v in section_data.items():
+                    if v and v not in ('', [], None):
+                        logging.info(f"  -> {k}: {str(v)[:100]}")
+            except Exception as e:
+                logging.warning(f"[FP REGISTER] 섹션 {section_key} 파싱 실패: {e}")
+
+        # 하위 호환성: custom_data가 있으면 병합
+        custom_data_raw = request.form.get('custom_data', '{}')
+        try:
+            custom_data_compat = json.loads(custom_data_raw)
+            if custom_data_compat:
+                all_fields.update(custom_data_compat)
+                logging.info(f"[FP REGISTER] custom_data 병합: {custom_data_compat}")
+        except Exception:
+            pass
+
+        # 최종 custom_data
+        custom_data = all_fields
+
         # created_at 기준으로 fullprocess_number 생성 (FP + yyMMddhhmm + 카운터)
         from id_generator import generate_fullprocess_number
         created_at_dt = get_korean_time()
         fullprocess_number = generate_fullprocess_number(DB_PATH, created_at_dt)
-        
-        # custom_data 처리
-        custom_data = data.get('custom_data', {})
+
+        # detailed_content 가져오기
+        detailed_content = request.form.get('detailed_content', '')
+        logging.info(f"[FP REGISTER] detailed_content 길이: {len(detailed_content)}")
+
+        # custom_data를 JSON 문자열로 변환
         if isinstance(custom_data, dict):
-            import json
             custom_data_json = json.dumps(custom_data, ensure_ascii=False)
         else:
             custom_data_json = custom_data
-        
-        # Full Process 등록 - 메인 테이블 저장
+
+        # Full Process 등록 - 메인 테이블 저장 (detailed_content 포함)
         upsert_data = {
             'fullprocess_number': fullprocess_number,
             'custom_data': custom_data_json,
+            'detailed_content': detailed_content,  # 메인 테이블에도 저장
             'created_at': created_at_dt.strftime('%Y-%m-%d %H:%M:%S'),
             'created_by': session.get('user_id', 'system'),
             'is_deleted': 0
@@ -1391,9 +1582,21 @@ def register_full_process():
             'full_process',
             upsert_data,
             conflict_cols=['fullprocess_number'],
-            update_cols=['custom_data', 'updated_at', 'is_deleted']
+            update_cols=['custom_data', 'detailed_content', 'updated_at', 'is_deleted']
         )
-        
+
+        # Details 테이블 저장 (단일 경로)
+        try:
+            from db.upsert import safe_upsert as _su
+            _su(conn, 'full_process_details', {
+                'fullprocess_number': fullprocess_number,
+                'detailed_content': detailed_content,
+                'updated_at': None
+            })
+            logging.info("[FP REGISTER] details 테이블에도 저장 완료")
+        except Exception as _e_det:
+            logging.warning(f"[FP REGISTER] details upsert warning: {_e_det}")
+
         conn.commit()
         
         return jsonify({

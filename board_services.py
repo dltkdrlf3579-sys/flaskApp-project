@@ -2,7 +2,6 @@
 보드 서비스 계층
 각 보드에 대한 공통 서비스 로직을 제공합니다.
 """
-import sqlite3
 import json
 import logging
 from datetime import datetime
@@ -290,7 +289,7 @@ class CodeService:
     def list(self, column_key: str) -> List[Dict]:
         """드롭다운 코드 목록 조회"""
         conn = get_db_connection(self.db_path)
-        conn.row_factory = sqlite3.Row
+        # PostgreSQL에서는 row_factory 불필요 (psycopg이 자동 처리)
         
         # v2 테이블 우선 조회
         codes = conn.execute("""
@@ -676,37 +675,38 @@ class AttachmentService:
             conn = get_db_connection(self.db_path)
             should_close = True
         
-        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
         
-        # 컬럼 존재 여부 체크 유틸
+        # 컬럼 존재 여부 체크
         def _has_col(col: str) -> bool:
             try:
-                if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                    cur = conn.cursor()
-                    cur.execute(
-                        "SELECT 1 FROM information_schema.columns WHERE table_name = %s AND column_name = %s",
-                        (self.attachment_table.lower(), col.lower())
-                    )
-                    return cur.fetchone() is not None
-                else:
-                    cur = conn.cursor()
-                    cur.execute(f"PRAGMA table_info({self.attachment_table})")
-                    return any(r[1].lower() == col.lower() for r in cur.fetchall())
+                cursor.execute(
+                    "SELECT 1 FROM information_schema.columns WHERE table_name = %s AND column_name = %s",
+                    (self.attachment_table.lower(), col.lower())
+                )
+                return cursor.fetchone() is not None
             except Exception:
                 return False
 
+        # PostgreSQL native query
         where_deleted = " AND is_deleted = 0" if _has_col('is_deleted') else ""
         order_col = 'uploaded_at' if _has_col('uploaded_at') else 'id'
-        attachments = conn.execute(
-            f"SELECT * FROM {self.attachment_table} WHERE {self.id_column} = ?{where_deleted} ORDER BY {order_col} DESC",
-            (item_id,)
-        ).fetchall()
+
+        query = f"SELECT * FROM {self.attachment_table} WHERE {self.id_column} = %s{where_deleted} ORDER BY {order_col} DESC"
+        cursor.execute(query, (item_id,))
+        attachments = cursor.fetchall()
         
         # 새로 생성한 연결만 닫기
         if should_close:
             conn.close()
         
         return [dict(attachment) for attachment in attachments]
+
+    def get_list(self, item_id: str) -> List[Dict]:
+        """
+        list 메서드의 별칭 (호환성 유지)
+        """
+        return self.list(item_id)
     
     def add(self, item_id: str, file, meta: Dict = None) -> int:
         """
@@ -756,12 +756,16 @@ class AttachmentService:
             should_close = True
         
         cursor = conn.cursor()
-        
-        cursor.execute_with_returning_id(f"""
+
+        # PostgreSQL RETURNING clause
+        sql = f"""
             INSERT INTO {self.attachment_table}
             ({self.id_column}, file_name, file_path, file_size, mime_type, description, uploaded_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """
+
+        cursor.execute(sql, (
             item_id,
             original_filename,
             file_path,
@@ -770,8 +774,10 @@ class AttachmentService:
             meta.get('description', '') if meta else '',
             meta.get('uploaded_by', 'system') if meta else 'system'
         ))
-        
-        attachment_id = cursor.lastrowid
+
+        # PostgreSQL에서 RETURNING 결과 가져오기
+        result = cursor.fetchone()
+        attachment_id = result['id'] if result else None
         conn.commit()
         
         # 새로 생성한 연결만 닫기
@@ -807,11 +813,11 @@ class AttachmentService:
         params = []
         
         if 'description' in meta:
-            update_fields.append("description = ?")
+            update_fields.append("description = %s")
             params.append(meta['description'])
-        
+
         if 'uploaded_by' in meta:
-            update_fields.append("uploaded_by = ?")
+            update_fields.append("uploaded_by = %s")
             params.append(meta['uploaded_by'])
         
         if not update_fields:
@@ -824,7 +830,7 @@ class AttachmentService:
         cursor.execute(f"""
             UPDATE {self.attachment_table}
             SET {', '.join(update_fields)}
-            WHERE id = ? AND is_deleted = 0
+            WHERE id = %s AND is_deleted = 0
         """, params)
         
         conn.commit()
@@ -863,14 +869,14 @@ class AttachmentService:
             # 파일 경로 먼저 조회
             cursor.execute(f"""
                 SELECT file_path FROM {self.attachment_table}
-                WHERE id IN ({','.join('?' * len(ids))})
+                WHERE id IN ({','.join(['%s'] * len(ids))})
             """, ids)
             file_paths = [row[0] for row in cursor.fetchall()]
             
             # DB에서 삭제
             cursor.execute(f"""
                 DELETE FROM {self.attachment_table}
-                WHERE id IN ({','.join('?' * len(ids))})
+                WHERE id IN ({','.join(['%s'] * len(ids))})
             """, ids)
             
             # 실제 파일 삭제
@@ -887,7 +893,7 @@ class AttachmentService:
             cursor.execute(f"""
                 UPDATE {self.attachment_table}
                 SET is_deleted = 1
-                WHERE id IN ({','.join('?' * len(ids))})
+                WHERE id IN ({','.join(['%s'] * len(ids))})
             """, ids)
         
         deleted_count = cursor.rowcount
@@ -919,13 +925,14 @@ class AttachmentService:
             conn = get_db_connection(self.db_path)
             should_close = True
         
-        conn.row_factory = sqlite3.Row
-        
-        attachment = conn.execute(f"""
+        cursor = conn.cursor()
+
+        cursor.execute(f"""
             SELECT file_path, file_name, mime_type
             FROM {self.attachment_table}
-            WHERE id = ? AND is_deleted = 0
-        """, (attachment_id,)).fetchone()
+            WHERE id = %s AND is_deleted = 0
+        """, (attachment_id,))
+        attachment = cursor.fetchone()
         
         # 새로 생성한 연결만 닫기
         if should_close:
@@ -933,11 +940,13 @@ class AttachmentService:
         
         if attachment:
             import os
-            if os.path.exists(attachment['file_path']):
+            # PostgreSQL returns tuple, not dict
+            file_path, file_name, mime_type = attachment
+            if os.path.exists(file_path):
                 return {
-                    'path': attachment['file_path'],
-                    'name': attachment['file_name'],
-                    'mime_type': attachment['mime_type']
+                    'path': file_path,
+                    'name': file_name,
+                    'mime_type': mime_type
                 }
         
         return None
@@ -992,12 +1001,15 @@ class AttachmentService:
                     # MIME 타입 추출
                     mime_type = file.content_type if hasattr(file, 'content_type') else 'application/octet-stream'
                     
-                    # DB에 저장 (같은 연결 사용, 중앙화된 id_column 사용)
-                    cursor.execute_with_returning_id(f"""
+                    # DB에 저장 - PostgreSQL RETURNING 사용
+                    sql = f"""
                         INSERT INTO {self.attachment_table}
                         ({self.id_column}, file_name, file_path, file_size, mime_type, description, uploaded_by)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """, (
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id
+                    """
+
+                    cursor.execute(sql, (
                         item_id,
                         original_filename,
                         file_path,
@@ -1006,8 +1018,10 @@ class AttachmentService:
                         meta.get('description', '') if meta else '',
                         meta.get('uploaded_by', 'system') if meta else 'system'
                     ))
-                    
-                    attachment_id = cursor.lastrowid
+
+                    # PostgreSQL에서 RETURNING 결과 가져오기
+                    result = cursor.fetchone()
+                    attachment_id = result[0] if result else None
                     attachment_ids.append(attachment_id)
                     logging.info(f"[{self.board_type}] 첨부파일 추가: {original_filename} (ID: {attachment_id})")
                     
@@ -1041,19 +1055,21 @@ class AttachmentService:
             conn = get_db_connection(self.db_path)
             should_close = True
         
+        cursor = conn.cursor()
+
         if item_id:
-            stats = conn.execute(f"""
-                SELECT 
+            cursor.execute(f"""
+                SELECT
                     COUNT(*) as total_count,
                     SUM(file_size) as total_size,
                     AVG(file_size) as avg_size,
                     MAX(file_size) as max_size
                 FROM {self.attachment_table}
-                WHERE {self.id_column} = ? AND is_deleted = 0
-            """, (item_id,)).fetchone()
+                WHERE {self.id_column} = %s AND is_deleted = 0
+            """, (item_id,))
         else:
-            stats = conn.execute(f"""
-                SELECT 
+            cursor.execute(f"""
+                SELECT
                     COUNT(*) as total_count,
                     SUM(file_size) as total_size,
                     AVG(file_size) as avg_size,
@@ -1061,10 +1077,27 @@ class AttachmentService:
                     COUNT(DISTINCT {self.id_column}) as item_count
                 FROM {self.attachment_table}
                 WHERE is_deleted = 0
-            """).fetchone()
-        
+            """)
+
+        stats = cursor.fetchone()
+
         # 새로 생성한 연결만 닫기
         if should_close:
             conn.close()
-        
-        return dict(stats)
+
+        # Convert tuple to dict
+        if item_id:
+            return {
+                'total_count': stats[0] or 0,
+                'total_size': stats[1] or 0,
+                'avg_size': stats[2] or 0,
+                'max_size': stats[3] or 0
+            }
+        else:
+            return {
+                'total_count': stats[0] or 0,
+                'total_size': stats[1] or 0,
+                'avg_size': stats[2] or 0,
+                'max_size': stats[3] or 0,
+                'item_count': stats[4] or 0
+            }

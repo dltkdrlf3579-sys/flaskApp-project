@@ -181,17 +181,18 @@ class SectionConfigService:
                 if self.table_name == 'section_config':
                     cursor.execute(
                         """
-                        SELECT COUNT(*) FROM section_config 
-                        WHERE board_type = ? AND section_key LIKE 'custom_section_%'
+                        SELECT COUNT(*) FROM section_config
+                        WHERE board_type = ? AND section_key LIKE ?
                         """,
-                        (self.board_type,)
+                        (self.board_type, 'custom_section_%')
                     )
                 else:
                     cursor.execute(
                         f"""
-                        SELECT COUNT(*) FROM {self.table_name} 
-                        WHERE section_key LIKE 'custom_section_%'
-                        """
+                        SELECT COUNT(*) FROM {self.table_name}
+                        WHERE section_key LIKE ?
+                        """,
+                        ('custom_section_%',)
                     )
                 _row = cursor.fetchone()
                 try:
@@ -225,39 +226,39 @@ class SectionConfigService:
                     max_order = 0
             
             if self.table_name == 'section_config':
-                cursor.execute_with_returning_id(
+                cursor.execute(
                     """
-                    INSERT INTO section_config 
+                    INSERT INTO section_config
                     (board_type, section_key, section_name, section_order, is_active)
-                    VALUES (?, ?, ?, ?, 1)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
                     (
                         self.board_type,
                         section_key,
                         section_data['section_name'],
                         max_order + 1,
+                        1
                     ),
                 )
             else:
-                cursor.execute_with_returning_id(
+                cursor.execute(
                     f"""
-                    INSERT INTO {self.table_name} 
+                    INSERT INTO {self.table_name}
                     (section_key, section_name, section_order, is_active)
-                    VALUES (?, ?, ?, 1)
+                    VALUES (?, ?, ?, ?)
                     """,
                     (
                         section_key,
                         section_data['section_name'],
                         max_order + 1,
+                        1
                     ),
                 )
-            
+
             conn.commit()
-            section_id = cursor.lastrowid
-            
+
             return {
                 'success': True,
-                'section_id': section_id,
                 'section_key': section_key,
             }
             

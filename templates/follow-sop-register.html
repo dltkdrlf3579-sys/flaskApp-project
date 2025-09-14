@@ -40,20 +40,6 @@
         </div>
         <div class="section-content" id="{{ section.section_key|replace('_', '-') }}-content">
             <div class="info-table">
-                <!-- 점검번호와 등록일 추가 (첫 번째 섹션에만) -->
-                {% if loop.index == 1 %}
-                <div class="info-row">
-                    <div class="info-cell span-1">
-                        <label>점검번호</label>
-                        <input type="text" value="자동 생성" readonly style="background-color: #f3f4f6; color: #6b7280; font-style: italic;">
-                    </div>
-                    <div class="info-cell span-1">
-                        <label>등록일</label>
-                        <input type="date" value="{{ today_date }}" readonly style="background-color: #f3f4f6;">
-                    </div>
-                </div>
-                {% endif %}
-                
                 {% set all_columns = section_columns[section.section_key] %}
                 <!-- detailed_content와 violation_content는 제외 -->
                 {% set columns = [] %}
@@ -85,7 +71,7 @@
                                     
                                 {% elif col.column_key == 'created_at' %}
                                     <!-- 등록일은 자동 생성 -->
-                                    <div class="value">{{ col.default_value if col.default_value else '자동 생성됩니다' }}</div>
+                                    <div class="value">{{ (col.default_value|date_only) if col.default_value else '자동 생성됩니다' }}</div>
                                     
                                 {% elif col.is_readonly %}
                                     <!-- 읽기 전용 필드 -->
@@ -138,22 +124,26 @@
                                            
                                 {% elif col.column_type == 'linked' %}
                                     <!-- 연결된 필드 (읽기 전용) -->
-                                    <input type="text" 
-                                           id="{{ col.column_key }}" 
-                                           class="{{ section.section_key|replace('_', '-') }}-input" 
+                                    <input type="text"
+                                           id="{{ col.column_key }}"
+                                           class="{{ section.section_key|replace('_', '-') }}-input"
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
+                                           {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                           {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                            readonly
                                            style="background-color: #f3f4f6;">
                                            
                                 {% elif col.column_type == 'popup' %}
                                     <!-- 팝업 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                placeholder="클릭하여 선택"
                                                readonly>
                                         <button class="btn btn-sm btn-primary" 
@@ -165,12 +155,14 @@
                                 {% elif col.column_type == 'table' or col.input_type == 'table' %}
                                     <!-- 테이블 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                data-input-type="table"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                placeholder="검색하여 선택"
                                                readonly
                                                style="background-color: #f8f9fa;">
@@ -357,14 +349,42 @@ function collectDynamicFields() {
     return data;
 }
 
+// 섹션별 필드 그룹화 함수
+function groupFieldsBySection(dynamicData) {
+    const sectionGroups = {};
+
+    // 모든 섹션의 컬럼을 순회하면서 그룹화
+    Object.keys(sectionColumns).forEach(sectionKey => {
+        const columns = sectionColumns[sectionKey] || [];
+        columns.forEach(col => {
+            // 해당 섹션의 그룹이 없으면 생성
+            if (!sectionGroups[sectionKey]) {
+                sectionGroups[sectionKey] = {};
+            }
+            const fieldKey = col.column_key;
+            // dynamicData에 해당 필드가 있으면 섹션 그룹에 추가
+            if (dynamicData[fieldKey] !== undefined) {
+                sectionGroups[sectionKey][fieldKey] = dynamicData[fieldKey];
+            }
+        });
+    });
+
+    console.log('=== 섹션별 그룹화 결과 ===');
+    Object.keys(sectionGroups).forEach(sectionKey => {
+        console.log(`${sectionKey}:`, sectionGroups[sectionKey]);
+    });
+
+    return sectionGroups;
+}
+
 // 등록 함수
 function registerFollowSop() {
     const formData = new FormData();
-    
+
     // CKEditor 또는 textarea에서 값 가져오기
     const contentTextarea = document.getElementById('detailed-content');
     let detailedContent = '';
-    
+
     if (window.RichText && typeof window.RichText.getData === 'function') {
         detailedContent = window.RichText.getData();
     } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
@@ -376,26 +396,22 @@ function registerFollowSop() {
             detailedContent = contentTextarea.value || '';
         }
     }
-    
+
     formData.append('detailed_content', detailedContent);
-    
+
     // 동적 필드 수집
     const dynamicData = collectDynamicFields();
-    
-    // base_fields와 custom_data 모두 전송 (식별자 키: work_req_no)
-    const baseFields = {};
-    const baseFieldsList = [
-        'work_req_no', 'company_name', 'business_number', 'violation_date',
-        'violation_location', 'violation_type', 'violation_content', 'created_at'
-    ];
-    
-    baseFieldsList.forEach(field => {
-        if (dynamicData[field] !== undefined) {
-            baseFields[field] = dynamicData[field];
-        }
+
+    // 섹션별로 그룹화해서 전송
+    const sectionGroups = groupFieldsBySection(dynamicData);
+
+    // 각 섹션별로 FormData에 추가
+    Object.keys(sectionGroups).forEach(sectionKey => {
+        console.log(`Sending section ${sectionKey}:`, sectionGroups[sectionKey]);
+        formData.append(sectionKey, JSON.stringify(sectionGroups[sectionKey]));
     });
-    
-    formData.append('base_fields', JSON.stringify(baseFields));
+
+    // 하위 호환성을 위해 custom_data도 전송 (전체 데이터)
     formData.append('custom_data', JSON.stringify(dynamicData));
     
     // 새 첨부파일 처리 (공통 컴포넌트 변수 사용)
@@ -478,10 +494,7 @@ function openTableSearch(fieldKey) {
     }
     
     // 팝업에서 선택된 데이터를 받는 함수
-    window.receiveTableSelection = function(fieldKey, data) {
-        document.getElementById(fieldKey).value = data.name || data.display_name;
-        document.getElementById(fieldKey + '_id').value = data.id;
-    };
+    // receiveTableSelection 함수는 popup-handler.js에서 통합 처리됨
     
     popup.focus();
 }

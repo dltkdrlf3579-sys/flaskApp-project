@@ -277,8 +277,8 @@
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     
-    <!-- CKEditor 5 Super-build CDN (Paste from Office, Upload 등 포함) -->
-    <script src="https://cdn.ckeditor.com/ckeditor5/40.0.0/super-build/ckeditor.js"></script>
+    <!-- CKEditor 5 Super-build CDN 제거 - 상단에 classic 버전 이미 로드됨 -->
+    <!-- <script src="https://cdn.ckeditor.com/ckeditor5/40.0.0/super-build/ckeditor.js"></script> -->
     
     <!-- RichText Utility -->
     <script>
@@ -437,6 +437,10 @@
     document.addEventListener('DOMContentLoaded', function() {
         // 약간의 지연을 두어 모든 스타일과 스크립트가 로드된 후 초기화
         setTimeout(function() {
+            if (window.SKIP_GLOBAL_RICHTEXT === true) {
+                console.log('⚠️ Global RichText init skipped by page flag');
+                return;
+            }
             if (document.getElementById('detailed-content')) {
                 console.log('🚀 CKEditor 자동 초기화 시작');
                 try { window.RichText.addControls(); } catch(e){}

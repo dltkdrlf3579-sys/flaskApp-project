@@ -20,6 +20,7 @@ from search_popup_service import SearchPopupService
 from column_sync_service import ColumnSyncService
 from db_connection import get_db_connection
 from db.upsert import safe_upsert
+from column_utils import normalize_column_types, determine_linked_type
 import schedule
 import threading
 import time
@@ -244,6 +245,11 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 # Jinja2 템플릿 캐시 비우기
 app.jinja_env.cache = {}
+
+# =====================
+# Helper Functions for Linked Types
+# =====================
+# determine_linked_type function moved to column_utils.py for reuse across all boards
 
 # =====================
 # SSO (OIDC-like) setup
@@ -1311,7 +1317,6 @@ def accident():
     }
     
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     
     # 섹션 정보 가져오기 (단일 소스: section_config via SectionConfigService)
     from section_service import SectionConfigService
@@ -1634,7 +1639,6 @@ def partner_accident():
     }
     
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     
     # 섹션 정보 가져오기 (단일 소스: section_config via SectionConfigService)
     try:
@@ -1868,7 +1872,6 @@ def safety_instruction_route():
     }
     
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     
     # 섹션 정보 가져오기 (safety_instruction 전용, 삭제되지 않은 것만)
     # 먼저 safety_instruction_sections 테이블 사용 시도, 없으면 section_config 사용
@@ -1886,7 +1889,6 @@ def safety_instruction_route():
         # PostgreSQL 트랜잭션 오류 처리
         conn.close()
         conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
         
         try:
             # safety_instruction_sections 테이블이 없으면 section_config 사용
@@ -2094,7 +2096,6 @@ def safety_instruction_register():
     logging.info("환경안전 지시서 등록 페이지 접근")
     
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     
     # 동적 컬럼 설정 가져오기 (safety_instruction 전용 테이블 사용)
     _wa = sql_is_active_true('is_active', conn)
@@ -2151,68 +2152,8 @@ def safety_instruction_register():
     logging.info(f"동적 컬럼 {len(dynamic_columns)}개 로드됨")
     logging.info(f"기본 옵션 {len(basic_options)}개 필드 로드됨")
     
-    # 동적 컬럼 타입 보정: 링크드/팝업 추론 (discipline(d)_person* 등)
-    try:
-        # 전역 키 수집
-        all_keys = {c.get('column_key') for c in dynamic_columns if c.get('column_key')}
-        suffixes = ['_id','_dept','_department','_department_code','_bizno','_company_bizno','_business_number','_code','_company']
-
-        def base_key_of(key: str) -> str:
-            if not isinstance(key, str):
-                return ''
-            for s in suffixes:
-                if key.endswith(s):
-                    return key[:-len(s)]
-            return key
-
-        def infer_group(bk: str) -> str:
-            if not bk:
-                return ''
-            variants = [bk, bk + 'd']  # 오타/변형 케이스 지원(disciplined vs displined)
-            # 특수 규칙: 징계대상자는 기본 contractor로 간주
-            if bk in {'disciplined_person'}:
-                return 'contractor'
-            # 협력사 근로자 그룹 우선 (회사명 키 존재)
-            if any(((v + '_company') in all_keys) for v in variants):
-                return 'contractor'
-            # 사람/ID 그룹
-            if any(((v + '_id') in all_keys) for v in variants):
-                return 'person'
-            # 회사 그룹: *_bizno, *_company_bizno
-            if any(((v + '_company_bizno') in all_keys) or ((v + '_bizno') in all_keys) or ((v + '_business_number') in all_keys) for v in variants):
-                return 'company'
-            # 부서 그룹
-            if any(((v + '_dept') in all_keys) or ((v + '_department') in all_keys) or ((v + '_department_code') in all_keys) for v in variants):
-                return 'department'
-            return ''
-
-        popup_map = {
-            'person': 'popup_person',
-            'company': 'popup_company',
-            'department': 'popup_department',
-            'contractor': 'popup_contractor',
-        }
-
-        for col in dynamic_columns:
-            ck = col.get('column_key') or ''
-            bk = base_key_of(ck)
-            grp = infer_group(bk)
-            # 보조(링크드) 필드 렌더링 힌트 부여
-            if ck.endswith('_id') or ck.endswith('_company') or ck.endswith('_company_bizno') or ck.endswith('_bizno') or ck.endswith('_business_number'):
-                col['column_type'] = 'linked_text'
-                continue
-            if ck.endswith('_dept') or ck.endswith('_department') or ck.endswith('_department_code'):
-                col['column_type'] = 'linked_dept'
-                continue
-            # 베이스 필드에 팝업 타입 지정
-            if grp and ck == bk:
-                ct = col.get('column_type')
-                if not ct or ct in ('text','popup','table','table_select'):
-                    col['column_type'] = popup_map.get(grp, ct)
-                # 입력 타입 힌트
-                col['input_type'] = col.get('input_type') or 'table'
-    except Exception as _e:
-        logging.warning(f"safety_instruction register: normalize types failed: {_e}")
+    # 컬럼 타입 정규화 - 공통 함수 사용
+    dynamic_columns = normalize_column_types(dynamic_columns)
 
     # 섹션 정보 로드
     from section_service import SectionConfigService
@@ -2260,7 +2201,6 @@ def safety_instruction_detail(issue_number):
     logging.info(f"환경안전 지시서 상세 정보 조회: {issue_number}")
     
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     
     # 실제 데이터베이스에서 조회 시도 (메인 테이블 우선)
     instruction = None
@@ -2417,6 +2357,8 @@ def safety_instruction_detail(issue_number):
 
     # custom_data 파싱 및 병합
     custom_data = {}
+    # detailed_content는 컬럼 값을 우선시하기 위해 별도 보관
+    _col_detailed_content = instruction_dict.get('detailed_content')
     def _parse_json_maybe(v):
         if v is None:
             return {}
@@ -2434,8 +2376,33 @@ def safety_instruction_detail(issue_number):
 
     if 'custom_data' in instruction_dict:
         custom_data = _parse_json_maybe(instruction_dict.get('custom_data'))
-        if isinstance(custom_data, dict):  # custom_data 조건 제거!
+        if isinstance(custom_data, dict):
+            # 상세내용은 custom_data에 있더라도 컬럼 값으로 표시해야 함
+            # (등록 시 custom_data에 저장된 오래된 값이 표시를 덮어쓰지 않도록 방지)
+            try:
+                custom_data.pop('detailed_content', None)
+            except Exception:
+                pass
             instruction_dict.update(custom_data)
+    # details 테이블에서 상세내용을 단일 소스로 읽기
+    try:
+        detail_row = None
+        try:
+            detail_row = conn.execute(
+                "SELECT detailed_content FROM safety_instruction_details WHERE issue_number = ?",
+                (issue_number,)
+            ).fetchone()
+        except Exception:
+            detail_row = None
+        if detail_row and (isinstance(detail_row, dict) or hasattr(detail_row, 'keys')):
+            dc_val = detail_row['detailed_content'] if isinstance(detail_row, dict) else detail_row[0]
+            instruction_dict['detailed_content'] = dc_val or ''
+        else:
+            # 폴백: 컬럼 detailed_content가 있으면 사용
+            instruction_dict['detailed_content'] = _col_detailed_content or ''
+    except Exception as _e_det:
+        logging.debug(f"SI details fetch skip: {_e_det}")
+        instruction_dict['detailed_content'] = _col_detailed_content or ''
 
     # 캐시에서 항상 보강: 메인에 키가 있어도 비어있으면 캐시로 채움
     try:
@@ -2541,11 +2508,15 @@ def safety_instruction_detail(issue_number):
             ck = col.get('column_key') or ''
             bk = base_key_of(ck)
             grp = infer_group(bk)
-            if ck.endswith('_id') or ck.endswith('_company') or ck.endswith('_company_bizno') or ck.endswith('_bizno') or ck.endswith('_business_number'):
-                col['column_type'] = 'linked_text'
-                continue
-            if ck.endswith('_dept') or ck.endswith('_department') or ck.endswith('_department_code'):
+            # dept 관련은 별도 처리 유지
+            if ck.endswith(('_dept', '_department', '_department_code')):
                 col['column_type'] = 'linked_dept'
+                continue
+            # 나머지 linked 필드는 determine_linked_type 사용
+            if (ck.endswith('_id') or ck.endswith('_bizno') or
+                ck.endswith('_business_number') or ck.endswith('_company') or
+                ck.endswith('_company_bizno')):
+                col['column_type'] = determine_linked_type(col)
                 continue
             if grp and ck == bk:
                 ct = col.get('column_type')
@@ -2554,6 +2525,9 @@ def safety_instruction_detail(issue_number):
                 col['input_type'] = col.get('input_type') or 'table'
     except Exception as _e:
         logging.warning(f"safety_instruction detail: normalize types failed: {_e}")
+
+    # 컬럼 타입 정규화 - 공통 함수 사용 (DB의 잘못된 타입도 자동 수정)
+    dynamic_columns = normalize_column_types(dynamic_columns)
 
     # 기본정보 드롭다운 옵션 로드
     basic_options = {}
@@ -2602,6 +2576,7 @@ def safety_instruction_detail(issue_number):
 def update_safety_instruction():
     """환경안전 지시서 수정 API - 메인 테이블 사용 + 첨부 처리"""
     from board_services import AttachmentService
+    from section_service import SectionConfigService
     conn = None
 
     try:
@@ -2619,44 +2594,47 @@ def update_safety_instruction():
 
         files = request.files.getlist('files')
 
-        # 다양한 요청 포맷 지원: base_fields/custom_data 우선, 없으면 basic_info/violation_info 합치기
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # 섹션 정보 동적으로 가져오기
+        section_service = SectionConfigService('safety_instruction', DB_PATH)
+        sections = section_service.get_sections()
+
+        # 섹션이 없으면 기본값 사용 (하위 호환성)
+        if not sections:
+            sections = [
+                {'section_key': 'basic_info'},
+                {'section_key': 'violation_info'},
+                {'section_key': 'additional'}
+            ]
+
+        # 모든 필드를 모을 딕셔너리
+        all_fields = {}
+
+        # 각 섹션별로 데이터 수집
+        for section in sections:
+            section_key = section['section_key']
+            section_data_str = request.form.get(section_key, '{}')
+            try:
+                section_data = pyjson.loads(section_data_str)
+                all_fields.update(section_data)
+                logging.info(f"[UPDATE] 섹션 {section_key} 데이터: {section_data}")
+            except Exception as e:
+                logging.warning(f"[UPDATE] 섹션 {section_key} 파싱 실패: {e}")
+
+        # 하위 호환성: custom_data가 있으면 병합
         custom_data_raw = request.form.get('custom_data', '{}')
-        base_fields_raw = request.form.get('base_fields', '{}')
-        basic_info_raw = request.form.get('basic_info', '{}')
-        violation_info_raw = request.form.get('violation_info', '{}')
+        try:
+            custom_data_compat = pyjson.loads(custom_data_raw) if isinstance(custom_data_raw, str) else (custom_data_raw or {})
+            if custom_data_compat:
+                all_fields.update(custom_data_compat)
+                logging.info(f"[UPDATE] custom_data 병합: {custom_data_compat}")
+        except Exception:
+            pass
 
-        try:
-            custom_data = pyjson.loads(custom_data_raw) if isinstance(custom_data_raw, str) else (custom_data_raw or {})
-        except Exception:
-            custom_data = {}
-
-        # 구버전 호환: basic_info/violation_info 병합
-        try:
-            basic_info = pyjson.loads(basic_info_raw) if isinstance(basic_info_raw, str) else (basic_info_raw or {})
-        except Exception:
-            basic_info = {}
-        try:
-            violation_info = pyjson.loads(violation_info_raw) if isinstance(violation_info_raw, str) else (violation_info_raw or {})
-        except Exception:
-            violation_info = {}
-        if basic_info or violation_info:
-            tmp = {}
-            tmp.update(basic_info)
-            tmp.update(violation_info)
-            # issue_number는 보호
-            tmp.pop('issue_number', None)
-            # custom_data에 병합 (클라이언트 전송이 우선)
-            for k, v in tmp.items():
-                custom_data.setdefault(k, v)
-
-        # base_fields도 custom_data에 흡수 (필요 시)
-        try:
-            base_fields = pyjson.loads(base_fields_raw) if isinstance(base_fields_raw, str) else (base_fields_raw or {})
-        except Exception:
-            base_fields = {}
-        if base_fields:
-            base_fields.pop('issue_number', None)
-            custom_data.update(base_fields)
+        # 최종 custom_data
+        custom_data = all_fields
 
         # 리스트 필드 문자열을 배열로 정규화
         for key, value in list(custom_data.items()):
@@ -2753,9 +2731,43 @@ def update_safety_instruction():
             conflict_cols=['issue_number'],
             update_cols=['custom_data', 'detailed_content', 'updated_at']
         )
+        # Details 테이블에 단일 경로 저장 (빈 문자열 포함)
+        try:
+            from db.upsert import safe_upsert as _su
+            _su(conn, 'safety_instruction_details', {
+                'issue_number': issue_number,
+                'detailed_content': detailed_content,
+                'updated_at': None
+            })
+            logging.info("[SI] details upsert applied")
+        except Exception as _e_det:
+            logging.warning(f"[SI] details upsert warning: {_e_det}")
+
+        # 첨부파일 데이터 파싱 (update_follow_sop와 동일한 방식)
+        try:
+            attachment_data_raw = request.form.get('attachment_data', '[]')
+            if isinstance(attachment_data_raw, str):
+                attachment_data = pyjson.loads(attachment_data_raw)
+            else:
+                attachment_data = attachment_data_raw
+            if not isinstance(attachment_data, list):
+                attachment_data = []
+        except Exception as e:
+            logging.warning(f"attachment_data 파싱 실패: {e}")
+            attachment_data = []
 
         # 첨부파일 처리
         attachment_service = AttachmentService('safety_instruction', DB_PATH, conn)
+
+        # 기존 첨부파일 설명 업데이트 (update_follow_sop와 동일한 방식)
+        for item in attachment_data:
+            if isinstance(item, dict) and item.get('id') and not item.get('isNew'):
+                attachment_service.update_meta(
+                    item['id'],
+                    {'description': item.get('description', '')}
+                )
+                logging.info(f"첨부파일 {item['id']} 설명 업데이트")
+
         if deleted_attachments:
             attachment_service.delete(deleted_attachments)
             logging.info(f"첨부파일 {len(deleted_attachments)}개 삭제")
@@ -2782,25 +2794,32 @@ def update_safety_instruction():
         if conn:
             conn.close()
 
-
 @app.route('/update-follow-sop', methods=['POST'])
 def update_follow_sop():
     """Follow SOP 정보 업데이트"""
     from board_services import AttachmentService
+    from section_service import SectionConfigService
     conn = None
-    
+
     try:
         work_req_no = request.form.get('work_req_no')
         detailed_content = request.form.get('detailed_content', '')
-        custom_data = request.form.get('custom_data', '{}')
-        base_fields = request.form.get('base_fields', '{}')
-        
+
+        # 디버그: 받은 모든 폼 데이터 출력
+        print(f"\n[FS UPDATE DEBUG] work_req_no: {work_req_no}")
+        print(f"[FS UPDATE DEBUG] FormData keys: {list(request.form.keys())}")
+        print(f"[FS UPDATE DEBUG] detailed_content received: {detailed_content[:100] if detailed_content else 'EMPTY'}")  # 중요: detailed_content 확인
+        for key in request.form.keys():
+            if key not in ['detailed_content', 'attachment_data', 'deleted_attachments']:
+                value = request.form.get(key)
+                print(f"[FS UPDATE DEBUG] {key}: {value[:200] if value else 'None'}")
+
         # 안전하게 JSON 파싱 (pyjson 사용)
         try:
             deleted_attachments = pyjson.loads(request.form.get('deleted_attachments', '[]'))
         except:
             deleted_attachments = []
-        
+
         try:
             attachment_data_raw = request.form.get('attachment_data', '[]')
             if isinstance(attachment_data_raw, str):
@@ -2812,25 +2831,56 @@ def update_follow_sop():
         except Exception as e:
             logging.warning(f"attachment_data 파싱 실패: {e}")
             attachment_data = []
-        
+
         files = request.files.getlist('files')
-        
-        # custom_data 파싱
-        if isinstance(custom_data, str):
+
+        conn = get_db_connection(timeout=30.0)
+        cursor = conn.cursor()
+
+        # 섹션 정보 동적으로 가져오기
+        section_service = SectionConfigService('follow_sop', DB_PATH)
+        sections = section_service.get_sections()
+
+        # 섹션이 없으면 기본값 사용 (하위 호환성)
+        if not sections:
+            sections = [
+                {'section_key': 'basic_info'},
+                {'section_key': 'work_info'},
+                {'section_key': 'additional'}
+            ]
+
+        # 모든 필드를 모을 딕셔너리
+        all_fields = {}
+
+        # 각 섹션별로 데이터 수집
+        for section in sections:
+            section_key = section['section_key']
+            section_data_str = request.form.get(section_key, '{}')
+            logging.info(f"[FS UPDATE DEBUG] 섹션 {section_key} raw: {section_data_str[:500]}")  # 디버그 추가
             try:
-                custom_data = pyjson.loads(custom_data)
+                section_data = pyjson.loads(section_data_str)
+                all_fields.update(section_data)
+                logging.info(f"[FS UPDATE] 섹션 {section_key} 데이터: {section_data}")
+                # 실제 값 확인
+                for k, v in section_data.items():
+                    if v and v not in ('', [], None):
+                        logging.info(f"  -> {k}: {str(v)[:100]}")
             except Exception as e:
-                logging.error(f"Custom Data parsing failed: {e}")
-                custom_data = {}
-        
-        # base_fields 파싱
-        if isinstance(base_fields, str):
-            try:
-                base_fields = pyjson.loads(base_fields)
-            except Exception as e:
-                logging.error(f"Base fields parsing failed: {e}")
-                base_fields = {}
-        
+                logging.warning(f"[FS UPDATE] 섹션 {section_key} 파싱 실패: {e}")
+
+        # 하위 호환성: custom_data가 있으면 병합
+        custom_data_raw = request.form.get('custom_data', '{}')
+        try:
+            custom_data_compat = pyjson.loads(custom_data_raw) if isinstance(custom_data_raw, str) else (custom_data_raw or {})
+            if custom_data_compat:
+                all_fields.update(custom_data_compat)
+                logging.info(f"[FS UPDATE] custom_data 병합: {custom_data_compat}")
+        except Exception:
+            pass
+
+        # 최종 custom_data
+        custom_data = all_fields
+
         # 리스트 필드 정규화
         for key, value in list(custom_data.items()):
             if isinstance(value, str) and value.startswith('[') and value.endswith(']'):
@@ -2839,13 +2889,6 @@ def update_follow_sop():
                     logging.info(f"List field {key} normalized from string to array")
                 except:
                     pass
-        
-        # base_fields가 있으면 custom_data에 병합
-        if base_fields:
-            custom_data.update(base_fields)
-        
-        conn = get_db_connection(timeout=30.0)
-        cursor = conn.cursor()
         
         # 기존 데이터 조회 (리스트 필드 병합을 위해) - 메인 테이블에서 조회
         cursor.execute("""
@@ -2878,7 +2921,9 @@ def update_follow_sop():
             return False
         
         for key, value in custom_data.items():
-            if is_list_field(value) or is_list_field(existing_custom_data.get(key, [])):
+            # 기존 값이 없을 때는 None을 기본값으로 사용 (빈 배열 [] 대신)
+            existing_value = existing_custom_data.get(key, None)
+            if is_list_field(value) or (existing_value is not None and is_list_field(existing_value)):
                 logging.info(f"[MERGE DEBUG] {key} 리스트 필드로 감지, 병합 처리 시작")
                 
                 # 기존 데이터 파싱
@@ -2933,36 +2978,54 @@ def update_follow_sop():
                         logging.info(f"[MERGE DEBUG] {key} 병합 완료: 기존 {len(existing_list)}개 + 새로 {len(new_list)}개 = 최종 {len(merged_list)}개 항목")
                 else:
                     # 하나가 비어있으면 비어있지 않은 것을 사용
-                    existing_custom_data[key] = new_list if len(new_list) > 0 else existing_list
-                    logging.info(f"[MERGE DEBUG] {key} 단순 대체: {len(existing_custom_data[key])}개 항목")
+                    # 빈 배열이 들어왔으면 기존 값 유지
+                    if len(new_list) > 0:
+                        existing_custom_data[key] = new_list
+                    elif len(existing_list) > 0:
+                        existing_custom_data[key] = existing_list
+                    # 둘 다 비어있으면 업데이트하지 않음 (기존 값 유지)
+                    logging.info(f"[MERGE DEBUG] {key} 단순 대체: {len(existing_custom_data.get(key, []))}개 항목")
             else:
-                # 일반 필드: 빈값은 보존, 값이 있으면 업데이트
-                try:
-                    if value is None:
-                        continue
-                    if isinstance(value, str) and value.strip() == '':
-                        continue
-                except Exception:
-                    pass
-                existing_custom_data[key] = value
+                # 일반 필드: None이 아니면 모두 업데이트 (빈 문자열도 유효한 값)
+                if value is not None:
+                    existing_custom_data[key] = value
         
-        # detailed_content를 custom_data에 추가
-        if detailed_content:
-            existing_custom_data['detailed_content'] = detailed_content
-            logging.info(f"detailed_content를 custom_data에 추가")
+        # detailed_content는 custom_data에 포함하지 않음 (별도 컬럼/테이블 사용)
+        # existing_custom_data['detailed_content'] = detailed_content  # 제거!
+        logging.info("detailed_content는 별도 컬럼과 details 테이블에만 저장")
+
+        # Details 테이블에 단일 경로 저장
+        try:
+            from db.upsert import safe_upsert as _su
+            logging.info(f"[FS] Attempting to upsert to follow_sop_details - work_req_no: {work_req_no}, detailed_content length: {len(detailed_content)}")
+            _su(conn, 'follow_sop_details', {
+                'work_req_no': work_req_no,
+                'detailed_content': detailed_content,
+                'updated_at': None
+            }, conflict_cols=['work_req_no'], update_cols=['detailed_content', 'updated_at'])
+            logging.info("[FS] details upsert applied successfully")
+        except Exception as _e_det:
+            logging.error(f"[FS] details upsert FAILED: {_e_det}")
+            import traceback
+            logging.error(f"[FS] Traceback: {traceback.format_exc()}")
         
         # 메인 테이블에 UPSERT (issue_number와 동일한 방식)
+        # custom_data를 JSON 문자열로 변환
+        import json
+        custom_data_json = json.dumps(existing_custom_data, ensure_ascii=False)
+        
         from db.upsert import safe_upsert
         safe_upsert(
             conn,
             'follow_sop',
             {
                 'work_req_no': work_req_no,
-                'custom_data': existing_custom_data,
+                'custom_data': custom_data_json,
+                'detailed_content': detailed_content,  # 메인 테이블에도 저장
                 'updated_at': None
             },
             conflict_cols=['work_req_no'],
-            update_cols=['custom_data', 'updated_at']
+            update_cols=['custom_data', 'detailed_content', 'updated_at']  # detailed_content 추가
         )
         
         # 2. followsop_details 테이블 관련 코드 제거 (더 이상 사용하지 않음)
@@ -3027,13 +3090,12 @@ def update_follow_sop():
 def update_full_process():
     """Full Process 정보 업데이트"""
     from board_services import AttachmentService
+    from section_service import SectionConfigService
     conn = None
-    
+
     try:
         fullprocess_number = request.form.get('fullprocess_number')
         detailed_content = request.form.get('detailed_content', '')
-        custom_data = request.form.get('custom_data', '{}')
-        base_fields = request.form.get('base_fields', '{}')
         
         # 안전하게 JSON 파싱 (pyjson 사용)
         try:
@@ -3054,23 +3116,63 @@ def update_full_process():
             attachment_data = []
         
         files = request.files.getlist('files')
-        
-        # custom_data 파싱
-        if isinstance(custom_data, str):
+
+        conn = get_db_connection(timeout=30.0)
+        cursor = conn.cursor()
+
+        # 섹션 정보 동적으로 가져오기
+        section_service = SectionConfigService('full_process', DB_PATH)
+        sections = section_service.get_sections()
+
+        # 섹션이 없으면 기본값 사용 (하위 호환성)
+        if not sections:
+            sections = [
+                {'section_key': 'basic_info'},
+                {'section_key': 'process_info'},
+                {'section_key': 'additional'}
+            ]
+
+        # 모든 필드를 모을 딕셔너리
+        all_fields = {}
+
+        # 각 섹션별로 데이터 수집
+        for section in sections:
+            section_key = section['section_key']
+            section_data_str = request.form.get(section_key, '{}')
+            logging.info(f"[FP UPDATE DEBUG] 섹션 {section_key} raw: {section_data_str[:500]}")
             try:
-                custom_data = pyjson.loads(custom_data)
+                section_data = pyjson.loads(section_data_str)
+                all_fields.update(section_data)
+                logging.info(f"[FP UPDATE] 섹션 {section_key} 데이터: {section_data}")
+                # 실제 값 확인
+                for k, v in section_data.items():
+                    if v and v not in ('', [], None):
+                        logging.info(f"  -> {k}: {str(v)[:100]}")
             except Exception as e:
-                logging.error(f"Custom Data parsing failed: {e}")
-                custom_data = {}
-        
-        # base_fields 파싱
-        if isinstance(base_fields, str):
-            try:
-                base_fields = pyjson.loads(base_fields)
-            except Exception as e:
-                logging.error(f"Base fields parsing failed: {e}")
-                base_fields = {}
-        
+                logging.warning(f"[FP UPDATE] 섹션 {section_key} 파싱 실패: {e}")
+
+        # 하위 호환성: custom_data나 base_fields가 있으면 병합
+        custom_data_raw = request.form.get('custom_data', '{}')
+        try:
+            custom_data_compat = pyjson.loads(custom_data_raw) if isinstance(custom_data_raw, str) else (custom_data_raw or {})
+            if custom_data_compat:
+                all_fields.update(custom_data_compat)
+                logging.info(f"[FP UPDATE] custom_data 병합: {custom_data_compat}")
+        except Exception:
+            pass
+
+        base_fields_raw = request.form.get('base_fields', '{}')
+        try:
+            base_fields_compat = pyjson.loads(base_fields_raw) if isinstance(base_fields_raw, str) else (base_fields_raw or {})
+            if base_fields_compat:
+                all_fields.update(base_fields_compat)
+                logging.info(f"[FP UPDATE] base_fields 병합: {base_fields_compat}")
+        except Exception:
+            pass
+
+        # 최종 custom_data
+        custom_data = all_fields
+
         # 리스트 필드 정규화
         for key, value in list(custom_data.items()):
             if isinstance(value, str) and value.startswith('[') and value.endswith(']'):
@@ -3079,14 +3181,7 @@ def update_full_process():
                     logging.info(f"List field {key} normalized from string to array")
                 except:
                     pass
-        
-        # base_fields가 있으면 custom_data에 병합
-        if base_fields:
-            custom_data.update(base_fields)
-        
-        conn = get_db_connection(timeout=30.0)
-        cursor = conn.cursor()
-        
+
         # 기존 데이터 조회 (리스트 필드 병합을 위해) - 메인 테이블
         cursor.execute("""
             SELECT custom_data 
@@ -3118,7 +3213,9 @@ def update_full_process():
             return False
         
         for key, value in custom_data.items():
-            if is_list_field(value) or is_list_field(existing_custom_data.get(key, [])):
+            # 기존 값이 없을 때는 None을 기본값으로 사용 (빈 배열 [] 대신)
+            existing_value = existing_custom_data.get(key, None)
+            if is_list_field(value) or (existing_value is not None and is_list_field(existing_value)):
                 logging.info(f"[MERGE DEBUG] {key} 리스트 필드로 감지, 병합 처리 시작")
                 
                 # 기존 데이터 파싱
@@ -3173,29 +3270,50 @@ def update_full_process():
                         logging.info(f"[MERGE DEBUG] {key} 병합 완료: 기존 {len(existing_list)}개 + 새로 {len(new_list)}개 = 최종 {len(merged_list)}개 항목")
                 else:
                     # 하나가 비어있으면 비어있지 않은 것을 사용
-                    existing_custom_data[key] = new_list if len(new_list) > 0 else existing_list
-                    logging.info(f"[MERGE DEBUG] {key} 단순 대체: {len(existing_custom_data[key])}개 항목")
+                    # 빈 배열이 들어왔으면 기존 값 유지
+                    if len(new_list) > 0:
+                        existing_custom_data[key] = new_list
+                    elif len(existing_list) > 0:
+                        existing_custom_data[key] = existing_list
+                    # 둘 다 비어있으면 업데이트하지 않음 (기존 값 유지)
+                    logging.info(f"[MERGE DEBUG] {key} 단순 대체: {len(existing_custom_data.get(key, []))}개 항목")
             else:
                 # 일반 필드는 정상 업데이트
                 existing_custom_data[key] = value
         
-        # detailed_content를 custom_data에 추가
-        if detailed_content:
-            existing_custom_data['detailed_content'] = detailed_content
-            logging.info(f"detailed_content를 custom_data에 추가")
+        # detailed_content는 custom_data에 포함하지 않음 (별도 컬럼/테이블 사용)
+        # existing_custom_data['detailed_content'] = detailed_content  # 제거!
+        logging.info("detailed_content는 별도 컬럼과 details 테이블에만 저장")
+
+        # Details 테이블에 단일 경로 저장
+        try:
+            from db.upsert import safe_upsert as _su
+            _su(conn, 'full_process_details', {
+                'fullprocess_number': fullprocess_number,
+                'detailed_content': detailed_content,
+                'updated_at': None
+            }, conflict_cols=['fullprocess_number'], update_cols=['detailed_content', 'updated_at'])
+            logging.info("[FP] details upsert applied")
+        except Exception as _e_det:
+            logging.warning(f"[FP] details upsert warning: {_e_det}")
         
         # 메인 테이블 UPSERT
+        # custom_data를 JSON 문자열로 변환
+        import json
+        custom_data_json = json.dumps(existing_custom_data, ensure_ascii=False)
+        
         from db.upsert import safe_upsert
         safe_upsert(
             conn,
             'full_process',
             {
                 'fullprocess_number': fullprocess_number,
-                'custom_data': existing_custom_data,
+                'custom_data': custom_data_json,
+                'detailed_content': detailed_content,  # 메인 테이블에도 저장
                 'updated_at': None
             },
             conflict_cols=['fullprocess_number'],
-            update_cols=['custom_data', 'updated_at']
+            update_cols=['custom_data', 'detailed_content', 'updated_at']  # detailed_content 추가
         )
         
         # 2. fullprocess_details 테이블 관련 코드 제거 (더 이상 사용하지 않음)
@@ -3260,7 +3378,6 @@ def update_full_process():
 def data_recovery():
     """데이터 복구 페이지"""
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     
     # 삭제된 사고 조회
     deleted_accidents_rows = conn.execute("""
@@ -3304,7 +3421,6 @@ def partner_standards():
     
     # 컬럼 설정 가져오기
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     
     dynamic_columns_rows = conn.execute("""
         SELECT * FROM partner_standards_column_config 
@@ -3402,7 +3518,6 @@ def partner_change_request():
     # 실제 데이터베이스에서 조회
     try:
         conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
         # DynamicSearchBuilder로 검색 조건 생성
@@ -3682,7 +3797,7 @@ def change_request_detail(request_id):
         try:
             rebuilt = {}
             for row in dynamic_columns_rows:
-                key = row['column_key'] if isinstance(row, sqlite3.Row) else row.get('column_key')
+                key = row.get('column_key') if hasattr(row, 'get') else row['column_key']
                 if key and hasattr(request_data, key):
                     rebuilt[key] = getattr(request_data, key)
             if rebuilt:
@@ -3805,7 +3920,7 @@ def update_change_request():
             logging.error(f"변경요청을 찾을 수 없습니다: ID={request_id}")
             return jsonify({"success": False, "message": "변경요청을 찾을 수 없습니다."}), 404
         
-        # 상세내용을 custom_data에 추가
+        # 상세내용을 custom_data와 details 테이블 모두에 저장
         if final_content:
             custom_data_dict['detailed_content'] = final_content
             # custom_data 업데이트
@@ -3814,21 +3929,52 @@ def update_change_request():
                 SET custom_data = %s
                 WHERE id = %s
             """, (pyjson.dumps(custom_data_dict), request_id))
-            logging.info(f"상세내용 custom_data에 업데이트 완료: {len(final_content)}자")
+            
+            # change_request_details 테이블에도 저장 (읽기와 일치시키기 위해)
+            actual_request_number = existing[1] if existing and existing[1] else request_number
+            from db.upsert import safe_upsert
+            safe_upsert(conn, 'change_request_details', {
+                'request_number': actual_request_number,
+                'detailed_content': final_content,
+                'updated_at': None
+            })
+            logging.info(f"상세내용 업데이트 완료: custom_data와 details 테이블에 {len(final_content)}자")
         
+        # 첨부파일 데이터 파싱 (update_follow_sop와 동일한 방식)
+        try:
+            attachment_data_raw = request.form.get('attachment_data', '[]')
+            if isinstance(attachment_data_raw, str):
+                attachment_data = pyjson.loads(attachment_data_raw)
+            else:
+                attachment_data = attachment_data_raw
+            if not isinstance(attachment_data, list):
+                attachment_data = []
+        except Exception as e:
+            logging.warning(f"attachment_data 파싱 실패: {e}")
+            attachment_data = []
+
         # AttachmentService 사용하여 첨부파일 처리 (기존 연결 전달)
         attachment_service = AttachmentService('change_request', DB_PATH, conn)
-        
+
+        # 기존 첨부파일 설명 업데이트 (update_follow_sop와 동일한 방식)
+        for item in attachment_data:
+            if isinstance(item, dict) and item.get('id') and not item.get('isNew'):
+                attachment_service.update_meta(
+                    item['id'],
+                    {'description': item.get('description', '')}
+                )
+                logging.info(f"첨부파일 {item['id']} 설명 업데이트")
+
         # 삭제할 첨부파일 처리
         if deleted_attachments:
             attachment_service.delete(deleted_attachments)
             logging.info(f"첨부파일 {len(deleted_attachments)}개 삭제")
-        
+
         # 새 첨부파일 업로드 - 실제 request_number 사용
         if files:
             actual_request_number = existing[1] if existing and existing[1] else request_number
             uploaded_ids = attachment_service.bulk_add(
-                actual_request_number, 
+                actual_request_number,
                 files,
                 {'uploaded_by': session.get('user_id', 'user')}
             )
@@ -3865,7 +4011,6 @@ def partner_detail(business_number):
     
     # 첨부파일 정보 가져오기
     conn = partner_manager.db_config.get_sqlite_connection()
-    conn.row_factory = sqlite3.Row
     attachments = conn.execute("""
         SELECT * FROM partner_attachments 
         WHERE business_number = ? 
@@ -3892,7 +4037,6 @@ def accident_detail(accident_id):
     logging.info(f"사고 상세 정보 조회: {accident_id}")
     
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     
     # 섹션 정보 가져오기
     # 먼저 accident_sections 테이블 사용 시도, 없으면 section_config 사용
@@ -3983,6 +4127,25 @@ def accident_detail(accident_id):
                         pass
                 except:
                     custom_data = {}
+            # details 테이블에서 상세내용을 단일 소스로 보강
+            try:
+                acc_number = accident.get('accident_number') or accident.get('id')
+                if acc_number:
+                    try:
+                        drow = conn.execute(
+                            "SELECT detailed_content FROM accident_details WHERE accident_number = %s",
+                            (acc_number,)
+                        ).fetchone()
+                    except Exception:
+                        drow = None
+                    if drow is not None:
+                        # Row or tuple/dict 대응
+                        if isinstance(drow, dict):
+                            accident['detailed_content'] = drow.get('detailed_content') or ''
+                        else:
+                            accident['detailed_content'] = drow[0] if len(drow) > 0 else ''
+            except Exception as _e_det:
+                logging.debug(f"accident details fetch skip: {_e_det}")
         else:
             # DB에 없으면 더미 데이터 사용
             dummy_accidents = []
@@ -4503,7 +4666,6 @@ def get_dropdown_options_for_display(board_type, column_key):
     """
     try:
         conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
         
         # v2 테이블 우선 확인 (board_type 포함)
         codes = conn.execute("""
@@ -4603,7 +4765,6 @@ def accident_register():
     logging.info("사고 등록 페이지 접근")
     
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     
     # 동적 컬럼 설정 가져오기 - is_deleted 체크 추가
     _wa = sql_is_active_true('is_active', conn)
@@ -4677,7 +4838,10 @@ def accident_register():
     
     logging.info(f"동적 컬럼 {len(dynamic_columns)}개 로드됨")
     logging.info(f"기본 옵션 {len(basic_options)}개 필드 로드됨")
-    
+
+    # 컬럼 타입 정규화 - 공통 함수 사용
+    dynamic_columns = normalize_column_types(dynamic_columns)
+
     # 섹션 정보 로드 - safety-instruction과 동일한 방식
     from section_service import SectionConfigService
     section_service = SectionConfigService('accident', DB_PATH)
@@ -4874,6 +5038,23 @@ def register_change_request():
         except Exception as e:
             logging.error(f"partner_change_requests 테이블 저장 실패: {e}")
 
+        # details 테이블에 상세내용 저장 (단일 경로)
+        try:
+            from db.upsert import safe_upsert as _su
+            detailed_content = ''
+            try:
+                detailed_content = data.get('detailed_content', '')
+            except Exception:
+                detailed_content = ''
+            _su(conn, 'change_request_details', {
+                'request_number': request_number,
+                'detailed_content': detailed_content,
+                'updated_at': None
+            })
+            logging.info("[CR REGISTER] details upsert applied")
+        except Exception as _e_det:
+            logging.warning(f"[CR REGISTER] details upsert warning: {_e_det}")
+
         # 첨부파일 저장: request_number 를 item_id로 사용
         try:
             if files:
@@ -5042,6 +5223,18 @@ def register_accident():
                 cursor.execute(f"ALTER TABLE accidents_cache ADD COLUMN {col_name} {col_type}")
                 logging.info(f"컬럼 추가: {col_name}")
         
+        # Details 테이블 저장 (단일 경로)
+        try:
+            from db.upsert import safe_upsert as _su
+            _su(conn, 'accident_details', {
+                'accident_number': accident_number,
+                'detailed_content': detailed_content or '',
+                'updated_at': None
+            })
+            logging.info("[ACC REGISTER] details upsert applied")
+        except Exception as _e_det:
+            logging.warning(f"[ACC REGISTER] details upsert warning: {_e_det}")
+
         # datetime 조합 (정렬용)
         if accident_date:
             accident_datetime = f"{accident_date} 00:00"
@@ -5170,57 +5363,89 @@ def register_safety_instruction():
         # json already imported globally
         import datetime
         
-        # basic_info와 violation_info JSON 파싱
-        basic_info = pyjson.loads(request.form.get('basic_info', '{}'))
-        violation_info = pyjson.loads(request.form.get('violation_info', '{}'))
-        
-        # 개별 필드 추출 (basic_info에서)
-        issue_number = basic_info.get('issue_number', '')  # 발부번호 (자동생성)
-        issuer = basic_info.get('issuer', '')  # 발행인
-        issuer_department = basic_info.get('issuer_department', '')  # 발행부서
-        classification = basic_info.get('classification', '')  # 분류
-        employment_type = basic_info.get('employment_type', '')  # 고용형태
-        primary_company = basic_info.get('primary_company', '')  # 1차사명
-        primary_business_number = basic_info.get('primary_business_number', '')  # 1차사_사업자번호
-        subcontractor = basic_info.get('subcontractor', '')  # 하도사명
-        subcontractor_business_number = basic_info.get('subcontractor_business_number', '')  # 하도사_사업자번호
-        disciplined_person = basic_info.get('disciplined_person', '')  # 징계자
-        gbm = basic_info.get('gbm', '')  # GBM
-        business_division = basic_info.get('business_division', '')  # 사업부
-        team = basic_info.get('team', '')  # 팀
-        department = basic_info.get('department', '')  # 소속부서
-        
-        # 개별 필드 추출 (violation_info에서)
-        violation_date = violation_info.get('violation_date', '')  # 위반일자
-        discipline_date = violation_info.get('discipline_date', '')  # 징계일자
-        discipline_department = violation_info.get('discipline_department', '')  # 징계발의부서
-        discipline_type = violation_info.get('discipline_type', '')  # 징계유형
-        accident_type = violation_info.get('accident_type', '')  # 사고유형
-        accident_grade = violation_info.get('accident_grade', '')  # 사고등급
-        safety_violation_grade = violation_info.get('safety_violation_grade', '')  # 환경안전수칙 위반등급
-        violation_type = violation_info.get('violation_type', '')  # 위반유형
-        access_ban_start_date = violation_info.get('access_ban_start_date', '')  # 출입정지 시작일
-        access_ban_end_date = violation_info.get('access_ban_end_date', '')  # 출입정지 종료일
-        period = violation_info.get('period', '')  # 기간
-        work_grade = violation_info.get('work_grade', '')  # 작업등급
-        penalty_points = violation_info.get('penalty_points', '')  # 감점
-        disciplined_person_id = violation_info.get('disciplined_person_id', '')  # 징계자ID
+        conn = get_db_connection(timeout=30.0)
+        cursor = conn.cursor()
+
+        # 섹션 정보 동적으로 가져오기
+        try:
+            cursor.execute("""
+                SELECT DISTINCT section_key
+                FROM safety_instruction_sections
+                WHERE is_active = 1
+                ORDER BY section_order
+            """)
+            sections = cursor.fetchall()
+            section_keys = [row[0] for row in sections] if sections else []
+        except:
+            # 테이블이 없거나 오류 시 기본값 사용
+            section_keys = ['basic_info', 'violation_info', 'additional']
+
+        logging.info(f"활성 섹션 목록: {section_keys}")
+
+        # 모든 필드를 모을 딕셔너리
+        all_fields = {}
+
+        # 각 섹션별로 데이터 수집
+        for section_key in section_keys:
+            section_data_str = request.form.get(section_key, '{}')
+            logging.info(f"[DEBUG] 섹션 {section_key} raw data: {section_data_str[:200]}")  # 디버깅 추가
+            try:
+                section_data = pyjson.loads(section_data_str)
+                all_fields.update(section_data)
+                logging.info(f"섹션 {section_key}: {len(section_data)} 필드")
+                # 실제 값이 있는지 확인
+                non_empty = {k: v for k, v in section_data.items() if v and v not in ('', [])}
+                logging.info(f"섹션 {section_key} 비어있지 않은 필드: {list(non_empty.keys())}")
+            except Exception as e:
+                logging.warning(f"섹션 {section_key} 파싱 실패: {e}")
+
+        # 하위 호환성: 섹션 데이터가 없으면 custom_data 사용
+        if not all_fields:
+            custom_data_str = request.form.get('custom_data', '{}')
+            all_fields = pyjson.loads(custom_data_str)
+            logging.info(f"섹션 데이터 없음, custom_data 사용: {len(all_fields)} 필드")
+
+        # 개별 필드 추출 (기존 코드와 호환)
+        issue_number = all_fields.get('issue_number', '')  # 발부번호 (자동생성)
+        issuer = all_fields.get('issuer', '')  # 발행인
+        issuer_department = all_fields.get('issuer_department', '')  # 발행부서
+        classification = all_fields.get('classification', '')  # 분류
+        employment_type = all_fields.get('employment_type', '')  # 고용형태
+        primary_company = all_fields.get('primary_company', '')  # 1차사명
+        primary_business_number = all_fields.get('primary_business_number', '')  # 1차사_사업자번호
+        subcontractor = all_fields.get('subcontractor', '')  # 하도사명
+        subcontractor_business_number = all_fields.get('subcontractor_business_number', '')  # 하도사_사업자번호
+        disciplined_person = all_fields.get('disciplined_person', '')  # 징계자
+        gbm = all_fields.get('gbm', '')  # GBM
+        business_division = all_fields.get('business_division', '')  # 사업부
+        team = all_fields.get('team', '')  # 팀
+        department = all_fields.get('department', '')  # 소속부서
+        violation_date = all_fields.get('violation_date', '')  # 위반일자
+        discipline_date = all_fields.get('discipline_date', '')  # 징계일자
+        discipline_department = all_fields.get('discipline_department', '')  # 징계발의부서
+        discipline_type = all_fields.get('discipline_type', '')  # 징계유형
+        accident_type = all_fields.get('accident_type', '')  # 사고유형
+        accident_grade = all_fields.get('accident_grade', '')  # 사고등급
+        safety_violation_grade = all_fields.get('safety_violation_grade', '')  # 환경안전수칙 위반등급
+        violation_type = all_fields.get('violation_type', '')  # 위반유형
+        access_ban_start_date = all_fields.get('access_ban_start_date', '')  # 출입정지 시작일
+        access_ban_end_date = all_fields.get('access_ban_end_date', '')  # 출입정지 종료일
+        period = all_fields.get('period', '')  # 기간
+        work_grade = all_fields.get('work_grade', '')  # 작업등급
+        penalty_points = all_fields.get('penalty_points', '')  # 감점
+        disciplined_person_id = all_fields.get('disciplined_person_id', '')  # 징계자ID
         
         # 상세내용
         detailed_content = request.form.get('detailed_content', '')  # 상세내용
         
-        # 동적 컬럼 및 첨부파일
-        custom_data = pyjson.loads(request.form.get('custom_data', '{}'))
+        # 첨부파일 데이터
         attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
         files = request.files.getlist('files')
         
         logging.info(f"환경안전 지시서 등록 요청 받음 - 징계자: {disciplined_person}")
         logging.info(f"위반일자: {violation_date}, 징계일자: {discipline_date}")
-        logging.info(f"동적 컬럼 데이터: {custom_data}")
+        logging.info(f"전체 필드 수: {len(all_fields)}")
         logging.info(f"첨부파일 개수: {len(files)}")
-        
-        conn = get_db_connection(timeout=30.0)
-        cursor = conn.cursor()
         
         # 발부번호 자동 생성 (YYYY-MM-00 형식)
         if violation_date:
@@ -5255,41 +5480,13 @@ def register_safety_instruction():
         
         logging.info(f"새 환경안전 지시서 발부번호 생성: {generated_issue_number}")
         
-        # 모든 동적 데이터를 custom_data에 포함
-        all_custom_data = {
-            'issuer': issuer,
-            'issuer_department': issuer_department,
-            'classification': classification,
-            'employment_type': employment_type,
-            'primary_company': primary_company,
-            'primary_business_number': primary_business_number,
-            'subcontractor': subcontractor,
-            'subcontractor_business_number': subcontractor_business_number,
-            'disciplined_person': disciplined_person,
-            'disciplined_person_id': disciplined_person_id,
-            'gbm': gbm,
-            'business_division': business_division,
-            'team': team,
-            'work_grade': work_grade,
-            'violation_date': violation_date,
-            'discipline_date': discipline_date,
-            'discipline_department': discipline_department,
-            'discipline_type': discipline_type,
-            'accident_type': accident_type,
-            'accident_grade': accident_grade,
-            'safety_violation_grade': safety_violation_grade,
-            'violation_type': violation_type,
-            'access_ban_start_date': access_ban_start_date,
-            'access_ban_end_date': access_ban_end_date,
-            'period': period,
-            'penalty_points': int(penalty_points) if penalty_points else None,
-            'detailed_content': detailed_content
-        }
+        # all_fields에 이미 모든 필드가 있으므로 그대로 사용
+        all_custom_data = all_fields.copy()
+
+        # detailed_content는 별도 필드이므로 custom_data에도 포함
+        all_custom_data['detailed_content'] = detailed_content
         
-        # 기존 custom_data와 병합
-        all_custom_data.update(custom_data)
-        
-        # 메인 테이블에 등록 - created_at은 DEFAULT 사용, 상세내용은 컬럼에 저장
+        # 메인 테이블에 등록 - created_at은 DEFAULT 사용
         from db.upsert import safe_upsert
         main_data = {
             'issue_number': generated_issue_number,
@@ -5307,6 +5504,17 @@ def register_safety_instruction():
             conflict_cols=['issue_number'],
             update_cols=['custom_data', 'detailed_content', 'updated_at', 'is_deleted']
         )
+
+        # Details 테이블에도 저장 (단일 경로)
+        try:
+            safe_upsert(conn, 'safety_instruction_details', {
+                'issue_number': generated_issue_number,
+                'detailed_content': detailed_content,
+                'updated_at': None
+            })
+            logging.info("[SI REGISTER] details upsert applied")
+        except Exception as _e_det:
+            logging.warning(f"[SI REGISTER] details upsert warning: {_e_det}")
         
         # 첨부파일 처리
         if files:
@@ -5455,7 +5663,7 @@ def update_partner():
         # partner_details safe_upsert 사용
         detail_data = {
             'business_number': business_number,
-            'detail_content': detailed_content,
+            'detailed_content': detailed_content,
             'updated_at': None  # 자동으로 처리됨
         }
         safe_upsert(conn, 'partner_details', detail_data)
@@ -5572,14 +5780,8 @@ def update_accident():
         base_fields = request.form.get('base_fields', '{}')  # ACC 사고일 때 기본정보
         
         # 상세내용 디버깅
-        print(f"[FORM DEBUG] detailed_content RAW: '{detailed_content}'")
-        print(f"[FORM DEBUG] detailed_content length: {len(detailed_content) if detailed_content else 0}")
-        print(f"[FORM DEBUG] detailed_content type: {type(detailed_content)}")
-        
         # detailed_content만 사용하도록 통일
         final_content = detailed_content
-        print(f"[FORM DEBUG] 최종 사용할 내용: '{final_content[:100] if final_content else None}'...")
-        print(f"[FORM DEBUG] 최종 내용 길이: {len(final_content) if final_content else 0}")
         
         # 안전하게 JSON 파싱
         try:
@@ -5607,6 +5809,7 @@ def update_accident():
         print(f"Custom Data type: {type(custom_data)}")
         print(f"Detailed Content received: '{detailed_content}'")
         print(f"Detailed Content length: {len(detailed_content) if detailed_content else 0}")
+
         print(f"Request form keys: {list(request.form.keys())}")
         print(f"Attachment data received: {attachment_data}")
         print(f"Files received: {len(files)} files")
@@ -5735,16 +5938,14 @@ def update_accident():
                     except:
                         existing_custom_data = {}
             
-            print(f"[MERGE DEBUG] 기존 데이터 keys: {list(existing_custom_data.keys())}")
-            print(f"[MERGE DEBUG] 새 데이터 keys: {list(custom_data.keys())}")
             
             # 특별히 injured_person은 덮어쓰지 않고 보존
             if 'injured_person' in existing_custom_data and 'injured_person' not in custom_data:
-                print(f"[MERGE DEBUG] injured_person 보존: {type(existing_custom_data['injured_person'])}")
                 # injured_person이 새 데이터에 없으면 기존 것 보존
+                pass
             elif 'injured_person' in custom_data:
                 # injured_person이 새 데이터에 있으면 그것 사용
-                print(f"[MERGE DEBUG] injured_person 업데이트: {type(custom_data['injured_person'])}")
+                pass
             
             # K사고 보호 및 안전 병합 규칙
             # - K사고: IQADB(원본) 기본 필드는 custom_data로 덮지 않음
@@ -5778,19 +5979,23 @@ def update_accident():
                     return field_value.startswith('[') and field_value.endswith(']')
                 return False
 
-            # 추가정보 섹션 키를 조회하여 '덮어쓰기 허용' 집합 구성
+            # 사용자 편집 가능한 섹션 키를 조회하여 '덮어쓰기 허용' 집합 구성
             additional_keys = set()
             try:
                 _tab_rows = cursor.execute(
                     "SELECT column_key, tab FROM accident_column_config"
                 ).fetchall()
+                # 시스템 보호 탭 vs 사용자 편집 가능 탭 구분
+                protected_tabs = {'basic_info', 'accident_info', 'location_info'}
+
                 for _r in _tab_rows:
                     try:
                         k = _r['column_key'] if hasattr(_r, 'keys') else _r[0]
                         t = _r['tab'] if hasattr(_r, 'keys') else (_r[1] if len(_r) > 1 else None)
                     except Exception:
                         k, t = None, None
-                    if k and (t == 'additional'):
+                    # 시스템 보호 탭이 아닌 모든 탭의 컬럼을 덮어쓰기 허용
+                    if k and t and t not in protected_tabs:
                         additional_keys.add(k)
             except Exception:
                 pass
@@ -5805,8 +6010,7 @@ def update_accident():
             
             for key, value in custom_data.items():
                 # 리스트 필드 병합 우선 처리
-                if is_list_field(value) or is_list_field(existing_custom_data.get(key, [])):
-                    print(f"[MERGE DEBUG] {key} 리스트 필드로 감지, 병합 처리 시작")
+                if is_list_field(value) or is_list_field(existing_custom_data.get(key)):
                     
                     # 기존 데이터 파싱
                     existing_list = existing_custom_data.get(key, [])
@@ -5831,16 +6035,13 @@ def update_accident():
                             except:
                                 new_list = []
                     
-                    print(f"[MERGE DEBUG] {key} - 기존: {len(existing_list)}개, 새로: {len(new_list)}개")
                     
                     # 추가정보/오버라이드 키는 우선 대체하되, 완전 빈 배열이면 기존값 보존
                     if key in overwrite_keys:
                         if len(new_list) == 0 and len(existing_list) > 0:
                             existing_custom_data[key] = existing_list
-                            print(f"[MERGE DEBUG] {key} 추가정보/오버라이드 → 빈 배열 무시, 기존 유지: {len(existing_list)}개")
                         else:
                             existing_custom_data[key] = new_list
-                            print(f"[MERGE DEBUG] {key} 추가정보/오버라이드 → 전체 대체: {len(new_list)}개")
                     # 그 외: 프론트에서 전체 배열을 보냈다면 그대로 사용, 아니면 병합
                     elif len(new_list) > 0 and len(existing_list) > 0:
                         # 새로운 데이터에 기존 데이터의 첫 번째 항목이 포함되어 있다면 전체 교체로 간주
@@ -5853,7 +6054,6 @@ def update_accident():
                         if has_existing_data:
                             # 전체 데이터를 보냈으므로 그대로 사용
                             existing_custom_data[key] = new_list
-                            print(f"[MERGE DEBUG] {key} 전체 교체: {len(new_list)}개 항목")
                         else:
                             # 새 항목만 추가하므로 병합 처리
                             merged_list = list(existing_list)
@@ -5865,23 +6065,31 @@ def update_accident():
                                     existing_ids.add(new_item.get('id'))
                             
                             existing_custom_data[key] = merged_list
-                            print(f"[MERGE DEBUG] {key} 병합 완료: 기존 {len(existing_list)}개 + 새로 {len(new_list)}개 = 최종 {len(merged_list)}개 항목")
                     else:
                         # 하나가 비어있으면 비어있지 않은 것을 사용 (일반 키)
                         existing_custom_data[key] = new_list if len(new_list) > 0 else existing_list
-                        print(f"[MERGE DEBUG] {key} 단순 대체: {len(existing_custom_data[key])}개 항목")
                 else:
                     # 일반 필드
                     # 값이 비어있으면 공통적으로 보존
                     if _is_empty_value(value):
-                        print(f"[MERGE GUARD] skip empty/blank for key: {key}")
                         continue
                     existing_custom_data[key] = value
             
-            # detailed_content를 custom_data에 추가
-            if final_content:
-                existing_custom_data['detailed_content'] = final_content
-                logging.info(f"detailed_content를 custom_data에 추가: {len(final_content)}자")
+            # detailed_content를 custom_data에 항상 반영(빈 문자열 포함)
+            existing_custom_data['detailed_content'] = final_content
+            logging.info(f"detailed_content를 custom_data에 반영: {len(final_content) if final_content else 0}자")
+
+            # Details 테이블 저장
+            try:
+                from db.upsert import safe_upsert as _su
+                _su(conn, 'accident_details', {
+                    'accident_number': accident_number,
+                    'detailed_content': final_content,
+                    'updated_at': None
+                })
+                logging.info("[ACC] details upsert applied")
+            except Exception as _e_det:
+                logging.warning(f"[ACC] details upsert warning: {_e_det}")
             
             # custom_data 업데이트 (JSONB 캐스팅 제거)
             cursor.execute("""
@@ -5897,11 +6105,12 @@ def update_accident():
             else:
                 custom_data_str = custom_data
             
-            # detailed_content를 custom_data에 추가
-            if final_content:
-                custom_data_dict = pyjson.loads(custom_data_str) if isinstance(custom_data_str, str) else custom_data_str
-                custom_data_dict['detailed_content'] = final_content
-                custom_data_str = pyjson.dumps(custom_data_dict)
+            # detailed_content를 custom_data에 항상 반영(빈 문자열 포함)
+            custom_data_dict = pyjson.loads(custom_data_str) if isinstance(custom_data_str, str) else (custom_data_str or {})
+            if not isinstance(custom_data_dict, dict):
+                custom_data_dict = {}
+            custom_data_dict['detailed_content'] = final_content
+            custom_data_str = pyjson.dumps(custom_data_dict)
             
             # FormData에서 직접 받은 필드들 사용 (하드코딩 제거)
             # 새 레코드 생성 (업체 정보는 선택적)
@@ -6056,7 +6265,6 @@ def update_accident():
 def download_attachment(attachment_id):
     """첨부파일 다운로드 (협력사 및 사고 통합)"""
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     
     # 먼저 partner_attachments에서 찾기
     attachment = conn.execute(
@@ -6110,7 +6318,6 @@ def download_attachment(attachment_id):
 def get_partner_attachments(business_number):
     """협력사 첨부파일 목록 가져오기"""
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     attachments = conn.execute("""
         SELECT * FROM partner_attachments 
         WHERE business_number = ? 
@@ -6150,7 +6357,6 @@ def auto_upload_partner_files():
         uploaded_files = []
         skipped = []  # 업로드 실패한 파일 추적
         conn = get_db_connection()
-        conn.row_factory = sqlite3.Row  # Row 객체 사용 설정
         cursor = conn.cursor()
         
         # 자동 업로드 설명 문구 정의
@@ -6404,7 +6610,6 @@ def admin_accident_columns():
     """사고 컬럼 관리 페이지 (표준 경로) - simplified 템플릿 사용"""
     # 기존 simplified 구현을 표준 경로에서 사용
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     _wa = sql_is_active_true('is_active', conn)
     _wd = sql_is_deleted_false('is_deleted', conn)
     sections = conn.execute(
@@ -6413,7 +6618,7 @@ def admin_accident_columns():
     sections = [dict(row) for row in sections]
     # 컬럼 관리 페이지에서는 사고 데이터 매핑이 필요 없음 (불필요 코드 제거)
     conn.close()
-    return render_template('admin-accident-columns-simplified.html', sections=sections, menu=MENU_CONFIG)
+    return render_template('admin-accident-columns.html', sections=sections, menu=MENU_CONFIG)
 
 @app.route("/admin/accident-columns-simplified")
 @require_admin_auth
@@ -6451,7 +6656,6 @@ def migrate_accidents_to_cache():
     """
     try:
         conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
         # accidents 테이블 존재 여부 확인
@@ -6558,26 +6762,26 @@ def admin_safety_instruction_codes():
     """환경안전 지시서 코드 관리 페이지"""
     return render_template('admin-safety-instruction-codes.html', menu=MENU_CONFIG)
 
-@app.route("/admin/fullprocess-codes")
+@app.route("/admin/full-process-codes")
 @require_admin_auth
-def admin_fullprocess_codes():
+def admin_full_process_codes():
     """Full Process 코드 관리 임베디드 페이지"""
     column_key = request.args.get('column_key', '')
     embedded = request.args.get('embedded', 'false') == 'true'
     
-    return render_template('admin-fullprocess-codes.html', 
+    return render_template('admin-full-process-codes.html', 
                          column_key=column_key,
                          embedded=embedded,
                          menu=MENU_CONFIG)
 
-@app.route("/admin/followsop-codes")
+@app.route("/admin/follow-sop-codes")
 @require_admin_auth
-def admin_followsop_codes():
+def admin_follow_sop_codes():
     """Follow SOP 코드 관리 임베디드 페이지"""
     column_key = request.args.get('column_key', '')
     embedded = request.args.get('embedded', 'false') == 'true'
     
-    return render_template('admin-followsop-codes.html', 
+    return render_template('admin-follow-sop-codes.html', 
                          column_key=column_key,
                          embedded=embedded,
                          menu=MENU_CONFIG)
@@ -6636,6 +6840,67 @@ def delete_follow_sop_column(column_id):
         logging.error(f"Follow SOP 컬럼 삭제 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
+# Follow SOP Sections API 엔드포인트
+@app.route("/api/follow-sop-sections", methods=["GET"])
+def get_follow_sop_sections():
+    """Follow SOP 섹션 목록 조회"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('follow_sop', DB_PATH)
+        sections = section_service.get_sections()
+        return jsonify({"success": True, "sections": sections})
+    except Exception as e:
+        logging.error(f"Follow SOP 섹션 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/follow-sop-sections", methods=["POST"])
+def add_follow_sop_section():
+    """Follow SOP 섹션 추가"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('follow_sop', DB_PATH)
+        result = section_service.add_section(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 섹션 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/follow-sop-sections/<int:section_id>", methods=["PUT"])
+def update_follow_sop_section(section_id):
+    """Follow SOP 섹션 수정"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('follow_sop', DB_PATH)
+        result = section_service.update_section(section_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 섹션 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/follow-sop-sections/<int:section_id>", methods=["DELETE"])
+def delete_follow_sop_section(section_id):
+    """Follow SOP 섹션 삭제"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('follow_sop', DB_PATH)
+        result = section_service.delete_section(section_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 섹션 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/follow-sop-sections/reorder", methods=["POST"])
+def reorder_follow_sop_sections():
+    """Follow SOP 섹션 순서 변경"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('follow_sop', DB_PATH)
+        result = section_service.reorder_sections(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Follow SOP 섹션 순서 변경 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
 # Full Process API 엔드포인트
 @app.route("/api/full-process-columns", methods=["GET"])
 def get_full_process_columns():
@@ -6681,6 +6946,67 @@ def delete_full_process_column(column_id):
         logging.error(f"Full Process 컬럼 삭제 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
+# Full Process Sections API 엔드포인트
+@app.route("/api/full-process-sections", methods=["GET"])
+def get_full_process_sections():
+    """Full Process 섹션 목록 조회"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('full_process', DB_PATH)
+        sections = section_service.get_sections()
+        return jsonify({"success": True, "sections": sections})
+    except Exception as e:
+        logging.error(f"Full Process 섹션 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/full-process-sections", methods=["POST"])
+def add_full_process_section():
+    """Full Process 섹션 추가"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('full_process', DB_PATH)
+        result = section_service.add_section(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 섹션 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/full-process-sections/<int:section_id>", methods=["PUT"])
+def update_full_process_section(section_id):
+    """Full Process 섹션 수정"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('full_process', DB_PATH)
+        result = section_service.update_section(section_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 섹션 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/full-process-sections/<int:section_id>", methods=["DELETE"])
+def delete_full_process_section(section_id):
+    """Full Process 섹션 삭제"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('full_process', DB_PATH)
+        result = section_service.delete_section(section_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 섹션 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route("/api/full-process-sections/reorder", methods=["POST"])
+def reorder_full_process_sections():
+    """Full Process 섹션 순서 변경"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('full_process', DB_PATH)
+        result = section_service.reorder_sections(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Full Process 섹션 순서 변경 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
 @app.route("/admin/safety-instruction-columns")
 @require_admin_auth  
 def admin_safety_instruction_columns():
@@ -6695,8 +7021,7 @@ def admin_safety_instruction_columns():
                          sections=sections)
 
 @app.route("/admin/follow-sop-columns")
-@app.route("/admin/followsop-columns")  # 두 URL 모두 지원
-@require_admin_auth  
+@require_admin_auth
 def admin_follow_sop_columns():
     """Follow SOP 컬럼 관리 페이지"""
     # 섹션 정보 로드
@@ -6704,14 +7029,23 @@ def admin_follow_sop_columns():
     section_service = SectionConfigService('follow_sop', DB_PATH)
     section_columns = section_service.get_sections_with_columns()
     
-    return render_template('admin-followsop-columns.html', 
+    return render_template('admin-follow-sop-columns.html',
                          menu=MENU_CONFIG,
                          section_columns=section_columns,
                          sections=section_columns)  # 하위 호환성
 
+@app.route("/admin/fullprocess-columns")
+def redirect_fullprocess_columns():
+    """구식 URL 리다이렉션"""
+    return redirect("/admin/full-process-columns", code=301)
+
+@app.route("/admin/followsop-columns")
+def redirect_followsop_columns():
+    """구식 URL 리다이렉션"""
+    return redirect("/admin/follow-sop-columns", code=301)
+
 @app.route("/admin/full-process-columns")
-@app.route("/admin/fullprocess-columns")  # 두 URL 모두 지원
-@require_admin_auth  
+@require_admin_auth
 def admin_full_process_columns():
     """Full Process 컬럼 관리 페이지"""
     # 섹션 정보 로드
@@ -6719,7 +7053,7 @@ def admin_full_process_columns():
     section_service = SectionConfigService('full_process', DB_PATH)
     section_columns = section_service.get_sections_with_columns()
     
-    return render_template('admin-fullprocess-columns.html', 
+    return render_template('admin-full-process-columns.html',
                          menu=MENU_CONFIG,
                          section_columns=section_columns,
                          sections=section_columns)  # 하위 호환성
@@ -6809,7 +7143,6 @@ def get_change_request_dropdown_codes():
     """특정 컬럼의 드롭다운 코드 조회 (v2 통일)"""
     try:
         conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
         
         # v2 테이블 사용
         codes = conn.execute("""
@@ -7031,7 +7364,10 @@ def change_request_register():
             else:
                 col['dropdown_options_mapped'] = []
     
-    logging.info(f"변경요청 동적 컬럼 {len(dynamic_columns)}개 로드됨")
+    # detailed_content는 별도 섹션으로 처리하므로 dynamic_columns에서 제외
+    dynamic_columns = [col for col in dynamic_columns if col['column_key'] != 'detailed_content']
+    
+    logging.info(f"변경요청 동적 컬럼 {len(dynamic_columns)}개 로드됨 (detailed_content 제외)")
     
     # 팝업 모드 확인
     is_popup = request.args.get('popup', '0') == '1'
@@ -7065,7 +7401,6 @@ def admin_data_management():
 def get_deleted_accidents():
     """삭제된 사고 목록 API"""
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     
     # 삭제된 사고만 조회
     deleted_accidents_rows = conn.execute("""
@@ -7083,7 +7418,6 @@ def get_deleted_accidents():
 def get_deleted_partners():
     """삭제된 협력사 목록 API"""
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     
     # 삭제된 협력사만 조회
     deleted_partners_rows = conn.execute("""
@@ -7101,7 +7435,6 @@ def get_deleted_partners():
 def get_deleted_safety_instructions():
     """삭제된 안전교육 목록 API"""
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     
     deleted_items = conn.execute("""
         SELECT * FROM safety_instructions 
@@ -7117,7 +7450,6 @@ def get_deleted_safety_instructions():
 def get_deleted_follow_sop():
     """삭제된 Follow SOP 목록 API"""
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     
     deleted_items = conn.execute("""
         SELECT * FROM follow_sop 
@@ -7134,7 +7466,6 @@ def get_full_process():
     """Full Process 목록 API (일반 데이터)"""
     try:
         conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
         
         # 삭제되지 않은 Full Process 목록 조회
         _wd = sql_is_deleted_false('is_deleted', conn)
@@ -7173,7 +7504,6 @@ def get_full_process():
 def get_deleted_full_process():
     """삭제된 Full Process 목록 API"""
     conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
     
     deleted_items = conn.execute("""
         SELECT * FROM full_process 
@@ -8011,215 +8341,6 @@ def reorder_safety_instruction_sections():
         logging.error(f"섹션 순서 변경 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-# ============= Follow SOP API 엔드포인트 =============
-@app.route("/api/follow-sop-columns", methods=["GET"])
-def get_followsop_columns():
-    """Follow SOP 페이지 동적 컬럼 설정 조회"""
-    try:
-        column_service = ColumnConfigService('follow_sop', DB_PATH)
-        columns = column_service.list_columns()
-        return jsonify(columns)
-    except Exception as e:
-        logging.error(f"Follow SOP 컬럼 조회 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/follow-sop-columns", methods=["POST"])
-def add_followsop_column():
-    """Follow SOP 페이지 동적 컬럼 추가"""
-    try:
-        column_service = ColumnConfigService('follow_sop', DB_PATH)
-        result = column_service.add_column(request.json)
-        return jsonify(result)
-    except Exception as e:
-        logging.error(f"Follow SOP 컬럼 추가 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/follow-sop-columns/<int:column_id>", methods=["PUT"])
-def update_followsop_column(column_id):
-    """Follow SOP 페이지 동적 컬럼 수정"""
-    try:
-        column_service = ColumnConfigService('follow_sop', DB_PATH)
-        result = column_service.update_column(column_id, request.json)
-        return jsonify(result)
-    except Exception as e:
-        logging.error(f"Follow SOP 컬럼 수정 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/follow-sop-columns/<int:column_id>", methods=["DELETE"])
-def delete_followsop_column(column_id):
-    """Follow SOP 페이지 동적 컬럼 삭제 (비활성화)"""
-    try:
-        column_service = ColumnConfigService('follow_sop', DB_PATH)
-        result = column_service.delete_column(column_id)
-        return jsonify(result)
-    except Exception as e:
-        logging.error(f"Follow SOP 컬럼 삭제 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/follow-sop-sections", methods=["GET"])
-def get_followsop_sections():
-    """Follow SOP 섹션 목록 조회"""
-    try:
-        from section_service import SectionConfigService
-        section_service = SectionConfigService('follow_sop', DB_PATH)
-        sections = section_service.get_sections()
-        return jsonify({"success": True, "sections": sections})
-    except Exception as e:
-        logging.error(f"Follow SOP 섹션 조회 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/follow-sop-sections", methods=["POST"])
-def add_followsop_section():
-    """Follow SOP 섹션 추가"""
-    try:
-        from section_service import SectionConfigService
-        section_service = SectionConfigService('follow_sop', DB_PATH)
-        result = section_service.add_section(request.json)
-        return jsonify(result)
-    except Exception as e:
-        logging.error(f"Follow SOP 섹션 추가 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/follow-sop-sections/<int:section_id>", methods=["PUT"])
-def update_followsop_section(section_id):
-    """Follow SOP 섹션 수정"""
-    try:
-        from section_service import SectionConfigService
-        section_service = SectionConfigService('follow_sop', DB_PATH)
-        result = section_service.update_section(section_id, request.json)
-        return jsonify(result)
-    except Exception as e:
-        logging.error(f"Follow SOP 섹션 수정 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/follow-sop-sections/<int:section_id>", methods=["DELETE"])
-def delete_followsop_section(section_id):
-    """Follow SOP 섹션 삭제"""
-    try:
-        from section_service import SectionConfigService
-        section_service = SectionConfigService('follow_sop', DB_PATH)
-        result = section_service.delete_section(section_id)
-        return jsonify(result)
-    except Exception as e:
-        logging.error(f"Follow SOP 섹션 삭제 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/follow-sop-sections/reorder", methods=["POST"])
-def reorder_followsop_sections():
-    """Follow SOP 섹션 순서 변경"""
-    try:
-        from section_service import SectionConfigService
-        section_service = SectionConfigService('follow_sop', DB_PATH)
-        result = section_service.reorder_sections(request.json)
-        return jsonify(result)
-    except Exception as e:
-        logging.error(f"Follow SOP 섹션 순서 변경 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-# ============= Full Process API 엔드포인트 =============
-@app.route("/api/full-process-columns", methods=["GET"])
-def get_fullprocess_columns():
-    """Full Process 페이지 동적 컬럼 설정 조회"""
-    try:
-        column_service = ColumnConfigService('full_process', DB_PATH)
-        columns = column_service.list_columns()
-        return jsonify(columns)
-    except Exception as e:
-        logging.error(f"Full Process 컬럼 조회 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/full-process-columns", methods=["POST"])
-def add_fullprocess_column():
-    """Full Process 페이지 동적 컬럼 추가"""
-    try:
-        column_service = ColumnConfigService('full_process', DB_PATH)
-        result = column_service.add_column(request.json)
-        return jsonify(result)
-    except Exception as e:
-        logging.error(f"Full Process 컬럼 추가 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/full-process-columns/<int:column_id>", methods=["PUT"])
-def update_fullprocess_column(column_id):
-    """Full Process 페이지 동적 컬럼 수정"""
-    try:
-        column_service = ColumnConfigService('full_process', DB_PATH)
-        result = column_service.update_column(column_id, request.json)
-        return jsonify(result)
-    except Exception as e:
-        logging.error(f"Full Process 컬럼 수정 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/full-process-columns/<int:column_id>", methods=["DELETE"])
-def delete_fullprocess_column(column_id):
-    """Full Process 페이지 동적 컬럼 삭제 (비활성화)"""
-    try:
-        column_service = ColumnConfigService('full_process', DB_PATH)
-        result = column_service.delete_column(column_id)
-        return jsonify(result)
-    except Exception as e:
-        logging.error(f"Full Process 컬럼 삭제 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/full-process-sections", methods=["GET"])
-def get_fullprocess_sections():
-    """Full Process 섹션 목록 조회"""
-    try:
-        from section_service import SectionConfigService
-        section_service = SectionConfigService('full_process', DB_PATH)
-        sections = section_service.get_sections()
-        return jsonify({"success": True, "sections": sections})
-    except Exception as e:
-        logging.error(f"Full Process 섹션 조회 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/full-process-sections", methods=["POST"])
-def add_fullprocess_section():
-    """Full Process 섹션 추가"""
-    try:
-        from section_service import SectionConfigService
-        section_service = SectionConfigService('full_process', DB_PATH)
-        result = section_service.add_section(request.json)
-        return jsonify(result)
-    except Exception as e:
-        logging.error(f"Full Process 섹션 추가 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/full-process-sections/<int:section_id>", methods=["PUT"])
-def update_fullprocess_section(section_id):
-    """Full Process 섹션 수정"""
-    try:
-        from section_service import SectionConfigService
-        section_service = SectionConfigService('full_process', DB_PATH)
-        result = section_service.update_section(section_id, request.json)
-        return jsonify(result)
-    except Exception as e:
-        logging.error(f"Full Process 섹션 수정 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/full-process-sections/<int:section_id>", methods=["DELETE"])
-def delete_fullprocess_section(section_id):
-    """Full Process 섹션 삭제"""
-    try:
-        from section_service import SectionConfigService
-        section_service = SectionConfigService('full_process', DB_PATH)
-        result = section_service.delete_section(section_id)
-        return jsonify(result)
-    except Exception as e:
-        logging.error(f"Full Process 섹션 삭제 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/api/full-process-sections/reorder", methods=["POST"])
-def reorder_fullprocess_sections():
-    """Full Process 섹션 순서 변경"""
-    try:
-        from section_service import SectionConfigService
-        section_service = SectionConfigService('full_process', DB_PATH)
-        result = section_service.reorder_sections(request.json)
-        return jsonify(result)
-    except Exception as e:
-        logging.error(f"Full Process 섹션 순서 변경 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
 
 # ============= 사고게시판 섹션 관리 API =============
 @app.route("/api/accident-sections", methods=["GET"])
@@ -8301,7 +8422,6 @@ def export_accidents_excel():
         
         # DB 연결
         conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
         
         # 동적 컬럼 정보 가져오기 (활성+미삭제, 섹션도 활성인 것만)
         where_c_active = sql_is_active_true('c.is_active', conn)
@@ -8516,7 +8636,6 @@ def import_accidents():
         
         # DB 연결
         conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
         # accident_columns 테이블 확인 및 생성
@@ -8808,7 +8927,6 @@ def export_follow_sop_excel():
         
         # DB 연결
         conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
         # 동적 컬럼 정보 (활성+미삭제, 섹션도 활성)
@@ -8917,22 +9035,21 @@ def export_follow_sop_excel():
             ws.cell(row=row_idx, column=col_idx, value=row_dict.get('created_by', ''))
             col_idx += 1
             
-            # custom_data 파싱
-            custom_data = {}
-            if row_dict.get('custom_data'):
-                try:
-                    custom_data = json.loads(row_dict.get('custom_data', '{}'))
-                except:
-                    custom_data = {}
-            
+            # custom_data 파싱 (PostgreSQL 전용)
+            custom_data = row_dict.get('custom_data', {})
+            if not isinstance(custom_data, dict):
+                custom_data = {}
+
             # 동적 컬럼 데이터 - 드롭다운/가상 채점 항목 포함
             # 드롭다운 매핑 지원
             def _map_value(col, value):
                 # 팝업형 값(dict) → name
                 if isinstance(value, dict):
                     return value.get('name', str(value))
-                # 리스트 ⇒ JSON 문자열
-                if col['column_type'] == 'list' and isinstance(value, list):
+                # 리스트 ⇒ JSON 문자열 (모든 리스트 처리)
+                if isinstance(value, list):
+                    if not value:  # 빈 리스트는 빈 문자열로
+                        return ''
                     try:
                         return json.dumps(value, ensure_ascii=False)
                     except Exception:
@@ -8944,7 +9061,7 @@ def export_follow_sop_excel():
                         for opt in opts:
                             if opt['code'] == value:
                                 return opt['value']
-                return value
+                return value if value is not None else ''
 
             for col in expanded_columns:
                 if col.get('_virtual') == 1:
@@ -9051,7 +9168,6 @@ def export_full_process_excel():
         
         # DB 연결
         conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
         # 동적 컬럼 정보 (활성+미삭제, 섹션도 활성)
@@ -9124,13 +9240,10 @@ def export_full_process_excel():
             ws.cell(row=row_idx, column=col_idx, value=row_dict.get('created_by', ''))
             col_idx += 1
             
-            # custom_data 파싱
-            custom_data = {}
-            if row_dict.get('custom_data'):
-                try:
-                    custom_data = json.loads(row_dict.get('custom_data', '{}'))
-                except:
-                    custom_data = {}
+            # custom_data 파싱 (PostgreSQL 전용)
+            custom_data = row_dict.get('custom_data', {})
+            if not isinstance(custom_data, dict):
+                custom_data = {}
             
             # 동적 컬럼 데이터 - 활성화되고 삭제되지 않은 컬럼만
             # 드롭다운 매핑 지원
@@ -9206,7 +9319,6 @@ def export_safety_instruction_excel():
         
         # DB 연결
         conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
         # 동적 컬럼 정보 (활성+미삭제, 섹션도 활성)
@@ -9397,7 +9509,6 @@ def export_change_requests_excel():
         
         # DB 연결
         conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
         
         # 동적 컬럼 정보 (활성+미삭제, 섹션도 활성)
         where_c_active = sql_is_active_true('c.is_active', conn)
@@ -9602,7 +9713,6 @@ def export_partners_to_excel():
         # 협력사 데이터 조회 (partner_standards 함수와 동일한 로직)
         try:
             conn = get_db_connection()
-            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
             # 쿼리 구성 (삭제되지 않은 데이터만)
@@ -10352,7 +10462,6 @@ def board_dropdown_history(board):
         return jsonify({"error": "column_key is required"}), 400
     try:
         conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         # board_type 컬럼 존재 여부 확인
         cur.execute("PRAGMA table_info(dropdown_code_audit)")
@@ -10387,7 +10496,6 @@ def board_dropdown_audit_summary(board):
     board_type = board.replace('-', '_')
     try:
         conn = get_db_connection()
-        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute("PRAGMA table_info(dropdown_code_audit)")
         cols = [r[1] for r in cur.fetchall()]

@@ -139,11 +139,13 @@
                                            
                                 {% elif col.column_type in ['linked', 'linked_text', 'linked_dept'] %}
                                     <!-- 연결된 필드 (읽기 전용) -->
-                                    <input type="text" 
-                                           id="{{ col.column_key }}" 
-                                           class="{{ section.section_key }}-input linked-field" 
+                                    <input type="text"
+                                           id="{{ col.column_key }}"
+                                           class="{{ section.section_key }}-input linked-field"
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
+                                           {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                           {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                            data-linked-type="{{ col.column_type }}"
                                            readonly
                                            style="background-color: #e9ecef; cursor: not-allowed;">
@@ -151,11 +153,13 @@
                                 {% elif col.column_type == 'popup' %}
                                     <!-- 팝업 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                placeholder="클릭하여 선택"
                                                readonly>
                                         <button class="btn btn-sm btn-primary" 
@@ -167,11 +171,13 @@
                                 {% elif col.column_type == 'popup_person' %}
                                     <!-- 담당자 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                data-input-type="popup_person"
                                                placeholder="담당자 검색"
                                                readonly
@@ -185,11 +191,13 @@
                                 {% elif col.column_type == 'popup_company' %}
                                     <!-- 업체 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                data-input-type="popup_company"
                                                placeholder="업체 검색"
                                                readonly
@@ -203,11 +211,13 @@
                                 {% elif col.column_type == 'popup_building' %}
                                     <!-- 건물 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                data-input-type="popup_building"
                                                placeholder="건물 검색"
                                                readonly
@@ -221,11 +231,13 @@
                                 {% elif col.column_type == 'popup_department' %}
                                     <!-- 부서 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                data-input-type="popup_department"
                                                placeholder="부서 검색"
                                                readonly
@@ -239,11 +251,13 @@
                                 {% elif col.column_type == 'popup_contractor' %}
                                     <!-- 협력사 근로자 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                data-input-type="popup_contractor"
                                                placeholder="협력사 근로자 검색"
                                                readonly
@@ -257,11 +271,13 @@
                                 {% elif col.column_type == 'table' or col.input_type == 'table' %}
                                     <!-- 테이블 검색 필드 -->
                                     <div class="input-group">
-                                        <input type="text" 
-                                               id="{{ col.column_key }}" 
-                                               class="{{ section.section_key }}-input" 
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                data-input-type="table"
                                                placeholder="검색하여 선택"
                                                readonly

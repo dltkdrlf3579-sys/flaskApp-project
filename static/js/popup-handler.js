@@ -3,6 +3,92 @@
  * 모든 보드에서 공통으로 사용하는 팝업 처리 함수
  */
 
+// table_group 기반 linked_text 필드 자동 업데이트 함수
+function updateLinkedFieldsByTableGroup(mainFieldKey, selectedData, tableGroup) {
+    if (!tableGroup) return;
+
+    console.log('updateLinkedFieldsByTableGroup:', mainFieldKey, tableGroup, selectedData);
+
+    // 같은 table_group의 모든 linked_text 필드 찾기
+    const linkedFields = document.querySelectorAll(`input[data-table-group="${tableGroup}"]`);
+    console.log('Found linked fields:', linkedFields.length);
+
+    // 모든 input 요소 중 table_group 속성이 있는 것들 확인
+    const allInputs = document.querySelectorAll('input[data-table-group]');
+    console.log('All inputs with data-table-group:', allInputs.length);
+    allInputs.forEach(input => {
+        console.log('Input:', input.id, 'table-group:', input.getAttribute('data-table-group'), 'class:', input.className);
+    });
+
+    linkedFields.forEach(field => {
+        const fieldKey = field.getAttribute('data-field');
+        const tableType = field.getAttribute('data-table-type');
+
+        // 메인 필드는 제외
+        if (fieldKey === mainFieldKey) return;
+
+        // 필드 키 패턴에 따라 데이터 매핑
+        console.log('Mapping field:', fieldKey, 'with data:', selectedData);
+
+        if (fieldKey.includes('_company')) {
+            // contractor의 소속업체명
+            field.value = selectedData.company_name || selectedData.company || '';
+        } else if (fieldKey.includes('_bizno') || fieldKey.includes('_business_number')) {
+            // contractor의 사업자번호
+            field.value = selectedData.business_number || selectedData.company_business_number || '';
+        } else if (fieldKey.includes('_id')) {
+            if (tableType === 'contractor') {
+                field.value = selectedData.worker_id || selectedData.contractor_id || selectedData.id || '';
+            } else if (tableType === 'company') {
+                field.value = selectedData.company_id || selectedData.id || '';
+            } else if (tableType === 'building') {
+                field.value = selectedData.building_id || selectedData.id || '';
+            }
+        } else if (fieldKey.includes('_name')) {
+            if (tableType === 'contractor') {
+                field.value = selectedData.worker_name || selectedData.contractor_name || selectedData.name || '';
+            } else if (tableType === 'company') {
+                field.value = selectedData.company_name || selectedData.name || '';
+            } else if (tableType === 'building') {
+                field.value = selectedData.building_name || selectedData.name || '';
+            }
+        } else if (fieldKey.includes('_dept') || fieldKey.includes('_department')) {
+            field.value = selectedData.department_name || selectedData.department || '';
+        } else if (fieldKey.includes('_code')) {
+            if (tableType === 'building') {
+                field.value = selectedData.building_code || selectedData.code || '';
+            } else if (tableType === 'department') {
+                field.value = selectedData.dept_code || selectedData.department_code || '';
+            } else {
+                field.value = selectedData.code || '';
+            }
+        } else if (fieldKey.includes('_text')) {
+            // linked_text 필드들에 대한 매핑
+            const linkedType = field.getAttribute('data-linked-type');
+            console.log('Processing linked_text field:', fieldKey, 'linked-type:', linkedType);
+
+            if (fieldKey.includes('사업자번호') || fieldKey.includes('_bizno')) {
+                field.value = selectedData.business_number || selectedData.company_business_number || '';
+            } else if (fieldKey.includes('소속업체') || fieldKey.includes('업체명')) {
+                field.value = selectedData.company_name || selectedData.company || '';
+            } else if (fieldKey.includes('부서') || fieldKey.includes('_dept')) {
+                field.value = selectedData.department_name || selectedData.department || '';
+            } else if (fieldKey.includes('건물') || fieldKey.includes('_building')) {
+                field.value = selectedData.building_name || selectedData.name || '';
+            } else {
+                // 기본적으로 name 필드 매핑
+                field.value = selectedData.name || selectedData.employee_name || selectedData.company_name || selectedData.building_name || '';
+            }
+        }
+
+        console.log('Field', fieldKey, 'mapped to:', field.value);
+
+        // 필드를 읽기 전용으로 설정
+        field.setAttribute('readonly', true);
+        field.style.backgroundColor = '#f8f9fa';
+    });
+}
+
 // 담당자 검색 팝업 열기
 function openPersonSearch(fieldKey) {
     const width = 1000;
@@ -34,32 +120,6 @@ function openPersonSearch(fieldKey) {
     popup.focus();
 }
 
-// 담당자 선택 콜백
-window.receivePersonSelection = function(fieldKey, data) {
-    console.log('receivePersonSelection 호출:', fieldKey, data);
-    
-    // 메인 필드 업데이트
-    const mainField = document.getElementById(fieldKey);
-    if (mainField) {
-        mainField.value = data.employee_name || data.name || '';
-    }
-    
-    // _id 필드 업데이트
-    const idField = document.getElementById(fieldKey + '_id');
-    if (idField) {
-        idField.value = data.employee_id || data.id || '';
-        idField.setAttribute('readonly', true);
-        idField.style.backgroundColor = '#f8f9fa';
-    }
-    
-    // _dept 필드 업데이트
-    const deptField = document.getElementById(fieldKey + '_dept');
-    if (deptField && (data.department_name || data.department)) {
-        deptField.value = data.department_name || data.department || '';
-        deptField.setAttribute('readonly', true);
-        deptField.style.backgroundColor = '#f8f9fa';
-    }
-};
 
 // 업체 검색 팝업 열기
 function openCompanySearch(fieldKey) {
@@ -95,20 +155,36 @@ function openCompanySearch(fieldKey) {
 // 업체 선택 콜백
 window.receiveCompanySelection = function(fieldKey, data) {
     console.log('receiveCompanySelection 호출:', fieldKey, data);
-    
+
     // 메인 필드 업데이트
     const mainField = document.getElementById(fieldKey);
     if (mainField) {
         mainField.value = data.company_name || '';
+        mainField.readOnly = true;
+        mainField.style.backgroundColor = '#f3f4f6';
+
+        // table_group 기반 linked 필드 자동 업데이트
+        const tableGroup = mainField.getAttribute('data-table-group');
+        if (tableGroup) {
+            updateLinkedFieldsByTableGroup(fieldKey, data, tableGroup);
+        }
     }
-    
-    // _bizno 필드 업데이트 (통일된 접미사)
-    const biznoField = document.getElementById(fieldKey + '_bizno');
-    if (biznoField) {
-        biznoField.value = data.business_number || '';
-        biznoField.setAttribute('readonly', true);
-        biznoField.style.backgroundColor = '#f8f9fa';
-    }
+
+    // 기존 방식 유지 (호환성을 위해)
+    // 사업자번호 필드 패턴들
+    const patterns = [
+        {suffix: '_business_number', value: data.business_number || ''},
+        {suffix: '_bizno', value: data.business_number || ''}
+    ];
+
+    patterns.forEach(pattern => {
+        const field = document.getElementById(fieldKey + pattern.suffix);
+        if (field && pattern.value) {
+            field.value = pattern.value;
+            field.setAttribute('readonly', true);
+            field.style.backgroundColor = '#f8f9fa';
+        }
+    });
 };
 
 // 건물 검색 팝업 열기
@@ -142,24 +218,6 @@ function openBuildingSearch(fieldKey) {
     popup.focus();
 }
 
-// 건물 선택 콜백
-window.receiveBuildingSelection = function(fieldKey, data) {
-    console.log('receiveBuildingSelection 호출:', fieldKey, data);
-    
-    // 메인 필드 업데이트
-    const mainField = document.getElementById(fieldKey);
-    if (mainField) {
-        mainField.value = data.building_name || '';
-    }
-    
-    // _code 필드 업데이트
-    const codeField = document.getElementById(fieldKey + '_code');
-    if (codeField) {
-        codeField.value = data.building_code || '';
-        codeField.setAttribute('readonly', true);
-        codeField.style.backgroundColor = '#f8f9fa';
-    }
-};
 
 // 부서 검색 팝업 열기
 function openDepartmentSearch(fieldKey) {
@@ -192,24 +250,6 @@ function openDepartmentSearch(fieldKey) {
     popup.focus();
 }
 
-// 부서 선택 콜백
-window.receiveDepartmentSelection = function(fieldKey, data) {
-    console.log('receiveDepartmentSelection 호출:', fieldKey, data);
-    
-    // 메인 필드 업데이트
-    const mainField = document.getElementById(fieldKey);
-    if (mainField) {
-        mainField.value = data.dept_name || data.department_name || '';
-    }
-    
-    // _code 필드 업데이트
-    const codeField = document.getElementById(fieldKey + '_code');
-    if (codeField) {
-        codeField.value = data.dept_code || data.department_code || '';
-        codeField.setAttribute('readonly', true);
-        codeField.style.backgroundColor = '#f8f9fa';
-    }
-};
 
 // 협력사 근로자 검색 팝업 열기
 function openContractorSearch(fieldKey) {
@@ -242,39 +282,151 @@ function openContractorSearch(fieldKey) {
     popup.focus();
 }
 
-// 협력사 근로자 선택 콜백
-window.receiveContractorSelection = function(fieldKey, data) {
-    console.log('receiveContractorSelection 호출:', fieldKey, data);
-    
-    // 메인 필드 업데이트
+// ======================================
+// 통합 팝업 선택 콜백 함수들 - 완전 통합 버전
+// ======================================
+
+// 테이블 선택 콜백
+window.receiveTableSelection = function(fieldKey, data) {
+
+    // follow-sop-detail.html의 특이형태 지원
+    if (arguments.length === 1 && typeof fieldKey === 'object') {
+        data = fieldKey;
+        fieldKey = window.currentFieldKey;
+    }
+
     const mainField = document.getElementById(fieldKey);
     if (mainField) {
-        mainField.value = data.worker_name || data.contractor_name || data.name || '';
+        mainField.value = data.display_value || data.name || data.display_name || '';
+        mainField.readOnly = true;
+        mainField.style.backgroundColor = '#f3f4f6';
     }
-    
-    // _id 필드 업데이트
+
     const idField = document.getElementById(fieldKey + '_id');
     if (idField) {
-        idField.value = data.worker_id || data.contractor_id || data.id || '';
-        idField.setAttribute('readonly', true);
-        idField.style.backgroundColor = '#f8f9fa';
-    }
-    
-    // _company_name 필드 업데이트 (소속업체)
-    const companyField = document.getElementById(fieldKey + '_company_name');
-    if (companyField) {
-        companyField.value = data.company_name || data.company || '';
-        companyField.setAttribute('readonly', true);
-        companyField.style.backgroundColor = '#f8f9fa';
-    }
-    
-    // _bizno 필드 업데이트 (통일된 접미사)
-    const biznoField = document.getElementById(fieldKey + '_bizno');
-    if (biznoField) {
-        biznoField.value = data.business_number || '';
-        biznoField.setAttribute('readonly', true);
-        biznoField.style.backgroundColor = '#f8f9fa';
+        idField.value = data.id || '';
+        idField.readOnly = true;
+        idField.style.backgroundColor = '#f3f4f6';
     }
 };
 
+// 담당자 선택 콜백
+window.receivePersonSelection = function(fieldKey, data) {
+
+    const mainField = document.getElementById(fieldKey);
+    if (mainField) {
+        mainField.value = data.employee_name || data.name || '';
+        mainField.readOnly = true;
+        mainField.style.backgroundColor = '#f3f4f6';
+
+        // table_group 기반 linked 필드 자동 업데이트
+        const tableGroup = mainField.getAttribute('data-table-group');
+        if (tableGroup) {
+            updateLinkedFieldsByTableGroup(fieldKey, data, tableGroup);
+        }
+    }
+
+    const patterns = [
+        {suffix: '_id', value: data.employee_id || data.id || ''},
+        {suffix: '_dept', value: data.department_name || data.department || ''}
+    ];
+
+    patterns.forEach(pattern => {
+        const field = document.getElementById(fieldKey + pattern.suffix);
+        if (field && pattern.value) {
+            field.value = pattern.value;
+            field.setAttribute('readonly', true);
+            field.style.backgroundColor = '#f8f9fa';
+        }
+    });
+};
+
+
+// 건물 선택 콜백
+window.receiveBuildingSelection = function(fieldKey, data) {
+
+    const mainField = document.getElementById(fieldKey);
+    if (mainField) {
+        mainField.value = data.building_name || '';
+        mainField.readOnly = true;
+        mainField.style.backgroundColor = '#f3f4f6';
+
+        // table_group 기반 linked 필드 자동 업데이트
+        const tableGroup = mainField.getAttribute('data-table-group');
+        if (tableGroup) {
+            updateLinkedFieldsByTableGroup(fieldKey, data, tableGroup);
+        }
+    }
+
+    const codeField = document.getElementById(fieldKey + '_code');
+    if (codeField) {
+        codeField.value = data.building_code || '';
+        codeField.readOnly = true;
+        codeField.style.backgroundColor = '#f3f4f6';
+    }
+};
+
+// 부서 선택 콜백
+window.receiveDepartmentSelection = function(fieldKey, data) {
+
+    const mainField = document.getElementById(fieldKey);
+    if (mainField) {
+        mainField.value = data.dept_name || data.department_name || '';
+        mainField.readOnly = true;
+        mainField.style.backgroundColor = '#f3f4f6';
+
+        // table_group 기반 linked 필드 자동 업데이트
+        const tableGroup = mainField.getAttribute('data-table-group');
+        if (tableGroup) {
+            updateLinkedFieldsByTableGroup(fieldKey, data, tableGroup);
+        }
+    }
+
+    // 기존 방식 유지 (호환성을 위해)
+    // _code 필드 업데이트
+    const codeField = document.getElementById(fieldKey + '_code');
+    if (codeField) {
+        codeField.value = data.dept_code || data.department_code || '';
+        codeField.readOnly = true;
+        codeField.style.backgroundColor = '#f3f4f6';
+    }
+};
+
+// 협력사 근로자 선택 콜백
+window.receiveContractorSelection = function(fieldKey, data) {
+    // 1. 메인 필드 업데이트
+    const mainField = document.getElementById(fieldKey);
+    if (mainField) {
+        mainField.value = data.worker_name || data.contractor_name || data.name || '';
+        mainField.readOnly = true;
+        mainField.style.backgroundColor = '#f3f4f6';
+    }
+
+    // 2. 모든 가능한 linked 필드 패턴 처리
+    const patterns = [
+        // ID 필드들
+        {suffix: '_id', value: data.worker_id || data.contractor_id || data.id || ''},
+
+        // 업체명 필드들 (실제 사용되는 패턴들)
+        {suffix: '_company', value: data.company_name || data.company || ''},
+        {suffix: '_company_name', value: data.company_name || data.company || ''},
+
+        // 사업자번호 필드들 (실제 사용되는 패턴들)
+        {suffix: '_bizno', value: data.business_number || ''},
+        {suffix: '_business_number', value: data.business_number || ''}
+    ];
+
+    patterns.forEach(pattern => {
+        const field = document.getElementById(fieldKey + pattern.suffix);
+        if (field && pattern.value) {
+            field.value = pattern.value;
+            field.setAttribute('readonly', true);
+            field.style.backgroundColor = '#f8f9fa';
+        }
+    });
+
+};
+
 console.log('✅ Popup handler loaded');
+
+// 페이지 로드 후 초기화 (디버깅 코드 제거됨)

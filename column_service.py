@@ -268,37 +268,20 @@ class ColumnConfigService:
                 max_num = cursor.fetchone()[0] or 10
                 column_key = f"column{max_num + 1}"
             
-            # 같은 column_key의 삭제된 컬럼이 있는지 확인 (복구 가능)
+            # 같은 column_key가 이미 존재하는지 확인 (활성 또는 삭제된 컬럼 포함)
             cursor.execute(
-                f"SELECT id FROM {self.table_name} WHERE column_key = ? AND is_deleted = 1",
+                f"SELECT id, is_deleted FROM {self.table_name} WHERE column_key = ?",
                 (column_key,)
             )
-            deleted_column = cursor.fetchone()
-            
-            if deleted_column:
-                # 삭제된 컬럼 복구
-                column_id = deleted_column[0]
-                cursor.execute(f"""
-                    UPDATE {self.table_name}
-                    SET column_name = ?, column_type = ?, is_active = 1, is_deleted = 0,
-                        dropdown_options = ?, column_span = ?, tab = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                """, (
-                    column_data['column_name'],
-                    column_data.get('column_type', 'text'),
-                    json.dumps(column_data.get('dropdown_options', []), ensure_ascii=False) if column_data.get('dropdown_options') else None,
-                    column_data.get('column_span', 1),
-                    column_data.get('tab', 'additional'),
-                    column_id
-                ))
-                
-                conn.commit()
-                logging.info(f"삭제된 컬럼 복구: {column_key}")
-                return {
-                    'success': True, 
-                    'message': '이전에 삭제된 컬럼이 복구되었습니다.',
-                    'id': column_id
-                }
+            existing_column = cursor.fetchone()
+
+            if existing_column:
+                is_deleted = existing_column[1]
+                if is_deleted == 1:
+                    raise ValueError(f"동일한 컬럼키 '{column_key}'가 삭제된 상태로 존재합니다. 관리자에게 문의하거나 다른 컬럼키를 사용해주세요.")
+                else:
+                    raise ValueError(f"컬럼키 '{column_key}'가 이미 사용 중입니다. 다른 컬럼키를 사용해주세요.")
+
             
             # 최대 순서 조회
             cursor.execute(f"SELECT MAX(column_order) FROM {self.table_name}")
@@ -400,16 +383,47 @@ class ColumnConfigService:
             )
             
             column_id = cursor.lastrowid
+
+            # 실제 데이터 테이블에도 컬럼 추가 (핵심 수정사항)
+            try:
+                # 컬럼 타입별 DDL 매핑
+                column_type_map = {
+                    'text': 'TEXT',
+                    'number': 'NUMERIC',
+                    'date': 'DATE',
+                    'dropdown': 'TEXT',
+                    'checkbox': 'INTEGER DEFAULT 0',
+                    'popup_person': 'TEXT',
+                    'popup_company': 'TEXT',
+                    'popup_department': 'TEXT',
+                    'popup_building': 'TEXT',
+                    'popup_contractor': 'TEXT',
+                    'linked_text': 'TEXT',
+                    'linked_dept': 'TEXT',
+                    'list': 'TEXT'
+                }
+
+                ddl_type = column_type_map.get(column_data.get('column_type', 'text'), 'TEXT')
+
+                # 데이터 테이블에 컬럼 추가
+                alter_sql = f"ALTER TABLE {self.data_table} ADD COLUMN {column_key} {ddl_type}"
+                cursor.execute(alter_sql)
+                logging.info(f"데이터 테이블 컬럼 추가: {self.data_table}.{column_key}")
+
+            except Exception as alter_error:
+                # 컬럼이 이미 존재하거나 다른 이유로 실패해도 설정 테이블 추가는 유지
+                logging.warning(f"데이터 테이블 컬럼 추가 실패 (무시): {alter_error}")
+
             conn.commit()
-            
+
         except Exception as e:
             conn.rollback()
             raise
         finally:
             conn.close()
-        
+
         logging.info(f"컬럼 추가됨: {column_key} ({column_data['column_name']})")
-        
+
         return {
             'id': column_id,
             'column_key': column_key,

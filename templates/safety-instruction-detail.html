@@ -182,11 +182,13 @@
                                            
                                 {% elif render_type in ['linked','linked_text','linked_dept'] %}
                                     <!-- 연결된 필드 (읽기 전용) -->
-                                    <input type="text" 
+                                    <input type="text"
                                            id="{{ col.column_key }}"
-                                           class="{{ section.section_key|replace('_', '-') }}-input" 
+                                           class="{{ section.section_key|replace('_', '-') }}-input linked-field"
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
+                                           {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                           {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                            value="{{ col_value }}"
                                            readonly
                                            style="background-color: #f3f4f6;">
@@ -196,11 +198,13 @@
                                     <!-- ⚠️ IMPORTANT: btn-primary 유지, 아이콘 없이 "검색" 텍스트만 -->
                                     <!-- DO NOT CHANGE to btn-outline-secondary or add icons -->
                                     <div class="input-group">
-                                        <input type="text" 
+                                        <input type="text"
                                                id="{{ col.column_key }}"
-                                               class="{{ section.section_key|replace('_', '-') }}-input" 
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                value="{{ col_value }}"
                                                readonly>
                                         <button class="btn btn-sm btn-primary" 
@@ -296,8 +300,8 @@
         </div>
         <div class="section-content">
             <div class="content-editor">
-                <!-- 에디터 초기화 개선 - data-content 패턴 사용 -->
-                <div id="detailed-content" class="editable-content" data-content="{{ (instruction.detailed_content or '') | tojson }}" data-ckeditor="true"></div>
+                <!-- textarea로 변경하여 CKEditor가 직접 처리하도록 함 -->
+                <textarea id="detailed-content" name="detailed_content" class="editable-content" data-ckeditor="true">{{ instruction.detailed_content if instruction.detailed_content else '' }}</textarea>
             </div>
         </div>
     </div>
@@ -398,17 +402,47 @@ function collectDynamicFields() {
     return data;
 }
 
+// 섹션별로 필드를 그룹화하는 함수
+function groupFieldsBySection(dynamicData) {
+    const sectionGroups = {};
+
+    // 모든 섹션의 컬럼을 순회하면서 그룹화
+    Object.keys(sectionColumns).forEach(sectionKey => {
+        const columns = sectionColumns[sectionKey] || [];
+
+        columns.forEach(col => {
+            // 해당 섹션의 그룹이 없으면 생성
+            if (!sectionGroups[sectionKey]) {
+                sectionGroups[sectionKey] = {};
+            }
+
+            const fieldKey = col.column_key;
+            // dynamicData에 해당 필드가 있으면 섹션 그룹에 추가
+            if (dynamicData[fieldKey] !== undefined) {
+                sectionGroups[sectionKey][fieldKey] = dynamicData[fieldKey];
+            }
+        });
+    });
+
+    console.log('=== 섹션별 그룹화 결과 ===');
+    Object.keys(sectionGroups).forEach(sectionKey => {
+        console.log(`${sectionKey}:`, sectionGroups[sectionKey]);
+    });
+
+    return sectionGroups;
+}
+
 // 수정 함수
 function updateSafetyInstruction() {
     const formData = new FormData();
-    
+
     // 발부번호
     formData.append('issue_number', issueNumber);
-    
+
     // 상세내용 처리 - CKEditor 또는 div에서 값 가져오기
     const contentDiv = document.getElementById('detailed-content');
     let detailedContent = '';
-    
+
     // CKEditor가 있다면 CKEditor에서 값 가져오기
     if (window.RichText && typeof window.RichText.getData === 'function') {
         detailedContent = window.RichText.getData();
@@ -417,36 +451,23 @@ function updateSafetyInstruction() {
     } else if (contentDiv) {
         detailedContent = contentDiv.innerHTML || '';
     }
-    
+
     formData.append('detailed_content', detailedContent);
-    
+
     // 동적 필드 수집
     const dynamicData = collectDynamicFields();
-    
-    // 각 필드를 FormData에 추가 (서버에서 필요한 경우 사용)
-    for (const [key, value] of Object.entries(dynamicData)) {
-        formData.append(key, value);
-    }
-    
-    // base_fields와 custom_data 모두 전송
-    // base_fields: 기본 컬럼들 (화이트리스트)
-    const baseFields = {};
-    const baseFieldsList = [
-        'issue_number', 'instruction_name', 'instruction_date', 'workplace',
-        'instruction_type', 'violation_category', 'created_at'
-    ];
-    
-    baseFieldsList.forEach(field => {
-        if (dynamicData[field] !== undefined) {
-            baseFields[field] = dynamicData[field];
-        }
+
+    // 섹션별로 그룹화해서 전송
+    const sectionGroups = groupFieldsBySection(dynamicData);
+
+    // 각 섹션별로 FormData에 추가
+    Object.keys(sectionGroups).forEach(sectionKey => {
+        console.log(`Sending section ${sectionKey}:`, sectionGroups[sectionKey]);
+        formData.append(sectionKey, JSON.stringify(sectionGroups[sectionKey]));
     });
-    
-    formData.append('base_fields', JSON.stringify(baseFields));
-    
-    // custom_data: 모든 동적 필드 포함
-    const customData = { ...dynamicData };
-    formData.append('custom_data', JSON.stringify(customData));
+
+    // 하위 호환성을 위해 custom_data도 전송 (전체 데이터)
+    formData.append('custom_data', JSON.stringify(dynamicData));
     
     // 새 첨부파일 처리 (공통 컴포넌트 변수 사용)
     if (typeof pendingFiles !== 'undefined') {
@@ -460,17 +481,19 @@ function updateSafetyInstruction() {
         formData.append('deleted_attachments', JSON.stringify(deletedAttachments));
     }
     
-    // 첨부파일 설명 정보
-    const attachmentDescriptions = [];
-    document.querySelectorAll('.attachment-desc').forEach((input, index) => {
-        const row = input.closest('tr') || input.closest('.attachment-row');
-        attachmentDescriptions.push({
-            id: row ? (row.dataset.id || row.dataset.attachmentId || null) : null,
-            description: input.value || '',
-            isNew: row ? (row.dataset.isNew === 'true') : false
-        });
+    // 첨부파일 설명 정보 (update_follow_sop와 동일한 방식)
+    const attachmentData = [];
+    document.querySelectorAll('.attachment-desc').forEach((input) => {
+        const row = input.closest('.table-row');
+        if (row) {
+            attachmentData.push({
+                id: row.dataset.id || null,
+                description: input.value || '',
+                isNew: row.dataset.isNew === 'true'
+            });
+        }
     });
-    formData.append('attachment_data', JSON.stringify(attachmentDescriptions));
+    formData.append('attachment_data', JSON.stringify(attachmentData));
     
     // 서버로 전송
     fetch('/update-safety-instruction', {
@@ -537,6 +560,93 @@ function openPopup(fieldKey) {
     alert('팝업 기능은 추가 구현이 필요합니다.');
 }
 
+// 디버깅 헬퍼 함수 (개발자 도구 Console에서 사용)
+window.debugFields = function() {
+    console.log('=== 디버깅 시작 ===');
+
+    // 1. data-field 속성이 있는 요소들 확인
+    const fieldsWithDataAttr = document.querySelectorAll('[data-field]');
+    console.log(`data-field 속성이 있는 요소: ${fieldsWithDataAttr.length}개`);
+
+    // 2. 각 필드의 값 확인
+    fieldsWithDataAttr.forEach(field => {
+        const fieldKey = field.dataset.field;
+        const value = field.value;
+        const section = field.dataset.section;
+        console.log(`  ${fieldKey} (섹션: ${section}): "${value}"`);
+    });
+
+    // 3. collectDynamicFields 실행
+    console.log('\n=== collectDynamicFields 실행 ===');
+    const collected = collectDynamicFields();
+    console.log('수집된 데이터:', collected);
+
+    // 4. 비어있지 않은 필드만 표시
+    const nonEmpty = {};
+    Object.keys(collected).forEach(key => {
+        if (collected[key] && collected[key] !== '') {
+            nonEmpty[key] = collected[key];
+        }
+    });
+    console.log('\n값이 있는 필드:', nonEmpty);
+
+    // 5. 섹션별 그룹화
+    console.log('\n=== 섹션별 그룹화 ===');
+    const grouped = groupFieldsBySection(collected);
+    console.log('그룹화 결과:', grouped);
+
+    return {
+        total: fieldsWithDataAttr.length,
+        collected: collected,
+        nonEmpty: nonEmpty,
+        grouped: grouped
+    };
+};
+
+// 테스트 데이터 입력 함수
+window.fillTestData = function() {
+    console.log('테스트 데이터 입력 중...');
+
+    // 각 필드에 테스트 값 입력
+    const testData = {
+        'issuer': '김철수',
+        'issuer_department': '안전팀',
+        'disciplined_person': '이영희',
+        'violation_date': '2025-01-13',
+        'violation_type': '안전규정 위반',
+        'gbm': 'GBM1',
+        'team': '제조1팀',
+        'penalty': '경고'
+    };
+
+    Object.keys(testData).forEach(fieldKey => {
+        const field = document.getElementById(fieldKey);
+        if (field) {
+            field.value = testData[fieldKey];
+            console.log(`✓ ${fieldKey}: ${testData[fieldKey]}`);
+        } else {
+            console.log(`✗ ${fieldKey}: 필드를 찾을 수 없음`);
+        }
+    });
+
+    // 상세내용도 입력
+    const detailContent = document.getElementById('detailed-content');
+    if (detailContent) {
+        if (window.RichText && typeof window.RichText.setData === 'function') {
+            window.RichText.setData('<p>테스트 상세내용입니다.</p>');
+        } else if (window.editorInstance && typeof window.editorInstance.setData === 'function') {
+            window.editorInstance.setData('<p>테스트 상세내용입니다.</p>');
+        } else {
+            detailContent.innerHTML = '<p>테스트 상세내용입니다.</p>';
+        }
+        console.log('✓ 상세내용 입력 완료');
+    }
+
+    console.log('\n테스트 데이터 입력 완료!');
+    console.log('이제 debugFields()를 실행해서 확인하거나');
+    console.log('저장 버튼을 클릭해보세요.');
+};
+
 // 페이지 로드 시 초기화
 document.addEventListener('DOMContentLoaded', function() {
     // 에디터 초기화
@@ -591,24 +701,7 @@ function openPersonSearch(fieldKey) {
         return;
     }
     
-    window.receivePersonSelection = function(fieldKey, data) {
-        const mainField = document.getElementById(fieldKey);
-        if (mainField) {
-            mainField.value = data.employee_name || data.name || '';
-        }
-        
-        // ID 필드 업데이트
-        const idField = document.getElementById(fieldKey + '_id');
-        if (idField) {
-            idField.value = data.employee_id || data.id || '';
-        }
-        
-        // 부서 필드 업데이트
-        const deptField = document.getElementById(fieldKey + '_dept');
-        if (deptField) {
-            deptField.value = data.department_name || data.department || '';
-        }
-    };
+    // receivePersonSelection 함수는 popup-handler.js에서 통합 처리됨
     
     popup.focus();
 }
@@ -636,15 +729,7 @@ function openCompanySearch(fieldKey) {
         return;
     }
     
-    window.receiveCompanySelection = function(fieldKey, data) {
-        const mainField = document.getElementById(fieldKey) || document.querySelector(`[data-field="${fieldKey}"]`);
-        if (mainField) mainField.value = data.company_name || '';
-        const businessNumberFields = [fieldKey + '_business_number', fieldKey + '_bizno'];
-        businessNumberFields.forEach(fid => {
-            const bn = document.getElementById(fid) || document.querySelector(`[data-field="${fid}"]`);
-            if (bn) bn.value = data.business_number || '';
-        });
-    };
+    // receiveCompanySelection 함수는 popup-handler.js에서 통합 처리됨
     
     popup.focus();
 }
@@ -672,11 +757,7 @@ function openBuildingSearch(fieldKey) {
         return;
     }
     
-    window.receiveBuildingSelection = function(fieldKey, data) {
-        document.getElementById(fieldKey).value = data.building_name || '';
-        const codeField = document.getElementById(fieldKey + '_code');
-        if (codeField) codeField.value = data.building_code || '';
-    };
+    // receiveBuildingSelection 함수는 popup-handler.js에서 통합 처리됨
     
     popup.focus();
 }
@@ -704,17 +785,7 @@ function openDepartmentSearch(fieldKey) {
         return;
     }
     
-    window.receiveDepartmentSelection = function(fieldKey, data) {
-        const mainField = document.getElementById(fieldKey);
-        if (mainField) {
-            mainField.value = data.dept_name || data.department_name || '';
-        }
-        
-        const codeField = document.getElementById(fieldKey + '_code');
-        if (codeField) {
-            codeField.value = data.dept_code || data.department_code || '';
-        }
-    };
+    // receiveDepartmentSelection 함수는 popup-handler.js에서 통합 처리됨
     
     popup.focus();
 }
@@ -742,29 +813,7 @@ function openContractorSearch(fieldKey) {
         return;
     }
     
-    
-    window.receiveContractorSelection = function(fieldKey, data) {
-        const mainField = document.getElementById(fieldKey) || document.querySelector(`[data-field="${fieldKey}"]`);
-        if (mainField) mainField.value = data.worker_name || '';
-
-        const mappings = [
-            { targets: ['_id'], src: 'worker_id' },
-            { targets: ['_company', '_company_name'], src: 'company_name' },
-            { targets: ['_bizno', '_company_bizno', '_business_number'], src: 'business_number' },
-        ];
-        mappings.forEach(m => {
-            m.targets.forEach(suffix => {
-                const field = document.getElementById(fieldKey + suffix) || document.querySelector(`[data-field="${fieldKey + suffix}"]`);
-                if (field) {
-                    field.value = data[m.src] || '';
-                    if (field.tagName === 'INPUT' || field.tagName === 'TEXTAREA') {
-                        field.readOnly = true;
-                        field.style.backgroundColor = '#f8f9fa';
-                    }
-                }
-            });
-        });
-    };
+    // receiveContractorSelection 함수는 popup-handler.js에서 통합 처리됨
     
     popup.focus();
 }

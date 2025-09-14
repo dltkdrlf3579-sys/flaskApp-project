@@ -69,6 +69,7 @@
                 {% for chunk in dynamic_columns | batch(columns_per_row) %}
                 <div class="info-row">
                     {% for col in chunk %}
+                    {% if col.column_key != 'detailed_content' %}
                     <div class="info-cell">
                         <label>{{ col.column_name }}</label>
                         
@@ -112,9 +113,11 @@
                         
                         {% elif col.column_type == 'popup_person' %}
                             <div class="popup-input-wrapper">
-                                <input type="text" 
-                                       class="dynamic-input popup-person" 
+                                <input type="text"
+                                       class="dynamic-input popup-person"
                                        data-column-key="{{ col.column_key }}"
+                                       {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                       {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                        value=""
                                        placeholder="담당자 선택"
                                        readonly>
@@ -123,9 +126,11 @@
                         
                         {% elif col.column_type == 'popup_company' %}
                             <div class="popup-input-wrapper">
-                                <input type="text" 
-                                       class="dynamic-input popup-company" 
+                                <input type="text"
+                                       class="dynamic-input popup-company"
                                        data-column-key="{{ col.column_key }}"
+                                       {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                       {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                        value=""
                                        placeholder="업체 선택"
                                        readonly>
@@ -135,10 +140,12 @@
                         {% elif col.column_type == 'table' or col.input_type == 'table' %}
                             <!-- 테이블 검색 필드 -->
                             <div class="input-group">
-                                <input type="text" 
-                                       class="dynamic-input" 
+                                <input type="text"
+                                       class="dynamic-input"
                                        data-column-key="{{ col.column_key }}"
                                        data-input-type="table"
+                                       {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                       {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                        value=""
                                        placeholder="검색하여 선택"
                                        readonly
@@ -154,6 +161,7 @@
                                    placeholder="{{ col.column_name }} 입력">
                         {% endif %}
                     </div>
+                    {% endif %}
                     {% endfor %}
                     
                     {# 빈 셀 채우기 #}
@@ -166,32 +174,10 @@
         </div>
     </div>
 
-    <!-- 3. 변경사유 섹션 -->
-    <div class="section change-reason-section">
-        <div class="section-header">
-            <h3 class="section-title">변경사유</h3>
-            <button class="collapse-btn" onclick="toggleSection('change-reason')">
-                <span class="collapse-icon">▲</span>
-            </button>
-        </div>
-        <div class="section-content" id="change-reason-content">
-            <div class="content-editor">
-                <!-- 간단한 편집 가능한 영역 -->
-                <div id="change-reason-detail" 
-                     class="editable-content" 
-                     contenteditable="true" 
-                     placeholder="변경사유에 대한 상세 내용을 입력하세요."></div>
-                
-                <!-- 숨겨진 textarea (저장용) -->
-                <textarea id="change-reason-hidden" style="display: none;"></textarea>
-            </div>
-        </div>
-    </div>
-
-    <!-- 4. 상세내용 영역 (하드코딩) -->
+    <!-- 3. 상세내용 영역 (CKEditor) -->
     {% include 'includes/detailed_content_section.html' %}
 
-    <!-- 5. 첨부파일 영역 (공통 컴포넌트) -->
+    <!-- 4. 첨부파일 영역 (공통 컴포넌트) -->
     {% from 'includes/attachment_section.html' import render_attachment_section %}
     {{ render_attachment_section([], 'change_request') }}
 
@@ -544,12 +530,23 @@ function saveChangeRequest() {
         }
     });
     
-    // 변경사유 텍스트 가져오기
-    const changeReasonElement = document.getElementById('change-reason-detail');
-    const changeReasonText = changeReasonElement ? changeReasonElement.innerText.trim() : '';
-    
-    // 상세내용 가져오기
-    const detailedContent = document.getElementById('detailed-content')?.value || '';
+    // 상세내용 가져오기 (CKEditor 사용)
+    let detailedContent = '';
+    // CKEditor 인스턴스 찾기 - 다양한 방법 시도
+    if (window.RichText && typeof window.RichText.getData === 'function') {
+        detailedContent = window.RichText.getData();
+    } else if (window['editor_detailed-content'] && typeof window['editor_detailed-content'].getData === 'function') {
+        detailedContent = window['editor_detailed-content'].getData();
+    } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
+        detailedContent = window.editorInstance.getData();
+    } else {
+        // 폴백: 일반 textarea
+        const textarea = document.getElementById('detailed-content');
+        if (textarea) {
+            detailedContent = textarea.value || '';
+        }
+    }
+    console.log('CKEditor 내용 길이:', detailedContent.length);
     
     // 필수 필드 추가 (동적 컬럼에서 수집)
     // requester_name, requester_department, company_name, business_number 등은
@@ -557,7 +554,6 @@ function saveChangeRequest() {
     
     // 상태는 항상 'requested' (요청)으로 고정 - 등록 페이지이므로
     dynamicData['status'] = 'requested';
-    dynamicData['change_reason'] = changeReasonText || '변경사유';
     dynamicData['detailed_content'] = detailedContent;
     
     // 첨부파일 설명 수집
@@ -802,8 +798,12 @@ if (typeof window !== 'undefined') {
 {{ attachment_scripts() }}
 
 
-<!-- Content Editor 스크립트 추가 -->
-<!-- CKEditor 스크립트 -->
+<!-- CKEditor 초기화 스크립트 로드 -->
 <script src="/static/js/ckeditor-simple.js"></script>
+
+<script>
+// CKEditor 초기화 확인
+console.log('CKEditor will be auto-initialized by ckeditor-simple.js');
+</script>
 
 {% endblock %}
