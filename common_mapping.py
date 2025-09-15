@@ -62,7 +62,7 @@ def smart_apply_mappings(data_list, board_type, dynamic_columns, db_path):
             'issuer_department', 'primary_company', 'primary_business_number',
             'subcontractor', 'subcontractor_business_number', 'disciplined_person',
             'gbm', 'business_division', 'team', 'department', 'day_of_week',
-            'location_detail', 'floor', 'building_name'
+            'location_detail'
         }
         
         # 매핑 가능한 필드와 매핑 동시에 저장

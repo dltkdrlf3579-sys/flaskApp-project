@@ -91,7 +91,8 @@ class PartnerDataManager:
         cursor = conn.cursor()
         
         # 기존 partners_cache 테이블의 구조 확인
-        cursor.execute("PRAGMA table_info(partners_cache)")
+        # PRAGMA removed for PostgreSQL compatibility
+        pass  # cursor.execute("PRAGMA table_info(partners_cache)")
         existing_columns = {col[1]: col[2] for col in cursor.fetchall()}
         
         # 필요한 컬럼 정의
@@ -275,7 +276,8 @@ class PartnerDataManager:
         ''')
         # 누락 컬럼 보강 (report_date)
         try:
-            cursor.execute("PRAGMA table_info(accidents_cache)")
+            # PRAGMA removed for PostgreSQL compatibility
+            pass  # cursor.execute("PRAGMA table_info(accidents_cache)")
             cols_ac = [c[1] for c in cursor.fetchall()]
             if 'report_date' not in cols_ac:
                 cursor.execute("ALTER TABLE accidents_cache ADD COLUMN report_date TEXT")
@@ -347,10 +349,10 @@ class PartnerDataManager:
             conn = get_db_connection(self.local_db_path, timeout=30.0)
             cursor = conn.cursor()
             
-            # PRAGMA 설정 추가
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA busy_timeout=5000")
-            cursor.execute("PRAGMA synchronous=NORMAL")
+            # PRAGMA settings removed for PostgreSQL compatibility
+            # cursor.execute("PRAGMA journal_mode=WAL")
+            # cursor.execute("PRAGMA busy_timeout=5000")
+            # cursor.execute("PRAGMA synchronous=NORMAL")
             
             # 트랜잭션 시작
             cursor.execute("BEGIN IMMEDIATE")
@@ -438,7 +440,7 @@ class PartnerDataManager:
                         business_type_minor, hazard_work_flag, representative, address,
                         average_age, annual_revenue, transaction_count, permanent_workers,
                         is_deleted
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0)
                     ON CONFLICT (business_number)
                     DO UPDATE SET
                         company_name = EXCLUDED.company_name,
@@ -467,7 +469,7 @@ class PartnerDataManager:
                                 business_type_minor, hazard_work_flag, representative, address,
                                 average_age, annual_revenue, transaction_count, permanent_workers,
                                 is_deleted
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0)
                             ON CONFLICT (business_number)
                             DO UPDATE SET
                                 company_name = EXCLUDED.company_name,
@@ -639,7 +641,7 @@ class PartnerDataManager:
                 cursor.execute('''
                     INSERT INTO employees_cache (
                         employee_id, employee_name, department_name
-                    ) VALUES (?, ?, ?)
+                    ) VALUES (%s, %s, %s)
                 ''', (
                     row.get('employee_id', ''),
                     row.get('employee_name', ''),
@@ -689,7 +691,7 @@ class PartnerDataManager:
                 cursor.execute('''
                     INSERT INTO departments_cache (
                         dept_code, dept_name, parent_dept_code
-                    ) VALUES (?, ?, ?)
+                    ) VALUES (%s, %s, %s)
                 ''', (
                     row.get('dept_code', ''),
                     row.get('dept_name', ''),
@@ -739,7 +741,7 @@ class PartnerDataManager:
                 cursor.execute('''
                     INSERT INTO buildings_cache (
                         building_code, building_name, SITE, SITE_TYPE
-                    ) VALUES (?, ?, ?, ?)
+                    ) VALUES (%s, %s, %s, %s)
                 ''', (
                     row.get('building_code', ''),
                     row.get('building_name', ''),
@@ -790,7 +792,7 @@ class PartnerDataManager:
                 cursor.execute('''
                     INSERT INTO contractors_cache (
                         worker_id, worker_name, company_name, business_number
-                    ) VALUES (?, ?, ?, ?)
+                    ) VALUES (%s, %s, %s, %s)
                 ''', (
                     row.get('worker_id', ''),
                     row.get('worker_name', ''),
@@ -874,7 +876,7 @@ class PartnerDataManager:
             cursor.executemany('''
                 INSERT INTO safety_instructions_cache (
                     issue_number, custom_data, is_deleted, created_at
-                ) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ) VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
             ''', rows)
             
             conn.commit()
@@ -954,11 +956,39 @@ class PartnerDataManager:
                         row_dict[k] = None
                 custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
                 
-                # work_req_no 추출 (컬럼명이 한글일 수 있음)
-                work_req_no = (row.get('work_req_no', '') or 
-                              row.get('작업요청번호', '') or 
-                              row.get('work_request_number', '') or 
-                              str(idx))  # 없으면 인덱스 사용
+                # created_at 또는 작업일자 추출하여 FS 형식 번호 생성
+                created_at_str = (row.get('created_at', '') or
+                                row.get('작업일자', '') or
+                                row.get('work_date', '') or
+                                row.get('등록일', ''))
+
+                # 날짜 파싱 시도
+                from datetime import datetime
+                from id_generator import generate_followsop_number
+
+                try:
+                    if created_at_str:
+                        # 다양한 날짜 형식 파싱 시도
+                        for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%Y/%m/%d', '%Y%m%d']:
+                            try:
+                                created_dt = datetime.strptime(str(created_at_str).split('.')[0], fmt)
+                                break
+                            except:
+                                continue
+                        else:
+                            # 파싱 실패시 현재 시간 사용
+                            created_dt = datetime.now()
+                    else:
+                        created_dt = datetime.now()
+
+                    # FS 형식 번호 생성
+                    work_req_no = generate_followsop_number(self.local_db_path, created_dt)
+                except Exception as e:
+                    # 번호 생성 실패시 원본 사용
+                    work_req_no = (row.get('work_req_no', '') or
+                                  row.get('작업요청번호', '') or
+                                  row.get('work_request_number', '') or
+                                  f'FS{idx:06d}')
                 
                 if idx == 0:  # 첫 번째 행만 디버깅
                     print(f"[DEBUG] work_req_no: {work_req_no}")
@@ -976,7 +1006,7 @@ class PartnerDataManager:
                 # SQLite: INSERT OR REPLACE
                 cursor.executemany('''
                     INSERT OR REPLACE INTO followsop_cache (work_req_no, custom_data) 
-                    VALUES (?, ?)
+                    VALUES (%s, %s)
                 ''', rows)
             
             # GPT 지침: 캐시→본테이블 이관 (UPSERT) - 동기화된 데이터는 무조건 활성화
@@ -1135,11 +1165,39 @@ class PartnerDataManager:
                         row_dict[k] = None
                 custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
                 
-                # fullprocess_number 추출 (컬럼명이 한글일 수 있음)
-                fullprocess_number = (row.get('fullprocess_number', '') or 
-                                     row.get('프로세스번호', '') or 
-                                     row.get('process_number', '') or 
-                                     str(idx))  # 없으면 인덱스 사용
+                # created_at 또는 평가일자 추출하여 FP 형식 번호 생성
+                created_at_str = (row.get('created_at', '') or
+                                row.get('평가일자', '') or
+                                row.get('process_date', '') or
+                                row.get('등록일', ''))
+
+                # 날짜 파싱 시도
+                from datetime import datetime
+                from id_generator import generate_fullprocess_number
+
+                try:
+                    if created_at_str:
+                        # 다양한 날짜 형식 파싱 시도
+                        for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%Y/%m/%d', '%Y%m%d']:
+                            try:
+                                created_dt = datetime.strptime(str(created_at_str).split('.')[0], fmt)
+                                break
+                            except:
+                                continue
+                        else:
+                            # 파싱 실패시 현재 시간 사용
+                            created_dt = datetime.now()
+                    else:
+                        created_dt = datetime.now()
+
+                    # FP 형식 번호 생성
+                    fullprocess_number = generate_fullprocess_number(self.local_db_path, created_dt)
+                except Exception as e:
+                    # 번호 생성 실패시 원본 사용
+                    fullprocess_number = (row.get('fullprocess_number', '') or
+                                         row.get('프로세스번호', '') or
+                                         row.get('process_number', '') or
+                                         f'FP{idx:06d}')
                 
                 if idx == 0:  # 첫 번째 행만 디버깅
                     print(f"[DEBUG] fullprocess_number: {fullprocess_number}")
@@ -1157,7 +1215,7 @@ class PartnerDataManager:
                 # SQLite: INSERT OR REPLACE
                 cursor.executemany('''
                     INSERT OR REPLACE INTO fullprocess_cache (fullprocess_number, custom_data) 
-                    VALUES (?, ?)
+                    VALUES (%s, %s)
                 ''', rows)
             
             # GPT 지침: 캐시→본테이블 이관 (UPSERT) - 동기화된 데이터는 무조건 활성화
@@ -1367,7 +1425,7 @@ class PartnerDataManager:
                 cursor.executemany('''
                     INSERT OR REPLACE INTO partner_change_requests_cache
                         (request_number, company_name, business_number, status, custom_data)
-                    VALUES (?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s)
                 ''', rows)
 
             conn.commit()
@@ -1393,7 +1451,7 @@ class PartnerDataManager:
                 pd.updated_at as detail_updated_at
             FROM partners_cache pc
             LEFT JOIN partner_details pd ON pc.business_number = pd.business_number
-            WHERE pc.business_number = ?
+            WHERE pc.business_number = %s
         '''
         
         partner = conn.execute(query, (business_number,)).fetchone()
@@ -1412,28 +1470,28 @@ class PartnerDataManager:
         # 필터 적용
         if filters:
             if filters.get('company_name'):
-                query += " AND company_name LIKE ?"
+                query += " AND company_name LIKE %s"
                 params.append(f"%{filters['company_name']}%")
             
             if filters.get('business_number'):
-                query += " AND business_number LIKE ?"
+                query += " AND business_number LIKE %s"
                 params.append(f"%{filters['business_number']}%")
             
             if filters.get('business_type_major'):
-                query += " AND business_type_major = ?"
+                query += " AND business_type_major = %s"
                 params.append(filters['business_type_major'])
             
             if filters.get('business_type_minor'):
-                query += " AND business_type_minor LIKE ?"
+                query += " AND business_type_minor LIKE %s"
                 params.append(f"%{filters['business_type_minor']}%")
             
             # 상시근로자 수 범위 필터
             if filters.get('workers_min'):
-                query += " AND permanent_workers >= ?"
+                query += " AND permanent_workers >= %s"
                 params.append(filters['workers_min'])
             
             if filters.get('workers_max'):
-                query += " AND permanent_workers <= ?"
+                query += " AND permanent_workers <= %s"
                 params.append(filters['workers_max'])
         
         # 전체 개수 조회
@@ -1441,7 +1499,7 @@ class PartnerDataManager:
         total_count = conn.execute(count_query, params).fetchone()[0]
         
         # 페이징 적용 - 상시근로자 수 큰 순으로 정렬 (SQLite 호환)
-        query += " ORDER BY (permanent_workers IS NULL), permanent_workers DESC, company_name LIMIT ? OFFSET ?"
+        query += " ORDER BY (permanent_workers IS NULL), permanent_workers DESC, company_name LIMIT %s OFFSET %s"
         params.extend([per_page, (page - 1) * per_page])
         
         partners = conn.execute(query, params).fetchall()
@@ -1734,7 +1792,7 @@ def maybe_one_time_sync_content(force=False):
 
     def _do_once(name, runner):
         # 상태 조회
-        row = cur.execute("SELECT first_sync_done FROM content_sync_state WHERE name=?", (name,)).fetchone()
+        row = cur.execute("SELECT first_sync_done FROM content_sync_state WHERE name=%s", (name,)).fetchone()
         done = (row and row[0] == 1)
         if done and not force:
             print(f"[INFO] Content '{name}' already synced (once).")

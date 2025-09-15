@@ -205,7 +205,11 @@ def follow_sop_route():
             try:
                 import json
                 raw = item.get('custom_data')
-                custom_data = raw if isinstance(raw, dict) else (json.loads(raw) if isinstance(raw, str) and raw else {})
+                # PostgreSQL JSONB는 이미 dict로 반환됨
+                if isinstance(raw, dict):
+                    custom_data = raw
+                else:
+                    custom_data = json.loads(raw) if isinstance(raw, str) and raw else {}
             except Exception as e:
                 logging.error(f"custom_data 파싱 오류: {e}")
                 custom_data = {}
@@ -587,7 +591,11 @@ def follow_sop_detail(work_req_no):
     if sop.get('custom_data'):
         try:
             raw = sop.get('custom_data')
-            custom_data = raw if isinstance(raw, dict) else (json.loads(raw) if isinstance(raw, str) and raw else {})
+            # PostgreSQL JSONB는 이미 dict로 반환됨
+            if isinstance(raw, dict):
+                custom_data = raw
+            else:
+                custom_data = json.loads(raw) if isinstance(raw, str) and raw else {}
         except Exception as e:
             logging.error(f"Custom data parsing error: {e}")
             custom_data = {}
@@ -797,7 +805,11 @@ def register_follow_sop():
         # 하위 호환성: custom_data가 있으면 병합
         custom_data_raw = request.form.get('custom_data', '{}')
         try:
-            custom_data_compat = json.loads(custom_data_raw)
+            # PostgreSQL JSONB는 이미 dict로 반환됨
+            if isinstance(custom_data_raw, dict):
+                custom_data_compat = custom_data_raw
+            else:
+                custom_data_compat = json.loads(custom_data_raw) if custom_data_raw else {}
             if custom_data_compat:
                 all_fields.update(custom_data_compat)
                 logging.info(f"[FS REGISTER] custom_data 병합: {custom_data_compat}")
@@ -828,11 +840,10 @@ def register_follow_sop():
         else:
             custom_data_json = custom_data
 
-        # Follow SOP 등록 - 메인 테이블로 저장 (detailed_content 포함)
+        # Follow SOP 등록 - 메인 테이블로 저장 (detailed_content 제외)
         upsert_data = {
             'work_req_no': work_req_no,
             'custom_data': custom_data_json,
-            'detailed_content': detailed_content,  # 메인 테이블에도 저장
             'created_at': created_at_dt.strftime('%Y-%m-%d %H:%M:%S'),
             'created_by': session.get('user_id', 'system'),
             'is_deleted': 0
@@ -843,7 +854,7 @@ def register_follow_sop():
             'follow_sop',
             upsert_data,
             conflict_cols=['work_req_no'],
-            update_cols=['custom_data', 'detailed_content', 'updated_at', 'is_deleted']
+            update_cols=['custom_data', 'updated_at', 'is_deleted']
         )
 
         # Details 테이블 저장 (단일 경로)
@@ -920,7 +931,11 @@ def update_follow_sop_simple():
         
         # JSON 파싱
         try:
-            custom_data_dict = json.loads(custom_data) if custom_data != '{}' else {}
+            # PostgreSQL JSONB는 이미 dict로 반환됨
+            if isinstance(custom_data, dict):
+                custom_data_dict = custom_data
+            else:
+                custom_data_dict = json.loads(custom_data) if custom_data and custom_data != '{}' else {}
         except ValueError:
             return jsonify({"success": False, "message": "잘못된 데이터 형식입니다."}), 400
         
@@ -1072,7 +1087,7 @@ def full_process_route():
         if hasattr(conn, 'is_postgres') and conn.is_postgres:
             where_clauses.append("((p.custom_data->>'company_name') ILIKE %s OR (p.custom_data->>'company_1cha') ILIKE %s)")
         else:
-            where_clauses.append("(JSON_EXTRACT(p.custom_data, '$.company_name') LIKE ? OR JSON_EXTRACT(p.custom_data, '$.company_1cha') LIKE ?)")
+            where_clauses.append("(JSON_EXTRACT(p.custom_data, '$.company_name') LIKE %s OR JSON_EXTRACT(p.custom_data, '$.company_1cha') LIKE %s)")
         query_params.extend([f"%{company_name}%", f"%{company_name}%"])
     
     if business_number:
@@ -1081,7 +1096,7 @@ def full_process_route():
         if hasattr(conn, 'is_postgres') and conn.is_postgres:
             where_clauses.append("((p.custom_data->>'business_number') ILIKE %s OR (p.custom_data->>'company_1cha_bizno') ILIKE %s)")
         else:
-            where_clauses.append("(JSON_EXTRACT(p.custom_data, '$.business_number') LIKE ? OR JSON_EXTRACT(p.custom_data, '$.company_1cha_bizno') LIKE ?)")
+            where_clauses.append("(JSON_EXTRACT(p.custom_data, '$.business_number') LIKE %s OR JSON_EXTRACT(p.custom_data, '$.company_1cha_bizno') LIKE %s)")
         query_params.extend([f"%{business_number}%", f"%{business_number}%"])
     
     # WHERE 절 구성 (삭제되지 않은 항목만)
@@ -1146,7 +1161,11 @@ def full_process_route():
             try:
                 import json
                 raw = item.get('custom_data')
-                custom_data = raw if isinstance(raw, dict) else (json.loads(raw) if isinstance(raw, str) and raw else {})
+                # PostgreSQL JSONB는 이미 dict로 반환됨
+                if isinstance(raw, dict):
+                    custom_data = raw
+                else:
+                    custom_data = json.loads(raw) if isinstance(raw, str) and raw else {}
             except Exception as e:
                 logging.error(f"custom_data 파싱 오류: {e}")
                 custom_data = {}
@@ -1403,7 +1422,7 @@ def full_process_detail(fullprocess_number):
         cursor.execute(f"""
             SELECT {select_columns}
             FROM full_process
-            WHERE fullprocess_number = ? AND (is_deleted = 0 OR is_deleted IS NULL)
+            WHERE fullprocess_number = %s AND (is_deleted = 0 OR is_deleted IS NULL)
         """, (fullprocess_number,))
 
         process_row = cursor.fetchone()
@@ -1448,7 +1467,7 @@ def full_process_detail(fullprocess_number):
         cursor.execute("""
             SELECT detailed_content 
             FROM full_process_details 
-            WHERE fullprocess_number = ?
+            WHERE fullprocess_number = %s
         """, (fullprocess_number,))
         detail_row = cursor.fetchone()
         if detail_row and detail_row[0]:
@@ -1606,7 +1625,11 @@ def register_full_process():
         # 하위 호환성: custom_data가 있으면 병합
         custom_data_raw = request.form.get('custom_data', '{}')
         try:
-            custom_data_compat = json.loads(custom_data_raw)
+            # PostgreSQL JSONB는 이미 dict로 반환됨
+            if isinstance(custom_data_raw, dict):
+                custom_data_compat = custom_data_raw
+            else:
+                custom_data_compat = json.loads(custom_data_raw) if custom_data_raw else {}
             if custom_data_compat:
                 all_fields.update(custom_data_compat)
                 logging.info(f"[FP REGISTER] custom_data 병합: {custom_data_compat}")
@@ -1637,11 +1660,10 @@ def register_full_process():
         else:
             custom_data_json = custom_data
 
-        # Full Process 등록 - 메인 테이블 저장 (detailed_content 포함)
+        # Full Process 등록 - 메인 테이블 저장 (detailed_content 제외)
         upsert_data = {
             'fullprocess_number': fullprocess_number,
             'custom_data': custom_data_json,
-            'detailed_content': detailed_content,  # 메인 테이블에도 저장
             'created_at': created_at_dt.strftime('%Y-%m-%d %H:%M:%S'),
             'created_by': session.get('user_id', 'system'),
             'is_deleted': 0
@@ -1651,7 +1673,7 @@ def register_full_process():
             'full_process',
             upsert_data,
             conflict_cols=['fullprocess_number'],
-            update_cols=['custom_data', 'detailed_content', 'updated_at', 'is_deleted']
+            update_cols=['custom_data', 'updated_at', 'is_deleted']
         )
 
         # Details 테이블 저장 (단일 경로)
@@ -1728,7 +1750,11 @@ def update_full_process_simple():
         
         # JSON 파싱
         try:
-            custom_data_dict = json.loads(custom_data) if custom_data != '{}' else {}
+            # PostgreSQL JSONB는 이미 dict로 반환됨
+            if isinstance(custom_data, dict):
+                custom_data_dict = custom_data
+            else:
+                custom_data_dict = json.loads(custom_data) if custom_data and custom_data != '{}' else {}
         except ValueError:
             return jsonify({"success": False, "message": "잘못된 데이터 형식입니다."}), 400
         
@@ -1744,8 +1770,8 @@ def update_full_process_simple():
         # Full Process 업데이트
         cursor.execute("""
             UPDATE full_process 
-            SET custom_data = ?, updated_by = ?
-            WHERE fullprocess_number = ?
+            SET custom_data = %s, updated_by = %s
+            WHERE fullprocess_number = %s
         """, (custom_data_json, session.get('user_id', 'system'), fullprocess_number))
         
         conn.commit()

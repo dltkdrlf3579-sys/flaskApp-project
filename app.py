@@ -40,7 +40,7 @@ def generate_manual_accident_number(cursor):
             """
             SELECT accident_number 
             FROM accidents_cache 
-            WHERE accident_number LIKE ?
+            WHERE accident_number LIKE %s
             ORDER BY accident_number DESC
             LIMIT 1
             """,
@@ -390,7 +390,8 @@ def init_db():
         ''')
         # 보강: is_deleted 컬럼이 없으면 추가(soft delete 일관성)
         try:
-            cursor.execute("PRAGMA table_info(section_config)")
+            # PRAGMA removed for PostgreSQL compatibility
+            pass  # cursor.execute("PRAGMA table_info(section_config)")
             cols = [r[1].lower() for r in cursor.fetchall()]
             if 'is_deleted' not in cols:
                 cursor.execute("ALTER TABLE section_config ADD COLUMN is_deleted INTEGER DEFAULT 0")
@@ -452,7 +453,8 @@ def init_db():
         ''')
         
         # Follow SOP 테이블에 is_deleted 컬럼 추가 (기존 테이블 업데이트)
-        cursor.execute("PRAGMA table_info(follow_sop_column_config)")
+        # PRAGMA removed for PostgreSQL compatibility
+        pass  # cursor.execute("PRAGMA table_info(follow_sop_column_config)")
         columns = [col[1] for col in cursor.fetchall()]
         if 'is_deleted' not in columns:
             cursor.execute("ALTER TABLE follow_sop_column_config ADD COLUMN is_deleted INTEGER DEFAULT 0")
@@ -477,13 +479,15 @@ def init_db():
         ''')
         
         # Full Process 테이블에 is_deleted 컬럼 추가 (기존 테이블 업데이트)
-        cursor.execute("PRAGMA table_info(full_process_column_config)")
+        # PRAGMA removed for PostgreSQL compatibility
+        pass  # cursor.execute("PRAGMA table_info(full_process_column_config)")
         columns = [col[1] for col in cursor.fetchall()]
         if 'is_deleted' not in columns:
             cursor.execute("ALTER TABLE full_process_column_config ADD COLUMN is_deleted INTEGER DEFAULT 0")
         
         # Safety Instruction 테이블에 누락된 컬럼들 추가 (startup 보강)
-        cursor.execute("PRAGMA table_info(safety_instruction_column_config)")
+        # PRAGMA removed for PostgreSQL compatibility
+        pass  # cursor.execute("PRAGMA table_info(safety_instruction_column_config)")
         safety_columns = [col[1] for col in cursor.fetchall()]
         if 'is_deleted' not in safety_columns:
             cursor.execute("ALTER TABLE safety_instruction_column_config ADD COLUMN is_deleted INTEGER DEFAULT 0")
@@ -506,7 +510,8 @@ def init_db():
         ''')
         
         # Follow SOP 테이블에 is_deleted 컬럼 추가 (기존 테이블 업데이트)
-        cursor.execute("PRAGMA table_info(follow_sop)")
+        # PRAGMA removed for PostgreSQL compatibility
+        pass  # cursor.execute("PRAGMA table_info(follow_sop)")
         columns = [col[1] for col in cursor.fetchall()]
         if 'is_deleted' not in columns:
             cursor.execute("ALTER TABLE follow_sop ADD COLUMN is_deleted INTEGER DEFAULT 0")
@@ -523,7 +528,8 @@ def init_db():
         ''')
         
         # Follow SOP sections 테이블에 section_order 컬럼 추가 (기존 테이블 업데이트)
-        cursor.execute("PRAGMA table_info(follow_sop_sections)")
+        # PRAGMA removed for PostgreSQL compatibility
+        pass  # cursor.execute("PRAGMA table_info(follow_sop_sections)")
         columns = [col[1] for col in cursor.fetchall()]
         if 'section_order' not in columns:
             cursor.execute("ALTER TABLE follow_sop_sections ADD COLUMN section_order INTEGER DEFAULT 1")
@@ -549,7 +555,8 @@ def init_db():
         ''')
         
         # Full Process 테이블에 is_deleted 컬럼 추가 (기존 테이블 업데이트)
-        cursor.execute("PRAGMA table_info(full_process)")
+        # PRAGMA removed for PostgreSQL compatibility
+        pass  # cursor.execute("PRAGMA table_info(full_process)")
         columns = [col[1] for col in cursor.fetchall()]
         if 'is_deleted' not in columns:
             cursor.execute("ALTER TABLE full_process ADD COLUMN is_deleted INTEGER DEFAULT 0")
@@ -566,7 +573,8 @@ def init_db():
         ''')
         
         # Full Process sections 테이블에 section_order 컬럼 추가 (기존 테이블 업데이트)
-        cursor.execute("PRAGMA table_info(full_process_sections)")
+        # PRAGMA removed for PostgreSQL compatibility
+        pass  # cursor.execute("PRAGMA table_info(full_process_sections)")
         columns = [col[1] for col in cursor.fetchall()]
         if 'section_order' not in columns:
             cursor.execute("ALTER TABLE full_process_sections ADD COLUMN section_order INTEGER DEFAULT 1")
@@ -591,7 +599,8 @@ def init_db():
         ''')
         
         # safety_instruction_sections 스키마 보정
-        cursor.execute("PRAGMA table_info(safety_instruction_sections)")
+        # PRAGMA removed for PostgreSQL compatibility
+        pass  # cursor.execute("PRAGMA table_info(safety_instruction_sections)")
         columns = [col[1] for col in cursor.fetchall()]
         if 'section_order' not in columns:
             cursor.execute("ALTER TABLE safety_instruction_sections ADD COLUMN section_order INTEGER DEFAULT 1")
@@ -778,10 +787,10 @@ def init_db():
     # 메뉴 설정에서 페이지 자동 생성
     for category in MENU_CONFIG:
         for submenu in category['submenu']:
-            cursor.execute("SELECT COUNT(*) FROM pages WHERE url = ?", (submenu['url'],))
+            cursor.execute("SELECT COUNT(*) FROM pages WHERE url = %s", (submenu['url'],))
             if cursor.fetchone()[0] == 0:
                 cursor.execute(
-                    "INSERT INTO pages (url, title, content) VALUES (?, ?, ?)",
+                    "INSERT INTO pages (url, title, content) VALUES (%s, %s, %s)",
                     (submenu['url'], submenu['title'], 
                      f"<h1>{submenu['title']}</h1><p>이 페이지의 내용을 편집하세요.</p>")
                 )
@@ -905,7 +914,8 @@ def init_sample_data():
         count = cursor.fetchone()[0]
         
         # permanent_workers 컬럼이 있는지 확인
-        cursor.execute("PRAGMA table_info(partners_cache)")
+        # PRAGMA removed for PostgreSQL compatibility
+        pass  # cursor.execute("PRAGMA table_info(partners_cache)")
         columns = [col[1] for col in cursor.fetchall()]
         
         # permanent_workers 컬럼이 없으면 기존 데이터에 랜덤값 추가
@@ -916,7 +926,7 @@ def init_sample_data():
             existing_partners = cursor.fetchall()
             for partner in existing_partners:
                 permanent_workers = random.randint(5, 500)
-                cursor.execute("UPDATE partners_cache SET permanent_workers = ? WHERE business_number = ?", 
+                cursor.execute("UPDATE partners_cache SET permanent_workers = %s WHERE business_number = %s", 
                              (permanent_workers, partner[0]))
             conn.commit()
             logging.info(f"기존 {len(existing_partners)}개 협력사에 상시근로자 데이터 추가 완료")
@@ -986,7 +996,7 @@ def init_sample_data():
                 business_number, company_name, partner_class, business_type_major, 
                 business_type_minor, hazard_work_flag, representative, address,
                 average_age, annual_revenue, transaction_count, permanent_workers
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ''', (
             business_number, company_name, partner_class, business_type_major,
             business_type_minor, hazard_work_flag, representative, address,
@@ -1012,7 +1022,7 @@ def init_sample_data():
                 cursor.execute('''
                     INSERT INTO partner_attachments (
                         business_number, file_name, file_path, file_size, description
-                    ) VALUES (?, ?, ?, ?, ?)
+                    ) VALUES (%s, %s, %s, %s, %s)
                 ''', (
                     business_number,
                     file_info[0],
@@ -1492,10 +1502,11 @@ def accident():
         # 안전 병합: custom_data를 파싱하여 빈값 미덮어쓰기 + K사고 기본필드 보호
         if accident.get('custom_data'):
             try:
+                # PostgreSQL JSONB는 이미 dict로 반환됨
                 if isinstance(accident['custom_data'], dict):
                     custom_data = accident['custom_data']
                 else:
-                    custom_data = json.loads(accident['custom_data'])
+                    custom_data = json.loads(accident['custom_data']) if accident['custom_data'] else {}
                 # ensure dict form is available to templates and later fallbacks
                 accident['custom_data'] = custom_data
                 # Ensure fallback reads parsed dict, not raw string
@@ -1745,10 +1756,11 @@ def partner_accident():
         if accident.get('custom_data'):
             try:
                 import json as pyjson
+                # PostgreSQL JSONB는 이미 dict로 반환됨
                 if isinstance(accident['custom_data'], dict):
                     custom_data = accident['custom_data']
                 else:
-                    custom_data = pyjson.loads(accident['custom_data'])
+                    custom_data = pyjson.loads(accident['custom_data']) if accident['custom_data'] else {}
                 accident['custom_data'] = custom_data
             except Exception as e:
                 logging.error(f"custom_data 파싱 오류: {e}")
@@ -1939,11 +1951,11 @@ def safety_instruction_route():
     
     # 필터링 적용
     if filters['company_name']:
-        query += " AND (primary_company LIKE ? OR subcontractor LIKE ?)"
+        query += " AND (primary_company LIKE %s OR subcontractor LIKE %s)"
         params.extend([f"%{filters['company_name']}%", f"%{filters['company_name']}%"])
     
     if filters['business_number']:
-        query += " AND (primary_business_number LIKE ? OR subcontractor_business_number LIKE ?)"
+        query += " AND (primary_business_number LIKE %s OR subcontractor_business_number LIKE %s)"
         params.extend([f"%{filters['business_number']}%", f"%{filters['business_number']}%"])
     
     if filters['violation_date_from']:
@@ -1951,7 +1963,7 @@ def safety_instruction_route():
         if hasattr(conn, 'is_postgres') and conn.is_postgres:
             query += " AND (custom_data->>'violation_date') >= %s"
         else:
-            query += " AND json_extract(custom_data, '$.violation_date') >= ?"
+            query += " AND json_extract(custom_data, '$.violation_date') >= %s"
         params.append(filters['violation_date_from'])
     
     if filters['violation_date_to']:
@@ -1959,7 +1971,7 @@ def safety_instruction_route():
         if hasattr(conn, 'is_postgres') and conn.is_postgres:
             query += " AND (custom_data->>'violation_date') <= %s"
         else:
-            query += " AND json_extract(custom_data, '$.violation_date') <= ?"
+            query += " AND json_extract(custom_data, '$.violation_date') <= %s"
         params.append(filters['violation_date_to'])
     
     # 전체 개수 조회 (ORDER BY 전에 실행)
@@ -1996,12 +2008,11 @@ def safety_instruction_route():
                 raw = instruction.get('custom_data')
                 
                 # dict/str 분기 처리
+                # PostgreSQL JSONB는 이미 dict로 반환됨
                 if isinstance(raw, dict):
                     custom_data = raw
-                elif isinstance(raw, str):
-                    custom_data = pyjson.loads(raw) if raw else {}
                 else:
-                    custom_data = {}
+                    custom_data = pyjson.loads(raw) if raw else {}
                     
                 # 기본 필드를 보호하면서 custom_data 병합
                 BASE_FIELDS = {'issue_number', 'created_at', 'updated_at', 'is_deleted', 'synced_at', 'no'}
@@ -2208,7 +2219,7 @@ def safety_instruction_detail(issue_number):
         _wd = sql_is_deleted_false('is_deleted', conn)
         instruction = conn.execute(f"""
             SELECT * FROM safety_instructions 
-            WHERE issue_number = ? AND {_wd}
+            WHERE issue_number = %s AND {_wd}
         """, (issue_number,)).fetchone()
     except sqlite3.OperationalError:
         # 테이블이 없는 경우 더미 데이터 사용
@@ -2281,7 +2292,7 @@ def safety_instruction_detail(issue_number):
         # 메인 테이블에 없으면 캐시에서 폴백
         try:
             cache_row = conn.execute(
-                "SELECT * FROM safety_instructions WHERE issue_number = ?",
+                "SELECT * FROM safety_instructions WHERE issue_number = %s",
                 (issue_number,)
             ).fetchone()
             if cache_row:
@@ -2389,7 +2400,7 @@ def safety_instruction_detail(issue_number):
         detail_row = None
         try:
             detail_row = conn.execute(
-                "SELECT detailed_content FROM safety_instruction_details WHERE issue_number = ?",
+                "SELECT detailed_content FROM safety_instruction_details WHERE issue_number = %s",
                 (issue_number,)
             ).fetchone()
         except Exception:
@@ -2407,7 +2418,7 @@ def safety_instruction_detail(issue_number):
     # 캐시에서 항상 보강: 메인에 키가 있어도 비어있으면 캐시로 채움
     try:
         cache_row = conn.execute(
-            "SELECT * FROM safety_instructions WHERE issue_number = ?",
+            "SELECT * FROM safety_instructions WHERE issue_number = %s",
             (issue_number,)
         ).fetchone()
         if cache_row:
@@ -2938,7 +2949,7 @@ def update_follow_sop():
         cursor.execute("""
             SELECT custom_data 
             FROM follow_sop 
-            WHERE work_req_no = ?
+            WHERE work_req_no = %s
         """, (work_req_no,))
         
         existing_row = cursor.fetchone()
@@ -3654,7 +3665,8 @@ def partner_change_request():
                       'change_reason', 'created_at', 'status', 'request_number']
         
         # is_deleted 컬럼 존재 여부 확인
-        cursor.execute("PRAGMA table_info(partner_change_requests)")
+        # PRAGMA removed for PostgreSQL compatibility
+        pass  # cursor.execute("PRAGMA table_info(partner_change_requests)")
         columns = [col[1] for col in cursor.fetchall()]
         
         # 각 필터 적용
@@ -3685,11 +3697,11 @@ def partner_change_request():
                 if hasattr(conn, 'is_postgres') and conn.is_postgres:
                     where_conditions.append(f"(custom_data->>'{field_name}') ILIKE %s")
                 else:
-                    where_conditions.append(f"json_extract(custom_data, '$.{field_name}') LIKE ?")
+                    where_conditions.append(f"json_extract(custom_data, '$.{field_name}') LIKE %s")
                 params.append(f"%{field_value}%")
             else:
                 # 일반 컬럼 검색
-                where_conditions.append(f"{field_name} LIKE ?")
+                where_conditions.append(f"{field_name} LIKE %s")
                 params.append(f"%{field_value}%")
         
         if where_conditions:
@@ -3709,7 +3721,7 @@ def partner_change_request():
             FROM partner_change_requests 
             {where_clause}
             ORDER BY created_at DESC
-            LIMIT ? OFFSET ?
+            LIMIT %s OFFSET %s
         """
         cursor.execute(data_query, params + [per_page, offset])
         rows = cursor.fetchall()
@@ -4159,7 +4171,7 @@ def partner_detail(business_number):
     conn = partner_manager.db_config.get_sqlite_connection()
     attachments = conn.execute("""
         SELECT * FROM partner_attachments 
-        WHERE business_number = ? 
+        WHERE business_number = %s 
         ORDER BY upload_date DESC
     """, (business_number,)).fetchall()
     conn.close()
@@ -4250,10 +4262,11 @@ def accident_detail(accident_id):
             if accident.get('custom_data'):
                 try:
                     # PostgreSQL JSONB는 이미 dict로 반환됨, SQLite는 JSON 문자열
+                    # PostgreSQL JSONB는 이미 dict로 반환됨
                     if isinstance(accident['custom_data'], dict):
                         custom_data = accident['custom_data']
                     else:
-                        custom_data = json.loads(accident['custom_data'])
+                        custom_data = json.loads(accident['custom_data']) if accident['custom_data'] else {}
                     
                     print(f"[DEBUG] accident_detail custom_data keys: {list(custom_data.keys())}")
                     if 'injured_person' in custom_data:
@@ -4355,14 +4368,14 @@ def accident_detail(accident_id):
     if str(accident_id).isdigit():
         cursor.execute("""
             SELECT * FROM accidents_cache 
-            WHERE id = ?
+            WHERE id = %s
             LIMIT 1
         """, (accident_id,))
     else:
         # 문자열 ID인 경우 (ACC로 시작하는 경우 등)
         cursor.execute("""
             SELECT * FROM accidents_cache 
-            WHERE accident_number = ?
+            WHERE accident_number = %s
             LIMIT 1
         """, (accident_id,))
     
@@ -4392,13 +4405,15 @@ def accident_detail(accident_id):
     if isinstance(accident, dict):
         accident_number = accident['accident_number']
         # custom_data에서 detailed_content 가져오기
+        # PostgreSQL JSONB는 이미 dict로 반환됨
         custom_data = accident.get('custom_data', {})
-        if isinstance(custom_data, str):
+        if isinstance(custom_data, dict):
+            pass  # Already a dict
+        else:
             try:
-                custom_data = pyjson.loads(custom_data)
+                custom_data = pyjson.loads(custom_data) if custom_data else {}
             except:
                 custom_data = {}
-        elif isinstance(custom_data, dict):
             # PostgreSQL JSONB인 경우 이미 dict
             pass
         else:
@@ -4647,10 +4662,11 @@ def accident_detail(accident_id):
     if 'custom_data' in accident and accident['custom_data']:
         try:
             # PostgreSQL JSONB는 이미 dict, SQLite는 JSON 문자열
+            # PostgreSQL JSONB는 이미 dict로 반환됨
             if isinstance(accident['custom_data'], dict):
                 custom_data = accident['custom_data']
             else:
-                custom_data = pyjson.loads(accident['custom_data'])
+                custom_data = pyjson.loads(accident['custom_data']) if accident['custom_data'] else {}
             
             # 리스트 필드 추가 처리 (이중 인코딩 문제 해결)
             for key, value in custom_data.items():
@@ -4817,7 +4833,7 @@ def get_dropdown_options_for_display(board_type, column_key):
         codes = conn.execute("""
             SELECT option_code, option_value 
             FROM dropdown_option_codes_v2
-            WHERE board_type = ? AND column_key = ? AND is_active = 1
+            WHERE board_type = %s AND column_key = %s AND is_active = 1
             ORDER BY display_order
         """, (board_type, column_key)).fetchall()
         
@@ -4868,7 +4884,7 @@ def convert_code_to_value_scoped(board_type, column_key, code):
             """
             SELECT option_value
             FROM dropdown_option_codes_v2
-            WHERE board_type = ? AND column_key = ? AND option_code = ?
+            WHERE board_type = %s AND column_key = %s AND option_code = %s
             """,
             (board_type, column_key, code),
         ).fetchone()
@@ -5251,7 +5267,12 @@ def register_accident():
         location_detail = request.form.get('location_detail', '')
         
         detailed_content = request.form.get('detailed_content')
-        custom_data = pyjson.loads(request.form.get('custom_data', '{}'))  # 동적 컬럼
+        # PostgreSQL JSONB는 이미 dict로 반환됨
+        custom_data_raw = request.form.get('custom_data', '{}')
+        if isinstance(custom_data_raw, dict):
+            custom_data = custom_data_raw
+        else:
+            custom_data = pyjson.loads(custom_data_raw) if custom_data_raw else {}  # 동적 컬럼
         attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
         files = request.files.getlist('files')
 
@@ -5327,7 +5348,8 @@ def register_accident():
         
         # 1. 기본 사고 정보 등록 (기본정보 + 동적 컬럼)
         # 필요한 컬럼들이 없는 경우 추가
-        cursor.execute("PRAGMA table_info(accidents_cache)")
+        # PRAGMA removed for PostgreSQL compatibility
+        pass  # cursor.execute("PRAGMA table_info(accidents_cache)")
         columns = [col[1] for col in cursor.fetchall()]
         
         # 필수 컬럼들 체크 및 추가
@@ -5419,7 +5441,7 @@ def register_accident():
         # 2. 상세내용을 custom_data에 저장
         if detailed_content:
             # 기존 custom_data 가져오기
-            cursor.execute("SELECT custom_data FROM accidents_cache WHERE accident_number = ?", (accident_number,))
+            cursor.execute("SELECT custom_data FROM accidents_cache WHERE accident_number = %s", (accident_number,))
             row = cursor.fetchone()
             existing_custom_data = {}
             if row and row[0]:
@@ -5437,8 +5459,8 @@ def register_accident():
             # custom_data 업데이트
             cursor.execute("""
                 UPDATE accidents_cache 
-                SET custom_data = ?
-                WHERE accident_number = ?
+                SET custom_data = %s
+                WHERE accident_number = %s
             """, (pyjson.dumps(existing_custom_data), accident_number))
         
         # 3. 첨부파일 처리
@@ -5465,15 +5487,19 @@ def register_accident():
         conn.commit()
         
         # 저장 확인
-        cursor.execute("SELECT custom_data FROM accidents_cache WHERE accident_number = ?", (accident_number,))
+        cursor.execute("SELECT custom_data FROM accidents_cache WHERE accident_number = %s", (accident_number,))
         saved_data = cursor.fetchone()
         if saved_data:
-            print(f"DB에 저장된 custom_data: {saved_data[0]}")
+            print(f"DB에 저장된 custom_data 타입: {type(saved_data[0])}")
             try:
-                parsed_saved = pyjson.loads(saved_data[0]) if saved_data[0] else {}
-                print(f"DB에서 파싱된 데이터: {parsed_saved}")
-            except:
-                print("DB에서 JSON 파싱 실패")
+                # PostgreSQL JSONB는 이미 dict로 반환됨
+                if isinstance(saved_data[0], dict):
+                    parsed_saved = saved_data[0]
+                else:
+                    parsed_saved = pyjson.loads(saved_data[0]) if saved_data[0] else {}
+                print(f"DB에서 파싱된 데이터 키: {list(parsed_saved.keys())[:5]}")
+            except Exception as e:
+                print(f"DB 데이터 확인 중 경고 (무시 가능): {e}")
         
         logging.info(f"사고 {accident_number} 등록 완료")
         print(f"=== 등록 완료: {accident_number} ===")
@@ -5808,7 +5834,7 @@ def update_partner():
         
         # 2. 삭제된 첨부파일 처리
         for attachment_id in deleted_attachments:
-            cursor.execute("DELETE FROM partner_attachments WHERE id = ?", (attachment_id,))
+            cursor.execute("DELETE FROM partner_attachments WHERE id = %s", (attachment_id,))
         
         # 3. 기존 첨부파일 정보 업데이트
         for attachment in attachment_data:
@@ -5817,8 +5843,8 @@ def update_partner():
                 if attachment.get('id') and not attachment.get('isNew'):
                     cursor.execute("""
                         UPDATE partner_attachments 
-                        SET description = ? 
-                        WHERE id = ?
+                        SET description = %s 
+                        WHERE id = %s
                     """, (attachment.get('description', ''), attachment['id']))
             else:
                 logging.warning(f"attachment가 딕셔너리가 아님: {type(attachment)}")
@@ -5850,7 +5876,7 @@ def update_partner():
                 cursor.execute("""
                     INSERT INTO partner_attachments 
                     (business_number, file_name, file_path, file_size, description)
-                    VALUES (?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s)
                 """, (
                     business_number,
                     filename,  # 원본 파일명으로 저장
@@ -5861,7 +5887,7 @@ def update_partner():
                 logging.info(f"첨부파일 추가: {filename} - {attachment_info.get('description', '')}")
         
         # 커밋 전 확인
-        check_result = cursor.execute("SELECT COUNT(*) FROM partner_attachments WHERE business_number = ?", (business_number,)).fetchone()
+        check_result = cursor.execute("SELECT COUNT(*) FROM partner_attachments WHERE business_number = %s", (business_number,)).fetchone()
         logging.info(f"커밋 전 {business_number} 협력사 첨부파일 개수: {check_result[0]}개")
         
         try:
@@ -5869,7 +5895,7 @@ def update_partner():
             logging.info("데이터베이스 커밋 성공")
             
             # 커밋 후 다시 확인
-            check_result2 = cursor.execute("SELECT COUNT(*) FROM partner_attachments WHERE business_number = ?", (business_number,)).fetchone()
+            check_result2 = cursor.execute("SELECT COUNT(*) FROM partner_attachments WHERE business_number = %s", (business_number,)).fetchone()
             logging.info(f"커밋 후 {business_number} 협력사 첨부파일 개수: {check_result2[0]}개")
             
             conn.close()
@@ -5877,7 +5903,7 @@ def update_partner():
             # 새로운 연결로 다시 확인
             logging.info("새 연결로 데이터 지속성 확인...")
             verify_conn = get_db_connection()
-            verify_result = verify_conn.execute("SELECT COUNT(*) FROM partner_attachments WHERE business_number = ?", (business_number,)).fetchone()
+            verify_result = verify_conn.execute("SELECT COUNT(*) FROM partner_attachments WHERE business_number = %s", (business_number,)).fetchone()
             logging.info(f"새 연결 확인: {business_number} 협력사 첨부파일 개수: {verify_result[0]}개")
             verify_conn.close()
             
@@ -6405,14 +6431,14 @@ def download_attachment(attachment_id):
     
     # 먼저 partner_attachments에서 찾기
     attachment = conn.execute(
-        "SELECT * FROM partner_attachments WHERE id = ?", 
+        "SELECT * FROM partner_attachments WHERE id = %s", 
         (attachment_id,)
     ).fetchone()
     
     # partner_attachments에 없으면 accident_attachments에서 찾기
     if not attachment:
         attachment = conn.execute(
-            "SELECT * FROM accident_attachments WHERE id = ?", 
+            "SELECT * FROM accident_attachments WHERE id = %s", 
             (attachment_id,)
         ).fetchone()
     
@@ -6457,7 +6483,7 @@ def get_partner_attachments(business_number):
     conn = get_db_connection()
     attachments = conn.execute("""
         SELECT * FROM partner_attachments 
-        WHERE business_number = ? 
+        WHERE business_number = %s 
         ORDER BY upload_date DESC
     """, (business_number,)).fetchall()
     conn.close()
@@ -6505,7 +6531,7 @@ def auto_upload_partner_files():
             # 기존 자동 업로드 파일 정보 조회 (정확한 설명 문구만)
             existing_files = cursor.execute("""
                 SELECT file_path FROM partner_attachments 
-                WHERE business_number = ? AND description = ?
+                WHERE business_number = %s AND description = %s
             """, (business_number, auto_upload_desc)).fetchall()
             
             # 파일 시스템에서 삭제
@@ -6521,7 +6547,7 @@ def auto_upload_partner_files():
             # DB에서 삭제 (정확한 설명 문구만)
             cursor.execute("""
                 DELETE FROM partner_attachments 
-                WHERE business_number = ? AND description = ?
+                WHERE business_number = %s AND description = %s
             """, (business_number, auto_upload_desc))
             conn.commit()
             deleted_count = len(existing_files)
@@ -6543,7 +6569,7 @@ def auto_upload_partner_files():
                 # 파일명 안전화 (한글 유지)
                 original_name = file_path.name
                 # 위험한 문자만 제거, 한글은 유지
-                safe_name = re.sub(r'[<>:"/\\|?*]', '_', original_name) if original_name else "file"
+                safe_name = re.sub(r'[<>:"/\\|%s*]', '_', original_name) if original_name else "file"
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 new_filename = f"{business_number}_{timestamp}_{safe_name}"
                 dest_path = upload_folder / new_filename
@@ -6567,7 +6593,7 @@ def auto_upload_partner_files():
                 cursor.execute("""
                     INSERT INTO partner_attachments
                     (business_number, file_name, file_path, file_size, upload_date, description)
-                    VALUES (?, ?, ?, ?, datetime('now'), ?)
+                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, %s)
                 """, (
                     business_number,
                     korean_filename,        # 한글 표시명 (인코딩 없이 그대로)
@@ -6797,7 +6823,8 @@ def migrate_accidents_to_cache():
 
         # accidents 테이블 존재 여부 확인
         try:
-            cur.execute("PRAGMA table_info(accidents)")
+            # PRAGMA removed for PostgreSQL compatibility
+            pass  # cur.execute("PRAGMA table_info(accidents)")
             cols = cur.fetchall()
             if not cols:
                 return jsonify({'success': False, 'message': 'accidents 테이블이 없습니다.'}), 404
@@ -6816,7 +6843,8 @@ def migrate_accidents_to_cache():
 
         # cache 필수 컬럼 보강
         try:
-            cur.execute("PRAGMA table_info(accidents_cache)")
+            # PRAGMA removed for PostgreSQL compatibility
+            pass  # cur.execute("PRAGMA table_info(accidents_cache)")
             cache_cols = [c[1] for c in cur.fetchall()]
             ensure_cols = [
                 ('accident_number','TEXT'),('accident_name','TEXT'),('workplace','TEXT'),
@@ -6877,7 +6905,7 @@ def migrate_accidents_to_cache():
                 data['is_deleted'] = row['is_deleted']
 
             try:
-                exist = conn.execute("SELECT 1 FROM accidents_cache WHERE accident_number = ?", (acc_no,)).fetchone()
+                exist = conn.execute("SELECT 1 FROM accidents_cache WHERE accident_number = %s", (acc_no,)).fetchone()
                 safe_upsert(conn, 'accidents_cache', data, conflict_cols=['accident_number'])
                 if exist:
                     updated += 1
@@ -7285,7 +7313,7 @@ def get_change_request_dropdown_codes():
         codes = conn.execute("""
             SELECT option_code as code, option_value as value, display_order, is_active
             FROM dropdown_option_codes_v2
-            WHERE board_type = 'change_request' AND column_key = ? AND is_active = 1
+            WHERE board_type = 'change_request' AND column_key = %s AND is_active = 1
             ORDER BY display_order, id
         """, (column_key,)).fetchall()
         
@@ -7320,7 +7348,7 @@ def save_change_request_dropdown_codes():
         cursor.execute("""
             UPDATE dropdown_option_codes_v2
             SET is_active = 0, updated_at = CURRENT_TIMESTAMP
-            WHERE board_type = 'change_request' AND column_key = ?
+            WHERE board_type = 'change_request' AND column_key = %s
         """, (column_key,))
         
         # 새 코드 삽입 또는 업데이트 (v2 테이블)
@@ -7328,7 +7356,7 @@ def save_change_request_dropdown_codes():
             cursor.execute("""
                 INSERT INTO dropdown_option_codes_v2
                 (board_type, column_key, option_code, option_value, display_order, is_active)
-                VALUES ('change_request', ?, ?, ?, ?, 1)
+                VALUES ('change_request', %s, %s, %s, %s, 1)
                 ON CONFLICT(board_type, column_key, option_code) DO UPDATE SET
                     option_value = excluded.option_value,
                     display_order = excluded.display_order,
@@ -7354,7 +7382,7 @@ def delete_change_request_dropdown_code(code_id):
         cursor.execute("""
             UPDATE dropdown_option_codes_v2
             SET is_active = 0, updated_at = CURRENT_TIMESTAMP 
-            WHERE id = ?
+            WHERE id = %s
         """, (code_id,))
         
         conn.commit()
@@ -7400,7 +7428,7 @@ def save_change_request():
         # 데이터 삽입
         columns = list(data.keys())
         values = list(data.values())
-        placeholders = ', '.join(['?' for _ in values])
+        placeholders = ', '.join(['%s' for _ in values])
         column_names = ', '.join(columns)
         
         cursor.execute(f"""
@@ -7444,7 +7472,7 @@ def change_request_register():
         cursor.execute("""
             SELECT MAX(CAST(SUBSTR(request_number, -2) AS INTEGER))
             FROM change_requests
-            WHERE request_number LIKE ?
+            WHERE request_number LIKE %s
         """, (f"{base_number}%",))
         
         last_number = cursor.fetchone()[0]
@@ -7663,7 +7691,7 @@ def restore_safety_instructions():
         cursor = conn.cursor()
         
         for item_id in ids:
-            cursor.execute("UPDATE safety_instructions SET is_deleted = 0 WHERE id = ?", (item_id,))
+            cursor.execute("UPDATE safety_instructions SET is_deleted = 0 WHERE id = %s", (item_id,))
         
         conn.commit()
         conn.close()
@@ -7686,7 +7714,7 @@ def restore_follow_sop():
         cursor = conn.cursor()
         
         for item_id in ids:
-            cursor.execute("UPDATE follow_sop SET is_deleted = 0 WHERE work_req_no = ?", (item_id,))
+            cursor.execute("UPDATE follow_sop SET is_deleted = 0 WHERE work_req_no = %s", (item_id,))
             # Cache table is no longer used for display, only update main table
         
         conn.commit()
@@ -7710,7 +7738,7 @@ def restore_full_process():
         cursor = conn.cursor()
         
         for item_id in ids:
-            cursor.execute("UPDATE full_process SET is_deleted = 0 WHERE fullprocess_number = ?", (item_id,))
+            cursor.execute("UPDATE full_process SET is_deleted = 0 WHERE fullprocess_number = %s", (item_id,))
         
         conn.commit()
         conn.close()
@@ -7750,7 +7778,7 @@ def delete_items(board_type):
         cursor = conn.cursor()
         
         # 소프트 삭제 수행
-        placeholders = ','.join('?' * len(ids))
+        placeholders = ','.join('%s' * len(ids))
         cursor.execute(f"""
             UPDATE {table_name} 
             SET is_deleted = 1 
@@ -7784,7 +7812,7 @@ def delete_accidents():
         cursor = conn.cursor()
         
         # 모든 사고 삭제 가능 (ACC, K 모두)
-        placeholders = ','.join('?' * len(ids))
+        placeholders = ','.join('%s' * len(ids))
         cursor.execute(f"""
             UPDATE accidents_cache 
             SET is_deleted = 1 
@@ -7818,7 +7846,7 @@ def delete_safety_instructions():
         cursor = conn.cursor()
         
         # 메인 테이블에서 소프트 삭제 (issue_number 기준)
-        placeholders = ','.join('?' * len(ids))
+        placeholders = ','.join('%s' * len(ids))
         cursor.execute(f"""
             UPDATE safety_instructions 
             SET is_deleted = 1 
@@ -7852,7 +7880,7 @@ def delete_follow_sop():
         cursor = conn.cursor()
         
         # follow_sop 테이블에서 소프트 삭제 (work_req_no 기준)
-        placeholders = ','.join('?' * len(ids))
+        placeholders = ','.join('%s' * len(ids))
         cursor.execute(f"""
             UPDATE follow_sop 
             SET is_deleted = 1 
@@ -7886,7 +7914,7 @@ def delete_full_process():
         cursor = conn.cursor()
         
         # full_process 테이블에서 소프트 삭제 (fullprocess_number 기준)
-        placeholders = ','.join('?' * len(ids))
+        placeholders = ','.join('%s' * len(ids))
         cursor.execute(f"""
             UPDATE full_process 
             SET is_deleted = 1 
@@ -7920,7 +7948,7 @@ def restore_accidents():
         cursor = conn.cursor()
         
         # 선택한 사고들을 복구 (is_deleted = 0)
-        placeholders = ','.join('?' * len(ids))
+        placeholders = ','.join('%s' * len(ids))
         cursor.execute(f"""
             UPDATE accidents_cache 
             SET is_deleted = 0 
@@ -7954,7 +7982,7 @@ def restore_partners():
         cursor = conn.cursor()
         
         # 선택한 협력사들을 복구 (is_deleted = 0)
-        placeholders = ','.join('?' * len(business_numbers))
+        placeholders = ','.join('%s' * len(business_numbers))
         cursor.execute(f"""
             UPDATE partners_cache 
             SET is_deleted = 0 
@@ -7987,7 +8015,7 @@ def search_buildings():
             cursor.execute("""
                 SELECT building_code, building_name
                 FROM buildings_cache
-                WHERE building_name LIKE ? OR building_code LIKE ?
+                WHERE building_name LIKE %s OR building_code LIKE %s
                 ORDER BY building_name
                 LIMIT 50
             """, (f'%{search_term}%', f'%{search_term}%'))
@@ -8027,7 +8055,7 @@ def search_departments():
                        p.dept_name as parent_name
                 FROM departments_cache d
                 LEFT JOIN departments_cache p ON d.parent_dept_code = p.dept_code
-                WHERE d.dept_name LIKE ? OR d.dept_code LIKE ?
+                WHERE d.dept_name LIKE %s OR d.dept_code LIKE %s
                 ORDER BY d.dept_name
                 LIMIT 50
             """, (f'%{search_term}%', f'%{search_term}%'))
@@ -8095,7 +8123,7 @@ def api_search():
                         SELECT business_number, company_name, representative, 
                                business_type_major, NULL as phone
                         FROM partners_cache
-                        WHERE business_number LIKE ? AND is_deleted = 0
+                        WHERE business_number LIKE %s AND is_deleted = 0
                         LIMIT 50
                     """, (f'%{search_term}%',))
                 else:
@@ -8103,7 +8131,7 @@ def api_search():
                         SELECT business_number, company_name, representative, 
                                business_type_major, NULL as phone
                         FROM partners_cache
-                        WHERE company_name LIKE ? AND is_deleted = 0
+                        WHERE company_name LIKE %s AND is_deleted = 0
                         LIMIT 50
                     """, (f'%{search_term}%',))
             else:
@@ -8158,7 +8186,7 @@ def api_search():
                         cursor.execute("""
                             SELECT building_code, building_name
                             FROM buildings_cache
-                            WHERE building_code LIKE ?
+                            WHERE building_code LIKE %s
                             ORDER BY building_name
                             LIMIT 50
                         """, (f'%{search_term}%',))
@@ -8166,7 +8194,7 @@ def api_search():
                         cursor.execute("""
                             SELECT building_code, building_name
                             FROM buildings_cache
-                            WHERE building_name LIKE ?
+                            WHERE building_name LIKE %s
                             ORDER BY building_name
                             LIMIT 50
                         """, (f'%{search_term}%',))
@@ -8222,7 +8250,7 @@ def api_search():
                                    p.dept_name as parent_name, d.dept_level
                             FROM departments_cache d
                             LEFT JOIN departments_cache p ON d.parent_dept_code = p.dept_code
-                            WHERE d.dept_code LIKE ?
+                            WHERE d.dept_code LIKE %s
                             ORDER BY d.dept_name
                             LIMIT 50
                         """, (f'%{search_term}%',))
@@ -8232,7 +8260,7 @@ def api_search():
                                    p.dept_name as parent_name, d.dept_level
                             FROM departments_cache d
                             LEFT JOIN departments_cache p ON d.parent_dept_code = p.dept_code
-                            WHERE d.dept_name LIKE ?
+                            WHERE d.dept_name LIKE %s
                             ORDER BY d.dept_name
                             LIMIT 50
                         """, (f'%{search_term}%',))
@@ -8324,7 +8352,7 @@ def permanent_delete_accidents():
         cursor = conn.cursor()
         
         # 선택한 사고들을 영구 삭제
-        placeholders = ','.join('?' * len(ids))
+        placeholders = ','.join('%s' * len(ids))
         cursor.execute(f"""
             DELETE FROM accidents_cache 
             WHERE id IN ({placeholders})
@@ -8404,7 +8432,7 @@ def admin_force_delete_si_columns():
 
         conn = get_db_connection()
         cursor = conn.cursor()
-        placeholders = ','.join('?' * len(keys))
+        placeholders = ','.join('%s' * len(keys))
         cursor.execute(
             f"UPDATE safety_instruction_column_config SET is_deleted = 1 WHERE LOWER(column_key) IN ({placeholders})",
             [k.lower() for k in keys]
@@ -8612,11 +8640,11 @@ def export_accidents_excel():
         # company_name과 business_number 필터링은 제거 (responsible_company 관련)
         
         if accident_date_start:
-            query += " AND accident_date >= ?"
+            query += " AND accident_date >= %s"
             params.append(accident_date_start)
         
         if accident_date_end:
-            query += " AND accident_date <= ?"
+            query += " AND accident_date <= %s"
             params.append(accident_date_end)
         
         # 등록일 기준 최신순 정렬 (시분초까지 정확히 정렬됨)
@@ -8942,7 +8970,7 @@ def import_accidents():
                         # 같은 날짜에 이미 있는 사고 수 확인 (cache 기준)
                         cursor.execute("""
                             SELECT COUNT(*) FROM accidents_cache 
-                            WHERE accident_number LIKE ?
+                            WHERE accident_number LIKE %s
                         """, (base_number + '%',))
                         count = cursor.fetchone()[0]
                         
@@ -8960,7 +8988,7 @@ def import_accidents():
                 # 중복 확인 (cache 기준)
                 if skip_duplicates and data.get('accident_number'):
                     try:
-                        cursor.execute("SELECT COUNT(*) FROM accidents_cache WHERE accident_number = ?", (data['accident_number'],))
+                        cursor.execute("SELECT COUNT(*) FROM accidents_cache WHERE accident_number = %s", (data['accident_number'],))
                         if (cursor.fetchone() or [0])[0] > 0:
                             continue
                     except Exception:
@@ -9834,23 +9862,23 @@ def export_change_requests_excel():
         params = []
         
         if company_name:
-            query += " AND company_name LIKE ?"
+            query += " AND company_name LIKE %s"
             params.append(f"%{company_name}%")
         
         if business_number:
-            query += " AND business_number LIKE ?"
+            query += " AND business_number LIKE %s"
             params.append(f"%{business_number}%")
             
         if status:
-            query += " AND status = ?"
+            query += " AND status = %s"
             params.append(status)
         
         if created_date_start:
-            query += " AND DATE(created_at) >= ?"
+            query += " AND DATE(created_at) >= %s"
             params.append(created_date_start)
         
         if created_date_end:
-            query += " AND DATE(created_at) <= ?"
+            query += " AND DATE(created_at) <= %s"
             params.append(created_date_end)
         
         # 등록일 기준 최신순 정렬
@@ -10029,25 +10057,25 @@ def export_partners_to_excel():
             params = []
             
             if company_name:
-                query += " AND company_name LIKE ?"
+                query += " AND company_name LIKE %s"
                 params.append(f'%{company_name}%')
             
             if business_number:
-                query += " AND business_number LIKE ?"
+                query += " AND business_number LIKE %s"
                 params.append(f'%{business_number}%')
                 
             if business_type_major:
-                query += " AND business_type_major = ?"
+                query += " AND business_type_major = %s"
                 params.append(business_type_major)
                 
             if business_type_minor:
-                query += " AND business_type_minor = ?"
+                query += " AND business_type_minor = %s"
                 params.append(business_type_minor)
                 
             if workers_min:
                 try:
                     min_val = int(workers_min)
-                    query += " AND permanent_workers >= ?"
+                    query += " AND permanent_workers >= %s"
                     params.append(min_val)
                 except ValueError:
                     pass
@@ -10055,7 +10083,7 @@ def export_partners_to_excel():
             if workers_max:
                 try:
                     max_val = int(workers_max)
-                    query += " AND permanent_workers <= ?"
+                    query += " AND permanent_workers <= %s"
                     params.append(max_val)
                 except ValueError:
                     pass
@@ -10232,7 +10260,7 @@ def delete_partners():
         cursor = conn.cursor()
         
         # Soft delete (is_deleted = 1로 설정)
-        placeholders = ','.join('?' * len(business_numbers))
+        placeholders = ','.join('%s' * len(business_numbers))
         cursor.execute(f"""
             UPDATE partners_cache 
             SET is_deleted = 1 
@@ -10376,7 +10404,8 @@ def delete_change_requests():
         cursor = conn.cursor()
         
         cursor.execute("""
-            PRAGMA table_info(partner_change_requests)
+            # PRAGMA removed for PostgreSQL compatibility
+            # PRAGMA table_info(partner_change_requests)
         """)
         columns = [col[1] for col in cursor.fetchall()]
         
@@ -10388,7 +10417,7 @@ def delete_change_requests():
             conn.commit()
         
         # 소프트 삭제 실행
-        placeholders = ','.join('?' * len(ids))
+        placeholders = ','.join('%s' * len(ids))
         cursor.execute(f"""
             UPDATE partner_change_requests 
             SET is_deleted = 1 
@@ -10494,7 +10523,7 @@ def api_get_person_detail(person_id):
         cursor.execute("""
             SELECT id, name, department, position, company_name, phone, email
             FROM person_master
-            WHERE id = ? AND is_active = 1
+            WHERE id = %s AND is_active = 1
         """, (person_id,))
         
         row = cursor.fetchone()
@@ -10534,7 +10563,7 @@ def api_create_person():
         
         cursor.execute_with_returning_id("""
             INSERT INTO person_master (name, department, position, company_name, phone, email)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s)
         """, (
             data.get('name'),
             data.get('department', ''),
@@ -10570,9 +10599,9 @@ def api_update_person(person_id):
         
         cursor.execute("""
             UPDATE person_master 
-            SET name = ?, department = ?, position = ?, company_name = ?, phone = ?, email = ?,
+            SET name = %s, department = %s, position = %s, company_name = %s, phone = %s, email = %s,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND is_active = 1
+            WHERE id = %s AND is_active = 1
         """, (
             data.get('name'),
             data.get('department', ''),
@@ -10608,7 +10637,7 @@ def api_delete_person(person_id):
         cursor.execute("""
             UPDATE person_master 
             SET is_active = 0, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ? AND is_active = 1
+            WHERE id = %s AND is_active = 1
         """, (person_id,))
         
         if cursor.rowcount == 0:
@@ -10742,13 +10771,14 @@ def board_dropdown_history(board):
         conn = get_db_connection()
         cur = conn.cursor()
         # board_type 컬럼 존재 여부 확인
-        cur.execute("PRAGMA table_info(dropdown_code_audit)")
+        # PRAGMA removed for PostgreSQL compatibility
+        pass  # cur.execute("PRAGMA table_info(dropdown_code_audit)")
         cols = [r[1] for r in cur.fetchall()]
         if 'board_type' in cols:
             history = conn.execute(
                 """
                 SELECT * FROM dropdown_code_audit
-                WHERE board_type = ? AND column_key = ?
+                WHERE board_type = %s AND column_key = %s
                 ORDER BY changed_at DESC, id DESC
                 """,
                 (board_type, column_key),
@@ -10757,7 +10787,7 @@ def board_dropdown_history(board):
             history = conn.execute(
                 """
                 SELECT * FROM dropdown_code_audit
-                WHERE column_key = ?
+                WHERE column_key = %s
                 ORDER BY changed_at DESC, id DESC
                 """,
                 (column_key,),
@@ -10775,7 +10805,8 @@ def board_dropdown_audit_summary(board):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("PRAGMA table_info(dropdown_code_audit)")
+        # PRAGMA removed for PostgreSQL compatibility
+        pass  # cur.execute("PRAGMA table_info(dropdown_code_audit)")
         cols = [r[1] for r in cur.fetchall()]
         if 'board_type' in cols:
             recent = conn.execute(
@@ -10784,7 +10815,7 @@ def board_dropdown_audit_summary(board):
                        COUNT(*) as total_changes,
                        COUNT(DISTINCT column_key) as columns_changed
                 FROM dropdown_code_audit
-                WHERE board_type = ? AND changed_at >= datetime('now','-7 days')
+                WHERE board_type = %s AND changed_at >= datetime('now','-7 days')
                 GROUP BY DATE(changed_at)
                 ORDER BY date DESC
                 """,
@@ -10794,7 +10825,7 @@ def board_dropdown_audit_summary(board):
                 """
                 SELECT column_key, COUNT(*) as change_count, MAX(changed_at) as last_changed
                 FROM dropdown_code_audit
-                WHERE board_type = ?
+                WHERE board_type = %s
                 GROUP BY column_key
                 ORDER BY change_count DESC
                 LIMIT 5
@@ -11005,7 +11036,7 @@ def page_view(url):
             _logging.debug(f"pages ensure failed: {_e}")
         except Exception:
             pass
-    page = conn.execute("SELECT * FROM pages WHERE url = ?", (url,)).fetchone()
+    page = conn.execute("SELECT * FROM pages WHERE url = %s", (url,)).fetchone()
     conn.close()
     
     if not page:

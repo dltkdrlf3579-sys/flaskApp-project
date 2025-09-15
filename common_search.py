@@ -50,16 +50,16 @@ class DynamicSearchBuilder:
         if not is_dynamic:
             # 일반 컬럼 검색
             if search_type == 'like':
-                query += f" AND {field_name} LIKE ?"
+                query += f" AND {field_name} LIKE %s"
                 params.append(f"%{field_value}%")
             elif search_type == 'equals':
-                query += f" AND {field_name} = ?"
+                query += f" AND {field_name} = %s"
                 params.append(field_value)
             elif search_type == 'gte':
-                query += f" AND {field_name} >= ?"
+                query += f" AND {field_name} >= %s"
                 params.append(field_value)
             elif search_type == 'lte':
-                query += f" AND {field_name} <= ?"
+                query += f" AND {field_name} <= %s"
                 params.append(field_value)
         else:
             # JSON/JSONB 필드 검색
@@ -70,24 +70,24 @@ class DynamicSearchBuilder:
                 if search_type == 'like':
                     if fallback_column:
                         # JSON 필드와 폴백 컬럼 동시 검색
-                        query += f" AND (json_extract({custom_data_field}, '{json_path}') LIKE ? OR {fallback_column} LIKE ?)"
+                        query += f" AND (json_extract({custom_data_field}, '{json_path}') LIKE %s OR {fallback_column} LIKE %s)"
                         params.append(f"%{field_value}%")
                         params.append(f"%{field_value}%")
                     else:
                         # JSON 필드만 검색
-                        query += f" AND json_extract({custom_data_field}, '{json_path}') LIKE ?"
+                        query += f" AND json_extract({custom_data_field}, '{json_path}') LIKE %s"
                         params.append(f"%{field_value}%")
                         
                 elif search_type == 'equals':
-                    query += f" AND json_extract({custom_data_field}, '{json_path}') = ?"
+                    query += f" AND json_extract({custom_data_field}, '{json_path}') = %s"
                     params.append(field_value)
                     
                 elif search_type == 'gte':
-                    query += f" AND CAST(json_extract({custom_data_field}, '{json_path}') AS REAL) >= ?"
+                    query += f" AND CAST(json_extract({custom_data_field}, '{json_path}') AS REAL) >= %s"
                     params.append(field_value)
                     
                 elif search_type == 'lte':
-                    query += f" AND CAST(json_extract({custom_data_field}, '{json_path}') AS REAL) <= ?"
+                    query += f" AND CAST(json_extract({custom_data_field}, '{json_path}') AS REAL) <= %s"
                     params.append(field_value)
                     
             elif self.db_type == 'postgresql':

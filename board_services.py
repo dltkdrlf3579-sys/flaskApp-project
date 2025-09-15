@@ -143,7 +143,8 @@ class ColumnService:
             values.append(None)
         
         # table_name과 table_type이 테이블에 있는지 확인
-        cursor.execute(f"PRAGMA table_info({self.config['column_table']})")
+        # PRAGMA removed for PostgreSQL compatibility
+        pass  # cursor.execute(f"PRAGMA table_info({self.config['column_table']})")
         existing_columns = [row[1] for row in cursor.fetchall()]
         
         if 'table_name' in existing_columns and 'table_name' in data:
@@ -158,7 +159,7 @@ class ColumnService:
         columns.extend(['created_at', 'updated_at'])
         
         # 쿼리 구성
-        placeholders = ', '.join(['?' for _ in values])
+        placeholders = ', '.join(['%s' for _ in values])
         columns_str = ', '.join(columns)
         
         cursor.execute_with_returning_id(f"""
@@ -181,7 +182,7 @@ class ColumnService:
         # 보호 컬럼 편집 방지
         try:
             row = cursor.execute(
-                f"SELECT column_key, COALESCE(is_system,0) FROM {self.config['column_table']} WHERE id = ?",
+                f"SELECT column_key, COALESCE(is_system,0) FROM {self.config['column_table']} WHERE id = %s",
                 (column_id,)
             ).fetchone()
             if row:
@@ -197,23 +198,23 @@ class ColumnService:
         params = []
         
         if 'column_name' in data:
-            update_fields.append("column_name = ?")
+            update_fields.append("column_name = %s")
             params.append(data['column_name'])
         
         if 'column_type' in data:
-            update_fields.append("column_type = ?")
+            update_fields.append("column_type = %s")
             params.append(data['column_type'])
         
         if 'dropdown_options' in data:
-            update_fields.append("dropdown_options = ?")
+            update_fields.append("dropdown_options = %s")
             params.append(json.dumps(data['dropdown_options']))
         
         if 'is_active' in data:
-            update_fields.append("is_active = ?")
+            update_fields.append("is_active = %s")
             params.append(1 if data['is_active'] else 0)
         
         if 'column_order' in data:
-            update_fields.append("column_order = ?")
+            update_fields.append("column_order = %s")
             params.append(data['column_order'])
         
         if update_fields:
@@ -223,7 +224,7 @@ class ColumnService:
             query = f"""
                 UPDATE {self.config['column_table']}
                 SET {', '.join(update_fields)}
-                WHERE id = ?
+                WHERE id = %s
             """
             cursor.execute(query, params)
             conn.commit()
@@ -238,7 +239,7 @@ class ColumnService:
 
         # 보호 컬럼 삭제 방지
         row = cursor.execute(
-            f"SELECT column_key, COALESCE(is_system,0) FROM {self.config['column_table']} WHERE id = ?",
+            f"SELECT column_key, COALESCE(is_system,0) FROM {self.config['column_table']} WHERE id = %s",
             (column_id,)
         ).fetchone()
         if row:
@@ -250,12 +251,12 @@ class ColumnService:
                 raise ValueError("Protected column cannot be deleted")
 
         if hard_delete:
-            cursor.execute(f"DELETE FROM {self.config['column_table']} WHERE id = ?", (column_id,))
+            cursor.execute(f"DELETE FROM {self.config['column_table']} WHERE id = %s", (column_id,))
         else:
             cursor.execute(f"""
                 UPDATE {self.config['column_table']}
                 SET is_active = 0, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
+                WHERE id = %s
             """, (column_id,))
         
         conn.commit()
@@ -270,8 +271,8 @@ class ColumnService:
         for item in items:
             cursor.execute(f"""
                 UPDATE {self.config['column_table']}
-                SET column_order = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
+                SET column_order = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
             """, (item['column_order'], item['id']))
         
         conn.commit()
@@ -294,7 +295,7 @@ class CodeService:
         # v2 테이블 우선 조회
         codes = conn.execute("""
             SELECT * FROM dropdown_option_codes_v2
-            WHERE board_type = ? AND column_key = ? AND is_active = 1
+            WHERE board_type = %s AND column_key = %s AND is_active = 1
             ORDER BY display_order
         """, (self.board_type, column_key)).fetchall()
         
@@ -302,7 +303,7 @@ class CodeService:
         if not codes:
             codes = conn.execute("""
                 SELECT * FROM dropdown_option_codes
-                WHERE column_key = ? AND is_active = 1
+                WHERE column_key = %s AND is_active = 1
                 ORDER BY display_order
             """, (column_key,)).fetchall()
         
@@ -333,7 +334,7 @@ class CodeService:
         cursor.execute("""
             UPDATE dropdown_option_codes_v2
             SET is_active = 0
-            WHERE board_type = ? AND column_key = ?
+            WHERE board_type = %s AND column_key = %s
         """, (self.board_type, column_key))
         
         # 새 코드 추가 (safe_upsert 사용)
@@ -362,7 +363,7 @@ class CodeService:
         cursor.execute("""
             UPDATE dropdown_option_codes_v2
             SET is_active = 0
-            WHERE id = ?
+            WHERE id = %s
         """, (code_id,))
         
         conn.commit()
@@ -391,19 +392,19 @@ class ItemService:
         
         if filters:
             if filters.get('company_name'):
-                where_clauses.append("company_name LIKE ?")
+                where_clauses.append("company_name LIKE %s")
                 params.append(f"%{filters['company_name']}%")
             
             if filters.get('business_number'):
-                where_clauses.append("business_number LIKE ?")
+                where_clauses.append("business_number LIKE %s")
                 params.append(f"%{filters['business_number']}%")
             
             if filters.get('date_start'):
-                where_clauses.append(f"{self.board_type}_date >= ?")
+                where_clauses.append(f"{self.board_type}_date >= %s")
                 params.append(filters['date_start'])
             
             if filters.get('date_end'):
-                where_clauses.append(f"{self.board_type}_date <= ?")
+                where_clauses.append(f"{self.board_type}_date <= %s")
                 params.append(filters['date_end'])
         
         where_sql = " AND ".join(where_clauses)
@@ -423,7 +424,7 @@ class ItemService:
             SELECT * FROM {self.config['cache_table']}
             WHERE {where_sql}
             ORDER BY id DESC
-            LIMIT ? OFFSET ?
+            LIMIT %s OFFSET %s
         """, params).fetchall()
         
         conn.close()
@@ -443,7 +444,7 @@ class ItemService:
         
         item = conn.execute(f"""
             SELECT * FROM {self.config['cache_table']}
-            WHERE id = ? AND is_deleted = 0
+            WHERE id = %s AND is_deleted = 0
         """, (item_id,)).fetchone()
         
         conn.close()
@@ -462,7 +463,7 @@ class ItemService:
         cursor.execute(f"""
             SELECT MAX(CAST(SUBSTR({self.board_type}_number, -4) AS INTEGER))
             FROM {self.config['cache_table']}
-            WHERE {self.board_type}_number LIKE ?
+            WHERE {self.board_type}_number LIKE %s
         """, (f"{self.config['number_prefix']}-{year:04d}-{month:02d}-%",))
         
         max_seq = cursor.fetchone()[0] or 0
@@ -473,7 +474,7 @@ class ItemService:
             INSERT INTO {self.config['cache_table']}
             ({self.board_type}_number, {self.board_type}_date, title, content, 
              custom_data, created_by, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         """, (
             number,
             data.get('date'),
@@ -499,9 +500,9 @@ class ItemService:
         
         cursor.execute(f"""
             UPDATE {self.config['cache_table']}
-            SET title = ?, content = ?, custom_data = ?, 
-                updated_at = CURRENT_TIMESTAMP, updated_by = ?
-            WHERE id = ?
+            SET title = %s, content = %s, custom_data = %s, 
+                updated_at = CURRENT_TIMESTAMP, updated_by = %s
+            WHERE id = %s
         """, (
             data.get('title'),
             data.get('content'),
@@ -521,14 +522,14 @@ class ItemService:
         
         if hard_delete:
             cursor.execute(
-                f"DELETE FROM {self.config['cache_table']} WHERE id IN ({','.join('?' * len(item_ids))})",
+                f"DELETE FROM {self.config['cache_table']} WHERE id IN ({','.join('%s' * len(item_ids))})",
                 item_ids
             )
         else:
             cursor.execute(
                 f"""UPDATE {self.config['cache_table']}
                    SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP
-                   WHERE id IN ({','.join('?' * len(item_ids))})""",
+                   WHERE id IN ({','.join('%s' * len(item_ids))})""",
                 item_ids
             )
         
@@ -624,7 +625,8 @@ class AttachmentService:
                     )
                     return cursor.fetchone() is not None
                 else:
-                    cursor.execute(f"PRAGMA table_info({table})")
+                    # PRAGMA removed for PostgreSQL compatibility
+                    pass  # cursor.execute(f"PRAGMA table_info({table})")
                     return any(r[1].lower() == col.lower() for r in cursor.fetchall())
             except Exception:
                 return False
