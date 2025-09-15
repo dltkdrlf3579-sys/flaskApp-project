@@ -6590,15 +6590,17 @@ def auto_upload_partner_files():
                 # 표시용 한글 파일명 생성 (base64 인코딩 제거)
                 korean_filename = f"{company_name}_{year}년_{month}월_통합레포트.html"
                 
+                from timezone_config import get_korean_time_str
                 cursor.execute("""
                     INSERT INTO partner_attachments
                     (business_number, file_name, file_path, file_size, upload_date, description)
-                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                 """, (
                     business_number,
                     korean_filename,        # 한글 표시명 (인코딩 없이 그대로)
                     str(dest_path),         # file_path (실제 파일 경로)
                     dest_path.stat().st_size, # file_size
+                    get_korean_time_str(),  # upload_date (한국 시간)
                     auto_upload_desc        # description (자동 업로드 설명)
                 ))
                 
