@@ -143,9 +143,13 @@ class ColumnService:
             values.append(None)
         
         # table_name과 table_type이 테이블에 있는지 확인
-        # PRAGMA removed for PostgreSQL compatibility
-        pass  # cursor.execute(f"PRAGMA table_info({self.config['column_table']})")
-        existing_columns = [row[1] for row in cursor.fetchall()]
+        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+        cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = %s
+        """, (self.config['column_table'],))
+        existing_columns = [row[0] for row in cursor.fetchall()]
         
         if 'table_name' in existing_columns and 'table_name' in data:
             columns.append('table_name')
@@ -625,9 +629,8 @@ class AttachmentService:
                     )
                     return cursor.fetchone() is not None
                 else:
-                    # PRAGMA removed for PostgreSQL compatibility
-                    pass  # cursor.execute(f"PRAGMA table_info({table})")
-                    return any(r[1].lower() == col.lower() for r in cursor.fetchall())
+                    # SQLite는 지원하지 않음 - PostgreSQL만 사용
+                    return False
             except Exception:
                 return False
 

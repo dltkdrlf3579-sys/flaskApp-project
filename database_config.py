@@ -91,9 +91,13 @@ class PartnerDataManager:
         cursor = conn.cursor()
         
         # 기존 partners_cache 테이블의 구조 확인
-        # PRAGMA removed for PostgreSQL compatibility
-        pass  # cursor.execute("PRAGMA table_info(partners_cache)")
-        existing_columns = {col[1]: col[2] for col in cursor.fetchall()}
+        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+        cursor.execute("""
+            SELECT column_name, data_type
+            FROM information_schema.columns
+            WHERE table_name = 'partners_cache'
+        """)
+        existing_columns = {col[0]: col[1] for col in cursor.fetchall()}
         
         # 필요한 컬럼 정의
         required_columns = {
@@ -276,9 +280,13 @@ class PartnerDataManager:
         ''')
         # 누락 컬럼 보강 (report_date)
         try:
-            # PRAGMA removed for PostgreSQL compatibility
-            pass  # cursor.execute("PRAGMA table_info(accidents_cache)")
-            cols_ac = [c[1] for c in cursor.fetchall()]
+            # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+            cursor.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'accidents_cache'
+            """)
+            cols_ac = [c[0] for c in cursor.fetchall()]
             if 'report_date' not in cols_ac:
                 cursor.execute("ALTER TABLE accidents_cache ADD COLUMN report_date TEXT")
         except Exception:

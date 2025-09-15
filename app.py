@@ -390,9 +390,13 @@ def init_db():
         ''')
         # 보강: is_deleted 컬럼이 없으면 추가(soft delete 일관성)
         try:
-            # PRAGMA removed for PostgreSQL compatibility
-            pass  # cursor.execute("PRAGMA table_info(section_config)")
-            cols = [r[1].lower() for r in cursor.fetchall()]
+            # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+            cursor.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'section_config'
+            """)
+            cols = [r[0].lower() for r in cursor.fetchall()]
             if 'is_deleted' not in cols:
                 cursor.execute("ALTER TABLE section_config ADD COLUMN is_deleted INTEGER DEFAULT 0")
         except Exception:
@@ -453,9 +457,13 @@ def init_db():
         ''')
         
         # Follow SOP 테이블에 is_deleted 컬럼 추가 (기존 테이블 업데이트)
-        # PRAGMA removed for PostgreSQL compatibility
-        pass  # cursor.execute("PRAGMA table_info(follow_sop_column_config)")
-        columns = [col[1] for col in cursor.fetchall()]
+        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+        cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'follow_sop_column_config'
+        """)
+        columns = [col[0] for col in cursor.fetchall()]
         if 'is_deleted' not in columns:
             cursor.execute("ALTER TABLE follow_sop_column_config ADD COLUMN is_deleted INTEGER DEFAULT 0")
         
@@ -479,16 +487,24 @@ def init_db():
         ''')
         
         # Full Process 테이블에 is_deleted 컬럼 추가 (기존 테이블 업데이트)
-        # PRAGMA removed for PostgreSQL compatibility
-        pass  # cursor.execute("PRAGMA table_info(full_process_column_config)")
-        columns = [col[1] for col in cursor.fetchall()]
+        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+        cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'full_process_column_config'
+        """)
+        columns = [col[0] for col in cursor.fetchall()]
         if 'is_deleted' not in columns:
             cursor.execute("ALTER TABLE full_process_column_config ADD COLUMN is_deleted INTEGER DEFAULT 0")
         
         # Safety Instruction 테이블에 누락된 컬럼들 추가 (startup 보강)
-        # PRAGMA removed for PostgreSQL compatibility
-        pass  # cursor.execute("PRAGMA table_info(safety_instruction_column_config)")
-        safety_columns = [col[1] for col in cursor.fetchall()]
+        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+        cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'safety_instruction_column_config'
+        """)
+        safety_columns = [col[0] for col in cursor.fetchall()]
         if 'is_deleted' not in safety_columns:
             cursor.execute("ALTER TABLE safety_instruction_column_config ADD COLUMN is_deleted INTEGER DEFAULT 0")
         if 'tab' not in safety_columns:
@@ -510,9 +526,13 @@ def init_db():
         ''')
         
         # Follow SOP 테이블에 is_deleted 컬럼 추가 (기존 테이블 업데이트)
-        # PRAGMA removed for PostgreSQL compatibility
-        pass  # cursor.execute("PRAGMA table_info(follow_sop)")
-        columns = [col[1] for col in cursor.fetchall()]
+        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+        cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'follow_sop'
+        """)
+        columns = [col[0] for col in cursor.fetchall()]
         if 'is_deleted' not in columns:
             cursor.execute("ALTER TABLE follow_sop ADD COLUMN is_deleted INTEGER DEFAULT 0")
         
@@ -528,9 +548,13 @@ def init_db():
         ''')
         
         # Follow SOP sections 테이블에 section_order 컬럼 추가 (기존 테이블 업데이트)
-        # PRAGMA removed for PostgreSQL compatibility
-        pass  # cursor.execute("PRAGMA table_info(follow_sop_sections)")
-        columns = [col[1] for col in cursor.fetchall()]
+        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+        cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'follow_sop_sections'
+        """)
+        columns = [col[0] for col in cursor.fetchall()]
         if 'section_order' not in columns:
             cursor.execute("ALTER TABLE follow_sop_sections ADD COLUMN section_order INTEGER DEFAULT 1")
             logging.info("follow_sop_sections 테이블에 section_order 컬럼 추가")
@@ -555,9 +579,13 @@ def init_db():
         ''')
         
         # Full Process 테이블에 is_deleted 컬럼 추가 (기존 테이블 업데이트)
-        # PRAGMA removed for PostgreSQL compatibility
-        pass  # cursor.execute("PRAGMA table_info(full_process)")
-        columns = [col[1] for col in cursor.fetchall()]
+        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+        cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'full_process'
+        """)
+        columns = [col[0] for col in cursor.fetchall()]
         if 'is_deleted' not in columns:
             cursor.execute("ALTER TABLE full_process ADD COLUMN is_deleted INTEGER DEFAULT 0")
         
@@ -573,9 +601,13 @@ def init_db():
         ''')
         
         # Full Process sections 테이블에 section_order 컬럼 추가 (기존 테이블 업데이트)
-        # PRAGMA removed for PostgreSQL compatibility
-        pass  # cursor.execute("PRAGMA table_info(full_process_sections)")
-        columns = [col[1] for col in cursor.fetchall()]
+        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+        cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'full_process_sections'
+        """)
+        columns = [col[0] for col in cursor.fetchall()]
         if 'section_order' not in columns:
             cursor.execute("ALTER TABLE full_process_sections ADD COLUMN section_order INTEGER DEFAULT 1")
             logging.info("full_process_sections 테이블에 section_order 컬럼 추가")
@@ -599,9 +631,13 @@ def init_db():
         ''')
         
         # safety_instruction_sections 스키마 보정
-        # PRAGMA removed for PostgreSQL compatibility
-        pass  # cursor.execute("PRAGMA table_info(safety_instruction_sections)")
-        columns = [col[1] for col in cursor.fetchall()]
+        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+        cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'safety_instruction_sections'
+        """)
+        columns = [col[0] for col in cursor.fetchall()]
         if 'section_order' not in columns:
             cursor.execute("ALTER TABLE safety_instruction_sections ADD COLUMN section_order INTEGER DEFAULT 1")
             logging.info("safety_instruction_sections 테이블에 section_order 컬럼 추가")
@@ -914,9 +950,13 @@ def init_sample_data():
         count = cursor.fetchone()[0]
         
         # permanent_workers 컬럼이 있는지 확인
-        # PRAGMA removed for PostgreSQL compatibility
-        pass  # cursor.execute("PRAGMA table_info(partners_cache)")
-        columns = [col[1] for col in cursor.fetchall()]
+        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+        cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'partners_cache'
+        """)
+        columns = [col[0] for col in cursor.fetchall()]
         
         # permanent_workers 컬럼이 없으면 기존 데이터에 랜덤값 추가
         if 'permanent_workers' not in columns:
@@ -3665,9 +3705,13 @@ def partner_change_request():
                       'change_reason', 'created_at', 'status', 'request_number']
         
         # is_deleted 컬럼 존재 여부 확인
-        # PRAGMA removed for PostgreSQL compatibility
-        pass  # cursor.execute("PRAGMA table_info(partner_change_requests)")
-        columns = [col[1] for col in cursor.fetchall()]
+        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+        cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'partner_change_requests'
+        """)
+        columns = [col[0] for col in cursor.fetchall()]
         
         # 각 필터 적용
         where_conditions = []
@@ -5344,9 +5388,13 @@ def register_accident():
         
         # 1. 기본 사고 정보 등록 (기본정보 + 동적 컬럼)
         # 필요한 컬럼들이 없는 경우 추가
-        # PRAGMA removed for PostgreSQL compatibility
-        pass  # cursor.execute("PRAGMA table_info(accidents_cache)")
-        columns = [col[1] for col in cursor.fetchall()]
+        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+        cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'accidents_cache'
+        """)
+        columns = [col[0] for col in cursor.fetchall()]
         
         # 필수 컬럼들 체크 및 추가
         required_columns = [
@@ -6821,8 +6869,12 @@ def migrate_accidents_to_cache():
 
         # accidents 테이블 존재 여부 확인
         try:
-            # PRAGMA removed for PostgreSQL compatibility
-            pass  # cur.execute("PRAGMA table_info(accidents)")
+            # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+            cur.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'accidents'
+            """)
             cols = cur.fetchall()
             if not cols:
                 return jsonify({'success': False, 'message': 'accidents 테이블이 없습니다.'}), 404
@@ -6841,9 +6893,13 @@ def migrate_accidents_to_cache():
 
         # cache 필수 컬럼 보강
         try:
-            # PRAGMA removed for PostgreSQL compatibility
-            pass  # cur.execute("PRAGMA table_info(accidents_cache)")
-            cache_cols = [c[1] for c in cur.fetchall()]
+            # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+            cur.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'accidents_cache'
+            """)
+            cache_cols = [c[0] for c in cur.fetchall()]
             ensure_cols = [
                 ('accident_number','TEXT'),('accident_name','TEXT'),('workplace','TEXT'),
                 ('accident_grade','TEXT'),('major_category','TEXT'),('injury_form','TEXT'),('injury_type','TEXT'),
@@ -10401,11 +10457,13 @@ def delete_change_requests():
         conn = get_db_connection()
         cursor = conn.cursor()
         
+        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
         cursor.execute("""
-            # PRAGMA removed for PostgreSQL compatibility
-            # PRAGMA table_info(partner_change_requests)
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'partner_change_requests'
         """)
-        columns = [col[1] for col in cursor.fetchall()]
+        columns = [col[0] for col in cursor.fetchall()]
         
         if 'is_deleted' not in columns:
             cursor.execute("""
@@ -10769,9 +10827,13 @@ def board_dropdown_history(board):
         conn = get_db_connection()
         cur = conn.cursor()
         # board_type 컬럼 존재 여부 확인
-        # PRAGMA removed for PostgreSQL compatibility
-        pass  # cur.execute("PRAGMA table_info(dropdown_code_audit)")
-        cols = [r[1] for r in cur.fetchall()]
+        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+        cur.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'dropdown_code_audit'
+        """)
+        cols = [r[0] for r in cur.fetchall()]
         if 'board_type' in cols:
             history = conn.execute(
                 """
@@ -10803,9 +10865,13 @@ def board_dropdown_audit_summary(board):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        # PRAGMA removed for PostgreSQL compatibility
-        pass  # cur.execute("PRAGMA table_info(dropdown_code_audit)")
-        cols = [r[1] for r in cur.fetchall()]
+        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+        cur.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'dropdown_code_audit'
+        """)
+        cols = [r[0] for r in cur.fetchall()]
         if 'board_type' in cols:
             recent = conn.execute(
                 """

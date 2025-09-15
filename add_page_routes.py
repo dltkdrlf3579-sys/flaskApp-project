@@ -1414,8 +1414,8 @@ def full_process_detail(fullprocess_number):
             """)
             columns = [row[0] for row in cursor.fetchall()]
         else:
-            cursor.execute("PRAGMA table_info(full_process)")
-            columns = [row[1] for row in cursor.fetchall()]
+            # SQLite는 지원하지 않음 - PostgreSQL만 사용
+            columns = []
 
         # 동적으로 SELECT 쿼리 생성
         select_columns = ', '.join(columns)

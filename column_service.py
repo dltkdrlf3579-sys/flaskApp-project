@@ -301,8 +301,13 @@ class ColumnConfigService:
                 input_type = 'table'
             
             # 테이블 컬럼 존재 여부 확인
-            cursor.execute(f"PRAGMA table_info({self.table_name})")
-            cols = [col[1] for col in cursor.fetchall()]
+            # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+            cursor.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = %s
+            """, (self.table_name,))
+            cols = [col[0] for col in cursor.fetchall()]
             has_input_type = 'input_type' in cols
             has_table_group = 'table_group' in cols
             has_table_type = 'table_type' in cols
@@ -365,8 +370,13 @@ class ColumnConfigService:
 
             # scoring_config 지원: JSON 문자열로 저장
             try:
-                cursor.execute(f"PRAGMA table_info({self.table_name})")
-                cols2 = [col[1] for col in cursor.fetchall()]
+                # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+                cursor.execute("""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = %s
+                """, (self.table_name,))
+                cols2 = [col[0] for col in cursor.fetchall()]
             except Exception:
                 cols2 = []
             if 'scoring_config' in column_data and 'scoring_config' in cols2:
@@ -497,8 +507,13 @@ class ColumnConfigService:
             update_values = []
             
             # input_type이 지원되는지 확인
-            cursor.execute(f"PRAGMA table_info({self.table_name})")
-            columns = [col[1] for col in cursor.fetchall()]
+            # PostgreSQL: information_schema를 통해 컬럼 정보 조회
+            cursor.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = %s
+            """, (self.table_name,))
+            columns = [col[0] for col in cursor.fetchall()]
             has_input_type = 'input_type' in columns
             
             allowed_fields = ['column_name', 'column_type', 'is_active', 
