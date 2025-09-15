@@ -68,6 +68,8 @@
                             {% set span = col.column_span|default(1)|int %}
                             {% if col.column_type == 'list' %}
                                 {% set span = 4 %}
+                            {% elif col.column_type == 'scoring' %}
+                                {% set span = 4 %}
                             {% endif %}
                             
                             {% if col.column_type == 'list' %}
@@ -337,25 +339,28 @@
                                             rows="4">{{ col_value }}</textarea>
                                             
                                 {% elif col.column_type == 'scoring' %}
-                                    <!-- 채점 필드 -->
-                                    <div class="scoring-field" data-field="{{ col.column_key }}" data-config="{{ col.scoring_config | default('{}') | tojson }}">
-                                        <div class="scoring-header">
-                                            <button type="button" class="scoring-toggle">채점 편집</button>
-                                            <div class="scoring-summary">
-                                                <span class="summary-total">총점: <b class="score-inline">100</b></span>
-                                                <span class="summary-count critical">중대 0</span>
-                                                <span class="summary-count major">주요 0</span>
-                                                <span class="summary-count minor">경미 0</span>
-                                            </div>
+                                    {# follow-sop-detail과 완전히 동일한 구조로 수정 #}
+                                    {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}
+                                    {% set items = sc['items'] if sc and ('items' in sc) else [] %}
+                                    {% set values = (col_value|from_json) if col_value else {} %}
+                                    <div class="scoring-group scoring-columns" data-field="{{ col.column_key }}" data-config='{{ col.scoring_config|default("{}")|tojson }}' data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}">
+                                        {% for it in items %}
+                                        <div class="sc-col">
+                                            <label class="form-label">{{ it.name or it.label or '항목' }}</label>
+                                            <input type="number" min="0" step="1"
+                                                   class="scoring-input"
+                                                   data-item="{{ it.id }}"
+                                                   data-score="{{ it.per_unit_delta }}"
+                                                   data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}"
+                                                   value="{{ values[it.id] if values and it.id in values else 0 }}">
+                                            <small class="hint">{{ it.per_unit_delta }}점/건</small>
                                         </div>
-                                        <div class="scoring-items">
-                                            <!-- 동적으로 생성될 채점 항목들 -->
-                                        </div>
-                                        <input type="hidden" 
-                                               class="{{ section.section_key }}-input" 
+                                        {% endfor %}
+                                        <input type="hidden"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
-                                               value="{{ col_value | default('{}') | tojson }}">
+                                               value='{{ col_value|default("{}") }}'>
                                     </div>
                                     
                                 {% elif col.column_type == 'score_total' %}

@@ -67,6 +67,8 @@
                             {% set span = col.column_span|default(1)|int %}
                             {% if col.column_type == 'list' %}
                                 {% set span = 4 %}
+                            {% elif col.column_type == 'scoring' %}
+                                {% set span = 4 %}
                             {% endif %}
                             
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
@@ -253,25 +255,27 @@
                                     </div>
                                     
                                 {% elif col.column_type == 'scoring' %}
-                                    {% set sc = (col.scoring_config|from_json) %}
-                                    {% set items = sc.items if sc and sc.items else [] %}
-                                    <div class="scoring-group" data-column="{{ col.column_key }}">
+                                    {# 간단 네모 입력들로 바로 렌더링 #}
+                                    {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}
+                                    {% set items = sc['items'] if sc and ('items' in sc) else [] %}
+                                    <div class="scoring-group scoring-columns" data-field="{{ col.column_key }}" data-config='{{ col.scoring_config|default("{}")|tojson }}' data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}">
                                         {% for it in items %}
-                                        <div class="input-group mb-1">
-                                            <span class="input-group-text" style="min-width: 160px;">{{ it.label }}</span>
-                                            <input type="number"
-                                                   min="0"
-                                                   step="1"
-                                                   id="{{ col.column_key }}_{{ it.id }}"
-                                                   class="{{ section.section_key|replace('_', '-') }}-input scoring-input form-control"
-                                                   data-field="{{ col.column_key }}_{{ it.id }}"
-                                                   data-section="{{ section.section_key }}"
+                                        <div class="sc-col">
+                                            <label class="form-label">{{ it.name or it.label or '항목' }}</label>
+                                            <input type="number" min="0" step="1"
+                                                   class="scoring-input"
+                                                   data-item="{{ it.id }}"
                                                    data-score="{{ it.per_unit_delta }}"
-                                                   placeholder="건수">
-                                            <span class="input-group-text">{{ it.per_unit_delta }}점/건</span>
+                                                   data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}"
+                                                   value="0">
+                                            <small class="hint">{{ it.per_unit_delta }}점/건</small>
                                         </div>
                                         {% endfor %}
-                                    </div>
+                                        <input type="hidden"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               value='{}'>                                    </div>
                                 {% elif col.column_type == 'score_total' %}
                                     {% set sc = (col.scoring_config|from_json) %}
                                     <div class="score-summary" data-total-key="{{ sc.total_key if sc and sc.total_key else 'default' }}">

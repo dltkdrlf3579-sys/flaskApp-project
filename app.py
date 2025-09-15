@@ -4212,12 +4212,14 @@ def partner_detail(business_number):
         return "협력사 정보를 찾을 수 없습니다.", 404
     
     # 첨부파일 정보 가져오기
-    conn = partner_manager.db_config.get_sqlite_connection()
-    attachments = conn.execute("""
-        SELECT * FROM partner_attachments 
-        WHERE business_number = %s 
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM partner_attachments
+        WHERE business_number = %s
         ORDER BY upload_date DESC
-    """, (business_number,)).fetchall()
+    """, (business_number,))
+    attachments = cursor.fetchall()
     conn.close()
     
     logging.info(f"협력사 {business_number} ({partner['company_name']}) 상세 페이지 로드 - 첨부파일 {len(attachments)}개")
@@ -6508,11 +6510,22 @@ def download_attachment(attachment_id):
     
     try:
         if os.path.exists(actual_file_path):
-            return send_file(
+            # ASCII 폴백 파일명 생성 (한글/특수문자 제거)
+            import re
+            safe_ascii = re.sub(r'[^\w\-_\.]', '_', attachment['file_name'])
+            if not safe_ascii:
+                safe_ascii = 'download.file'
+
+            # 바이너리로 강제 전송하여 프록시/게이트웨이 문제 회피
+            response = send_file(
                 actual_file_path,
+                mimetype='application/octet-stream',  # HTML도 바이너리로 전송
                 as_attachment=True,
                 download_name=attachment['file_name']
             )
+            # RFC5987 형식 폴백 파일명 추가
+            response.headers['Content-Disposition'] += f'; filename="{safe_ascii}"'
+            return response
         else:
             logging.error(f"파일을 찾을 수 없습니다: {actual_file_path}")
             return "File not found on disk", 404
@@ -6612,8 +6625,8 @@ def auto_upload_partner_files():
                 
                 # 파일명 안전화 (한글 유지)
                 original_name = file_path.name
-                # 위험한 문자만 제거, 한글은 유지
-                safe_name = re.sub(r'[<>:"/\\|%s*]', '_', original_name) if original_name else "file"
+                # 위험한 문자만 제거, 한글은 유지 (Windows 금지문자: <>:"/\|?*%)
+                safe_name = re.sub(r'[<>:"/\\|?*%]', '_', original_name) if original_name else "file"
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 new_filename = f"{business_number}_{timestamp}_{safe_name}"
                 dest_path = upload_folder / new_filename

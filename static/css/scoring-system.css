@@ -133,7 +133,7 @@
 /* Scoring as multiple columns (embedded like normal fields) */
 .scoring-columns {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0,1fr));
+    grid-template-columns: repeat(8, minmax(0,1fr));
     gap: 10px;
 }
 .scoring-columns .sc-col {
@@ -217,7 +217,7 @@
         align-items: flex-start;
         gap: 8px;
     }
-    .scoring-columns { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .scoring-columns { grid-template-columns: repeat(4, minmax(0,1fr)); }
     
     .scoring-controls {
         width: 100%;

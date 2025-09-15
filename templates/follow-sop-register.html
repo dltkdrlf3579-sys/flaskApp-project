@@ -59,7 +59,7 @@
                             {% if col.column_type == 'list' %}
                                 {% set span = 4 %}
                             {% elif col.column_type == 'scoring' %}
-                                {% set span = 2 %}
+                                {% set span = 4 %}
                             {% endif %}
                             
                             <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
@@ -182,7 +182,7 @@
                                     <div class="scoring-group scoring-columns" data-field="{{ col.column_key }}" data-config='{{ col.scoring_config|default("{}")|tojson }}' data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}">
                                         {% for it in items %}
                                         <div class="sc-col">
-                                            <label class="form-label">{{ it.label }}</label>
+                                            <label class="form-label">{{ it.name or it.label or '항목' }}</label>
                                             <input type="number" min="0" step="1"
                                                    class="scoring-input"
                                                    data-item="{{ it.id }}"
