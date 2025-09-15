@@ -201,7 +201,7 @@
                                        oninput="validateNumberInput(this)"
                                        onkeypress="return isNumberKey(event, this)"
                                        placeholder="숫자만 입력하세요">
-                            {% elif render_type in ['linked', 'linked_text', 'linked_dept'] %}
+                            {% elif render_type == 'linked_text' %}
                                 <!-- 연결된 필드 (읽기 전용) - table_group 기반 연동 -->
                                 <input type="text"
                                        id="{{ col.column_key }}"
@@ -228,7 +228,7 @@
                                            value="{{ col_value }}"
                                            readonly>
                                     <button class="btn btn-sm btn-primary" 
-                                            onclick="{% if render_type == 'popup_person' %}openPersonSearch{% elif render_type == 'popup_company' %}openCompanySearch{% elif render_type == 'popup_department' %}openDepartmentSearch{% elif render_type == 'popup_building' %}openBuildingSearch{% elif render_type == 'popup_contractor' %}openContractorSearch{% else %}openPopup{% endif %}('{{ col.column_key }}')">
+                                            onclick="{% if render_type == 'popup_person' %}openPersonSearch('{{ col.column_key }}'){% elif render_type == 'popup_company' %}openCompanySearch('{{ col.column_key }}'){% elif render_type == 'popup_department' %}openDepartmentSearch('{{ col.column_key }}'){% elif render_type == 'popup_building' %}openBuildingSearch('{{ col.column_key }}'){% elif render_type == 'popup_contractor' %}openContractorSearch('{{ col.column_key }}'){% else %}alert('팝업 타입을 지정해주세요'){% endif %}">
                                         검색
                                     </button>
                                 </div>
@@ -601,47 +601,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-// 팝업 열기 함수 (테이블 타입용)
-function openPopup(fieldKey) {
-    const width = 1000;
-    const height = 600;
-    const left = (screen.width - width) / 2;
-    const top = (screen.height - height) / 2;
-    
-    const popupOptions = [
-        `width=${width}`,
-        `height=${height}`,
-        `left=${left}`,
-        `top=${top}`,
-        'scrollbars=yes',
-        'resizable=yes'
-    ].join(',');
-    
-    // 컬럼 설정에서 테이블 정보 가져오기
-    const fieldConfig = columns.find(col => col.column_key === fieldKey);
-    if (!fieldConfig || !fieldConfig.table_name) {
-        alert('테이블 설정을 찾을 수 없습니다.');
-        return;
-    }
-
-    const popupUrl = `/search-popup?type=table&field=${fieldKey}&table=${fieldConfig.table_name}`;
-    const popup = window.open(popupUrl, 'tableSearch', popupOptions);
-    
-    if (!popup || popup.closed) {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
-        return;
-    }
-    
-    // receiveTableSelection 함수는 popup-handler.js에서 통합 처리됨
-    
-    popup.focus();
-}
-
-// 테이블 팝업 열기 함수 (공통 컴포넌트용)
-function openTablePopup(fieldKey) {
-    // openPopup과 동일한 로직 사용
-    openPopup(fieldKey);
-}
+// 모든 팝업 함수는 popup-handler.js에서 제공됨
 
 // K사고도 수정 허용(프론트 차단 제거)
 document.addEventListener('DOMContentLoaded', function() {
@@ -692,7 +652,9 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // 기본 스크립트 끝
-// 담당자 검색 팝업 열기 함수
+// 모든 팝업 함수는 popup-handler.js에서 제공됨
+
+/*
 function openPersonSearch(fieldKey) {
     const width = 1000;
     const height = 600;
@@ -844,6 +806,7 @@ function openBuildingSearch(fieldKey) {
 // receive*Selection 함수들은 popup-handler.js에서 통합 처리됨
 
 // receiveContractorSelection 함수는 popup-handler.js에서 통합 처리됨
+*/
 
 // 숫자 입력 유효성 검사 함수들
 function isNumberKey(evt, inputEl) {

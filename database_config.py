@@ -1242,12 +1242,145 @@ class PartnerDataManager:
             
             print(f"[SUCCESS] ✅ FullProcess 데이터 {len(df)}건 동기화 완료")
             return True
-            
+
         except Exception as e:
             print(f"[ERROR] ❌ FullProcess 데이터 동기화 실패: {e}")
             traceback.print_exc()
             return False
-    
+
+    def sync_partner_change_requests_from_external_db(self):
+        """외부 DB에서 Partner Change Requests 데이터 동기화 (동적 컬럼 방식)"""
+        if not IQADB_AVAILABLE:
+            print("[ERROR] IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
+            return False
+
+        try:
+            # config.ini에서 외부 DB용 쿼리 가져오기
+            if self.config.has_option('CONTENT_DATA_QUERIES', 'PARTNER_CHANGE_REQUESTS_QUERY'):
+                query = self.config.get('CONTENT_DATA_QUERIES', 'PARTNER_CHANGE_REQUESTS_QUERY')
+            elif self.config.has_option('MASTER_DATA_QUERIES', 'PARTNER_CHANGE_REQUESTS_QUERY'):
+                query = self.config.get('MASTER_DATA_QUERIES', 'PARTNER_CHANGE_REQUESTS_QUERY')
+            else:
+                print("[WARNING] PARTNER_CHANGE_REQUESTS_QUERY가 config.ini에 정의되지 않았습니다.")
+                return False
+
+            print(f"[INFO] 실행할 Partner Change Requests 쿼리: {query[:100]}...")
+
+            # 외부 DB에서 데이터 조회
+            print("[INFO] IQADB_CONNECT310을 사용하여 Partner Change Requests 데이터 조회 시작...")
+            df = execute_SQL(query)
+            print(f"[INFO] Partner Change Requests 데이터 조회 완료: {len(df)} 건")
+
+            if df.empty:
+                print("[WARNING] 조회된 Partner Change Requests 데이터가 없습니다.")
+                return False
+
+            # SQLite에 저장
+            conn = get_db_connection(self.local_db_path, timeout=30.0)
+            cursor = conn.cursor()
+
+            # PRAGMA 설정
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+
+            # partner_change_requests_cache 테이블 생성 (없으면)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS partner_change_requests_cache (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_number TEXT UNIQUE,
+                    company_name TEXT,
+                    business_number TEXT,
+                    status TEXT DEFAULT 'pending',
+                    custom_data TEXT DEFAULT '{}',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    sync_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
+            # 트랜잭션 시작
+            cursor.execute("BEGIN IMMEDIATE")
+
+            # 기존 캐시 데이터 삭제
+            cursor.execute("DELETE FROM partner_change_requests_cache")
+
+            # 배치 삽입을 위한 데이터 준비 (동적 컬럼 방식)
+            print(f"[DEBUG] Partner Change Requests DataFrame 컬럼: {list(df.columns)}")
+            rows = []
+            for idx, row in df.iterrows():
+                # 모든 데이터를 custom_data에 JSON으로 저장
+                row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+                # 날짜 타입들을 안전하게 문자열로 변환
+                for k, v in row_dict.items():
+                    if isinstance(v, (pd.Timestamp, datetime, date)) or str(type(v)).endswith(("numpy.datetime64'>", "numpy.timedelta64'>")):
+                        row_dict[k] = str(v)
+                    elif pd.isna(v):
+                        row_dict[k] = None
+                custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
+
+                # 주요 필드 추출
+                request_number = (row.get('request_number', '') or
+                                row.get('요청번호', '') or
+                                row.get('request_no', '') or
+                                f"REQ-{idx}")  # 없으면 인덱스 사용
+
+                company_name = (row.get('company_name', '') or
+                              row.get('회사명', '') or
+                              row.get('업체명', '') or
+                              '')
+
+                business_number = (row.get('business_number', '') or
+                                 row.get('사업자번호', '') or
+                                 row.get('사업자등록번호', '') or
+                                 '')
+
+                status = (row.get('status', '') or
+                        row.get('상태', '') or
+                        'pending')
+
+                if idx == 0:  # 첫 번째 행만 디버깅
+                    print(f"[DEBUG] request_number: {request_number}")
+                    print(f"[DEBUG] company_name: {company_name}")
+                    print(f"[DEBUG] business_number: {business_number}")
+                    print(f"[DEBUG] custom_data 길이: {len(custom_data)}")
+
+                rows.append((request_number, company_name, business_number, status, custom_data))
+
+            # 배치 삽입 - PostgreSQL vs SQLite 조건부 처리
+            if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                # PostgreSQL용 (ON CONFLICT)
+                cursor.executemany('''
+                    INSERT INTO partner_change_requests_cache
+                        (request_number, company_name, business_number, status, custom_data)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT(request_number) DO UPDATE SET
+                        company_name = EXCLUDED.company_name,
+                        business_number = EXCLUDED.business_number,
+                        status = EXCLUDED.status,
+                        custom_data = EXCLUDED.custom_data,
+                        updated_at = CURRENT_TIMESTAMP,
+                        sync_date = CURRENT_TIMESTAMP
+                ''', rows)
+            else:
+                # SQLite용 (OR REPLACE)
+                cursor.executemany('''
+                    INSERT OR REPLACE INTO partner_change_requests_cache
+                        (request_number, company_name, business_number, status, custom_data)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', rows)
+
+            conn.commit()
+            conn.close()
+
+            print(f"[SUCCESS] ✅ Partner Change Requests 데이터 {len(df)}건 동기화 완료")
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] ❌ Partner Change Requests 데이터 동기화 실패: {e}")
+            traceback.print_exc()
+            return False
+
     def get_partner_by_business_number(self, business_number):
         """사업자번호로 협력사 정보 조회 (캐시 + 상세정보 조인)"""
         conn = get_db_connection(self.local_db_path)
@@ -1641,7 +1774,7 @@ def maybe_one_time_sync_content(force=False):
         _do_once('followsop', run_followsop)
     
     # FullProcess 동기화 (쿼리 존재 시에만 수행)
-    if (partner_manager.config.has_option('CONTENT_DATA_QUERIES', 'FULLPROCESS_QUERY') or 
+    if (partner_manager.config.has_option('CONTENT_DATA_QUERIES', 'FULLPROCESS_QUERY') or
         partner_manager.config.has_option('MASTER_DATA_QUERIES', 'FULLPROCESS_QUERY')):
         def run_fullprocess():
             try:
@@ -1650,6 +1783,17 @@ def maybe_one_time_sync_content(force=False):
                 print(f"[ERROR] FULLPROCESS sync: {e}")
                 return False
         _do_once('fullprocess', run_fullprocess)
+
+    # Partner Change Requests 동기화 (쿼리 존재 시에만 수행)
+    if (partner_manager.config.has_option('CONTENT_DATA_QUERIES', 'PARTNER_CHANGE_REQUESTS_QUERY') or
+        partner_manager.config.has_option('MASTER_DATA_QUERIES', 'PARTNER_CHANGE_REQUESTS_QUERY')):
+        def run_partner_change_requests():
+            try:
+                return partner_manager.sync_partner_change_requests_from_external_db()
+            except Exception as e:
+                print(f"[ERROR] PARTNER_CHANGE_REQUESTS sync: {e}")
+                return False
+        _do_once('partner_change_requests', run_partner_change_requests)
 
     conn.close()
 partner_manager.db_config = db_config  # 순환 참조 해결

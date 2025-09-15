@@ -33,21 +33,14 @@
         </div>
         <div class="section-content" id="basic-info-content">
             <div class="info-table">
-                <!-- change_request_id와 created_at 추가 -->
-                <div class="info-row">
-                    <div class="info-cell span-1">
-                        <label>ID</label>
-                        <input type="text" value="자동 생성" readonly style="background-color: #f3f4f6; color: #6b7280; font-style: italic;">
-                    </div>
-                    <div class="info-cell span-1">
-                        <label>등록일</label>
-                        <input type="date" value="{{ today.strftime('%Y-%m-%d') if today else '' }}" readonly style="background-color: #f3f4f6;">
-                    </div>
-                </div>
                 <div class="info-row">
                     <div class="info-cell">
                         <label>요청번호</label>
                         <div class="value">{{ request_number }}</div>
+                    </div>
+                    <div class="info-cell">
+                        <label>등록일</label>
+                        <div class="value">{{ today.strftime('%Y-%m-%d') if today else '' }}</div>
                     </div>
                 </div>
             </div>

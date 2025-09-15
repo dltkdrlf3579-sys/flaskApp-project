@@ -179,7 +179,7 @@
                                            onkeypress="return isNumberKey(event, this)"
                                            placeholder="숫자만 입력하세요">
                                            
-                                {% elif col.column_type in ['linked', 'linked_text', 'linked_dept'] %}
+                                {% elif col.column_type == 'linked_text' %}
                                     <!-- 연결된 필드 (읽기 전용) -->
                                     <input type="text"
                                            id="{{ col.column_key }}"
@@ -204,8 +204,8 @@
                                                {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                value="{{ col_value }}"
                                                readonly>
-                                        <button class="btn btn-sm btn-primary" 
-                                                onclick="openPopup('{{ col.column_key }}')">
+                                        <button class="btn btn-sm btn-primary"
+                                                onclick="alert('팝업 타입이 구현되지 않았습니다.')">
                                             검색
                                         </button>
                                     </div>
@@ -323,8 +323,8 @@
                                                {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                value="{{ col_value }}"
                                                readonly>
-                                        <button class="btn btn-sm btn-primary" 
-                                                onclick="openPopup('{{ col.column_key }}')">
+                                        <button class="btn btn-sm btn-primary"
+                                                onclick="alert('팝업 타입이 구현되지 않았습니다.')">
                                             검색
                                         </button>
                                     </div>
@@ -600,14 +600,16 @@ function updateFullProcess() {
         formData.append('deleted_attachments', JSON.stringify(deletedAttachments));
     }
     
-    // 첨부파일 설명 정보
+    // 첨부파일 설명 정보 (accident와 동일하게 + 강화된 처리)
     const attachmentDescriptions = [];
-    document.querySelectorAll('.attachment-desc').forEach((input, index) => {
-        const row = input.closest('.table-row');
+    document.querySelectorAll('#attachments-tbody .table-row').forEach((row) => {
+        const descEl = row.querySelector('.attachment-desc, .file-desc-input'); // 양쪽 다 지원
+        const rawIsNew = String(row.dataset.isNew || '').toLowerCase();
         attachmentDescriptions.push({
-            id: row ? (row.dataset.id || null) : null,
-            description: input.value || '',
-            isNew: row ? (row.dataset.isNew === 'true') : false
+            id: row.dataset.id ? parseInt(row.dataset.id, 10) :
+                (row.dataset.attachmentId ? parseInt(row.dataset.attachmentId, 10) : null),
+            description: descEl ? (descEl.value ?? descEl.textContent ?? '') : '',
+            isNew: rawIsNew === 'true' || rawIsNew === '1' || row.classList.contains('new-file-row')
         });
     });
     formData.append('attachment_data', JSON.stringify(attachmentDescriptions));
@@ -641,42 +643,9 @@ function updateFullProcess() {
     });
 }
 
-// 팝업 열기 함수 (테이블 타입용)
-function openPopup(fieldKey) {
-    const width = 1000;
-    const height = 600;
-    const left = (screen.width - width) / 2;
-    const top = (screen.height - height) / 2;
-    
-    const popupOptions = [
-        `width=${width}`,
-        `height=${height}`,
-        `left=${left}`,
-        `top=${top}`,
-        'scrollbars=yes',
-        'resizable=yes'
-    ].join(',');
-    
-    // 컬럼 설정에서 테이블 정보 가져오기
-    const fieldConfig = columns.find(col => col.column_key === fieldKey);
-    if (!fieldConfig || !fieldConfig.input_type_config) {
-        alert('테이블 설정을 찾을 수 없습니다.');
-        return;
-    }
-    
-    const tableConfig = JSON.parse(fieldConfig.input_type_config);
-    const popupUrl = `/search-popup?type=table&field=${fieldKey}&table=${tableConfig.table_name}`;
-    const popup = window.open(popupUrl, 'tableSearch', popupOptions);
-    
-    if (!popup || popup.closed) {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
-        return;
-    }
-    
-    // receiveTableSelection 함수는 popup-handler.js에서 통합 처리됨
-    
-    popup.focus();
-}
+// 팝업 열기 함수는 popup-handler.js에서 처리됨
+// openPersonSearch, openCompanySearch, openBuildingSearch,
+// openDepartmentSearch, openContractorSearch 등을 사용
 
 // 담당자 검색 팝업 열기 함수
 function openPersonSearch(fieldKey) {

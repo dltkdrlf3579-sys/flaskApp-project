@@ -2575,7 +2575,6 @@ def safety_instruction_detail(issue_number):
 @app.route('/update-safety-instruction', methods=['POST'])
 def update_safety_instruction():
     """환경안전 지시서 수정 API - 메인 테이블 사용 + 첨부 처리"""
-    from board_services import AttachmentService
     from section_service import SectionConfigService
     conn = None
 
@@ -2591,6 +2590,19 @@ def update_safety_instruction():
             deleted_attachments = pyjson.loads(request.form.get('deleted_attachments', '[]'))
         except Exception:
             deleted_attachments = []
+
+        # attachment_data 파싱 (Accident 패턴과 동일하게)
+        try:
+            attachment_data_raw = request.form.get('attachment_data', '[]')
+            if isinstance(attachment_data_raw, str):
+                attachment_data = pyjson.loads(attachment_data_raw)
+            else:
+                attachment_data = attachment_data_raw
+            if not isinstance(attachment_data, list):
+                attachment_data = []
+        except Exception as e:
+            logging.warning(f"attachment_data 파싱 실패: {e}")
+            attachment_data = []
 
         files = request.files.getlist('files')
 
@@ -2648,10 +2660,11 @@ def update_safety_instruction():
         cursor = conn.cursor()
 
         # 기존 custom_data 로드 (리스트 필드 병합 시 필요)
-        existing_row = cursor.execute(
-            "SELECT custom_data FROM safety_instructions WHERE issue_number = ?",
+        cursor.execute(
+            "SELECT custom_data FROM safety_instructions WHERE issue_number = %s",
             (issue_number,)
-        ).fetchone()
+        )
+        existing_row = cursor.fetchone()
 
         existing_custom = {}
         if existing_row and existing_row[0]:
@@ -2731,6 +2744,7 @@ def update_safety_instruction():
             conflict_cols=['issue_number'],
             update_cols=['custom_data', 'detailed_content', 'updated_at']
         )
+        
         # Details 테이블에 단일 경로 저장 (빈 문자열 포함)
         try:
             from db.upsert import safe_upsert as _su
@@ -2743,41 +2757,68 @@ def update_safety_instruction():
         except Exception as _e_det:
             logging.warning(f"[SI] details upsert warning: {_e_det}")
 
-        # 첨부파일 데이터 파싱 (update_follow_sop와 동일한 방식)
-        try:
-            attachment_data_raw = request.form.get('attachment_data', '[]')
-            if isinstance(attachment_data_raw, str):
-                attachment_data = pyjson.loads(attachment_data_raw)
-            else:
-                attachment_data = attachment_data_raw
-            if not isinstance(attachment_data, list):
-                attachment_data = []
-        except Exception as e:
-            logging.warning(f"attachment_data 파싱 실패: {e}")
-            attachment_data = []
+        # 첨부파일 처리 - Accident 패턴 적용 (직접 SQL)
+        
+        # 1. 삭제된 첨부파일 처리
+        for attachment_id in deleted_attachments:
+            # 파일 경로 조회
+            cursor.execute("""
+                SELECT file_path FROM safety_instruction_attachments WHERE id = %s
+            """, (attachment_id,))
+            row = cursor.fetchone()
+            if row:
+                file_path = row[0]
+                # 파일 삭제
+                if os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                    except Exception as e:
+                        logging.error(f"파일 삭제 실패: {e}")
+                # DB에서 삭제
+                cursor.execute("""
+                    DELETE FROM safety_instruction_attachments WHERE id = %s
+                """, (attachment_id,))
+            logging.info(f"첨부파일 {attachment_id} 삭제")
 
-        # 첨부파일 처리
-        attachment_service = AttachmentService('safety_instruction', DB_PATH, conn)
+        # 2. 기존 첨부파일 설명 업데이트
+        for attachment in attachment_data:
+            if isinstance(attachment, dict):
+                if attachment.get('id') and not attachment.get('isNew'):
+                    cursor.execute("""
+                        UPDATE safety_instruction_attachments
+                        SET description = %s
+                        WHERE id = %s
+                    """, (attachment.get('description', ''), attachment['id']))
+                    logging.info(f"첨부파일 {attachment['id']} 설명 업데이트")
 
-        # 기존 첨부파일 설명 업데이트 (update_follow_sop와 동일한 방식)
-        for item in attachment_data:
-            if isinstance(item, dict) and item.get('id') and not item.get('isNew'):
-                attachment_service.update_meta(
-                    item['id'],
-                    {'description': item.get('description', '')}
-                )
-                logging.info(f"첨부파일 {item['id']} 설명 업데이트")
-
-        if deleted_attachments:
-            attachment_service.delete(deleted_attachments)
-            logging.info(f"첨부파일 {len(deleted_attachments)}개 삭제")
+        # 3. 새 파일 업로드 처리
         if files:
-            uploaded_ids = attachment_service.bulk_add(
-                issue_number,
-                files,
-                {'uploaded_by': session.get('user_id', 'user')}
-            )
-            logging.info(f"첨부파일 {len(uploaded_ids)}개 업로드: {uploaded_ids}")
+            upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'safety_instructions')
+            os.makedirs(upload_folder, exist_ok=True)
+            
+            # 새 파일에 대한 attachment_data 필터링
+            new_attachments = [a for a in attachment_data if isinstance(a, dict) and a.get('isNew')]
+            
+            for i, file in enumerate(files):
+                if file and file.filename:
+                    filename = secure_filename(file.filename)
+                    timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
+                    unique_filename = f"{issue_number}_{timestamp}_{filename}".replace('-', '_')
+                    file_path = os.path.join(upload_folder, unique_filename)
+                    
+                    file.save(file_path)
+                    
+                    # description 가져오기
+                    description = ''
+                    if i < len(new_attachments):
+                        description = new_attachments[i].get('description', '')
+                    
+                    # 첨부파일 정보 저장
+                    cursor.execute("""
+                        INSERT INTO safety_instruction_attachments (issue_number, file_name, file_path, file_size, description)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (issue_number, filename, file_path, os.path.getsize(file_path), description))
+                    logging.info(f"새 첨부파일 추가: {filename} - {description}")
 
         conn.commit()
         logging.info(f"Safety Instruction 업데이트 완료: {issue_number}")
@@ -2833,6 +2874,9 @@ def update_follow_sop():
             attachment_data = []
 
         files = request.files.getlist('files')
+
+        logging.info(f"[FS UPDATE] attachment_data 파싱 결과: {attachment_data}")
+        logging.info(f"[FS UPDATE] files 개수: {len(files)}")
 
         conn = get_db_connection(timeout=30.0)
         cursor = conn.cursor()
@@ -3013,7 +3057,8 @@ def update_follow_sop():
         # custom_data를 JSON 문자열로 변환
         import json
         custom_data_json = json.dumps(existing_custom_data, ensure_ascii=False)
-        
+
+        logging.info(f"[FS UPDATE] safe_upsert 호출 전 - work_req_no: {work_req_no}")
         from db.upsert import safe_upsert
         safe_upsert(
             conn,
@@ -3027,43 +3072,75 @@ def update_follow_sop():
             conflict_cols=['work_req_no'],
             update_cols=['custom_data', 'detailed_content', 'updated_at']  # detailed_content 추가
         )
-        
+        logging.info(f"[FS UPDATE] safe_upsert 완료")
+
         # 2. followsop_details 테이블 관련 코드 제거 (더 이상 사용하지 않음)
-        
-        # 3. 첨부파일 처리
-        attachment_service = AttachmentService('follow_sop', DB_PATH, conn)
-        
-        # 삭제된 첨부파일 처리 (delete는 리스트를 받음)
+
+        # 3. 첨부파일 처리 (직접 처리 방식으로 변경)
+        logging.info(f"[FS UPDATE] 첨부파일 처리 시작 - deleted: {deleted_attachments}, attachment_data type: {type(attachment_data)}, len: {len(attachment_data) if attachment_data else 0}")
+
+        # 삭제된 첨부파일 처리
         if deleted_attachments:
-            attachment_service.delete(deleted_attachments)
-        
+            placeholders = ','.join(['%s'] * len(deleted_attachments))
+            cursor.execute(f"""
+                DELETE FROM follow_sop_attachments
+                WHERE id IN ({placeholders})
+            """, deleted_attachments)
+            logging.info(f"첨부파일 {len(deleted_attachments)}개 삭제")
+
         # 기존 첨부파일 설명 업데이트
+        logging.info(f"[FS UPDATE] attachment_data 받음: {attachment_data}")
         for item in attachment_data:
+            logging.info(f"[FS UPDATE] item 확인: {item}, type: {type(item)}")
             if isinstance(item, dict) and item.get('id') and not item.get('isNew'):
-                attachment_service.update_meta(
-                    item['id'],
-                    {'description': item.get('description', '')}
-                )
-        
-        # 새 첨부파일 개별 추가 (add 메서드 사용)
-        for idx, file in enumerate(files):
-            if file and file.filename:
-                # 각 파일의 설명 찾기
-                description = ''
-                if idx < len(attachment_data):
-                    desc_info = attachment_data[idx]
-                    if isinstance(desc_info, dict):
-                        description = desc_info.get('description', '')
-                
-                # 파일 추가
-                attachment_service.add(
-                    work_req_no,
-                    file,
-                    {
-                        'description': description,
-                        'uploaded_by': session.get('user_id', 'user')
-                    }
-                )
+                logging.info(f"[FS UPDATE] 첨부파일 ID {item['id']} description 업데이트 시도: '{item.get('description', '')}'")
+                cursor.execute("""
+                    UPDATE follow_sop_attachments
+                    SET description = %s
+                    WHERE id = %s
+                """, (item.get('description', ''), item['id']))
+                # 실제 DB 확인
+                cursor.execute("SELECT description FROM follow_sop_attachments WHERE id = %s", (item['id'],))
+                result = cursor.fetchone()
+                logging.info(f"[FS UPDATE] DB 확인 - ID {item['id']}: description = '{result[0] if result else 'NOT FOUND'}'")
+            else:
+                logging.info(f"[FS UPDATE] 스킵된 item - id: {item.get('id') if isinstance(item, dict) else 'N/A'}, isNew: {item.get('isNew') if isinstance(item, dict) else 'N/A'}")
+
+        # 새 파일 업로드 처리
+        if files:
+            import os
+            from werkzeug.utils import secure_filename
+            from timezone_config import get_korean_time
+
+            upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'follow_sop')
+            os.makedirs(upload_folder, exist_ok=True)
+
+            # 새 파일에 대한 설명 준비
+            new_file_descriptions = []
+            for item in attachment_data:
+                if isinstance(item, dict) and item.get('isNew'):
+                    new_file_descriptions.append(item.get('description', ''))
+
+            for idx, file in enumerate(files):
+                if file and file.filename:
+                    filename = secure_filename(file.filename)
+                    timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
+                    unique_filename = f"{work_req_no}_{timestamp}_{filename}".replace('-', '_')
+                    file_path = os.path.join(upload_folder, unique_filename)
+
+                    file.save(file_path)
+
+                    # 설명 가져오기
+                    description = ''
+                    if idx < len(new_file_descriptions):
+                        description = new_file_descriptions[idx]
+
+                    # DB에 저장
+                    cursor.execute("""
+                        INSERT INTO follow_sop_attachments (work_req_no, file_name, file_path, file_size, description)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (work_req_no, filename, file_path, os.path.getsize(file_path), description))
+                    logging.info(f"새 첨부파일 저장: {filename}, 설명: {description}")
         
         conn.commit()
         logging.info(f"Follow SOP {work_req_no} 업데이트 성공")
@@ -3089,7 +3166,6 @@ def update_follow_sop():
 @app.route('/update-full-process', methods=['POST'])
 def update_full_process():
     """Full Process 정보 업데이트"""
-    from board_services import AttachmentService
     from section_service import SectionConfigService
     conn = None
 
@@ -3163,7 +3239,7 @@ def update_full_process():
 
         base_fields_raw = request.form.get('base_fields', '{}')
         try:
-            base_fields_compat = pyjson.loads(base_fields_raw) if isinstance(base_fields_raw, str) else (base_fields_raw or {})
+            base_fields_compat = pyjson.loads(base_fields_raw) if isinstance(base_fields_raw, str) else (base_fields_compat or {})
             if base_fields_compat:
                 all_fields.update(base_fields_compat)
                 logging.info(f"[FP UPDATE] base_fields 병합: {base_fields_compat}")
@@ -3186,7 +3262,7 @@ def update_full_process():
         cursor.execute("""
             SELECT custom_data 
             FROM full_process 
-            WHERE fullprocess_number = ?
+            WHERE fullprocess_number = %s
         """, (fullprocess_number,))
         
         existing_row = cursor.fetchone()
@@ -3316,42 +3392,89 @@ def update_full_process():
             update_cols=['custom_data', 'detailed_content', 'updated_at']  # detailed_content 추가
         )
         
-        # 2. fullprocess_details 테이블 관련 코드 제거 (더 이상 사용하지 않음)
+        # 3. 첨부파일 처리 - AttachmentService 대신 직접 처리
+        # 첨부파일 테이블 생성 (PostgreSQL 문법)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS full_process_attachments (
+                id SERIAL PRIMARY KEY,
+                fullprocess_number TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                file_size INTEGER,
+                description TEXT,
+                upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (fullprocess_number) REFERENCES full_process (fullprocess_number)
+            )
+        """)
         
-        # 3. 첨부파일 처리
-        attachment_service = AttachmentService('full_process', DB_PATH, conn)
-        
-        # 삭제된 첨부파일 처리 (delete는 리스트를 받음)
+        # 삭제된 첨부파일 처리
         if deleted_attachments:
-            attachment_service.delete(deleted_attachments)
+            for attachment_id in deleted_attachments:
+                # 파일 경로 조회
+                cursor.execute("""
+                    SELECT file_path FROM full_process_attachments WHERE id = %s
+                """, (attachment_id,))
+                row = cursor.fetchone()
+                if row:
+                    file_path = row[0]
+                    # 파일 삭제
+                    if os.path.exists(file_path):
+                        try:
+                            os.remove(file_path)
+                        except Exception as e:
+                            logging.error(f"파일 삭제 실패: {e}")
+                    # DB에서 삭제
+                    cursor.execute("""
+                        DELETE FROM full_process_attachments WHERE id = %s
+                    """, (attachment_id,))
         
         # 기존 첨부파일 설명 업데이트
+        logging.info(f"[FP UPDATE] attachment_data 받음: {attachment_data}")
         for item in attachment_data:
             if isinstance(item, dict) and item.get('id') and not item.get('isNew'):
-                attachment_service.update_meta(
-                    item['id'],
-                    {'description': item.get('description', '')}
-                )
+                logging.info(f"[FP UPDATE] 첨부파일 ID {item['id']} description 업데이트: '{item.get('description', '')}'")
+                cursor.execute("""
+                    UPDATE full_process_attachments
+                    SET description = %s
+                    WHERE id = %s
+                """, (item.get('description', ''), item['id']))
+                # 업데이트 확인
+                cursor.execute("SELECT description FROM full_process_attachments WHERE id = %s", (item['id'],))
+                result = cursor.fetchone()
+                logging.info(f"[FP UPDATE] DB 확인 - ID {item['id']}: description = '{result[0] if result else 'NOT FOUND'}'")
+            else:
+                logging.info(f"[FP UPDATE] 스킵된 item: {item}")
         
-        # 새 첨부파일 개별 추가 (add 메서드 사용)
-        for idx, file in enumerate(files):
-            if file and file.filename:
-                # 각 파일의 설명 찾기
-                description = ''
-                if idx < len(attachment_data):
-                    desc_info = attachment_data[idx]
-                    if isinstance(desc_info, dict):
-                        description = desc_info.get('description', '')
-                
-                # 파일 추가
-                attachment_service.add(
-                    fullprocess_number,
-                    file,
-                    {
-                        'description': description,
-                        'uploaded_by': session.get('user_id', 'user')
-                    }
-                )
+        # 새 파일 업로드 처리
+        if files:
+            upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'full_process')
+            os.makedirs(upload_folder, exist_ok=True)
+            
+            # 새 파일에 대한 설명 준비
+            new_file_descriptions = []
+            for item in attachment_data:
+                if isinstance(item, dict) and item.get('isNew'):
+                    new_file_descriptions.append(item.get('description', ''))
+            
+            for idx, file in enumerate(files):
+                if file and file.filename:
+                    filename = secure_filename(file.filename)
+                    timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
+                    unique_filename = f"{fullprocess_number}_{timestamp}_{filename}".replace('-', '_')
+                    file_path = os.path.join(upload_folder, unique_filename)
+                    
+                    file.save(file_path)
+                    
+                    # 각 파일의 설명 찾기
+                    description = ''
+                    if idx < len(new_file_descriptions):
+                        description = new_file_descriptions[idx]
+                    
+                    # 첨부파일 정보 저장
+                    cursor.execute("""
+                        INSERT INTO full_process_attachments (fullprocess_number, file_name, file_path, file_size, description)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (fullprocess_number, filename, file_path, os.path.getsize(file_path), description))
         
         conn.commit()
         logging.info(f"Full Process {fullprocess_number} 업데이트 성공")
@@ -3786,10 +3909,11 @@ def change_request_detail(request_id):
             custom_data = {}
     
     logging.info(f"변경요청 동적 컬럼 {len(dynamic_columns)}개 로드됨, custom_data {len(custom_data)}개 필드")
-    
-    # 첨부파일 조회 추가
+
+    # 첨부파일 조회 추가 - 새 연결 생성
+    conn = get_db_connection()
     from board_services import AttachmentService
-    attachment_service = AttachmentService('change_request', DB_PATH)
+    attachment_service = AttachmentService('change_request', DB_PATH, conn)
     # 실제 request_number 사용 (DB에서 가져온 값)
     actual_request_number = request_data.request_number if hasattr(request_data, 'request_number') and request_data.request_number else f"CR-{request_id}"
     # custom_data가 비어있다면(초기 등록이 컬럼 단위 저장인 경우) 컬럼 값에서 복원
@@ -3808,7 +3932,9 @@ def change_request_detail(request_id):
 
     attachments = attachment_service.list(actual_request_number)
     logging.info(f"변경요청 첨부파일 조회: {actual_request_number} → {len(attachments)}개 로드됨")
-    
+
+    conn.close()  # 첨부파일 조회 후 연결 닫기
+
     # popup 파라미터 확인
     is_popup = request.args.get('popup', '0') == '1'
     
@@ -3970,8 +4096,14 @@ def update_change_request():
             attachment_service.delete(deleted_attachments)
             logging.info(f"첨부파일 {len(deleted_attachments)}개 삭제")
 
-        # 새 첨부파일 업로드 - 실제 request_number 사용
+        # 새 파일 업로드 및 설명 추가
         if files:
+            # 새 파일에 대한 설명 준비
+            new_file_descriptions = []
+            for item in attachment_data:
+                if isinstance(item, dict) and item.get('isNew'):
+                    new_file_descriptions.append(item.get('description', ''))
+
             actual_request_number = existing[1] if existing and existing[1] else request_number
             uploaded_ids = attachment_service.bulk_add(
                 actual_request_number,
@@ -3979,6 +4111,15 @@ def update_change_request():
                 {'uploaded_by': session.get('user_id', 'user')}
             )
             logging.info(f"첨부파일 {len(uploaded_ids)}개 업로드: {uploaded_ids}")
+
+            # 새로 업로드된 파일의 설명 업데이트
+            for i, attachment_id in enumerate(uploaded_ids):
+                if i < len(new_file_descriptions) and new_file_descriptions[i]:
+                    attachment_service.update_meta(
+                        attachment_id,
+                        {'description': new_file_descriptions[i]}
+                    )
+                    logging.info(f"새 첨부파일 {attachment_id} 설명 추가: {new_file_descriptions[i]}")
         
         conn.commit()
         logging.info(f"Change Request 업데이트 완료: {request_number}")
@@ -5126,7 +5267,13 @@ def register_accident():
         custom_data = pyjson.loads(request.form.get('custom_data', '{}'))  # 동적 컬럼
         attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
         files = request.files.getlist('files')
-        
+
+        # 디버깅: attachment_data 구조 확인
+        print(f"[ACC DEBUG] attachment_data 전체: {attachment_data}")
+        print(f"[ACC DEBUG] attachment_data 타입: {type(attachment_data)}")
+        for idx, item in enumerate(attachment_data):
+            print(f"[ACC DEBUG] attachment_data[{idx}]: {item}, 타입: {type(item)}")
+
         print(f"=== 등록 요청 받음 ===")
         print(f"사고명: {accident_name}")
         print(f"사고 날짜: {accident_date}")
@@ -5362,21 +5509,24 @@ def register_safety_instruction():
     try:
         # json already imported globally
         import datetime
-        
+
         conn = get_db_connection(timeout=30.0)
         cursor = conn.cursor()
 
         # 섹션 정보 동적으로 가져오기
         try:
             cursor.execute("""
-                SELECT DISTINCT section_key
+                SELECT DISTINCT section_key, section_order
                 FROM safety_instruction_sections
                 WHERE is_active = 1
                 ORDER BY section_order
             """)
             sections = cursor.fetchall()
             section_keys = [row[0] for row in sections] if sections else []
-        except:
+        except Exception as e:
+            logging.warning(f"섹션 정보 조회 실패: {e}")
+            # 트랜잭션 롤백
+            conn.rollback()
             # 테이블이 없거나 오류 시 기본값 사용
             section_keys = ['basic_info', 'violation_info', 'additional']
 
@@ -5441,7 +5591,13 @@ def register_safety_instruction():
         # 첨부파일 데이터
         attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
         files = request.files.getlist('files')
-        
+
+        # 디버깅: attachment_data 구조 확인
+        logging.info(f"[SI DEBUG] attachment_data 전체: {attachment_data}")
+        logging.info(f"[SI DEBUG] attachment_data 타입: {type(attachment_data)}")
+        for idx, item in enumerate(attachment_data):
+            logging.info(f"[SI DEBUG] attachment_data[{idx}]: {item}, 타입: {type(item)}")
+
         logging.info(f"환경안전 지시서 등록 요청 받음 - 징계자: {disciplined_person}")
         logging.info(f"위반일자: {violation_date}, 징계일자: {discipline_date}")
         logging.info(f"전체 필드 수: {len(all_fields)}")
@@ -5464,9 +5620,9 @@ def register_safety_instruction():
         
         # 해당 년월의 마지막 발부번호 찾기 (메인 테이블에서)
         cursor.execute("""
-            SELECT issue_number FROM safety_instructions 
-            WHERE issue_number LIKE ? 
-            ORDER BY issue_number DESC 
+            SELECT issue_number FROM safety_instructions
+            WHERE issue_number LIKE %s
+            ORDER BY issue_number DESC
             LIMIT 1
         """, (f"{year_month}-%",))
         
@@ -5518,20 +5674,6 @@ def register_safety_instruction():
         
         # 첨부파일 처리
         if files:
-            # 첨부파일 테이블 생성
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS safety_instruction_attachments (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    issue_number TEXT NOT NULL,
-                    file_name TEXT NOT NULL,
-                    file_path TEXT NOT NULL,
-                    file_size INTEGER,
-                    description TEXT,
-                    upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (issue_number) REFERENCES safety_instructions (issue_number)
-                )
-            """)
-            
             upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'safety_instructions')
             os.makedirs(upload_folder, exist_ok=True)
             
@@ -5543,9 +5685,11 @@ def register_safety_instruction():
                     file_path = os.path.join(upload_folder, unique_filename)
                     
                     file.save(file_path)
-                    
-                    # 첨부파일 정보 저장
+
+                    # 첨부파일 정보 저장 (accident와 동일한 방식)
                     description = attachment_data[i]['description'] if i < len(attachment_data) else ''
+
+                    logging.info(f"[SI DEBUG] INSERT 시도: issue_number={generated_issue_number}, file={filename}, desc='{description}'")
                     cursor.execute("""
                         INSERT INTO safety_instruction_attachments (issue_number, file_name, file_path, file_size, description)
                         VALUES (%s, %s, %s, %s, %s)
@@ -5558,8 +5702,14 @@ def register_safety_instruction():
         
     except Exception as e:
         if conn:
-            conn.rollback()
+            try:
+                conn.rollback()
+            except:
+                pass  # rollback 실패도 무시
         logging.error(f"환경안전 지시서 등록 중 오류: {e}")
+        logging.error(f"오류 타입: {type(e).__name__}")
+        import traceback
+        logging.error(f"스택 트레이스:\n{traceback.format_exc()}")
         return jsonify({"success": False, "message": str(e)})
     finally:
         if conn:
@@ -8423,22 +8573,46 @@ def export_accidents_excel():
         # DB 연결
         conn = get_db_connection()
         
-        # 동적 컬럼 정보 가져오기 (활성+미삭제, 섹션도 활성인 것만)
-        where_c_active = sql_is_active_true('c.is_active', conn)
-        where_c_notdel = sql_is_deleted_false('c.is_deleted', conn)
-        where_s_active = sql_is_active_true('s.is_active', conn)
-        where_s_notdel = sql_is_deleted_false('s.is_deleted', conn)
+        # 섹션 정보 가져오기
+        section_sql = f"""
+            SELECT section_key, section_name, section_order
+            FROM section_config
+            WHERE board_type = 'accident'
+              AND {sql_is_active_true('is_active', conn)}
+              AND {sql_is_deleted_false('is_deleted', conn)}
+            ORDER BY section_order
+        """
+        try:
+            sections = [dict(row) for row in conn.execute(section_sql).fetchall()]
+        except:
+            # 섹션 테이블이 없으면 기본 섹션 사용
+            sections = []
+
+        # 동적 컬럼 정보 가져오기 (활성+미삭제)
+        where_c_active = sql_is_active_true('is_active', conn)
+        where_c_notdel = sql_is_deleted_false('is_deleted', conn)
         dyn_sql = f"""
-            SELECT c.* FROM accident_column_config c
-            LEFT JOIN section_config s ON s.board_type = 'accident' AND s.section_key = c.tab
+            SELECT * FROM accident_column_config
             WHERE {where_c_active}
               AND {where_c_notdel}
-              AND ({where_s_active} OR s.section_key IS NULL)
-              AND ({where_s_notdel} OR s.section_key IS NULL)
-            ORDER BY c.column_order
+            ORDER BY column_order
         """
         dynamic_columns_rows = conn.execute(dyn_sql).fetchall()
-        dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+        dynamic_columns_all = [dict(row) for row in dynamic_columns_rows]
+
+        # 섹션별로 컬럼 그룹핑 (섹션 순서 -> 섹션 내 컬럼 순서)
+        dynamic_columns = []
+        if sections:
+            # 섹션 순서대로 컬럼 추가
+            for section in sections:
+                section_columns = [col for col in dynamic_columns_all if col.get('tab') == section['section_key']]
+                dynamic_columns.extend(section_columns)
+            # 섹션이 없는 컬럼들 추가
+            no_section_columns = [col for col in dynamic_columns_all if not col.get('tab') or not any(s['section_key'] == col.get('tab') for s in sections)]
+            dynamic_columns.extend(no_section_columns)
+        else:
+            # 섹션 정보가 없으면 기존 순서 사용
+            dynamic_columns = dynamic_columns_all
         
         # 사고 데이터 조회 (partner_accident 함수와 동일한 로직)
         # 삭제되지 않은 데이터만 조회
@@ -8556,17 +8730,29 @@ def export_accidents_excel():
             for offset, col in enumerate(custom_columns):
                 key = col['column_key']
                 value = custom.get(key, rec.get(key, ''))
-                if col.get('column_type') == 'list' and isinstance(value, list):
-                    try:
-                        value = pyjson.dumps(value, ensure_ascii=False) if value else ''
-                    except Exception:
-                        value = str(value) if value else ''
+
+                # 빈 리스트 처리를 먼저 수행
+                if isinstance(value, list):
+                    if col.get('column_type') == 'list':
+                        try:
+                            # 빈 리스트는 빈 문자열로, 내용이 있으면 JSON 문자열로
+                            value = pyjson.dumps(value, ensure_ascii=False) if value else ''
+                        except Exception:
+                            value = ''
+                    else:
+                        # list 타입이 아닌데 리스트 값이면 빈 문자열로
+                        value = ''
                 elif isinstance(value, dict):
                     value = value.get('name') or str(value)
                 elif col.get('column_type') == 'dropdown' and value:
                     value = get_display_value(key, value)
                 elif col.get('column_type') in ['date','datetime'] and value:
                     value = format_date(value)
+
+                # None이나 빈 리스트인 경우 빈 문자열로 보장
+                if value is None or value == [] or value == {}:
+                    value = ''
+
                 ws.cell(row=row_idx, column=start_col + offset, value=value)
         
         # 컬럼 너비 자동 조정
@@ -8929,31 +9115,55 @@ def export_follow_sop_excel():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 동적 컬럼 정보 (활성+미삭제, 섹션도 활성)
-        where_c_active = sql_is_active_true('c.is_active', conn)
-        where_c_notdel = sql_is_deleted_false('c.is_deleted', conn)
-        where_s_active = sql_is_active_true('s.is_active', conn)
-        where_s_notdel = sql_is_deleted_false('s.is_deleted', conn)
+        # 섹션 정보 가져오기
+        section_sql = f"""
+            SELECT section_key, section_name, section_order
+            FROM follow_sop_sections
+            WHERE {sql_is_active_true('is_active', conn)}
+              AND {sql_is_deleted_false('is_deleted', conn)}
+            ORDER BY section_order
+        """
+        try:
+            cursor.execute(section_sql)
+            sections = [dict(row) for row in cursor.fetchall()]
+        except:
+            # 섹션 테이블이 없으면 기본 섹션 사용
+            sections = []
+
+        # 동적 컬럼 정보 (활성+미삭제)
+        where_c_active = sql_is_active_true('is_active', conn)
+        where_c_notdel = sql_is_deleted_false('is_deleted', conn)
         dyn_sql = f"""
-            SELECT c.* FROM follow_sop_column_config c
-            LEFT JOIN follow_sop_sections s ON s.section_key = c.tab
+            SELECT * FROM follow_sop_column_config
             WHERE {where_c_active}
               AND {where_c_notdel}
-              AND ({where_s_active} OR s.section_key IS NULL)
-              AND ({where_s_notdel} OR s.section_key IS NULL)
-            ORDER BY c.column_order
+            ORDER BY column_order
         """
         cursor.execute(dyn_sql)
-        dynamic_columns = cursor.fetchall()
+        dynamic_columns_all = [dict(row) for row in cursor.fetchall()]
+
+        # 섹션별로 컬럼 그룹핑 (섹션 순서 -> 섹션 내 컬럼 순서)
+        dynamic_columns = []
+        if sections:
+            # 섹션 순서대로 컬럼 추가
+            for section in sections:
+                section_columns = [col for col in dynamic_columns_all if col.get('tab') == section['section_key']]
+                dynamic_columns.extend(section_columns)
+            # 섹션이 없는 컬럼들 추가
+            no_section_columns = [col for col in dynamic_columns_all if not col.get('tab') or not any(s['section_key'] == col.get('tab') for s in sections)]
+            dynamic_columns.extend(no_section_columns)
+        else:
+            # 섹션 정보가 없으면 기존 순서 사용
+            dynamic_columns = dynamic_columns_all
         
         # Follow SOP 데이터 조회
         data_sql = f"""
-            SELECT * FROM follow_sop 
+            SELECT * FROM follow_sop
             WHERE {sql_is_deleted_false('is_deleted', conn)}
             ORDER BY created_at DESC
         """
         cursor.execute(data_sql)
-        data = cursor.fetchall()
+        data = [dict(row) for row in cursor.fetchall()]
         
         # 엑셀 워크북 생성
         wb = Workbook()
@@ -9170,31 +9380,55 @@ def export_full_process_excel():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 동적 컬럼 정보 (활성+미삭제, 섹션도 활성)
-        where_c_active = sql_is_active_true('c.is_active', conn)
-        where_c_notdel = sql_is_deleted_false('c.is_deleted', conn)
-        where_s_active = sql_is_active_true('s.is_active', conn)
-        where_s_notdel = sql_is_deleted_false('s.is_deleted', conn)
+        # 섹션 정보 가져오기
+        section_sql = f"""
+            SELECT section_key, section_name, section_order
+            FROM full_process_sections
+            WHERE {sql_is_active_true('is_active', conn)}
+              AND {sql_is_deleted_false('is_deleted', conn)}
+            ORDER BY section_order
+        """
+        try:
+            cursor.execute(section_sql)
+            sections = [dict(row) for row in cursor.fetchall()]
+        except:
+            # 섹션 테이블이 없으면 기본 섹션 사용
+            sections = []
+
+        # 동적 컬럼 정보 (활성+미삭제)
+        where_c_active = sql_is_active_true('is_active', conn)
+        where_c_notdel = sql_is_deleted_false('is_deleted', conn)
         dyn_sql = f"""
-            SELECT c.* FROM full_process_column_config c
-            LEFT JOIN full_process_sections s ON s.section_key = c.tab
+            SELECT * FROM full_process_column_config
             WHERE {where_c_active}
               AND {where_c_notdel}
-              AND ({where_s_active} OR s.section_key IS NULL)
-              AND ({where_s_notdel} OR s.section_key IS NULL)
-            ORDER BY c.column_order
+            ORDER BY column_order
         """
         cursor.execute(dyn_sql)
-        dynamic_columns = cursor.fetchall()
+        dynamic_columns_all = [dict(row) for row in cursor.fetchall()]
+
+        # 섹션별로 컬럼 그룹핑 (섹션 순서 -> 섹션 내 컬럼 순서)
+        dynamic_columns = []
+        if sections:
+            # 섹션 순서대로 컬럼 추가
+            for section in sections:
+                section_columns = [col for col in dynamic_columns_all if col.get('tab') == section['section_key']]
+                dynamic_columns.extend(section_columns)
+            # 섹션이 없는 컬럼들 추가
+            no_section_columns = [col for col in dynamic_columns_all if not col.get('tab') or not any(s['section_key'] == col.get('tab') for s in sections)]
+            dynamic_columns.extend(no_section_columns)
+        else:
+            # 섹션 정보가 없으면 기존 순서 사용
+            dynamic_columns = dynamic_columns_all
         
         # Full Process 데이터 조회
         data_sql = f"""
-            SELECT * FROM full_process 
+            SELECT * FROM full_process
             WHERE {sql_is_deleted_false('is_deleted', conn)}
             ORDER BY created_at DESC
         """
         cursor.execute(data_sql)
-        data = cursor.fetchall()
+        data = [dict(row) for row in cursor.fetchall()]
         
         # 엑셀 워크북 생성
         wb = Workbook()
@@ -9251,6 +9485,8 @@ def export_full_process_excel():
                 if isinstance(value, dict):
                     return value.get('name', str(value))
                 if col['column_type'] == 'list' and isinstance(value, list):
+                    if not value:  # 빈 리스트는 빈 문자열로
+                        return ''
                     try:
                         return json.dumps(value, ensure_ascii=False)
                     except Exception:
@@ -9321,29 +9557,67 @@ def export_safety_instruction_excel():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 동적 컬럼 정보 (활성+미삭제, 섹션도 활성)
-        where_c_active = sql_is_active_true('c.is_active', conn)
-        where_c_notdel = sql_is_deleted_false('c.is_deleted', conn)
-        where_s_active = sql_is_active_true('s.is_active', conn)
+        # 섹션 정보 가져오기
+        section_sql = f"""
+            SELECT section_key, section_name, section_order
+            FROM safety_instruction_sections
+            WHERE {sql_is_active_true('is_active', conn)}
+              AND {sql_is_deleted_false('is_deleted', conn)}
+            ORDER BY section_order
+        """
+        try:
+            cursor.execute(section_sql)
+            sections = [dict(row) for row in cursor.fetchall()]
+        except:
+            # 섹션 테이블이 없거나 section_config 테이블 확인
+            try:
+                section_sql = f"""
+                    SELECT section_key, section_name, section_order
+                    FROM section_config
+                    WHERE board_type = 'safety_instruction'
+                      AND {sql_is_active_true('is_active', conn)}
+                      AND {sql_is_deleted_false('is_deleted', conn)}
+                    ORDER BY section_order
+                """
+                cursor.execute(section_sql)
+                sections = [dict(row) for row in cursor.fetchall()]
+            except:
+                sections = []
+
+        # 동적 컬럼 정보 (활성+미삭제)
+        where_c_active = sql_is_active_true('is_active', conn)
+        where_c_notdel = sql_is_deleted_false('is_deleted', conn)
         dyn_sql = f"""
-            SELECT c.* FROM safety_instruction_column_config c
-            INNER JOIN section_config s 
-              ON s.board_type = 'safety_instruction' AND s.section_key = c.tab AND {where_s_active}
+            SELECT * FROM safety_instruction_column_config
             WHERE {where_c_active}
               AND {where_c_notdel}
-            ORDER BY c.column_order
+            ORDER BY column_order
         """
         cursor.execute(dyn_sql)
-        dynamic_columns = cursor.fetchall()
+        dynamic_columns_all = [dict(row) for row in cursor.fetchall()]
+
+        # 섹션별로 컬럼 그룹핑 (섹션 순서 -> 섹션 내 컬럼 순서)
+        dynamic_columns = []
+        if sections:
+            # 섹션 순서대로 컬럼 추가
+            for section in sections:
+                section_columns = [col for col in dynamic_columns_all if col.get('tab') == section['section_key']]
+                dynamic_columns.extend(section_columns)
+            # 섹션이 없는 컬럼들 추가
+            no_section_columns = [col for col in dynamic_columns_all if not col.get('tab') or not any(s['section_key'] == col.get('tab') for s in sections)]
+            dynamic_columns.extend(no_section_columns)
+        else:
+            # 섹션 정보가 없으면 기존 순서 사용
+            dynamic_columns = dynamic_columns_all
         
         # Safety Instruction 데이터 조회 - 메인 테이블 사용
         data_sql = f"""
-            SELECT * FROM safety_instructions 
+            SELECT * FROM safety_instructions
             WHERE {sql_is_deleted_false('is_deleted', conn)}
             ORDER BY created_at DESC, issue_number DESC
         """
         cursor.execute(data_sql)
-        data = cursor.fetchall()
+        data = [dict(row) for row in cursor.fetchall()]
         
         # 엑셀 워크북 생성
         wb = Workbook()
@@ -9439,14 +9713,26 @@ def export_safety_instruction_excel():
                 if col['column_key'] not in basic_column_keys:
                     col_key = col['column_key']
                     value = row_dict.get(col_key, '')
-                    
-                    # 리스트는 JSON 문자열로 변환
-                    if col['column_type'] == 'list' and isinstance(value, list):
-                        try:
-                            value = json.dumps(value, ensure_ascii=False)
-                        except Exception:
-                            value = str(value)
-                    
+
+                    # 리스트 처리 (column_type과 관계없이 실제 값이 리스트면 처리)
+                    if isinstance(value, list):
+                        if not value:  # 빈 리스트는 빈 문자열로
+                            value = ''
+                        else:
+                            try:
+                                value = json.dumps(value, ensure_ascii=False)
+                            except Exception:
+                                value = str(value)
+                    # 딕셔너리 처리
+                    elif isinstance(value, dict):
+                        if not value:  # 빈 딕셔너리도 빈 문자열로
+                            value = ''
+                        else:
+                            value = value.get('name', str(value))
+                    # None 처리
+                    elif value is None:
+                        value = ''
+
                     ws.cell(row=row_idx, column=col_idx, value=value)
                     col_idx += 1
         
@@ -9510,22 +9796,48 @@ def export_change_requests_excel():
         # DB 연결
         conn = get_db_connection()
         
-        # 동적 컬럼 정보 (활성+미삭제, 섹션도 활성)
-        where_c_active = sql_is_active_true('c.is_active', conn)
-        where_c_notdel = sql_is_deleted_false('c.is_deleted', conn)
-        where_s_active = sql_is_active_true('s.is_active', conn)
-        where_s_notdel = sql_is_deleted_false('s.is_deleted', conn)
+        # 섹션 정보 가져오기
+        section_sql = f"""
+            SELECT section_key, section_name, section_order
+            FROM section_config
+            WHERE board_type = 'change_request'
+              AND {sql_is_active_true('is_active', conn)}
+            ORDER BY section_order
+        """
+        sections = conn.execute(section_sql).fetchall()
+        
+        # 동적 컬럼 정보 (활성+미삭제)
+        where_c_active = sql_is_active_true('is_active', conn)
+        where_c_notdel = sql_is_deleted_false('is_deleted', conn)
         dyn_sql = f"""
-            SELECT c.* FROM change_request_column_config c
-            LEFT JOIN section_config s ON s.board_type = 'change_request' AND s.section_key = c.tab
+            SELECT * FROM change_request_column_config
             WHERE {where_c_active}
               AND {where_c_notdel}
-              AND ({where_s_active} OR s.section_key IS NULL)
-              AND ({where_s_notdel} OR s.section_key IS NULL)
-            ORDER BY c.column_order
+            ORDER BY column_order
         """
         dynamic_columns_rows = conn.execute(dyn_sql).fetchall()
-        dynamic_columns = [dict(row) for row in dynamic_columns_rows]
+        dynamic_columns_all = [dict(row) for row in dynamic_columns_rows]
+        
+        # 섹션 기반으로 컬럼 정렬
+        dynamic_columns = []
+        if sections:
+            # 각 섹션에 속하는 컬럼들을 순서대로 추가
+            for section in sections:
+                section_columns = [col for col in dynamic_columns_all 
+                                 if col.get('tab') == section['section_key']]
+                # 섹션 내에서 column_order로 정렬
+                section_columns.sort(key=lambda x: x.get('column_order', 0))
+                dynamic_columns.extend(section_columns)
+            
+            # 섹션이 없는 컬럼들을 마지막에 추가
+            no_section_columns = [col for col in dynamic_columns_all 
+                                if not col.get('tab') or 
+                                not any(section['section_key'] == col.get('tab') for section in sections)]
+            no_section_columns.sort(key=lambda x: x.get('column_order', 0))
+            dynamic_columns.extend(no_section_columns)
+        else:
+            # 섹션이 없으면 원래 순서대로
+            dynamic_columns = dynamic_columns_all
         
         # 변경요청 데이터 조회
         query = f"""
@@ -9646,9 +9958,19 @@ def export_change_requests_excel():
                         value = value['name']
                     else:
                         value = str(value)
-                
+
+                # 리스트 타입 처리
+                elif isinstance(value, list):
+                    if not value:  # 빈 리스트는 빈 문자열로
+                        value = ''
+                    else:
+                        try:
+                            value = pyjson.dumps(value, ensure_ascii=False)
+                        except Exception:
+                            value = str(value)
+
                 # 드롭다운 타입인 경우 코드를 실제 값으로 변환
-                if col['column_type'] == 'dropdown' and value:
+                elif col['column_type'] == 'dropdown' and value:
                     value = get_display_value(col['column_key'], value)
                 
                 # 날짜 타입인 경우 시분초 제거

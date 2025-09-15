@@ -2,7 +2,7 @@
 # 이 파일은 app.py에서 exec()로 실행되므로 필요한 imports를 명시적으로 추가
 import logging
 import sqlite3
-from flask import request, render_template, jsonify
+from flask import request, render_template, jsonify, session
 from db_connection import get_db_connection
 from column_utils import normalize_column_types
 
@@ -150,7 +150,7 @@ def follow_sop_route():
         if hasattr(conn, 'is_postgres') and conn.is_postgres:
             where_clauses.append("((s.custom_data->>'company_name') ILIKE %s OR (s.custom_data->>'company_name_1cha') ILIKE %s)")
         else:
-            where_clauses.append("(JSON_EXTRACT(s.custom_data, '$.company_name') LIKE ? OR JSON_EXTRACT(s.custom_data, '$.company_name_1cha') LIKE ?)")
+            where_clauses.append("(JSON_EXTRACT(s.custom_data, '$.company_name') LIKE %s OR JSON_EXTRACT(s.custom_data, '$.company_name_1cha') LIKE %s)")
         query_params.extend([f"%{company_name}%", f"%{company_name}%"])
     
     if business_number:
@@ -159,7 +159,7 @@ def follow_sop_route():
         if hasattr(conn, 'is_postgres') and conn.is_postgres:
             where_clauses.append("((s.custom_data->>'business_number') ILIKE %s OR (s.custom_data->>'company_name_1cha_bizno') ILIKE %s)")
         else:
-            where_clauses.append("(JSON_EXTRACT(s.custom_data, '$.business_number') LIKE ? OR JSON_EXTRACT(s.custom_data, '$.company_name_1cha_bizno') LIKE ?)")
+            where_clauses.append("(JSON_EXTRACT(s.custom_data, '$.business_number') LIKE %s OR JSON_EXTRACT(s.custom_data, '$.company_name_1cha_bizno') LIKE %s)")
         query_params.extend([f"%{business_number}%", f"%{business_number}%"])
     
     # WHERE 절 구성 (삭제되지 않은 항목만)
@@ -183,7 +183,7 @@ def follow_sop_route():
         FROM {table_name} s
         WHERE {where_sql}
         ORDER BY s.created_at DESC
-        LIMIT ? OFFSET ?
+        LIMIT %s OFFSET %s
     """
     
     query_params.extend([per_page, (page - 1) * per_page])
@@ -712,8 +712,8 @@ def follow_sop_detail(work_req_no):
     attachments = []
     try:
         from board_services import AttachmentService
-        attachment_service = AttachmentService('follow_sop', DB_PATH)
-        attachments = attachment_service.get_list(work_req_no)
+        attachment_service = AttachmentService('follow_sop', DB_PATH, conn)
+        attachments = attachment_service.list(work_req_no)
         logging.info(f"[DEBUG] Loaded {len(attachments)} attachments for {work_req_no}")
     except Exception as e:
         logging.error(f"첨부파일 조회 오류: {e}")
@@ -802,6 +802,12 @@ def register_follow_sop():
         detailed_content = request.form.get('detailed_content', '')
         logging.info(f"[FS REGISTER] detailed_content 길이: {len(detailed_content)}")
 
+        # 첨부파일 데이터 (accident와 동일하게 pyjson 사용)
+        attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
+
+        files = request.files.getlist('files')
+        logging.info(f"[FS REGISTER] 첨부파일 개수: {len(files)}")
+
         # custom_data를 JSON 문자열로 변환
         if isinstance(custom_data, dict):
             custom_data_json = json.dumps(custom_data, ensure_ascii=False)
@@ -838,8 +844,35 @@ def register_follow_sop():
         except Exception as _e_det:
             logging.warning(f"[FS REGISTER] details upsert warning: {_e_det}")
 
+        # 첨부파일 처리 (Safety-Instruction 방식으로 변경)
+        if files:
+            # CREATE TABLE 제거 - 테이블은 이미 존재함
+
+            import os
+            from werkzeug.utils import secure_filename
+
+            upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'follow_sop')
+            os.makedirs(upload_folder, exist_ok=True)
+
+            for i, file in enumerate(files):
+                if file and file.filename:
+                    filename = secure_filename(file.filename)
+                    timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
+                    unique_filename = f"{work_req_no}_{timestamp}_{filename}".replace('-', '_')
+                    file_path = os.path.join(upload_folder, unique_filename)
+
+                    file.save(file_path)
+
+                    # 첨부파일 정보 저장
+                    description = attachment_data[i]['description'] if i < len(attachment_data) else ''
+                    cursor.execute("""
+                        INSERT INTO follow_sop_attachments (work_req_no, file_name, file_path, file_size, description)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (work_req_no, filename, file_path, os.path.getsize(file_path), description))
+                    logging.info(f"[FS REGISTER] 첨부파일 저장: {filename}")
+
         conn.commit()
-        
+
         return jsonify({
             'success': True,
             'message': 'Follow SOP가 등록되었습니다.',
@@ -1082,7 +1115,7 @@ def full_process_route():
         FROM {table_name} p
         WHERE {where_sql}
         ORDER BY p.created_at DESC
-        LIMIT ? OFFSET ?
+        LIMIT %s OFFSET %s
     """
     
     query_params.extend([per_page, (page - 1) * per_page])
@@ -1442,9 +1475,7 @@ def full_process_detail(fullprocess_number):
             section_columns[section['section_key']] = [
                 col for col in dynamic_columns if col.get('tab') == section['section_key']
             ]
-    
-    conn.close()
-    
+
     # 드롭다운 옵션 로드
     basic_options = {}
     try:
@@ -1459,12 +1490,12 @@ def full_process_detail(fullprocess_number):
     except Exception as e:
         logging.error(f"Failed to load dropdown options: {e}")
 
-    # 첨부파일 정보 가져오기
+    # 첨부파일 정보 가져오기 - AttachmentService 사용 (accident와 동일)
     attachments = []
     try:
         from board_services import AttachmentService
-        attachment_service = AttachmentService('full_process', DB_PATH)
-        attachments = attachment_service.get_list(fullprocess_number)
+        attachment_service = AttachmentService('full_process', DB_PATH, conn)
+        attachments = attachment_service.list(fullprocess_number)
         logging.info(f"[DEBUG] Loaded {len(attachments)} attachments for {fullprocess_number}")
     except Exception as e:
         logging.error(f"첨부파일 조회 오류: {e}")
@@ -1482,6 +1513,9 @@ def full_process_detail(fullprocess_number):
     logging.info(f"[TEMPLATE DEBUG] issue_date in process: {process.get('issue_date')}")
     logging.info(f"[TEMPLATE DEBUG] department in process: {process.get('department')}")
     logging.info(f"[TEMPLATE DEBUG] manager in process: {process.get('manager')}")
+
+    # DB 연결 닫기 (AttachmentService 사용 후)
+    conn.close()
 
     return render_template('full-process-detail.html',
                          process=process,
@@ -1562,6 +1596,12 @@ def register_full_process():
         detailed_content = request.form.get('detailed_content', '')
         logging.info(f"[FP REGISTER] detailed_content 길이: {len(detailed_content)}")
 
+        # 첨부파일 데이터 (accident와 동일하게 pyjson 사용)
+        attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
+
+        files = request.files.getlist('files')
+        logging.info(f"[FP REGISTER] 첨부파일 개수: {len(files)}")
+
         # custom_data를 JSON 문자열로 변환
         if isinstance(custom_data, dict):
             custom_data_json = json.dumps(custom_data, ensure_ascii=False)
@@ -1592,10 +1632,37 @@ def register_full_process():
                 'fullprocess_number': fullprocess_number,
                 'detailed_content': detailed_content,
                 'updated_at': None
-            })
+            }, conflict_cols=['fullprocess_number'], update_cols=['detailed_content', 'updated_at'])
             logging.info("[FP REGISTER] details 테이블에도 저장 완료")
         except Exception as _e_det:
             logging.warning(f"[FP REGISTER] details upsert warning: {_e_det}")
+
+        # 첨부파일 처리 (Safety-Instruction 방식으로 변경)
+        if files:
+            # CREATE TABLE 제거 - 테이블은 이미 존재함
+
+            import os
+            from werkzeug.utils import secure_filename
+
+            upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'full_process')
+            os.makedirs(upload_folder, exist_ok=True)
+
+            for i, file in enumerate(files):
+                if file and file.filename:
+                    filename = secure_filename(file.filename)
+                    timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
+                    unique_filename = f"{fullprocess_number}_{timestamp}_{filename}".replace('-', '_')
+                    file_path = os.path.join(upload_folder, unique_filename)
+
+                    file.save(file_path)
+
+                    # 첨부파일 정보 저장
+                    description = attachment_data[i]['description'] if i < len(attachment_data) else ''
+                    cursor.execute("""
+                        INSERT INTO full_process_attachments (fullprocess_number, file_name, file_path, file_size, description)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (fullprocess_number, filename, file_path, os.path.getsize(file_path), description))
+                    logging.info(f"[FP REGISTER] 첨부파일 저장: {filename}")
 
         conn.commit()
         

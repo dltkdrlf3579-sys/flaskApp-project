@@ -116,9 +116,9 @@
                                             {% endif %}
                                         {% else %}
                                             {% if col.column_key.endswith('_dept') %}
-                                                {% set render_type = 'linked_dept' %}
+                                                {% set render_type = 'linked_text' %}
                                             {% elif col.column_key.endswith('_id') or col.column_key.endswith('_bizno') %}
-                                                {% set render_type = 'linked' %}
+                                                {% set render_type = 'linked_text' %}
                                             {% endif %}
                                         {% endif %}
                                     {% endif %}
@@ -180,7 +180,7 @@
                                            onkeypress="return isNumberKey(event, this)"
                                            value="{{ col_value }}">
                                            
-                                {% elif render_type in ['linked','linked_text','linked_dept'] %}
+                                {% elif render_type == 'linked_text' %}
                                     <!-- 연결된 필드 (읽기 전용) -->
                                     <input type="text"
                                            id="{{ col.column_key }}"
@@ -207,8 +207,8 @@
                                                {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                value="{{ col_value }}"
                                                readonly>
-                                        <button class="btn btn-sm btn-primary" 
-                                                onclick="{% if render_type == 'popup_person' %}openPersonSearch{% elif render_type == 'popup_company' %}openCompanySearch{% elif render_type == 'popup_department' %}openDepartmentSearch{% elif render_type == 'popup_building' %}openBuildingSearch{% elif render_type == 'popup_contractor' %}openContractorSearch{% else %}openPopup{% endif %}('{{ col.column_key }}')">
+                                        <button class="btn btn-sm btn-primary"
+                                                onclick="{% if render_type == 'popup_person' %}openPersonSearch{% elif render_type == 'popup_company' %}openCompanySearch{% elif render_type == 'popup_department' %}openDepartmentSearch{% elif render_type == 'popup_building' %}openBuildingSearch{% elif render_type == 'popup_contractor' %}openContractorSearch{% else %}alert('팝업 타입을 지정해주세요'){% endif %}{% if render_type != 'popup' %}('{{ col.column_key }}'){% endif %}">
                                                 검색
                                             </button>
                                     </div>
@@ -554,11 +554,10 @@ function verifyPasswordAndSave() {
     }
 }
 
-// 팝업 열기 함수
-function openPopup(fieldKey) {
-    // 팝업 구현 (필요시 추가)
-    alert('팝업 기능은 추가 구현이 필요합니다.');
-}
+// 팝업 열기 함수 - popup-handler.js에서 처리
+// openPopup 함수는 사용하지 않음 (각 타입별 함수 사용)
+// openPersonSearch, openCompanySearch, openBuildingSearch,
+// openDepartmentSearch, openContractorSearch 등
 
 // 디버깅 헬퍼 함수 (개발자 도구 Console에서 사용)
 window.debugFields = function() {

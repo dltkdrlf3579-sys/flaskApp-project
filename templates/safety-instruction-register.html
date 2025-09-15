@@ -121,14 +121,13 @@
                                            onkeypress="return isNumberKey(event, this)"
                                            placeholder="{{ col.column_name }} 입력">
                                            
-                                {% elif col.column_type in ['linked', 'linked_text', 'linked_dept'] %}
+                                {% elif col.column_type == 'linked_text' %}
                                     <!-- 연결된 필드 (읽기 전용) -->
                                     <input type="text"
                                            id="{{ col.column_key }}"
                                            class="{{ section.section_key|replace('_', '-') }}-input linked-field"
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
-                                           data-linked-type="{{ col.column_type }}"
                                            {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
                                            {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                            readonly
@@ -144,8 +143,8 @@
                                                data-section="{{ section.section_key }}"
                                                placeholder="클릭하여 선택"
                                                readonly>
-                                        <button class="btn btn-sm btn-primary" 
-                                                onclick="openPopup('{{ col.column_key }}')">
+                                        <button class="btn btn-sm btn-primary"
+                                                onclick="alert('팝업 타입을 지정해주세요')">
                                             검색
                                         </button>
                                     </div>
@@ -333,14 +332,13 @@
                                            onkeypress="return isNumberKey(event, this)"
                                            placeholder="숫자만 입력하세요">
                                            
-                                {% elif col.column_type in ['linked', 'linked_text', 'linked_dept'] %}
+                                {% elif col.column_type == 'linked_text' %}
                                     <!-- 연결된 필드 (읽기 전용) -->
                                     <input type="text"
                                            id="{{ col.column_key }}"
                                            class="{{ section.section_key|replace('_', '-') }}-input linked-field"
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
-                                           data-linked-type="{{ col.column_type }}"
                                            {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
                                            {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                            readonly
@@ -648,6 +646,9 @@ function registerSafetyInstruction() {
         });
     });
     
+    // attachment_data를 JSON으로 전송 (accident와 동일하게)
+    formData.append('attachment_data', JSON.stringify(attachmentData));
+
     // 새 첨부파일 처리 (공통 컴포넌트 변수 사용)
     if (typeof pendingFiles !== 'undefined') {
         pendingFiles.forEach((file, index) => {

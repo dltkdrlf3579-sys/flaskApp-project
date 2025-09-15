@@ -19,40 +19,8 @@ def determine_linked_type(col):
     table_group = col.get('table_group', '')
     table_type = col.get('table_type', '')
 
-    # suffix가 있는 필드는 무조건 linked_text (table_group 기반 처리를 위해)
-    suffixes = ['_bizno', '_company', '_dept', '_code', '_id']
-    for suffix in suffixes:
-        if column_key.endswith(suffix):
-            return 'linked_text'
-
-    # table_type 우선 확인 (가장 명확한 지표)
-    if table_type:
-        if table_type == 'company':
-            return 'linked_company'
-        elif table_type == 'employee':
-            return 'linked_employee'
-        elif table_type == 'partner':
-            return 'linked_partner'
-        elif table_type == 'contractor':
-            return 'linked_contractor'
-        elif table_type == 'department':
-            return 'linked_department'
-
-    # table_group 확인 (두 번째 우선순위)
-    if table_group:
-        # table_group이 베이스 필드와 연관되어 있으면 그 타입 사용
-        if 'company' in table_group or 'add_company_info' in table_group:
-            return 'linked_company'
-        elif 'worker' in table_group or 'employee' in table_group:
-            return 'linked_employee'
-        elif 'partner' in table_group:
-            return 'linked_partner'
-        elif 'contractor' in table_group:
-            return 'linked_contractor'
-        elif 'department' in table_group or 'dept' in table_group:
-            return 'linked_department'
-
-    # 기본값
+    # 모든 linked 타입 필드는 linked_text로 통일 (table_group 기반 처리를 위해)
+    # suffix가 있는 필드든 없는 필드든 모두 linked_text 반환
     return 'linked_text'
 
 

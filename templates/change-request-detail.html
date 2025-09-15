@@ -117,14 +117,13 @@
                                    
                         {% elif col.column_type == 'linked_text' %}
                             <input type="text"
-                                   class="dynamic-input linked-text"
+                                   class="dynamic-input linked-field"
                                    data-column-key="{{ col.column_key }}"
                                    {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
                                    {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                    value="{{ col_value }}"
-                                   placeholder="자동입력"
                                    readonly
-                                   style="background-color: #f8f9fa; cursor: not-allowed;">
+                                   style="background-color: #f3f4f6;">
                         
                         {% elif col.column_type == 'popup_company' %}
                             <div class="input-group">
