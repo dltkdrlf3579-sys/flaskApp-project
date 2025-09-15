@@ -479,14 +479,29 @@ def follow_sop_register():
     # 팝업 여부 확인
     is_popup = request.args.get('popup') == '1'
     
+    # 드롭다운 옵션 로드
+    basic_options = {}
+    try:
+        from app import get_dropdown_options_for_display as _get_opts
+        for col in dynamic_columns:
+            if col.get('column_type') == 'dropdown':
+                col_key = col.get('column_key')
+                if col_key:
+                    opts = _get_opts('follow_sop', col_key)
+                    if opts:
+                        basic_options[col_key] = opts
+    except Exception as e:
+        logging.error(f"Failed to load dropdown options: {e}")
+
     # 현재 날짜 추가 (한국 시간)
     from timezone_config import get_korean_time
     today_date = get_korean_time().strftime('%Y-%m-%d')
-    
+
     return render_template('follow-sop-register.html',
                          dynamic_columns=dynamic_columns,
                          sections=sections,
                          section_columns=section_columns,  # 중요! 이것이 누락되어 있었음
+                         basic_options=basic_options,  # 드롭다운 옵션 추가
                          today_date=today_date,  # 오늘 날짜 추가
                          is_popup=is_popup,
                          menu=MENU_CONFIG)
@@ -541,7 +556,7 @@ def follow_sop_detail(work_req_no):
     try:
         cursor.execute("""
             SELECT work_req_no, custom_data,
-                   created_at, created_by, updated_at, updated_by, is_deleted
+                   created_at, updated_at, is_deleted
             FROM follow_sop
             WHERE work_req_no = %s AND (is_deleted = 0 OR is_deleted IS NULL)
         """, (work_req_no,))
@@ -553,10 +568,10 @@ def follow_sop_detail(work_req_no):
                 'work_req_no': sop_row[0],
                 'custom_data': sop_row[1],
                 'created_at': sop_row[2],
-                'created_by': sop_row[3],
-                'updated_at': sop_row[4],
-                'updated_by': sop_row[5],
-                'is_deleted': sop_row[6]
+                'updated_at': sop_row[3],
+                'is_deleted': sop_row[4],
+                'created_by': None,  # follow_sop 테이블에 없음
+                'updated_by': None   # follow_sop 테이블에 없음
             }
     except Exception as e:
         logging.error(f"follow_sop 조회 오류: {e}")
@@ -705,6 +720,20 @@ def follow_sop_detail(work_req_no):
 
     conn.close()
 
+    # 드롭다운 옵션 로드
+    basic_options = {}
+    try:
+        from app import get_dropdown_options_for_display as _get_opts
+        for col in dynamic_columns:
+            if col.get('column_type') == 'dropdown':
+                col_key = col.get('column_key')
+                if col_key:
+                    opts = _get_opts('follow_sop', col_key)
+                    if opts:
+                        basic_options[col_key] = opts
+    except Exception as e:
+        logging.error(f"Failed to load dropdown options: {e}")
+
     # 팝업 여부 확인
     is_popup = request.args.get('popup') == '1'
 
@@ -716,6 +745,7 @@ def follow_sop_detail(work_req_no):
                          sections=sections,
                          section_columns=section_columns,
                          all_column_keys=all_keys,
+                         basic_options=basic_options,  # 드롭다운 옵션 추가
                          attachments=attachments,  # 첨부파일 데이터 추가
                          is_popup=is_popup,
                          menu=MENU_CONFIG)
@@ -1279,14 +1309,29 @@ def full_process_register():
     # 팝업 여부 확인
     is_popup = request.args.get('popup') == '1'
     
+    # 드롭다운 옵션 로드
+    basic_options = {}
+    try:
+        from app import get_dropdown_options_for_display as _get_opts
+        for col in dynamic_columns:
+            if col.get('column_type') == 'dropdown':
+                col_key = col.get('column_key')
+                if col_key:
+                    opts = _get_opts('full_process', col_key)
+                    if opts:
+                        basic_options[col_key] = opts
+    except Exception as e:
+        logging.error(f"Failed to load dropdown options: {e}")
+
     # 현재 날짜 추가 (한국 시간)
     from timezone_config import get_korean_time
     today_date = get_korean_time().strftime('%Y-%m-%d')
-    
+
     return render_template('full-process-register.html',
                          dynamic_columns=dynamic_columns,
                          sections=sections,
                          section_columns=section_columns,  # 중요! 이것이 누락되어 있었음
+                         basic_options=basic_options,  # 드롭다운 옵션 추가
                          today_date=today_date,  # 오늘 날짜 추가
                          is_popup=is_popup,
                          menu=MENU_CONFIG)

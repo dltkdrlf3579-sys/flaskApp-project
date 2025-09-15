@@ -108,7 +108,7 @@ class ColumnConfigService:
 
         def _has_column_sqlite(table: str, col: str) -> bool:
             try:
-                cursor.execute(f"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = ?", (col,))
+                cursor.execute(f"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = %s", (col,))
                 return (cursor.fetchone() or [0])[0] > 0
             except Exception:
                 return False
@@ -222,7 +222,7 @@ class ColumnConfigService:
         conn = get_db_connection(self.db_path, row_factory=True)
         
         column = conn.execute(
-            f"SELECT * FROM {self.table_name} WHERE id = ?", 
+            f"SELECT * FROM {self.table_name} WHERE id = %s", 
             (column_id,)
         ).fetchone()
         conn.close()
@@ -270,7 +270,7 @@ class ColumnConfigService:
             
             # 같은 column_key가 이미 존재하는지 확인 (활성 또는 삭제된 컬럼 포함)
             cursor.execute(
-                f"SELECT id, is_deleted FROM {self.table_name} WHERE column_key = ?",
+                f"SELECT id, is_deleted FROM {self.table_name} WHERE column_key = %s",
                 (column_key,)
             )
             existing_column = cursor.fetchone()
@@ -376,7 +376,7 @@ class ColumnConfigService:
                     sc = json.dumps(sc, ensure_ascii=False)
                 values.append(sc)
 
-            placeholders = ', '.join(['?'] * len(fields))
+            placeholders = ', '.join(['%s'] * len(fields))
             cursor.execute_with_returning_id(
                 f"INSERT INTO {self.table_name} ({', '.join(fields)}) VALUES ({placeholders})",
                 tuple(values)
@@ -452,7 +452,7 @@ class ColumnConfigService:
 
             # 보호 컬럼은 수정 불가 (is_system=1 또는 보호 키)
             row = cursor.execute(
-                f"SELECT column_key, COALESCE(is_system,0) FROM {self.table_name} WHERE id = ?",
+                f"SELECT column_key, COALESCE(is_system,0) FROM {self.table_name} WHERE id = %s",
                 (column_id,)
             ).fetchone()
             if not row:
@@ -466,7 +466,7 @@ class ColumnConfigService:
             
             # 현재 컬럼 정보 조회
             cursor.execute(
-                f"SELECT column_key FROM {self.table_name} WHERE id = ?", 
+                f"SELECT column_key FROM {self.table_name} WHERE id = %s", 
                 (column_id,)
             )
             if not cursor.fetchone():
@@ -477,8 +477,8 @@ class ColumnConfigService:
             if 'is_deleted' in column_data and len(column_data) == 1:
                 cursor.execute(f"""
                     UPDATE {self.table_name}
-                    SET is_deleted = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
+                    SET is_deleted = %s
+                    WHERE id = %s
                 """, (column_data['is_deleted'], column_id))
                 
                 conn.commit()
@@ -514,7 +514,7 @@ class ColumnConfigService:
             
             for field in allowed_fields:
                 if field in column_data:
-                    update_fields.append(f"{field} = ?")
+                    update_fields.append(f"{field} = %s")
                     if field in ('is_active','is_required'):
                         # 필드 타입 확인 후 안전한 값 전달
                         try:
@@ -546,11 +546,21 @@ class ColumnConfigService:
                         update_values.append(val)
             
             if update_fields:
-                update_fields.append("updated_at = CURRENT_TIMESTAMP")
-                update_values.append(column_id)
-                
+                # PostgreSQL에서 updated_at 컬럼 확인
                 cursor.execute(
-                    f"UPDATE {self.table_name} SET {', '.join(update_fields)} WHERE id = ?",
+                    """
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_name = %s AND column_name = 'updated_at'
+                    """,
+                    (self.table_name.lower(),)
+                )
+                if cursor.fetchone():
+                    update_fields.append("updated_at = CURRENT_TIMESTAMP")
+
+                update_values.append(column_id)
+
+                cursor.execute(
+                    f"UPDATE {self.table_name} SET {', '.join(update_fields)} WHERE id = %s",
                     update_values
                 )
             
@@ -586,7 +596,7 @@ class ColumnConfigService:
 
             # 보호 컬럼은 삭제(비활성화) 불가
             row = cursor.execute(
-                f"SELECT column_key, COALESCE(is_system,0) FROM {self.table_name} WHERE id = ?",
+                f"SELECT column_key, COALESCE(is_system,0) FROM {self.table_name} WHERE id = %s",
                 (column_id,)
             ).fetchone()
             if not row:
@@ -602,7 +612,7 @@ class ColumnConfigService:
             cursor.execute(f"""
                 UPDATE {self.table_name} 
                 SET is_deleted = 1, updated_at = CURRENT_TIMESTAMP 
-                WHERE id = ?
+                WHERE id = %s
             """, (column_id,))
             
             if cursor.rowcount == 0:
@@ -642,8 +652,8 @@ class ColumnConfigService:
             for item in order_data:
                 cursor.execute(f"""
                     UPDATE {self.table_name} 
-                    SET column_order = ?, updated_at = CURRENT_TIMESTAMP 
-                    WHERE id = ?
+                    SET column_order = %s, updated_at = CURRENT_TIMESTAMP 
+                    WHERE id = %s
                 """, (item['column_order'], item['id']))
             
             conn.commit()
