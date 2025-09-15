@@ -543,7 +543,7 @@ def follow_sop_detail(work_req_no):
             SELECT work_req_no, custom_data, detailed_content,
                    created_at, created_by, updated_at, updated_by, is_deleted
             FROM follow_sop
-            WHERE work_req_no = ? AND (is_deleted = 0 OR is_deleted IS NULL)
+            WHERE work_req_no = %s AND (is_deleted = 0 OR is_deleted IS NULL)
         """, (work_req_no,))
         sop_row = cursor.fetchone()
 
@@ -585,7 +585,7 @@ def follow_sop_detail(work_req_no):
         cursor.execute("""
             SELECT detailed_content
             FROM follow_sop_details
-            WHERE work_req_no = ?
+            WHERE work_req_no = %s
         """, (work_req_no,))
         detail_row = cursor.fetchone()
         if detail_row and detail_row[0]:
@@ -598,7 +598,7 @@ def follow_sop_detail(work_req_no):
                 cursor.execute("""
                     SELECT detailed_content
                     FROM follow_sop
-                    WHERE work_req_no = ?
+                    WHERE work_req_no = %s
                 """, (work_req_no,))
                 main_row = cursor.fetchone()
                 if main_row and main_row[0]:
@@ -921,9 +921,9 @@ def update_follow_sop_simple():
         
         # Follow SOP 업데이트
         cursor.execute("""
-            UPDATE follow_sop 
-            SET custom_data = ?, updated_by = ?
-            WHERE work_req_no = ?
+            UPDATE follow_sop
+            SET custom_data = %s, updated_by = %s
+            WHERE work_req_no = %s
         """, (custom_data_json, session.get('user_id', 'system'), work_req_no))
         
         conn.commit()
