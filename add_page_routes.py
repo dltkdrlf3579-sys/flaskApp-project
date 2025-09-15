@@ -593,23 +593,8 @@ def follow_sop_detail(work_req_no):
             print(f"[FS DETAIL DEBUG] Loaded detailed_content from follow_sop_details: {len(detail_row[0])} chars")
             print(f"[FS DETAIL DEBUG] detailed_content value: {detail_row[0][:100]}")  # 디버깅용
         else:
-            # 메인 테이블에서 읽기 시도
-            try:
-                cursor.execute("""
-                    SELECT detailed_content
-                    FROM follow_sop
-                    WHERE work_req_no = %s
-                """, (work_req_no,))
-                main_row = cursor.fetchone()
-                if main_row and main_row[0]:
-                    sop['detailed_content'] = main_row[0]
-                    print(f"[FS DETAIL DEBUG] Loaded detailed_content from main table: {len(main_row[0])} chars")
-                else:
-                    sop['detailed_content'] = ''
-                    print("[FS DETAIL DEBUG] No detailed_content found, using empty string")
-            except:
-                sop['detailed_content'] = ''
-                print("[FS DETAIL DEBUG] No detailed_content column in main table")
+            sop['detailed_content'] = ''
+            print("[FS DETAIL DEBUG] No detailed_content in details table, using empty string")
     except Exception as e:
         print(f"[FS DETAIL DEBUG] Failed to load from follow_sop_details: {e}")
         # 기존 custom_data에서 읽기 (하위 호환성)
