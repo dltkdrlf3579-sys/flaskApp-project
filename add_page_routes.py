@@ -540,7 +540,7 @@ def follow_sop_detail(work_req_no):
     sop = {}
     try:
         cursor.execute("""
-            SELECT work_req_no, custom_data, detailed_content,
+            SELECT work_req_no, custom_data,
                    created_at, created_by, updated_at, updated_by, is_deleted
             FROM follow_sop
             WHERE work_req_no = %s AND (is_deleted = 0 OR is_deleted IS NULL)
@@ -552,12 +552,11 @@ def follow_sop_detail(work_req_no):
             sop = {
                 'work_req_no': sop_row[0],
                 'custom_data': sop_row[1],
-                'detailed_content': sop_row[2],
-                'created_at': sop_row[3],
-                'created_by': sop_row[4],
-                'updated_at': sop_row[5],
-                'updated_by': sop_row[6],
-                'is_deleted': sop_row[7]
+                'created_at': sop_row[2],
+                'created_by': sop_row[3],
+                'updated_at': sop_row[4],
+                'updated_by': sop_row[5],
+                'is_deleted': sop_row[6]
             }
     except Exception as e:
         logging.error(f"follow_sop 조회 오류: {e}")

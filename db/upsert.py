@@ -32,7 +32,7 @@ UPSERT_REGISTRY = {
         'conflict_cols': ['business_number'],
         'update_cols': ['detailed_content', 'updated_at']
     },
-    'followsop_details': {
+    'follow_sop_details': {
         'conflict_cols': ['work_req_no'],
         'update_cols': ['detailed_content', 'updated_at']
     },

@@ -10315,39 +10315,8 @@ def create_partner_change_request():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 변경요청 테이블 생성 (없을 경우)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS partner_change_requests (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                request_number TEXT UNIQUE,
-                requester_name TEXT NOT NULL,
-                requester_department TEXT NOT NULL,
-                company_name TEXT NOT NULL,
-                business_number TEXT NOT NULL,
-                change_type TEXT NOT NULL,
-                current_value TEXT NOT NULL,
-                new_value TEXT NOT NULL,
-                change_reason TEXT NOT NULL,
-                status TEXT DEFAULT 'pending',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                custom_data TEXT,
-                is_deleted INTEGER DEFAULT 0
-            )
-        """)
-        
-        # 기존 테이블에 request_number 컬럼이 없으면 추가
-        cursor.execute("PRAGMA table_info(partner_change_requests)")
-        columns = [col[1] for col in cursor.fetchall()]
-        if 'request_number' not in columns:
-            cursor.execute("ALTER TABLE partner_change_requests ADD COLUMN request_number TEXT UNIQUE")
-            logging.info("request_number 컬럼 추가됨")
-        if 'custom_data' not in columns:
-            cursor.execute("ALTER TABLE partner_change_requests ADD COLUMN custom_data TEXT")
-            logging.info("custom_data 컬럼 추가됨")
-        if 'is_deleted' not in columns:
-            cursor.execute("ALTER TABLE partner_change_requests ADD COLUMN is_deleted INTEGER DEFAULT 0")
-            logging.info("is_deleted 컬럼 추가됨")
+        # PostgreSQL/SQLite 호환 처리
+        # 운영환경에서는 테이블이 이미 생성되어 있어야 함
         
         # request_number 생성 (CR-YYYYMM-SEQ 형식)
         current_month = get_korean_time().strftime('%Y%m')
@@ -10356,7 +10325,7 @@ def create_partner_change_request():
         cursor.execute("""
             SELECT MAX(CAST(SUBSTR(request_number, -2) AS INTEGER)) as max_seq
             FROM partner_change_requests
-            WHERE request_number LIKE ?
+            WHERE request_number LIKE %s
         """, (f'CR-{current_month}-%',))
         
         result = cursor.fetchone()
@@ -10368,11 +10337,11 @@ def create_partner_change_request():
         status = data.get('status', 'requested')
         
         # 변경요청 데이터 삽입 (request_number, custom_data, status 포함)
-        cursor.execute_with_returning_id("""
-            INSERT INTO partner_change_requests 
-            (request_number, requester_name, requester_department, company_name, business_number, 
+        cursor.execute("""
+            INSERT INTO partner_change_requests
+            (request_number, requester_name, requester_department, company_name, business_number,
              change_type, current_value, new_value, change_reason, custom_data, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             request_number,  # 자동 생성된 request_number
             data['requester_name'],
