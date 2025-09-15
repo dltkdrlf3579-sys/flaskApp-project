@@ -965,19 +965,23 @@ class PartnerDataManager:
                 custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
                 
                 # created_at 또는 작업일자 추출하여 FS 형식 번호 생성
+                # 외부 DB의 다양한 날짜 필드 확인
                 created_at_str = (row.get('created_at', '') or
+                                row.get('CREATED_AT', '') or
                                 row.get('작업일자', '') or
                                 row.get('work_date', '') or
-                                row.get('등록일', ''))
+                                row.get('WORK_DATE', '') or
+                                row.get('등록일', '') or
+                                row.get('REG_DATE', '') or
+                                row.get('reg_date', ''))
 
                 # 날짜 파싱 시도
-                from datetime import datetime
                 from id_generator import generate_followsop_number
 
                 try:
                     if created_at_str:
                         # 다양한 날짜 형식 파싱 시도
-                        for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%Y/%m/%d', '%Y%m%d']:
+                        for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%Y/%m/%d', '%Y%m%d', '%d-%b-%y', '%d/%m/%Y']:
                             try:
                                 created_dt = datetime.strptime(str(created_at_str).split('.')[0], fmt)
                                 break
@@ -985,11 +989,14 @@ class PartnerDataManager:
                                 continue
                         else:
                             # 파싱 실패시 현재 시간 사용
+                            print(f"[WARNING] 날짜 파싱 실패: {created_at_str}, 현재 시간 사용")
                             created_dt = datetime.now()
                     else:
+                        # 날짜 필드가 없으면 현재 시간 사용
+                        print(f"[WARNING] 날짜 필드 없음, 현재 시간 사용")
                         created_dt = datetime.now()
 
-                    # FS 형식 번호 생성
+                    # FS 형식 번호 생성 (무조건 생성)
                     work_req_no = generate_followsop_number(self.local_db_path, created_dt)
                 except Exception as e:
                     # 번호 생성 실패시 원본 사용
@@ -1174,19 +1181,23 @@ class PartnerDataManager:
                 custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
                 
                 # created_at 또는 평가일자 추출하여 FP 형식 번호 생성
+                # 외부 DB의 다양한 날짜 필드 확인
                 created_at_str = (row.get('created_at', '') or
+                                row.get('CREATED_AT', '') or
                                 row.get('평가일자', '') or
                                 row.get('process_date', '') or
-                                row.get('등록일', ''))
+                                row.get('PROCESS_DATE', '') or
+                                row.get('등록일', '') or
+                                row.get('REG_DATE', '') or
+                                row.get('reg_date', ''))
 
                 # 날짜 파싱 시도
-                from datetime import datetime
                 from id_generator import generate_fullprocess_number
 
                 try:
                     if created_at_str:
                         # 다양한 날짜 형식 파싱 시도
-                        for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%Y/%m/%d', '%Y%m%d']:
+                        for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%Y/%m/%d', '%Y%m%d', '%d-%b-%y', '%d/%m/%Y']:
                             try:
                                 created_dt = datetime.strptime(str(created_at_str).split('.')[0], fmt)
                                 break
@@ -1194,11 +1205,14 @@ class PartnerDataManager:
                                 continue
                         else:
                             # 파싱 실패시 현재 시간 사용
+                            print(f"[WARNING] 날짜 파싱 실패: {created_at_str}, 현재 시간 사용")
                             created_dt = datetime.now()
                     else:
+                        # 날짜 필드가 없으면 현재 시간 사용
+                        print(f"[WARNING] 날짜 필드 없음, 현재 시간 사용")
                         created_dt = datetime.now()
 
-                    # FP 형식 번호 생성
+                    # FP 형식 번호 생성 (무조건 생성)
                     fullprocess_number = generate_fullprocess_number(self.local_db_path, created_dt)
                 except Exception as e:
                     # 번호 생성 실패시 원본 사용
