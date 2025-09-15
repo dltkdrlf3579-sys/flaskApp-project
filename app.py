@@ -4414,10 +4414,6 @@ def accident_detail(accident_id):
                 custom_data = pyjson.loads(custom_data) if custom_data else {}
             except:
                 custom_data = {}
-            # PostgreSQL JSONB인 경우 이미 dict
-            pass
-        else:
-            custom_data = {}
         
         # detailed_content 추출
         accident['detailed_content'] = custom_data.get('detailed_content', '')
