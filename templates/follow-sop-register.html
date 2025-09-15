@@ -546,23 +546,17 @@ function openTableSearch(fieldKey) {
 }
 
 .info-row {
-    display: flex !important;
-    flex-wrap: wrap !important;
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
     gap: 16px !important;
     margin-bottom: 16px !important;
-    min-height: 80px !important;
-    visibility: visible !important;
-    opacity: 1 !important;
 }
 
 .info-cell {
     display: flex !important;
     flex-direction: column !important;
     gap: 8px !important;
-    flex: 0 0 calc(25% - 12px) !important;
     min-height: 60px !important;
-    visibility: visible !important;
-    opacity: 1 !important;
 }
 
 .info-cell label {
