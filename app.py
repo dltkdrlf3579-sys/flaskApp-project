@@ -3735,11 +3735,14 @@ def partner_change_request():
             except:
                 status = 'pending'
             
-            # custom_data 파싱
+            # custom_data 파싱 (PostgreSQL JSONB는 이미 dict)
             custom_data = {}
             if row['custom_data']:
                 try:
-                    custom_data = pyjson.loads(row['custom_data'])
+                    if isinstance(row['custom_data'], dict):
+                        custom_data = row['custom_data']  # PostgreSQL JSONB
+                    else:
+                        custom_data = pyjson.loads(row['custom_data'])  # SQLite TEXT
                 except:
                     custom_data = {}
                 
@@ -3897,12 +3900,14 @@ def change_request_detail(request_id):
                 col_dict['dropdown_options_mapped'] = []
         dynamic_columns.append(type('Column', (), col_dict)())
     
-    # custom_data를 DB에서 가져온 데이터에서 파싱
+    # custom_data를 DB에서 가져온 데이터에서 파싱 (PostgreSQL JSONB는 이미 dict)
     custom_data = {}
     if hasattr(request_data, 'custom_data') and request_data.custom_data:
         try:
-            # json already imported globally
-            custom_data = pyjson.loads(request_data.custom_data)
+            if isinstance(request_data.custom_data, dict):
+                custom_data = request_data.custom_data  # PostgreSQL JSONB
+            else:
+                custom_data = pyjson.loads(request_data.custom_data)  # SQLite TEXT
             logging.info(f"custom_data 파싱 성공: {len(custom_data)}개 필드")
         except Exception as e:
             logging.error(f"custom_data 파싱 실패: {e}")
@@ -5112,9 +5117,9 @@ def register_change_request():
         
         # 오늘 날짜의 마지막 요청번호 찾기 - partner_change_requests 테이블에서
         cursor.execute("""
-            SELECT request_number FROM partner_change_requests 
-            WHERE request_number LIKE ? 
-            ORDER BY request_number DESC 
+            SELECT request_number FROM partner_change_requests
+            WHERE request_number LIKE %s
+            ORDER BY request_number DESC
             LIMIT 1
         """, (f"{request_number_prefix}%",))
         
@@ -5129,25 +5134,7 @@ def register_change_request():
         
         # partner_change_requests 테이블에 저장 (메인 테이블)
         try:
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS partner_change_requests (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    request_number TEXT UNIQUE,
-                    requester_name TEXT,
-                    requester_department TEXT,
-                    company_name TEXT,
-                    business_number TEXT,
-                    change_type TEXT,
-                    current_value TEXT,
-                    new_value TEXT,
-                    change_reason TEXT,
-                    status TEXT DEFAULT 'requested',
-                    created_at TIMESTAMP,
-                    updated_at TIMESTAMP,
-                    custom_data TEXT,
-                    is_deleted INTEGER DEFAULT 0
-                )
-            """)
+            # 운영환경에서는 테이블이 이미 생성되어 있어야 함
             
             # 상태를 강제로 'requested' (요청)으로 설정
             data['status'] = 'requested'
