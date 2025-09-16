@@ -11609,7 +11609,13 @@ if __name__ == "__main__":
     # SSL 인증서가 있으면 HTTPS, 없으면 HTTP
     ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS)
     try:
-        ssl_context.load_cert_chain(certfile=ssl_cert, keyfile=ssl_key)
+        # 상대경로일 경우 앱 루트 기준으로 보정
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        cert_path = ssl_cert if os.path.isabs(ssl_cert) else os.path.join(base_dir, ssl_cert)
+        key_path = ssl_key if os.path.isabs(ssl_key) else os.path.join(base_dir, ssl_key)
+        print(f"[SSO] Server TLS cert: {cert_path}")
+        print(f"[SSO] Server TLS key : {key_path}")
+        ssl_context.load_cert_chain(certfile=cert_path, keyfile=key_path)
         print(f"HTTPS 모드로 실행: https://localhost:{ssl_port}")
         app.run(host="0.0.0.0", port=ssl_port, ssl_context=ssl_context, debug=app.debug)
     except (FileNotFoundError, Exception) as e:
