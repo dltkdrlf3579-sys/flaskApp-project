@@ -11607,50 +11607,49 @@ def sso_diagnostics():
             os.path.join(cwd, 'Templates', 'Cert', cert_name),
         ]
 
+        # 후보 경로 HTML 생성
+        li_items = []
+        for p in idp_candidates:
+            li_items.append(f"<li>{p} — exists={os.path.exists(p)}</li>")
+        li_html = '\n'.join(li_items)
+
         # SSO 파라미터들
         idp_url = _get_config_value(cfg, 'SSO', 'idp_authorize_url', 'idp_entity_id', 'Idp.EntityID', default='')
         client_id = _get_config_value(cfg, 'SSO', 'idp_client_id', 'Idp.ClientID', default='')
         redirect_uri = _compute_redirect_uri(cfg)
         sp_redirect_url_cfg = _get_config_value(cfg, 'SSO', 'sp_redirect_url', default='')
 
-        html = [
-            '<h2>SSO Diagnostics</h2>',
-            '<h3>Paths</h3>',
-            f'<pre>CWD: {cwd}\nBASE_DIR: {base_dir}</pre>',
-            '<h4>Server TLS (HTTPS)</h4>',
-            f'<pre>ssl_cert_file (cfg): {ssl_cert_cfg}\nssl_key_file  (cfg): {ssl_key_cfg}\n'
-            f'ssl_cert_abs (resolved): {ssl_cert_abs} exists={os.path.exists(ssl_cert_abs)}\n'
-            f'ssl_key_abs  (resolved): {ssl_key_abs} exists={os.path.exists(ssl_key_abs)}</pre>',
-            '<h4>IdP Signing Cert (Token Verification)</h4>',
-            f'<pre>cert_file_path (cfg): {cert_dir}\ncert_file_name (cfg): {cert_name}</pre>',
-            '<ul>'
-        ]
-        for p in idp_candidates:
-            html.append(f'<li>{p} — exists={os.path.exists(p)}</li>')
-        html.append('</ul>')
+        html = f"""
+        <h2>SSO Diagnostics</h2>
+        <h3>Paths</h3>
+        <pre>CWD: {cwd}
+BASE_DIR: {base_dir}</pre>
+        <h4>Server TLS (HTTPS)</h4>
+        <pre>ssl_cert_file (cfg): {ssl_cert_cfg}
+ssl_key_file  (cfg): {ssl_key_cfg}
+ssl_cert_abs (resolved): {ssl_cert_abs} exists={os.path.exists(ssl_cert_abs)}
+ssl_key_abs  (resolved): {ssl_key_abs} exists={os.path.exists(ssl_key_abs)}</pre>
+        <h4>IdP Signing Cert (Token Verification)</h4>
+        <pre>cert_file_path (cfg): {cert_dir}
+cert_file_name (cfg): {cert_name}</pre>
+        <ul>
+        {li_html}
+        </ul>
+        <h3>SSO Params</h3>
+        <pre>idp_authorize_url: {idp_url}
+client_id: {client_id}
+sp_redirect_url (cfg): {sp_redirect_url_cfg}
+computed redirect_uri: {redirect_uri}
+</pre>
+        <h3>Request</h3>
+        <pre>scheme: {request.scheme}
+Host: {request.headers.get('Host')}
+X-Forwarded-Proto: {request.headers.get('X-Forwarded-Proto')}
+X-Forwarded-Host: {request.headers.get('X-Forwarded-Host')}
+</pre>
+        """
 
-        html.extend([
-            '<h3>SSO Params</h3>',
-            (
-                f'<pre>'
-                f'idp_authorize_url: {idp_url}\n'
-                f'client_id: {client_id}\n'
-                f'sp_redirect_url (cfg): {sp_redirect_url_cfg}\n'
-                f'computed redirect_uri: {redirect_uri}\n'
-                f'</pre>'
-            ),
-            '<h3>Request</h3>',
-            (
-                f'<pre>'
-                f'scheme: {request.scheme}\n'
-                f'Host: {request.headers.get("Host")}\n'
-                f'X-Forwarded-Proto: {request.headers.get("X-Forwarded-Proto")}\n'
-                f'X-Forwarded-Host: {request.headers.get("X-Forwarded-Host")}\n'
-                f'</pre>'
-            ),
-        ])
-
-        return '\n'.join(html)
+        return html
     except Exception as e:
         return f"Diagnostics error: {e}", 500
 
