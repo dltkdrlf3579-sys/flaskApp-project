@@ -6777,8 +6777,28 @@ def admin_sync_now():
     """수동 강제 동기화 엔드포인트"""
     try:
         from database_config import maybe_daily_sync_master, maybe_one_time_sync_content
-        
-        sync_type = request.json.get('type', 'all')
+
+        # 간단한 토큰 보호 (선택): config.ini [ADMIN] SYNC_TOKEN과 헤더 'X-Sync-Token' 매칭 시에만 허용
+        try:
+            cfg = configparser.ConfigParser()
+            cfg.read('config.ini', encoding='utf-8')
+            expected = cfg.get('ADMIN', 'SYNC_TOKEN', fallback='')
+        except Exception:
+            expected = ''
+        provided = request.headers.get('X-Sync-Token', '')
+        if expected:
+            if provided != expected:
+                return jsonify({'success': False, 'message': 'Unauthorized (sync token required)'}), 401
+
+        # type 파라미터는 JSON/폼/쿼리스트링 모두 허용
+        sync_type = None
+        if request.is_json:
+            try:
+                sync_type = (request.get_json(silent=True) or {}).get('type')
+            except Exception:
+                sync_type = None
+        if not sync_type:
+            sync_type = request.form.get('type') or request.args.get('type') or 'all'
         
         if sync_type == 'master' or sync_type == 'all':
             maybe_daily_sync_master(force=True)
@@ -11546,7 +11566,12 @@ def auto_sso_redirect():
     """세션이 없으면 자동으로 SSO 시작"""
 
     # 제외 경로 (SSO, 정적 파일, API 등)
-    excluded_paths = ['/SSO', '/sso', '/sso/diagnostics', '/acs', '/slo', '/static', '/uploads', '/api', '/admin/login', '/debug-session']
+    excluded_paths = [
+        '/SSO', '/sso', '/sso/diagnostics', '/acs', '/slo', '/static', '/uploads', '/api',
+        '/admin/login', '/debug-session',
+        # allow automation endpoints without SSO session
+        '/admin/sync-now', '/admin/cache-counts'
+    ]
 
     # 제외 경로는 체크 안 함
     for path in excluded_paths:
