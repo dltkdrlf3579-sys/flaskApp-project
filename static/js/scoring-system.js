@@ -334,6 +334,15 @@ function calculateScoreTotal() {
             if (totalDisplay) totalDisplay.value = total;
             const hiddenTotal = field.querySelector('input[type="hidden"][data-field]');
             if (hiddenTotal) hiddenTotal.value = JSON.stringify({ total });
+            // 가시적인 클론 타일의 표시값도 동기화
+            try {
+                const key = field.getAttribute('data-field');
+                if (key) {
+                    document.querySelectorAll(`.score-total-field.score-total-clone[data-field="${key}"] .total-score-display`).forEach(el => {
+                        el.value = total;
+                    });
+                }
+            } catch (e) { /* ignore */ }
             return; // include_keys 모드에서는 기존 방식 생략
         }
 
@@ -349,6 +358,15 @@ function calculateScoreTotal() {
         if (totalDisplay) totalDisplay.value = total;
         const hiddenInput = field.querySelector('input[type="hidden"]');
         if (hiddenInput) hiddenInput.value = JSON.stringify({ total });
+        // 클론 타일 동기화
+        try {
+            const key = field.getAttribute('data-field');
+            if (key) {
+                document.querySelectorAll(`.score-total-field.score-total-clone[data-field="${key}"] .total-score-display`).forEach(el => {
+                    el.value = total;
+                });
+            }
+        } catch (e) { /* ignore */ }
     });
 }
 
