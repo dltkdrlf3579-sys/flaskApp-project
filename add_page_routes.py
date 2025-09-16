@@ -1956,6 +1956,16 @@ def full_process_detail(fullprocess_number):
     logging.info(f"[TEMPLATE DEBUG] department in process: {process.get('department')}")
     logging.info(f"[TEMPLATE DEBUG] manager in process: {process.get('manager')}")
 
+    # 외부 scoring 데이터 매핑 적용
+    external_scoring_data = None
+    try:
+        from scoring_external_service import get_scoring_data_for_template
+        scoring_template_data = get_scoring_data_for_template(cursor, fullprocess_number)
+        external_scoring_data = scoring_template_data.get('scoring_columns', [])
+        logging.info(f"[SCORING] External scoring data loaded: {len(external_scoring_data)} columns")
+    except Exception as e:
+        logging.warning(f"[SCORING] Failed to load external scoring data: {e}")
+
     # DB 연결 닫기 (AttachmentService 사용 후)
     conn.close()
 
@@ -1969,6 +1979,7 @@ def full_process_detail(fullprocess_number):
                          all_column_keys=all_keys,
                          basic_options=basic_options,  # 드롭다운 옵션 추가
                          attachments=attachments,  # 첨부파일 데이터 추가
+                         external_scoring_data=external_scoring_data,  # 외부 scoring 데이터 추가
                          is_popup=is_popup,
                          menu=MENU_CONFIG)
 

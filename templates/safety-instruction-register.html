@@ -57,7 +57,7 @@
                         {% set _ = columns.append(col) %}
                     {% endif %}
                 {% endfor %}
-                {% set columns_per_row = 4 %}
+                {% set columns_per_row = 8 %}
                 
                 <!-- batch 방식으로 4개씩 묶어서 처리 -->
                 {% for chunk in columns | batch(columns_per_row, '') %}
@@ -536,26 +536,16 @@ function collectDynamicFields() {
 
         sectionInputs.forEach(input => {
             const fieldKey = input.dataset.field;
-            if (!fieldKey) return; // fieldKey가 없으면 건너뛰기
-
             let value = '';
 
-            if (!input) {
-                console.warn(`Input element is null for field: ${fieldKey}`);
-                return;
-            }
-
             if (input.tagName === 'SELECT') {
-                value = input.value || '';
+                value = input.value;
             } else if (input.type === 'checkbox') {
                 value = input.checked ? '1' : '0';
-            } else if (input.type === 'number') {
-                // 숫자 타입 특별 처리
-                value = input.value || '0';
             } else if (input.tagName === 'TEXTAREA') {
-                value = input.value || '';
+                value = input.value;
             } else {
-                value = input.value || '';
+                value = input.value;
             }
             
             // 리스트 필드 처리 - 더 간단하고 확실한 방법

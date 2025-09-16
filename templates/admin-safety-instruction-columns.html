@@ -2204,6 +2204,11 @@ window.addEventListener('error', function(ev){
                         if (grade) conf.grade = grade;
                         const ta = document.getElementById('scoringConfig');
                         if (ta) ta.value = JSON.stringify(conf);
+
+                        // 숫자 타입이면 resolvedInputType도 설정
+                        const nsel = document.querySelector('input[name="numberType"]:checked');
+                        const nt = nsel ? nsel.value : 'float';
+                        resolvedInputType = (nt === 'integer') ? 'number_integer' : 'number_float';
                     }
                     const scText = (document.getElementById('scoringConfig') || {}).value || pendingColumns[index].scoring_config || null;
                     pendingColumns[index] = {

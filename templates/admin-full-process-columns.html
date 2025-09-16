@@ -436,12 +436,12 @@
         <div class="mb-3" id="spanField" style="display: none;">
                             <label class="form-label">차지할 칸 수</label>
                             <div class="btn-group w-100" role="group">
-                                <input type="radio" class="btn-check" name="columnSpan" id="span1" value="1" checked>
+                                <input type="radio" class="btn-check" name="columnSpan" id="span1" value="1">
                                 <label class="btn btn-outline-primary" for="span1">
                                     <i class="bi bi-square"></i> 1칸
                                 </label>
 
-                                <input type="radio" class="btn-check" name="columnSpan" id="span2" value="2">
+                                <input type="radio" class="btn-check" name="columnSpan" id="span2" value="2" checked>
                                 <label class="btn btn-outline-primary" for="span2">
                                     <i class="bi bi-square"></i><i class="bi bi-square"></i> 2칸
                                 </label>
@@ -1129,9 +1129,9 @@ let editingId = null;
                         if (col.table_type) column._tableType = col.table_type;
                         if (col.table_name) column._tableName = col.table_name;
                         
-                        // column_span이 없으면 기본값 1 설정
-                        if (!column.column_span && column.column_type === 'text') {
-                            column.column_span = 1;
+                        // column_span이 없으면 기본값 2 설정
+                        if (!column.column_span) {
+                            column.column_span = 2;
                         }
                         
                         return column;
@@ -2017,8 +2017,8 @@ let editingId = null;
             const isActive = document.getElementById('isActive').checked;
             const selectedSection = document.getElementById('columnSection').value;
             
-            // 텍스트 타입일 때 span 값 가져오기
-            let columnSpan = 1;
+            // span 값 가져오기 (기본값 2)
+            let columnSpan = 2;
             if (columnType === 'text') {
                 const selectedSpan = document.querySelector('input[name="columnSpan"]:checked');
                 if (selectedSpan) {
@@ -2192,6 +2192,11 @@ let editingId = null;
                         if (grade) conf.grade = grade;
                         const ta = document.getElementById('scoringConfig');
                         if (ta) ta.value = JSON.stringify(conf);
+
+                        // 숫자 타입이면 resolvedInputType도 설정
+                        const nsel = document.querySelector('input[name="numberType"]:checked');
+                        const nt = nsel ? nsel.value : 'float';
+                        resolvedInputType = (nt === 'integer') ? 'number_integer' : 'number_float';
                     }
                     const scText = (document.getElementById('scoringConfig') || {}).value || pendingColumns[index].scoring_config || null;
                     pendingColumns[index] = {
@@ -2542,7 +2547,7 @@ let editingId = null;
                             column_name: column.column_name,
                             column_key: column.column_key,
                             column_type: column.column_type,
-                            column_span: column.column_span || 1, // span 정보 추가
+                            column_span: column.column_span || 2, // span 정보 추가
                             is_active: column.is_active ? 1 : 0,
                             dropdown_options: column.dropdown_options,
                             scoring_config: column.scoring_config || null,
@@ -2578,7 +2583,7 @@ let editingId = null;
                             column_name: column.column_name,
                             column_key: column.column_key,
                             column_type: column.column_type,
-                            column_span: column.column_span || 1, // span 정보 추가
+                            column_span: column.column_span || 2, // span 정보 추가
                             is_active: column.is_active ? 1 : 0,
                             dropdown_options: column.dropdown_options,
                             scoring_config: column.scoring_config || null,

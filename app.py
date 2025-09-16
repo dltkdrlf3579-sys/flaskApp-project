@@ -24,6 +24,13 @@ from column_utils import normalize_column_types, determine_linked_type
 import schedule
 import threading
 import time
+# SSO 관련 imports 추가
+import jwt
+import json
+import uuid
+import ssl
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
 
 
 def generate_manual_accident_number(cursor):
@@ -252,33 +259,9 @@ app.jinja_env.cache = {}
 # determine_linked_type function moved to column_utils.py for reuse across all boards
 
 # =====================
-# SSO (OIDC-like) setup
+# Scoring Service Import
 # =====================
-from sso import sso_bp
-# Ensure blueprint routes are loaded before registration
-import sso.routes  # noqa: F401
-from sso.middleware import check_sso_authentication
 from scoring_service import calculate_score as _calc_score
-
-# Read SSO config
-_cfg = configparser.ConfigParser()
-try:
-    _cfg.read('config.ini', encoding='utf-8')
-except Exception:
-    pass
-
-app.config['SSO_CLIENT_ID'] = _cfg.get('SSO', 'idp_client_id', fallback='')
-app.config['SSO_REDIRECT_URI'] = _cfg.get('SSO', 'sp_redirect_url', fallback='')
-app.config['SSO_LOGOUT_URL'] = _cfg.get('SSO', 'idp_signout_url', fallback='')
-
-# Register SSO blueprint (after routes imported)
-app.register_blueprint(sso_bp)
-
-# Enforce SSO (dev mode auto-seeds session)
-@app.before_request
-def _sso_before_request():
-    resp = check_sso_authentication()
-    return resp
 
 # =====================
 # Scoring API
@@ -3117,11 +3100,10 @@ def update_follow_sop():
             {
                 'work_req_no': work_req_no,
                 'custom_data': custom_data_json,
-                'detailed_content': detailed_content,  # 메인 테이블에도 저장
                 'updated_at': None
             },
             conflict_cols=['work_req_no'],
-            update_cols=['custom_data', 'detailed_content', 'updated_at']  # detailed_content 추가
+            update_cols=['custom_data', 'updated_at']
         )
         logging.info(f"[FS UPDATE] safe_upsert 완료")
 
@@ -3436,11 +3418,10 @@ def update_full_process():
             {
                 'fullprocess_number': fullprocess_number,
                 'custom_data': custom_data_json,
-                'detailed_content': detailed_content,  # 메인 테이블에도 저장
                 'updated_at': None
             },
             conflict_cols=['fullprocess_number'],
-            update_cols=['custom_data', 'detailed_content', 'updated_at']  # detailed_content 추가
+            update_cols=['custom_data', 'updated_at']
         )
         
         # 3. 첨부파일 처리 - AttachmentService 대신 직접 처리
@@ -11247,9 +11228,138 @@ def page_view(url):
     if not page:
         return "Page not found", 404
     
-    return render_template("page.html", 
+    return render_template("page.html",
                          page={'url': page[1], 'title': page[2], 'content': page[3]},
                          menu=MENU_CONFIG)
+
+# =====================
+# 콘텐츠 업로드 라우트 (if __name__ 위로 이동)
+# =====================
+@app.route('/upload-inline-image', methods=['POST'])
+def upload_inline_image():
+    try:
+        file = request.files.get('upload') or request.files.get('file')
+        if not file or not file.filename:
+            return jsonify({ 'error': { 'message': 'No file uploaded' } }), 400
+
+        # 확장자/크기 검증
+        allowed = {'png','jpg','jpeg','gif','webp','bmp'}
+        ext = os.path.splitext(file.filename)[1].lower().lstrip('.')
+        if ext not in allowed:
+            return jsonify({ 'error': { 'message': 'Unsupported file type' } }), 400
+        file.seek(0, os.SEEK_END)
+        size = file.tell()
+        file.seek(0)
+        if size > 10 * 1024 * 1024:  # 10MB
+            return jsonify({ 'error': { 'message': 'File too large' } }), 400
+
+        # 저장 경로
+        upload_dir = os.path.join('uploads', 'content')
+        os.makedirs(upload_dir, exist_ok=True)
+
+        # 안전한 파일명
+        import time
+        basename = secure_filename(file.filename)
+        fname = f"{int(time.time())}_{basename}"
+        path = os.path.join(upload_dir, fname)
+        file.save(path)
+
+        url = f"/uploads/content/{fname}"
+        return jsonify({ 'url': url })
+    except Exception as e:
+        logging.error(f"Inline image upload failed: {e}")
+        return jsonify({ 'error': { 'message': 'Upload failed' } }), 500
+
+@app.route('/uploads/content/<path:filename>')
+def serve_uploaded_content(filename):
+    directory = os.path.join('uploads', 'content')
+    return send_from_directory(directory, filename)
+
+# =====================
+# SSO 샘플 라우트 추가
+# =====================
+
+@app.route('/SSO')
+def sso():
+    """SSO 인증 시작"""
+    # config.ini에서 SSO 설정 읽기
+    config = configparser.ConfigParser()
+    config.read('config.ini', encoding='utf-8')
+
+    nonce_val = uuid.uuid4().urn
+    nonce_val = nonce_val[9:]
+
+    idp_url = config.get('SSO', 'idp_entity_id', fallback='example')
+    auth_param = '?client_id=' + config.get('SSO', 'idp_client_id', fallback='example')
+    auth_param += '&redirect_uri=' + config.get('SSO', 'sp_redirect_url', fallback='https://localhost:44369/acs')
+    auth_param += '&response_mode=form_post'
+    auth_param += '&response_type=id_token'
+    auth_param += '&scope=openid+profile'
+    auth_param += '&nonce=' + nonce_val
+
+    print(idp_url + auth_param)
+    return redirect(idp_url + auth_param, code=302)
+
+@app.route('/acs', methods=['GET', 'POST'])
+def acs():
+    """SSO 콜백 처리"""
+    isLoad = False
+    isError = False
+    Error_MSG = ''
+    claim_val = ''
+
+    if request.method == 'POST':
+        try:
+            # config.ini에서 인증서 경로 읽기
+            config = configparser.ConfigParser()
+            config.read('config.ini', encoding='utf-8')
+            cert_path = config.get('SSO', 'cert_file_path', fallback='Templates/Cert/')
+            cert_name = config.get('SSO', 'cert_file_name', fallback='Idp.cer')
+
+            cert_str = open(cert_path + cert_name, 'rb').read()
+            cert_obj = x509.load_pem_x509_certificate(cert_str, default_backend())
+            public_key = cert_obj.public_key()
+
+            id_token_val = request.form['id_token']
+            b_token = id_token_val.encode()
+
+            decoded = jwt.decode(b_token, public_key, algorithms=['RS256'],
+                               options={'verify_signature': True, 'verify_exp': True, 'verify_aud': False})
+            json_str = json.dumps(decoded)
+            claim_val = json.loads(json_str)
+
+            # 세션에 사용자 정보 저장 (1시 방향 이름 표시 및 파일 업로드 추적용)
+            if claim_val:
+                session['user_id'] = claim_val.get('loginid', '')  # loginid를 user_id로 저장
+                session['user_name'] = claim_val.get('username', '')  # username을 user_name으로 저장
+                session['authenticated'] = True
+
+        except jwt.ExpiredSignatureError:
+            isError = True
+            Error_MSG = 'Authentication Token has expired.'
+        except jwt.InvalidTokenError:
+            isError = True
+            Error_MSG = 'Authentication Token is not valid.'
+        except Exception as e:
+            isError = True
+            Error_MSG = f'Error: {str(e)}'
+
+        print(claim_val)
+
+    # SSO 전용 템플릿 사용 (기존 index.html과 충돌 방지)
+    return render_template('sso_index.html', isLoad=isLoad, isError=isError, Error_MSG=Error_MSG, Claims=claim_val)
+
+@app.route('/slo')
+def slo():
+    """SSO 로그아웃"""
+    # 세션 클리어
+    session.clear()
+
+    # config.ini에서 로그아웃 URL 읽기
+    config = configparser.ConfigParser()
+    config.read('config.ini', encoding='utf-8')
+    idp_url = config.get('SSO', 'idp_signout_url', fallback='example')
+    return redirect(idp_url, code=302)
 
 
 if __name__ == "__main__":
@@ -11304,44 +11414,12 @@ if __name__ == "__main__":
         logging.info("=" * 50)
     
     print(f"partner-accident 라우트 등록됨: {'/partner-accident' in [rule.rule for rule in app.url_map.iter_rules()]}", flush=True)
-    app.run(host="0.0.0.0", port=5000, debug=app.debug)
-@app.route('/upload-inline-image', methods=['POST'])
-def upload_inline_image():
+
+    # SSL 설정 추가 (샘플 SSO용)
+    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS)
     try:
-        file = request.files.get('upload') or request.files.get('file')
-        if not file or not file.filename:
-            return jsonify({ 'error': { 'message': 'No file uploaded' } }), 400
-
-        # 확장자/크기 검증
-        allowed = {'png','jpg','jpeg','gif','webp','bmp'}
-        ext = os.path.splitext(file.filename)[1].lower().lstrip('.')
-        if ext not in allowed:
-            return jsonify({ 'error': { 'message': 'Unsupported file type' } }), 400
-        file.seek(0, os.SEEK_END)
-        size = file.tell()
-        file.seek(0)
-        if size > 10 * 1024 * 1024:  # 10MB
-            return jsonify({ 'error': { 'message': 'File too large' } }), 400
-
-        # 저장 경로
-        upload_dir = os.path.join('uploads', 'content')
-        os.makedirs(upload_dir, exist_ok=True)
-
-        # 안전한 파일명
-        import time
-        basename = secure_filename(file.filename)
-        fname = f"{int(time.time())}_{basename}"
-        path = os.path.join(upload_dir, fname)
-        file.save(path)
-
-        url = f"/uploads/content/{fname}"
-        return jsonify({ 'url': url })
-    except Exception as e:
-        logging.error(f"Inline image upload failed: {e}")
-        return jsonify({ 'error': { 'message': 'Upload failed' } }), 500
-
-
-@app.route('/uploads/content/<path:filename>')
-def serve_uploaded_content(filename):
-    directory = os.path.join('uploads', 'content')
-    return send_from_directory(directory, filename)
+        ssl_context.load_cert_chain(certfile='Templates/Cert/cert.pem', keyfile='Templates/Cert/key.pem')
+        app.run(host="0.0.0.0", port=44369, ssl_context=ssl_context, debug=app.debug)
+    except FileNotFoundError:
+        print("SSL 인증서 파일이 없습니다. HTTP로 실행합니다.")
+        app.run(host="0.0.0.0", port=5000, debug=app.debug)

@@ -63,7 +63,7 @@
                         {% set _ = columns.append(col) %}
                     {% endif %}
                 {% endfor %}
-                {% set columns_per_row = 4 %}
+                {% set columns_per_row = 8 %}
                 
                 <!-- batch 방식으로 4개씩 묶어서 처리 -->
                 {% for chunk in columns | batch(columns_per_row, '') %}

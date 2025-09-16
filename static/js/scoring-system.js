@@ -396,11 +396,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 초기 총점 계산
     calculateScoreTotal();
+
+    // 총점 타일 라벨을 항상 외부 라벨(컬럼명)과 동기화하고, 외부 라벨은 숨김 처리
+    syncScoreTotalLabels();
 });
 
 // 총점(.score-total-field)을 해당 scoring-group의 그리드 옆으로 옮기는 함수
 function coLocateScoreTotals() {
     try {
+        // 이전에 만들어진 표시용 클론들을 정리하여 중복 방지
+        document.querySelectorAll('.score-total-field.score-total-clone').forEach(el => {
+            try { el.remove(); } catch(e) { /* ignore */ }
+        });
         document.querySelectorAll('.score-total-field').forEach(totalField => {
             const cfg = parseJsonDeep(totalField.dataset.config || '{}', {});
             const include = Array.isArray(cfg.include_keys) ? cfg.include_keys : [];
@@ -447,20 +454,11 @@ function coLocateScoreTotals() {
                 targetGroup.appendChild(grid);
             }
 
-            // 총점 컨테이너를 .sc-col 형태로 보장
-            let totalContainer = totalField.closest('.sc-col');
-            if (!totalContainer) {
-                const wrap = document.createElement('div');
-                wrap.className = 'sc-col';
-                totalField.parentNode.insertBefore(wrap, totalField);
-                wrap.appendChild(totalField);
-                totalContainer = wrap;
-            }
-
-            // 원래 info-cell 추적 (총점이 있던 셀)
-            const sourceInfoCell = totalContainer.closest('.info-cell');
-            const shouldHideSource = !!(sourceInfoCell && sourceInfoCell.contains(totalContainer));
-            // 이동 전 외부 라벨 텍스트 확보
+            // 총점 원본 컨테이너(.info-cell 내의 실제 타일)를 정확히 식별
+            const fieldKey = totalField.getAttribute('data-field');
+            const sourceTotalContainer = document.querySelector(`.info-cell .score-total-field[data-field="${fieldKey}"]:not(.score-total-clone)`);
+            const sourceInfoCell = sourceTotalContainer ? sourceTotalContainer.closest('.info-cell') : null;
+            // 원본 라벨 텍스트 확보 (info-cell > label 또는 타일 내부 라벨)
             let outerLabelText = null;
             if (sourceInfoCell) {
                 const direct = sourceInfoCell.querySelector(':scope > label');
@@ -469,16 +467,86 @@ function coLocateScoreTotals() {
                 if (labelNode && labelNode.textContent) {
                     outerLabelText = labelNode.textContent.trim();
                 }
+                if (!outerLabelText) {
+                    const inner = sourceTotalContainer ? sourceTotalContainer.querySelector('label') : null;
+                    if (inner && inner.textContent) outerLabelText = inner.textContent.trim();
+                }
+                // 원본 info-cell id를 부여하고 참조 저장 (이후 정확히 이 셀만 숨김)
+                if (!sourceInfoCell.id) {
+                    const fid = fieldKey || Math.random().toString(36).slice(2);
+                    sourceInfoCell.id = `scoretotal-src-${fid}`;
+                }
+                totalField.setAttribute('data-source-info-id', sourceInfoCell.id);
             }
 
-            // 그리드로 이동 (항목 옆으로 레고처럼 붙이기)
-            grid.appendChild(totalContainer);
+            // 이미 클론이 있는지 확인 (중복 추가 방지)
+            let clone = grid.querySelector(`.score-total-field.score-total-clone[data-field="${fieldKey}"]`);
+            if (!clone) {
+                // 총점 컨테이너를 .sc-col 형태로 보장
+                let totalContainer = totalField.closest('.sc-col');
+                if (!totalContainer) {
+                    const wrap = document.createElement('div');
+                    wrap.className = 'sc-col';
+                    totalField.parentNode.insertBefore(wrap, totalField);
+                    wrap.appendChild(totalField);
+                    totalContainer = wrap;
+                }
+                clone = totalContainer.cloneNode(true);
+                try {
+                    // 클론에서는 hidden input 제거 (저장 값 중복 방지)
+                    clone.querySelectorAll('input[type="hidden"][data-field]').forEach(h => h.remove());
+                    // 라벨 텍스트를 원본 컬럼명으로 동기화
+                    const inner = clone.querySelector('label');
+                    if (inner && outerLabelText && outerLabelText.length > 0) {
+                        inner.textContent = outerLabelText;
+                    }
+                    // 식별용 클래스 추가
+                    clone.classList.add('score-total-clone');
+                } catch (e) { /* ignore */ }
 
-            // 라벨은 이동하지 않음: 각 info-cell의 라벨과 타일 내부 라벨을 모두 유지해
-            // 시각적으로도 헷갈리지 않도록 한다. (중복 표시는 허용)
-            // 원본 셀도 숨기지 않음: 다른 칼럼 라벨 손상 방지
+                // 채점 항목들 뒤에 자연스럽게 붙이기 위해 그리드 마지막에 추가
+                grid.appendChild(clone);
+            } else {
+                // 기존 클론의 라벨만 동기화
+                try {
+                    const inner = clone.querySelector('label');
+                    if (inner && outerLabelText && outerLabelText.length > 0) {
+                        inner.textContent = outerLabelText;
+                    }
+                } catch (e) { /* ignore */ }
+            }
+
+            // 원본 필드에도 소스 라벨 저장 (동기화용)
+            if (outerLabelText && outerLabelText.length > 0) {
+                totalField.setAttribute('data-source-label', outerLabelText);
+            }
+
+            // 원본 총점 셀은 레이아웃을 밀어내므로 숨김 처리
+            if (sourceInfoCell && sourceInfoCell.style) {
+                sourceInfoCell.style.display = 'none';
+            }
         });
+        // 이동 후 라벨 동기화 재실행
+        syncScoreTotalLabels();
     } catch (e) {
         console.warn('coLocateScoreTotals error:', e);
     }
+}
+
+// 총점 타일 내부 라벨을 원래 info-cell 컬럼 라벨과 맞추고, 외부 라벨은 숨김 처리
+function syncScoreTotalLabels() {
+    document.querySelectorAll('.score-total-field').forEach(totalField => {
+        // 내부 라벨에 원본 컬럼명 적용
+        const inner = totalField.querySelector('label');
+        const sourceLabel = totalField.getAttribute('data-source-label');
+        if (inner && sourceLabel) {
+            inner.textContent = sourceLabel;
+        }
+        // 원본 총점 info-cell만 숨김 (다른 칼럼 라벨은 유지)
+        const srcId = totalField.getAttribute('data-source-info-id');
+        if (srcId) {
+            const srcCell = document.getElementById(srcId);
+            if (srcCell && srcCell.style) srcCell.style.display = 'none';
+        }
+    });
 }

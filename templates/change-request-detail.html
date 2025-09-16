@@ -58,7 +58,7 @@
         <div class="section-content" id="additional-info-content">
             
             <div class="info-table">
-                {% set columns_per_row = 4 %}
+                {% set columns_per_row = 8 %}
                 {% for chunk in dynamic_columns | batch(columns_per_row) %}
                 <div class="info-row">
                     {% for col in chunk %}
