@@ -11347,8 +11347,34 @@ def sso():
         'state': state_val,
     }
     auth_url = idp_url + ('?' if '?' not in idp_url else '&') + _urlencode(params)
-    print(f"[SSO] Auth URL: {auth_url}")
-    return redirect(auth_url, code=302)
+    try:
+        # 개발 편의: /SSO?debug=1 로 호출 시 리다이렉트 대신 내용을 그대로 보여줌
+        if request.args.get('debug') == '1':
+            headers = {
+                'X-Forwarded-Proto': request.headers.get('X-Forwarded-Proto'),
+                'X-Forwarded-Host': request.headers.get('X-Forwarded-Host'),
+                'Host': request.headers.get('Host'),
+            }
+            html = f"""
+            <h2>SSO Debug</h2>
+            <pre>
+            idp_url: {idp_url}
+            client_id: {client_id}
+            redirect_uri: {redirect_uri}
+            state: {state_val}
+            nonce: {nonce_val}
+            auth_url: {auth_url}
+            headers: {headers}
+            scheme: {request.scheme}
+            url_root: {request.url_root}
+            </pre>
+            <a href="{auth_url}">Go to Auth URL</a>
+            """
+            return html
+        print(f"[SSO] Auth URL: {auth_url}")
+        return redirect(auth_url, code=302)
+    except Exception as e:
+        return f"SSO error building auth URL: {e}", 500
 
 def _load_public_key_from_cert_bytes(cert_bytes: bytes):
     """Try PEM then DER to load a certificate and return its public key."""
@@ -11368,19 +11394,30 @@ def _read_cert_bytes(cfg: configparser.ConfigParser) -> bytes:
     cert_name = _get_config_value(cfg, 'SSO', 'cert_file_name', 'CertFile_Name', default='Idp.cer')
     # Normalize path separators
     base = os.getcwd()
+    # 윈도우 경로 구분자 섞임 방지
+    cert_dir_norm = cert_dir.replace('\\', os.sep).replace('/', os.sep)
     candidates = [
-        os.path.join(base, cert_dir, cert_name),
+        os.path.join(base, cert_dir_norm, cert_name),
         os.path.join(base, 'templates', 'Cert', cert_name),
         os.path.join(base, 'Templates', 'Cert', cert_name),
     ]
+    print(f"[SSO][IDP CERT] CWD: {base}")
+    print(f"[SSO][IDP CERT] Declared dir/name: '{cert_dir}' / '{cert_name}'")
+    tried = []
     for p in candidates:
+        exists = os.path.exists(p)
+        print(f"[SSO][IDP CERT] Try: {p} exists={exists}")
+        tried.append((p, exists))
+        if not exists:
+            continue
         try:
             with open(p, 'rb') as f:
                 print(f"[SSO] Using cert: {p}")
                 return f.read()
-        except FileNotFoundError:
+        except Exception as e:
+            print(f"[SSO][IDP CERT] Read fail: {p} error={e}")
             continue
-    raise FileNotFoundError(f"Certificate not found. Tried: {candidates}")
+    raise FileNotFoundError("Certificate not found. Tried: " + ", ".join([f"{p} (exists={ex})" for p, ex in tried]))
 
 @app.route('/acs', methods=['GET', 'POST'])
 def acs():
@@ -11509,7 +11546,7 @@ def auto_sso_redirect():
     """세션이 없으면 자동으로 SSO 시작"""
 
     # 제외 경로 (SSO, 정적 파일, API 등)
-    excluded_paths = ['/SSO', '/acs', '/slo', '/static', '/uploads', '/api', '/admin/login', '/debug-session']
+    excluded_paths = ['/SSO', '/sso', '/sso/diagnostics', '/acs', '/slo', '/static', '/uploads', '/api', '/admin/login', '/debug-session']
 
     # 제외 경로는 체크 안 함
     for path in excluded_paths:
@@ -11543,6 +11580,68 @@ def debug_session():
     <a href="/slo">Logout</a> |
     <a href="/">Home</a>
     """
+
+# SSO 진단 페이지: 경로/설정/파일 존재 여부 표시
+@app.route('/sso/diagnostics')
+def sso_diagnostics():
+    try:
+        cfg = configparser.ConfigParser()
+        cfg.read('config.ini', encoding='utf-8')
+
+        # 기본 경로 정보
+        cwd = os.getcwd()
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # 서버 TLS 인증서(HTTPS 포트용)
+        ssl_cert_cfg = cfg.get('SSO', 'ssl_cert_file', fallback='Templates/Cert/cert.pem')
+        ssl_key_cfg = cfg.get('SSO', 'ssl_key_file', fallback='Templates/Cert/key.pem')
+        ssl_cert_abs = ssl_cert_cfg if os.path.isabs(ssl_cert_cfg) else os.path.join(base_dir, ssl_cert_cfg)
+        ssl_key_abs = ssl_key_cfg if os.path.isabs(ssl_key_cfg) else os.path.join(base_dir, ssl_key_cfg)
+
+        # IdP 공개키 인증서(토큰 검증용)
+        cert_dir = _get_config_value(cfg, 'SSO', 'cert_file_path', 'CertFile_Path', default='templates/Cert/')
+        cert_name = _get_config_value(cfg, 'SSO', 'cert_file_name', 'CertFile_Name', default='Idp.cer')
+        idp_candidates = [
+            os.path.join(cwd, cert_dir.replace('\\', os.sep).replace('/', os.sep), cert_name),
+            os.path.join(cwd, 'templates', 'Cert', cert_name),
+            os.path.join(cwd, 'Templates', 'Cert', cert_name),
+        ]
+
+        # SSO 파라미터들
+        idp_url = _get_config_value(cfg, 'SSO', 'idp_authorize_url', 'idp_entity_id', 'Idp.EntityID', default='')
+        client_id = _get_config_value(cfg, 'SSO', 'idp_client_id', 'Idp.ClientID', default='')
+        redirect_uri = _compute_redirect_uri(cfg)
+        sp_redirect_url_cfg = _get_config_value(cfg, 'SSO', 'sp_redirect_url', default='')
+
+        html = [
+            '<h2>SSO Diagnostics</h2>',
+            '<h3>Paths</h3>',
+            f'<pre>CWD: {cwd}\nBASE_DIR: {base_dir}</pre>',
+            '<h4>Server TLS (HTTPS)</h4>',
+            f'<pre>ssl_cert_file (cfg): {ssl_cert_cfg}\nssl_key_file  (cfg): {ssl_key_cfg}\n'
+            f'ssl_cert_abs (resolved): {ssl_cert_abs} exists={os.path.exists(ssl_cert_abs)}\n'
+            f'ssl_key_abs  (resolved): {ssl_key_abs} exists={os.path.exists(ssl_key_abs)}</pre>',
+            '<h4>IdP Signing Cert (Token Verification)</h4>',
+            f'<pre>cert_file_path (cfg): {cert_dir}\ncert_file_name (cfg): {cert_name}</pre>',
+            '<ul>'
+        ]
+        for p in idp_candidates:
+            html.append(f'<li>{p} — exists={os.path.exists(p)}</li>')
+        html.append('</ul>')
+
+        html.extend([
+            '<h3>SSO Params</h3>',
+            f'<pre>idp_authorize_url: {idp_url}\nclient_id: {client_id}\n'
+            f'sp_redirect_url (cfg): {sp_redirect_url_cfg}\ncomputed redirect_uri: {redirect_uri}\n'</pre>',
+            '<h3>Request</h3>',
+            f'<pre>scheme: {request.scheme}\nHost: {request.headers.get("Host")}\n'
+            f'X-Forwarded-Proto: {request.headers.get("X-Forwarded-Proto")}\n'
+            f'X-Forwarded-Host: {request.headers.get("X-Forwarded-Host")}\n'</pre>',
+        ])
+
+        return '\n'.join(html)
+    except Exception as e:
+        return f"Diagnostics error: {e}", 500
 
 if __name__ == "__main__":
     print("Flask 앱 시작 중...", flush=True)
