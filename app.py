@@ -11316,16 +11316,18 @@ def acs():
             cert_path = config.get('SSO', 'cert_file_path', fallback='Templates/Cert/')
             cert_name = config.get('SSO', 'cert_file_name', fallback='Idp.cer')
 
-            # 원본 config.py처럼 os.getcwd() + 경로 조합
-            full_cert_path = os.path.join(os.getcwd(), cert_path.replace('/', os.sep), cert_name)
+            # 운영환경처럼 정확히 동일하게 처리
+            # config.py: os.getcwd() + '\\Templates\\Cert\\'
+            full_cert_path = os.getcwd() + '\\' + cert_path.replace('/', '\\') + cert_name
             print(f"[SSO] Loading certificate from: {full_cert_path}")
 
+            # 실제 폴더는 소문자 templates일 수 있으므로 폴백
             try:
                 cert_str = open(full_cert_path, 'rb').read()
             except FileNotFoundError:
-                # 경로 구분자 문제일 수 있으니 다른 방식 시도
-                alt_cert_path = os.getcwd() + os.sep + cert_path.replace('/', os.sep) + cert_name
-                print(f"[SSO] Retry with alt path: {alt_cert_path}")
+                # 소문자 templates로 재시도
+                alt_cert_path = os.getcwd() + '\\templates\\Cert\\' + cert_name
+                print(f"[SSO] Retry with lowercase: {alt_cert_path}")
                 cert_str = open(alt_cert_path, 'rb').read()
             cert_obj = x509.load_pem_x509_certificate(cert_str, default_backend())
             public_key = cert_obj.public_key()
@@ -11512,11 +11514,22 @@ if __name__ == "__main__":
     
     print(f"partner-accident 라우트 등록됨: {'/partner-accident' in [rule.rule for rule in app.url_map.iter_rules()]}", flush=True)
 
-    # SSL 설정 추가 (샘플 SSO용)
+    # SSL 설정 (config.ini에서 읽기)
+    config = configparser.ConfigParser()
+    config.read('config.ini', encoding='utf-8')
+
+    ssl_cert = config.get('SSO', 'ssl_cert_file', fallback='Templates/Cert/cert.pem')
+    ssl_key = config.get('SSO', 'ssl_key_file', fallback='Templates/Cert/key.pem')
+    ssl_port = config.getint('SSO', 'ssl_port', fallback=44369)
+    http_port = config.getint('SSO', 'http_port', fallback=5000)
+
+    # SSL 인증서가 있으면 HTTPS, 없으면 HTTP
     ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS)
     try:
-        ssl_context.load_cert_chain(certfile='Templates/Cert/cert.pem', keyfile='Templates/Cert/key.pem')
-        app.run(host="0.0.0.0", port=44369, ssl_context=ssl_context, debug=app.debug)
-    except FileNotFoundError:
-        print("SSL 인증서 파일이 없습니다. HTTP로 실행합니다.")
-        app.run(host="0.0.0.0", port=5000, debug=app.debug)
+        ssl_context.load_cert_chain(certfile=ssl_cert, keyfile=ssl_key)
+        print(f"HTTPS 모드로 실행: https://localhost:{ssl_port}")
+        app.run(host="0.0.0.0", port=ssl_port, ssl_context=ssl_context, debug=app.debug)
+    except (FileNotFoundError, Exception) as e:
+        print(f"SSL 인증서 문제: {e}")
+        print(f"HTTP 모드로 실행: http://localhost:{http_port}")
+        app.run(host="0.0.0.0", port=http_port, debug=app.debug)
