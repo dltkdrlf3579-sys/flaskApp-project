@@ -11631,12 +11631,23 @@ def sso_diagnostics():
 
         html.extend([
             '<h3>SSO Params</h3>',
-            f'<pre>idp_authorize_url: {idp_url}\nclient_id: {client_id}\n'
-            f'sp_redirect_url (cfg): {sp_redirect_url_cfg}\ncomputed redirect_uri: {redirect_uri}\n'</pre>',
+            (
+                f'<pre>'
+                f'idp_authorize_url: {idp_url}\n'
+                f'client_id: {client_id}\n'
+                f'sp_redirect_url (cfg): {sp_redirect_url_cfg}\n'
+                f'computed redirect_uri: {redirect_uri}\n'
+                f'</pre>'
+            ),
             '<h3>Request</h3>',
-            f'<pre>scheme: {request.scheme}\nHost: {request.headers.get("Host")}\n'
-            f'X-Forwarded-Proto: {request.headers.get("X-Forwarded-Proto")}\n'
-            f'X-Forwarded-Host: {request.headers.get("X-Forwarded-Host")}\n'</pre>',
+            (
+                f'<pre>'
+                f'scheme: {request.scheme}\n'
+                f'Host: {request.headers.get("Host")}\n'
+                f'X-Forwarded-Proto: {request.headers.get("X-Forwarded-Proto")}\n'
+                f'X-Forwarded-Host: {request.headers.get("X-Forwarded-Host")}\n'
+                f'</pre>'
+            ),
         ])
 
         return '\n'.join(html)
