@@ -175,35 +175,33 @@ def apply_external_scoring(cursor, fullprocess_number: str, scoring_columns: Lis
 
         for scoring_col in scoring_columns:
             column_key = scoring_col['column_key']
-            # 원본 config 전체를 복사 (깊은 복사)
-            config = json.loads(json.dumps(scoring_col['config']))
+            items = scoring_col['items'].copy()  # 원본 수정 방지
+            config = scoring_col['config']
 
             if column_key in mapping:
                 logging.info(f"[SCORING] Processing column_key: {column_key}")
 
-                # config의 items 배열 수정
-                if 'items' in config:
-                    for item in config['items']:
-                        item_id = item['id']
+                for item in items:
+                    item_id = item['id']
 
-                        if item_id in mapping[column_key]:
-                            external_column = mapping[column_key][item_id]
+                    if item_id in mapping[column_key]:
+                        external_column = mapping[column_key][item_id]
 
-                            if external_column in external_data:
-                                # 핵심: value 필드 추가 (external_value가 아닌 value!)
-                                value = external_data[external_column]
-                                item['value'] = value
+                        if external_column in external_data:
+                            # 값 적용
+                            value = external_data[external_column]
+                            item['external_value'] = value
 
-                                logging.info(f"[SCORING] 매핑 적용: {column_key}.{item_id} → {external_column} = {value}")
-                            else:
-                                logging.warning(f"[SCORING] External column '{external_column}' not found in data")
+                            logging.info(f"[SCORING] 매핑 적용: {column_key}.{item_id} → {external_column} = {value}")
                         else:
-                            logging.debug(f"[SCORING] item_id '{item_id}' not found in mapping for {column_key}")
+                            logging.warning(f"[SCORING] External column '{external_column}' not found in data")
+                    else:
+                        logging.warning(f"[SCORING] item_id '{item_id}' not found in mapping for {column_key}")
 
-            # 완전한 scoring_config 구조로 저장
             updated_columns.append({
                 'column_key': column_key,
-                'scoring_config': config  # 수정된 완전한 JSON 구조
+                'items': items,
+                'config': config
             })
 
         logging.info(f"[SCORING] Successfully processed {len(updated_columns)} scoring columns")

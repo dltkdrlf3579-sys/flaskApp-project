@@ -6772,7 +6772,7 @@ def admin_logout():
 # Admin 동기화 관리 엔드포인트
 # ======================================================================
 
-@app.route('/admin/sync-now', methods=['POST'])
+@app.route('/admin/sync-now', methods=['POST','GET'])
 def admin_sync_now():
     """수동 강제 동기화 엔드포인트"""
     try:
@@ -6789,6 +6789,12 @@ def admin_sync_now():
         if expected:
             if provided != expected:
                 return jsonify({'success': False, 'message': 'Unauthorized (sync token required)'}), 401
+
+        # 디버그 로깅(요청 메타)
+        try:
+            print(f"[SYNC] method={request.method} ct={request.headers.get('Content-Type')} host={request.host}")
+        except Exception:
+            pass
 
         # type 파라미터는 JSON/폼/쿼리스트링 모두 허용
         sync_type = None
@@ -11570,8 +11576,18 @@ def auto_sso_redirect():
         '/SSO', '/sso', '/sso/diagnostics', '/acs', '/slo', '/static', '/uploads', '/api',
         '/admin/login', '/debug-session',
         # allow automation endpoints without SSO session
-        '/admin/sync-now', '/admin/cache-counts'
+        '/admin/sync-now', '/admin/sync-now/', '/admin/cache-counts'
     ]
+
+    # 동기화 토큰이 있는 요청은 항상 통과 (자동화/스크립트 호출용)
+    try:
+        cfg = configparser.ConfigParser()
+        cfg.read('config.ini', encoding='utf-8')
+        expected = cfg.get('ADMIN', 'SYNC_TOKEN', fallback='')
+    except Exception:
+        expected = ''
+    if expected and request.headers.get('X-Sync-Token') == expected:
+        return None
 
     # 제외 경로는 체크 안 함
     for path in excluded_paths:

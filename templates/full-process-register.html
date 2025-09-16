@@ -220,12 +220,39 @@
                                     <label>{{ col.column_name }}</label>
                                     {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}
                                     {% set items = sc['items'] if sc and ('items' in sc) else [] %}
+                                    {# 이전 컬럼이 score_total인지 확인 #}
+                                    {% set prev_idx = loop.index0 - 1 %}
+                                    {% set prev_col = chunk[prev_idx] if prev_idx >= 0 else None %}
+                                    {% set has_prev_score_total = prev_col and prev_col.column_type == 'score_total' %}
                                     {# 다음 컬럼이 score_total인지 확인 #}
                                     {% set next_idx = loop.index0 + 1 %}
                                     {% set next_col = chunk[next_idx] if next_idx < chunk|length else None %}
                                     {% set has_score_total = next_col and next_col.column_type == 'score_total' %}
 
                                     <div class="scoring-group scoring-columns" data-field="{{ col.column_key }}" data-config='{{ col.scoring_config|default("{}")|tojson }}' data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}">
+                                        {# score_total이 이전에 있으면 첫 번째로 포함 #}
+                                        {% if has_prev_score_total %}
+                                            {% set sc_total = (prev_col.scoring_config|from_json) if prev_col.scoring_config else {} %}
+                                            {% set base_score = sc_total.get('base_score') if sc_total and sc_total.get('base_score') else 100 %}
+                                            <div class="sc-col">
+                                                <label class="form-label">{{ prev_col.column_name }}</label>
+                                                <input type="number"
+                                                       id="{{ prev_col.column_key }}_display"
+                                                       class="total-score-display"
+                                                       data-field="{{ prev_col.column_key }}"
+                                                       data-config='{{ prev_col.scoring_config|default("{}")|tojson }}'
+                                                       data-base-score="{{ base_score }}"
+                                                       value="{{ base_score }}"
+                                                       readonly
+                                                       style="width: 100%; border: 1px solid #d1d5db; border-radius: 4px; padding: 6px 8px; font-weight: bold; text-align: center; background: #f8f9fa;">
+                                                <input type="hidden"
+                                                       id="{{ prev_col.column_key }}"
+                                                       class="{{ section.section_key|replace('_', '-') }}-input"
+                                                       data-field="{{ prev_col.column_key }}"
+                                                       data-section="{{ section.section_key }}"
+                                                       value="{{ base_score }}">
+                                            </div>
+                                        {% endif %}
                                         {% for it in items %}
                                         <div class="sc-col">
                                             <label class="form-label">{{ it.name or it.label or '항목' }}</label>
@@ -234,7 +261,7 @@
                                                    data-item="{{ it.id }}"
                                                    data-score="{{ it.per_unit_delta }}"
                                                    data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}"
-                                                   value="0">
+                                                   value="">
                                             {% if sc.get('show_unit_hint', True) %}
                                             <small class="hint">{{ it.per_unit_delta }}점/건</small>
                                             {% endif %}
@@ -272,10 +299,12 @@
                                                value='{}'>
                                     </div>
                                 {% elif col.column_type == 'score_total' %}
-                                    {# 이전 컬럼이 scoring이면 이미 처리됨, 건너뛰기 #}
+                                    {# 이전 컬럼이 scoring이거나 다음 컬럼이 scoring이면 건너뛰기 #}
                                     {% set prev_idx = loop.index0 - 1 %}
                                     {% set prev_col = chunk[prev_idx] if prev_idx >= 0 else None %}
-                                    {% if not (prev_col and prev_col.column_type == 'scoring') %}
+                                    {% set next_idx = loop.index0 + 1 %}
+                                    {% set next_col = chunk[next_idx] if next_idx < chunk|length else None %}
+                                    {% if not (prev_col and prev_col.column_type == 'scoring') and not (next_col and next_col.column_type == 'scoring') %}
                                         <!-- 총점 필드 (독립적으로 표시) -->
                                         <label>{{ col.column_name }}</label>
                                         {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}
