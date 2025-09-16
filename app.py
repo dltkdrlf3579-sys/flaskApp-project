@@ -101,6 +101,12 @@ menu = MENU_CONFIG
 
 # 설정 파일에서 환경 설정 로드
 app.secret_key = db_config.config.get('DEFAULT', 'SECRET_KEY')
+
+# 세션 쿠키 설정 (localhost와 127.0.0.1 호환)
+app.config['SESSION_COOKIE_DOMAIN'] = None  # 도메인 제한 없음
+app.config['SESSION_COOKIE_SECURE'] = False  # HTTP/HTTPS 둘 다 허용
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.debug = db_config.config.getboolean('DEFAULT', 'DEBUG')
 
 # Jinja2 필터 추가 (JSON 파싱용)
@@ -11279,26 +11285,102 @@ def serve_uploaded_content(filename):
 # SSO 샘플 라우트 추가
 # =====================
 
+def _get_config_value(cfg: configparser.ConfigParser, section: str, key: str, *fallback_keys, default: str = '') -> str:
+    """Try multiple keys (for legacy compatibility) and return first available value."""
+    # Primary
+    if cfg.has_option(section, key):
+        return cfg.get(section, key)
+    # Fallbacks (flat, legacy-style)
+    for fk in fallback_keys:
+        if cfg.has_option(section, fk):
+            return cfg.get(section, fk)
+    return default
+
+def _compute_redirect_uri(cfg: configparser.ConfigParser) -> str:
+    # Prefer explicit config
+    val = _get_config_value(cfg, 'SSO', 'sp_redirect_url', default='')
+    if val:
+        return val
+    # Fallback: build from current request
+    try:
+        scheme = request.headers.get('X-Forwarded-Proto') or ('https' if request.is_secure else 'http')
+        host = request.headers.get('X-Forwarded-Host') or request.host
+        return f"{scheme}://{host}/acs"
+    except Exception:
+        # Final fallback (dev default)
+        return 'https://localhost:44369/acs'
+
+def _urlencode(params: dict) -> str:
+    from urllib.parse import urlencode
+    return urlencode(params)
+
 @app.route('/SSO')
 def sso():
     """SSO 인증 시작"""
-    # config.ini에서 SSO 설정 읽기
-    config = configparser.ConfigParser()
-    config.read('config.ini', encoding='utf-8')
+    cfg = configparser.ConfigParser()
+    cfg.read('config.ini', encoding='utf-8')
 
-    nonce_val = uuid.uuid4().urn
-    nonce_val = nonce_val[9:]
+    # State/Nonce for CSRF + replay protection
+    state_val = uuid.uuid4().hex
+    nonce_val = uuid.uuid4().hex
+    session['sso_state'] = state_val
+    session['sso_nonce'] = nonce_val
 
-    idp_url = config.get('SSO', 'idp_entity_id', fallback='example')
-    auth_param = '?client_id=' + config.get('SSO', 'idp_client_id', fallback='example')
-    auth_param += '&redirect_uri=' + config.get('SSO', 'sp_redirect_url', fallback='https://localhost:44369/acs')
-    auth_param += '&response_mode=form_post'
-    auth_param += '&response_type=id_token'
-    auth_param += '&scope=openid+profile'
-    auth_param += '&nonce=' + nonce_val
+    # IDP authorize endpoint (config name varies in samples)
+    idp_url = _get_config_value(
+        cfg, 'SSO', 'idp_authorize_url',
+        'idp_entity_id', 'Idp.EntityID', default=''
+    )
+    client_id = _get_config_value(cfg, 'SSO', 'idp_client_id', 'Idp.ClientID', default='')
+    redirect_uri = _compute_redirect_uri(cfg)
 
-    print(idp_url + auth_param)
-    return redirect(idp_url + auth_param, code=302)
+    if not idp_url or not client_id:
+        print(f"[SSO] Missing idp_url/client_id. idp_url='{idp_url}', client_id='{client_id}'")
+    
+    params = {
+        'client_id': client_id,
+        'redirect_uri': redirect_uri,
+        'response_mode': 'form_post',
+        'response_type': 'id_token',
+        'scope': 'openid profile',
+        'nonce': nonce_val,
+        'state': state_val,
+    }
+    auth_url = idp_url + ('?' if '?' not in idp_url else '&') + _urlencode(params)
+    print(f"[SSO] Auth URL: {auth_url}")
+    return redirect(auth_url, code=302)
+
+def _load_public_key_from_cert_bytes(cert_bytes: bytes):
+    """Try PEM then DER to load a certificate and return its public key."""
+    try:
+        cert_obj = x509.load_pem_x509_certificate(cert_bytes, default_backend())
+        return cert_obj.public_key()
+    except Exception:
+        try:
+            cert_obj = x509.load_der_x509_certificate(cert_bytes, default_backend())
+            return cert_obj.public_key()
+        except Exception as e:
+            raise e
+
+def _read_cert_bytes(cfg: configparser.ConfigParser) -> bytes:
+    # Accept multiple config shapes and case variants
+    cert_dir = _get_config_value(cfg, 'SSO', 'cert_file_path', 'CertFile_Path', default='templates/Cert/')
+    cert_name = _get_config_value(cfg, 'SSO', 'cert_file_name', 'CertFile_Name', default='Idp.cer')
+    # Normalize path separators
+    base = os.getcwd()
+    candidates = [
+        os.path.join(base, cert_dir, cert_name),
+        os.path.join(base, 'templates', 'Cert', cert_name),
+        os.path.join(base, 'Templates', 'Cert', cert_name),
+    ]
+    for p in candidates:
+        try:
+            with open(p, 'rb') as f:
+                print(f"[SSO] Using cert: {p}")
+                return f.read()
+        except FileNotFoundError:
+            continue
+    raise FileNotFoundError(f"Certificate not found. Tried: {candidates}")
 
 @app.route('/acs', methods=['GET', 'POST'])
 def acs():
@@ -11310,35 +11392,32 @@ def acs():
 
     if request.method == 'POST':
         try:
-            # config.ini에서 인증서 경로 읽기
-            config = configparser.ConfigParser()
-            config.read('config.ini', encoding='utf-8')
-            cert_path = config.get('SSO', 'cert_file_path', fallback='Templates/Cert/')
-            cert_name = config.get('SSO', 'cert_file_name', fallback='Idp.cer')
-
-            # 운영환경처럼 정확히 동일하게 처리
-            # config.py: os.getcwd() + '\\Templates\\Cert\\'
-            full_cert_path = os.getcwd() + '\\' + cert_path.replace('/', '\\') + cert_name
-            print(f"[SSO] Loading certificate from: {full_cert_path}")
-
-            # 실제 폴더는 소문자 templates일 수 있으므로 폴백
-            try:
-                cert_str = open(full_cert_path, 'rb').read()
-            except FileNotFoundError:
-                # 소문자 templates로 재시도
-                alt_cert_path = os.getcwd() + '\\templates\\Cert\\' + cert_name
-                print(f"[SSO] Retry with lowercase: {alt_cert_path}")
-                cert_str = open(alt_cert_path, 'rb').read()
-            cert_obj = x509.load_pem_x509_certificate(cert_str, default_backend())
-            public_key = cert_obj.public_key()
+            cfg = configparser.ConfigParser()
+            cfg.read('config.ini', encoding='utf-8')
+            cert_bytes = _read_cert_bytes(cfg)
+            public_key = _load_public_key_from_cert_bytes(cert_bytes)
 
             id_token_val = request.form['id_token']
-            b_token = id_token_val.encode()
+            # Optional state check if response_mode=form_post includes state
+            state_in = request.form.get('state')
+            if state_in and session.get('sso_state') and state_in != session.get('sso_state'):
+                raise Exception('Invalid SSO state')
 
-            decoded = jwt.decode(b_token, public_key, algorithms=['RS256'],
-                               options={'verify_signature': True, 'verify_exp': True, 'verify_aud': False})
+            # Decode
+            decoded = jwt.decode(
+                id_token_val,
+                key=public_key,
+                algorithms=['RS256'],
+                options={'verify_signature': True, 'verify_exp': True, 'verify_aud': False}
+            )
             json_str = json.dumps(decoded)
             claim_val = json.loads(json_str)
+
+            # Optional nonce check
+            nonce_expected = session.get('sso_nonce')
+            nonce_received = claim_val.get('nonce') if isinstance(claim_val, dict) else None
+            if nonce_expected and nonce_received and nonce_expected != nonce_received:
+                print(f"[SSO] Nonce mismatch: expected={nonce_expected}, received={nonce_received}")
 
             # 세션에 사용자 정보 저장 (1시 방향 이름 표시 및 파일 업로드 추적용)
             if claim_val:
@@ -11404,8 +11483,12 @@ def acs():
             print(f"[SSO SUCCESS] Redirecting to {next_url}")
             return redirect(next_url)
 
-    # 에러 또는 GET 요청 시 SSO 페이지 표시
-    return render_template('sso_index.html', isLoad=isLoad, isError=isError, Error_MSG=Error_MSG, Claims=claim_val)
+    # 에러 또는 GET 요청 시 SSO 페이지 표시 (간단한 디버그 정보 포함)
+    try:
+        return render_template('sso_index.html', isLoad=isLoad, isError=isError, Error_MSG=Error_MSG, Claims=claim_val)
+    except Exception:
+        # 템플릿이 없더라도 최소한 텍스트 표시
+        return f"SSO {'OK' if not isError else 'ERROR'}: {Error_MSG}", (200 if not isError else 400)
 
 @app.route('/slo')
 def slo():
