@@ -11330,9 +11330,49 @@ def acs():
 
             # 세션에 사용자 정보 저장 (1시 방향 이름 표시 및 파일 업로드 추적용)
             if claim_val:
-                session['user_id'] = claim_val.get('loginid', '')  # loginid를 user_id로 저장
-                session['user_name'] = claim_val.get('username', '')  # username을 user_name으로 저장
+                # 디버깅: 실제 클레임 키 확인
+                print("="*50)
+                print("SSO CLAIM DEBUG:")
+                print(f"All keys: {list(claim_val.keys())}")
+
+                # 가능한 username 키들 체크
+                possible_name_keys = ['username', 'Username', 'UserName', 'userName', 'name', 'Name']
+                for key in possible_name_keys:
+                    if key in claim_val:
+                        print(f"✓ Found NAME key: '{key}' = '{claim_val[key]}'")
+
+                # 가능한 loginid 키들 체크
+                possible_id_keys = ['loginid', 'LoginId', 'loginId', 'login_id', 'Login_Id', 'sub']
+                for key in possible_id_keys:
+                    if key in claim_val:
+                        print(f"✓ Found ID key: '{key}' = '{claim_val[key]}'")
+
+                # 대소문자 무관하게 찾기
+                user_name = ''
+                user_id = ''
+
+                # username 찾기 (순서대로 시도)
+                for key in ['username', 'Username', 'UserName', 'name', 'Name']:
+                    if key in claim_val and claim_val[key]:
+                        user_name = claim_val[key]
+                        print(f"→ Using '{key}' for user_name: '{user_name}'")
+                        break
+
+                # loginid 찾기 (순서대로 시도)
+                for key in ['loginid', 'LoginId', 'loginId', 'login_id', 'sub']:
+                    if key in claim_val and claim_val[key]:
+                        user_id = claim_val[key]
+                        print(f"→ Using '{key}' for user_id: '{user_id}'")
+                        break
+
+                session['user_id'] = user_id
+                session['user_name'] = user_name
                 session['authenticated'] = True
+
+                print(f"SAVED TO SESSION:")
+                print(f"  user_id: '{session.get('user_id')}'")
+                print(f"  user_name: '{session.get('user_name')}'")
+                print("="*50)
 
         except jwt.ExpiredSignatureError:
             isError = True
