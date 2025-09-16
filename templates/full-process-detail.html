@@ -69,23 +69,8 @@
                             {% if col.column_type == 'list' %}
                                 {% set span = 8 %}
                             {% elif col.column_type == 'scoring' %}
-                                {# scoring 필드는 항목 개수에 따라 span 결정 #}
-                                {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}
-                                {% set items = sc['items'] if sc and ('items' in sc) else [] %}
-                                {% set item_count = items|length %}
-                                {# 다음 컬럼이 score_total인지 확인 #}
-                                {% set next_idx = loop.index0 + 1 %}
-                                {% set next_col = chunk[next_idx] if next_idx < chunk|length else None %}
-                                {% set has_score_total = next_col and next_col.column_type == 'score_total' %}
-                                {# score_total이 포함되면 span 1 추가 #}
-                                {% set extra_span = 1 if has_score_total else 0 %}
-                                {% if item_count <= 4 %}
-                                    {% set span = 4 + extra_span %}
-                                {% elif item_count <= 6 %}
-                                    {% set span = 6 + extra_span %}
-                                {% else %}
-                                    {% set span = 8 %}
-                                {% endif %}
+                                {# 모든 scoring 그룹은 항상 전체 폭(8칸)을 차지 #}
+                                {% set span = 8 %}
                             {% elif col.column_type == 'score_total' %}
                                 {# 이전 컬럼이 scoring이면 span 0 (이미 처리됨) #}
                                 {% set prev_idx = loop.index0 - 1 %}
@@ -93,7 +78,7 @@
                                 {% if prev_col and prev_col.column_type == 'scoring' %}
                                     {% set span = 0 %}
                                 {% else %}
-                                    {% set span = 1 %}
+                                    {% set span = 2 %}
                                 {% endif %}
                             {% elif col.column_span and col.column_span|int > 0 %}
                                 {% set span = col.column_span|int %}
