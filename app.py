@@ -11316,7 +11316,17 @@ def acs():
             cert_path = config.get('SSO', 'cert_file_path', fallback='Templates/Cert/')
             cert_name = config.get('SSO', 'cert_file_name', fallback='Idp.cer')
 
-            cert_str = open(cert_path + cert_name, 'rb').read()
+            # 원본 config.py처럼 os.getcwd() + 경로 조합
+            full_cert_path = os.path.join(os.getcwd(), cert_path.replace('/', os.sep), cert_name)
+            print(f"[SSO] Loading certificate from: {full_cert_path}")
+
+            try:
+                cert_str = open(full_cert_path, 'rb').read()
+            except FileNotFoundError:
+                # 경로 구분자 문제일 수 있으니 다른 방식 시도
+                alt_cert_path = os.getcwd() + os.sep + cert_path.replace('/', os.sep) + cert_name
+                print(f"[SSO] Retry with alt path: {alt_cert_path}")
+                cert_str = open(alt_cert_path, 'rb').read()
             cert_obj = x509.load_pem_x509_certificate(cert_str, default_backend())
             public_key = cert_obj.public_key()
 
@@ -11414,7 +11424,7 @@ def auto_sso_redirect():
     """세션이 없으면 자동으로 SSO 시작"""
 
     # 제외 경로 (SSO, 정적 파일, API 등)
-    excluded_paths = ['/SSO', '/acs', '/slo', '/static', '/uploads', '/api', '/admin/login']
+    excluded_paths = ['/SSO', '/acs', '/slo', '/static', '/uploads', '/api', '/admin/login', '/debug-session']
 
     # 제외 경로는 체크 안 함
     for path in excluded_paths:
@@ -11429,6 +11439,25 @@ def auto_sso_redirect():
         return redirect('/SSO')
 
     return None
+
+# 수동 SSO 테스트용 디버그 라우트
+@app.route('/debug-session')
+def debug_session():
+    """세션 확인용 디버그 페이지"""
+    return f"""
+    <h1>Session Debug</h1>
+    <pre>
+    user_id: {session.get('user_id', 'NOT SET')}
+    user_name: {session.get('user_name', 'NOT SET')}
+    authenticated: {session.get('authenticated', False)}
+
+    All session keys: {list(session.keys())}
+    </pre>
+    <hr>
+    <a href="/SSO">Manual SSO Login</a> |
+    <a href="/slo">Logout</a> |
+    <a href="/">Home</a>
+    """
 
 if __name__ == "__main__":
     print("Flask 앱 시작 중...", flush=True)
