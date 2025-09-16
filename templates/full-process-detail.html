@@ -81,7 +81,8 @@
                                     {% set span = 2 %}
                                 {% endif %}
                             {% elif col.column_span and col.column_span|int > 0 %}
-                                {% set span = col.column_span|int %}
+                                {% set cs = col.column_span|int %}
+                                {% set span = cs if cs >= 2 else 2 %}
                             {% else %}
                                 {% set span = 2 %}
                             {% endif %}
