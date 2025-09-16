@@ -11386,7 +11386,13 @@ def acs():
 
         print(claim_val)
 
-    # SSO 전용 템플릿 사용 (기존 index.html과 충돌 방지)
+        # 성공 시 원래 가려던 페이지로 리다이렉트
+        if not isError and claim_val and session.get('user_name'):
+            next_url = session.pop('next_url', '/')
+            print(f"[SSO SUCCESS] Redirecting to {next_url}")
+            return redirect(next_url)
+
+    # 에러 또는 GET 요청 시 SSO 페이지 표시
     return render_template('sso_index.html', isLoad=isLoad, isError=isError, Error_MSG=Error_MSG, Claims=claim_val)
 
 @app.route('/slo')
@@ -11401,6 +11407,28 @@ def slo():
     idp_url = config.get('SSO', 'idp_signout_url', fallback='example')
     return redirect(idp_url, code=302)
 
+
+# SSO 자동 인증 미들웨어
+@app.before_request
+def auto_sso_redirect():
+    """세션이 없으면 자동으로 SSO 시작"""
+
+    # 제외 경로 (SSO, 정적 파일, API 등)
+    excluded_paths = ['/SSO', '/acs', '/slo', '/static', '/uploads', '/api', '/admin/login']
+
+    # 제외 경로는 체크 안 함
+    for path in excluded_paths:
+        if request.path.startswith(path):
+            return None
+
+    # 세션에 user_name이 없으면 자동 SSO
+    if not session.get('user_name'):
+        # 원래 가려던 URL 저장
+        session['next_url'] = request.url
+        print(f"[AUTO SSO] No session, redirecting to /SSO from {request.path}")
+        return redirect('/SSO')
+
+    return None
 
 if __name__ == "__main__":
     print("Flask 앱 시작 중...", flush=True)
