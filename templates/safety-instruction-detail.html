@@ -249,7 +249,10 @@
                                                    data-score="{{ it.per_unit_delta }}"
                                                    data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}"
                                                    value="{{ values[it.id] if values and it.id in values else 0 }}">
+                                            {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}
+                                            {% if sc.get('show_unit_hint', True) %}
                                             <small class="hint">{{ it.per_unit_delta }}점/건</small>
+                                            {% endif %}
                                         </div>
                                         {% endfor %}
                                         <input type="hidden"
@@ -261,19 +264,46 @@
                                     
                                 {% elif col.column_type == 'score_total' %}
                                     <!-- 총점 필드 (자동 계산) -->
-                                    {% set sc = (col.scoring_config|from_json) %}
-                                    <div class="score-total-field" data-total-key="{{ sc.total_key if sc and sc.total_key else 'default' }}">
-                                        <div class="score-display">
-                                            <span class="score-value">0</span>점
-                                            <div class="score-breakdown">
-                                                <span class="critical-count">중대: 0</span>
-                                                <span class="major-count">주요: 0</span>
-                                                <span class="minor-count">경미: 0</span>
-                                                <span class="bonus-count">가점: 0</span>
-                                            </div>
+                                    {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}
+                                    {% set score_items = sc.get('items') if sc and sc.get('items') else [
+                                        {'id': 'critical', 'label': '중대', 'affects_score': false, 'default': 0},
+                                        {'id': 'major', 'label': '주요', 'affects_score': false, 'default': 0},
+                                        {'id': 'minor', 'label': '경미', 'affects_score': false, 'default': 0},
+                                        {'id': 'bonus', 'label': '가점', 'affects_score': true, 'default': 0},
+                                        {'id': 'penalty', 'label': '감점', 'affects_score': true, 'negative': true, 'default': 0}
+                                    ] %}
+                                    {% set base_score = sc.get('base_score') if sc and sc.get('base_score') else 100 %}
+
+                                    <div class="scoring-columns score-total-field" data-field="{{ col.column_key }}" data-base-score="{{ base_score }}">
+                                        {% for item in score_items %}
+                                        <div class="sc-col">
+                                            <label class="form-label">{{ item.label }}</label>
+                                            <input type="number"
+                                                   class="score-item-input {{ 'affects-score' if item.affects_score else '' }}"
+                                                   data-item-id="{{ item.id }}"
+                                                   data-affects-score="{{ item.affects_score|lower }}"
+                                                   data-negative="{{ item.negative|lower if item.negative else 'false' }}"
+                                                   value="{{ item.default }}"
+                                                   min="0">
+                                            {% if item.affects_score %}
+                                            <span class="hint">점수 반영</span>
+                                            {% endif %}
                                         </div>
-                                        <input type="hidden" 
-                                               class="{{ section.section_key }}-input" 
+                                        {% endfor %}
+
+                                        <!-- 총점 표시 -->
+                                        <div class="sc-col" style="background: #f0f0f0;">
+                                            <label class="form-label">총점</label>
+                                            <input type="number"
+                                                   class="total-score-display"
+                                                   value="{{ base_score }}"
+                                                   readonly
+                                                   style="background: #e0e0e0; font-weight: bold;">
+                                            <span class="hint">자동 계산</span>
+                                        </div>
+
+                                        <input type="hidden"
+                                               class="{{ section.section_key }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
                                                value="{{ col_value }}">

@@ -88,6 +88,11 @@ function initScoringSystem() {
     
     // 총점 계산
     calculateTotalScore();
+
+    // 총점 박스를 관련 채점 그룹 옆으로 재배치 (같은 가족 느낌)
+    coLocateScoreTotals();
+    // 재배치 후 총점 다시 계산
+    calculateScoreTotal();
 }
 
 function ensureScoringHeader(fieldEl) {
@@ -300,6 +305,53 @@ function calculateTotalScore() {
     });
 }
 
+// 개선된 총점 계산 함수
+function calculateScoreTotal() {
+    document.querySelectorAll('.score-total-field').forEach(field => {
+        // 먼저 include_keys 기반 계산 여부 확인
+        const cfg = parseJsonDeep(field.dataset.config || '{}', {});
+        const include = Array.isArray(cfg.include_keys) ? cfg.include_keys : [];
+        if (include.length > 0) {
+            const baseScore = typeof cfg.base_score === 'number' ? cfg.base_score : parseInt(field.dataset.baseScore || '100');
+            let total = baseScore;
+            include.forEach(key => {
+                const group = document.querySelector(`.scoring-group[data-field="${key}"]`);
+                if (!group) return;
+                const scfg = parseJsonDeep(group.dataset.config || '{}', {});
+                const items = Array.isArray(scfg.items) ? scfg.items : [];
+                const hidden = group.querySelector('input[type="hidden"][data-field]');
+                const values = parseJsonDeep(hidden?.value || '{}', {});
+                items.forEach(item => {
+                    // affects_score가 false면 총점 반영 제외
+                    if (typeof item.affects_score === 'boolean' && !item.affects_score) return;
+                    const count = Number(values[item.id] || 0);
+                    let delta = Number(item.per_unit_delta || 0);
+                    if (item.negative === true && delta > 0) delta = -delta;
+                    total += count * delta;
+                });
+            });
+            const totalDisplay = field.querySelector('.total-score-display');
+            if (totalDisplay) totalDisplay.value = total;
+            const hiddenTotal = field.querySelector('input[type="hidden"][data-field]');
+            if (hiddenTotal) hiddenTotal.value = JSON.stringify({ total });
+            return; // include_keys 모드에서는 기존 방식 생략
+        }
+
+        // 기존 방식(로컬 박스 내 입력 합산) - 하위호환
+        const baseScore = parseInt(field.dataset.baseScore || '100');
+        let total = baseScore;
+        field.querySelectorAll('.score-item-input.affects-score').forEach(input => {
+            const value = parseInt(input.value || '0');
+            const isNegative = input.dataset.negative === 'true';
+            total += isNegative ? -value : value;
+        });
+        const totalDisplay = field.querySelector('.total-score-display');
+        if (totalDisplay) totalDisplay.value = total;
+        const hiddenInput = field.querySelector('input[type="hidden"]');
+        if (hiddenInput) hiddenInput.value = JSON.stringify({ total });
+    });
+}
+
 // 페이지 로드 시 초기화
 document.addEventListener('DOMContentLoaded', function() {
     initScoringSystem();
@@ -328,7 +380,123 @@ document.addEventListener('DOMContentLoaded', function() {
             if (e.target && e.target.classList && e.target.classList.contains('scoring-input')) {
                 updateHidden();
                 calculateTotalScore();
+                calculateScoreTotal(); // include_keys 기반 총점도 갱신
             }
         });
     });
+
+    // 총점 필드 이벤트 리스너 추가
+    document.querySelectorAll('.score-total-field').forEach(field => {
+        field.addEventListener('input', (e) => {
+            if (e.target && e.target.classList.contains('score-item-input')) {
+                calculateScoreTotal();
+            }
+        });
+    });
+
+    // 초기 총점 계산
+    calculateScoreTotal();
 });
+
+// 총점(.score-total-field)을 해당 scoring-group의 그리드 옆으로 옮기는 함수
+function coLocateScoreTotals() {
+    try {
+        document.querySelectorAll('.score-total-field').forEach(totalField => {
+            const cfg = parseJsonDeep(totalField.dataset.config || '{}', {});
+            const include = Array.isArray(cfg.include_keys) ? cfg.include_keys : [];
+
+            // 1) 우선 include_keys[0] 기준으로 타겟 찾기
+            let targetGroup = null;
+            if (include.length > 0) {
+                const firstKey = include[0];
+                targetGroup = document.querySelector(`.scoring-group[data-field="${firstKey}"]`);
+            }
+
+            // 2) include_keys가 없거나 타겟을 못 찾은 경우, total_key 매칭으로 찾기
+            if (!targetGroup) {
+                const groupKey = cfg.total_key || cfg.group || 'default';
+                const groups = Array.from(document.querySelectorAll('.scoring-group'));
+                for (const g of groups) {
+                    const gcfg = parseJsonDeep(g.dataset.config || '{}', {});
+                    const gkey = gcfg.total_key || gcfg.group || 'default';
+                    if (gkey === groupKey) { targetGroup = g; break; }
+                }
+            }
+
+            // 3) 그래도 없으면, 문서 상에서 바로 앞선 scoring-group을 사용 (가장 가까운 가족)
+            if (!targetGroup) {
+                let walker = totalField.parentElement;
+                while (walker && !targetGroup) {
+                    walker = walker.previousElementSibling || walker.parentElement;
+                    if (!walker) break;
+                    if (walker.classList && walker.classList.contains('scoring-group')) {
+                        targetGroup = walker; break;
+                    }
+                }
+            }
+            if (!targetGroup) return; // 끝까지 못 찾으면 이동 포기
+
+            // 보장: 대상 그룹 안에 .scoring-columns가 있어야 함
+            let grid = targetGroup.classList && targetGroup.classList.contains('scoring-columns')
+                ? targetGroup
+                : targetGroup.querySelector('.scoring-columns');
+            if (!grid) {
+                // 기존 그룹 자체가 그리드가 아닐 때만 새로 생성
+                grid = document.createElement('div');
+                grid.className = 'scoring-columns';
+                targetGroup.appendChild(grid);
+            }
+
+            // 총점 컨테이너를 .sc-col 형태로 보장
+            let totalContainer = totalField.closest('.sc-col');
+            if (!totalContainer) {
+                const wrap = document.createElement('div');
+                wrap.className = 'sc-col';
+                totalField.parentNode.insertBefore(wrap, totalField);
+                wrap.appendChild(totalField);
+                totalContainer = wrap;
+            }
+
+            // 원래 info-cell 추적 (총점이 있던 셀)
+            const sourceInfoCell = totalContainer.closest('.info-cell');
+            const shouldHideSource = !!(sourceInfoCell && sourceInfoCell.contains(totalContainer));
+            // 이동 전 외부 라벨 텍스트 확보
+            let outerLabelText = null;
+            if (sourceInfoCell) {
+                const direct = sourceInfoCell.querySelector(':scope > label');
+                const any = sourceInfoCell.querySelector('label');
+                const labelNode = direct || any || null;
+                if (labelNode && labelNode.textContent) {
+                    outerLabelText = labelNode.textContent.trim();
+                }
+            }
+
+            // 그리드로 이동 (항목 옆으로 레고처럼 붙이기)
+            grid.appendChild(totalContainer);
+
+            // 총점 타일의 라벨 교정: 원래 info-cell의 라벨을 타일 안 첫 요소로 이동
+            try {
+                const innerLabel = totalContainer.querySelector('label');
+                let outerLabel = null;
+                if (sourceInfoCell) {
+                    // 우선 순위: info-cell 직계 label
+                    outerLabel = sourceInfoCell.querySelector(':scope > label') || null;
+                    if (!outerLabel) {
+                        // fallback: 첫 번째 label
+                        outerLabel = sourceInfoCell.querySelector('label');
+                    }
+                }
+                if (outerLabel) {
+                    if (innerLabel) innerLabel.remove();
+                    outerLabel.classList.add('form-label');
+                    totalContainer.insertBefore(outerLabel, totalContainer.firstChild);
+                }
+            } catch(e) { /* ignore */ }
+
+            // 라벨/원본 셀은 숨기지 않음: 다른 칼럼 라벨이 사라지는 부작용 방지
+            // 필요시 추후 스타일로 원본 칸을 미세 조정 가능
+        });
+    } catch (e) {
+        console.warn('coLocateScoreTotals error:', e);
+    }
+}

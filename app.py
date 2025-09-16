@@ -9371,36 +9371,60 @@ def export_follow_sop_excel():
                     ws.cell(row=row_idx, column=col_idx, value=v)
                 else:
                     if col.get('column_type') == 'score_total':
-                        # 총점 계산 (total_key 기준)
+                        # 총점 계산: include_keys 우선, 없으면 total_key 기준
                         try:
                             stc = col
                             conf = stc.get('scoring_config')
                             if conf and isinstance(conf, str):
                                 try: conf = _json.loads(conf)
                                 except Exception: conf = {}
-                            total_key = (conf or {}).get('total_key') or 'default'
                             base = (conf or {}).get('base_score', 100)
                             total = base
-                            for sc_col in scoring_cols:
-                                sconf = sc_col.get('scoring_config')
-                                if sconf and isinstance(sconf, str):
-                                    try: sconf = _json.loads(sconf)
-                                    except Exception: sconf = {}
-                                if ((sconf or {}).get('total_key') or 'default') != total_key:
-                                    continue
-                                items_cfg = (sconf or {}).get('items') or []
-                                group_obj = custom_data.get(sc_col.get('column_key'), {})
-                                if isinstance(group_obj, str):
-                                    try: group_obj = _json.loads(group_obj)
-                                    except Exception: group_obj = {}
-                                for it in items_cfg:
-                                    iid = it.get('id')
-                                    delta = float(it.get('per_unit_delta') or 0)
-                                    cnt = 0
-                                    if isinstance(group_obj, dict) and iid in group_obj:
-                                        try: cnt = int(group_obj.get(iid) or 0)
-                                        except Exception: cnt = 0
-                                    total += cnt * delta
+                            include_keys = (conf or {}).get('include_keys') or []
+                            if include_keys:
+                                for key in include_keys:
+                                    sc_col = next((c for c in scoring_cols if c.get('column_key') == key), None)
+                                    if not sc_col:
+                                        continue
+                                    sconf = sc_col.get('scoring_config')
+                                    if sconf and isinstance(sconf, str):
+                                        try: sconf = _json.loads(sconf)
+                                        except Exception: sconf = {}
+                                    items_cfg = (sconf or {}).get('items') or []
+                                    group_obj = custom_data.get(key, {})
+                                    if isinstance(group_obj, str):
+                                        try: group_obj = _json.loads(group_obj)
+                                        except Exception: group_obj = {}
+                                    for it in items_cfg:
+                                        iid = it.get('id')
+                                        delta = float(it.get('per_unit_delta') or 0)
+                                        cnt = 0
+                                        if isinstance(group_obj, dict) and iid in group_obj:
+                                            try: cnt = int(group_obj.get(iid) or 0)
+                                            except Exception: cnt = 0
+                                        total += cnt * delta
+                            else:
+                                total_key = (conf or {}).get('total_key') or 'default'
+                                for sc_col in scoring_cols:
+                                    sconf = sc_col.get('scoring_config')
+                                    if sconf and isinstance(sconf, str):
+                                        try: sconf = _json.loads(sconf)
+                                        except Exception: sconf = {}
+                                    if ((sconf or {}).get('total_key') or 'default') != total_key:
+                                        continue
+                                    items_cfg = (sconf or {}).get('items') or []
+                                    group_obj = custom_data.get(sc_col.get('column_key'), {})
+                                    if isinstance(group_obj, str):
+                                        try: group_obj = _json.loads(group_obj)
+                                        except Exception: group_obj = {}
+                                    for it in items_cfg:
+                                        iid = it.get('id')
+                                        delta = float(it.get('per_unit_delta') or 0)
+                                        cnt = 0
+                                        if isinstance(group_obj, dict) and iid in group_obj:
+                                            try: cnt = int(group_obj.get(iid) or 0)
+                                            except Exception: cnt = 0
+                                        total += cnt * delta
                             ws.cell(row=row_idx, column=col_idx, value=total)
                         except Exception:
                             ws.cell(row=row_idx, column=col_idx, value='')
@@ -9534,8 +9558,40 @@ def export_full_process_excel():
             cell.alignment = header_align
             col_idx += 1
         
-        # 동적 컬럼 - 삭제되지 않은 것만
-        for col in dynamic_columns:
+        # 동적 컬럼 헤더 (채점 항목 확장)
+        import json as _json
+        def _expand_scoring_columns(_cols):
+            out = []
+            for c in _cols:
+                if c.get('column_type') == 'scoring':
+                    sc = c.get('scoring_config')
+                    if sc and isinstance(sc, str):
+                        try: sc = _json.loads(sc)
+                        except Exception: sc = {}
+                    items = (sc or {}).get('items') or []
+                    for it in items:
+                        iid = it.get('id')
+                        label = it.get('label') or iid
+                        if not iid:
+                            continue
+                        out.append({
+                            'column_key': f"{c['column_key']}__{iid}",
+                            'column_name': f"{c.get('column_name', c.get('column_key'))} - {label}",
+                            'column_type': 'number',
+                            '_virtual': 1,
+                            '_source_scoring_key': c['column_key'],
+                            '_source_item_id': iid
+                        })
+                else:
+                    out.append(dict(c))
+            return out
+
+        dyn_cols_list = [dict(x) for x in dynamic_columns]
+        expanded_columns = _expand_scoring_columns(dyn_cols_list)
+        scoring_cols = [dict(c) for c in dyn_cols_list if dict(c).get('column_type') == 'scoring']
+        score_total_cols = [dict(c) for c in dyn_cols_list if dict(c).get('column_type') == 'score_total']
+
+        for col in expanded_columns:
             cell = ws.cell(row=1, column=col_idx, value=col['column_name'])
             cell.font = header_font
             cell.fill = header_fill
@@ -9561,7 +9617,7 @@ def export_full_process_excel():
             if not isinstance(custom_data, dict):
                 custom_data = {}
             
-            # 동적 컬럼 데이터 - 활성화되고 삭제되지 않은 컬럼만
+            # 동적 컬럼 데이터 (확장 포함)
             # 드롭다운 매핑 지원
             def _map_value(col, value):
                 if isinstance(value, dict):
@@ -9581,9 +9637,81 @@ def export_full_process_excel():
                                 return opt['value']
                 return value
 
-            for col in dynamic_columns:
-                v = custom_data.get(col['column_key'], '')
-                ws.cell(row=row_idx, column=col_idx, value=_map_value(col, v))
+            for col in expanded_columns:
+                if col.get('_virtual') == 1:
+                    src = col.get('_source_scoring_key')
+                    iid = col.get('_source_item_id')
+                    group_obj = custom_data.get(src, {})
+                    if isinstance(group_obj, str):
+                        try:
+                            group_obj = json.loads(group_obj)
+                        except Exception:
+                            group_obj = {}
+                    v = 0
+                    if isinstance(group_obj, dict):
+                        v = group_obj.get(iid, 0)
+                    ws.cell(row=row_idx, column=col_idx, value=v)
+                else:
+                    if col.get('column_type') == 'score_total':
+                        try:
+                            stc = col
+                            conf = stc.get('scoring_config')
+                            if conf and isinstance(conf, str):
+                                try: conf = _json.loads(conf)
+                                except Exception: conf = {}
+                            base = (conf or {}).get('base_score', 100)
+                            total = base
+                            include_keys = (conf or {}).get('include_keys') or []
+                            if include_keys:
+                                for key in include_keys:
+                                    sc_col = next((c for c in scoring_cols if c.get('column_key') == key), None)
+                                    if not sc_col:
+                                        continue
+                                    sconf = sc_col.get('scoring_config')
+                                    if sconf and isinstance(sconf, str):
+                                        try: sconf = _json.loads(sconf)
+                                        except Exception: sconf = {}
+                                    items_cfg = (sconf or {}).get('items') or []
+                                    group_obj = custom_data.get(key, {})
+                                    if isinstance(group_obj, str):
+                                        try: group_obj = _json.loads(group_obj)
+                                        except Exception: group_obj = {}
+                                    for it in items_cfg:
+                                        iid = it.get('id')
+                                        delta = float(it.get('per_unit_delta') or 0)
+                                        cnt = 0
+                                        if isinstance(group_obj, dict) and iid in group_obj:
+                                            try: cnt = int(group_obj.get(iid) or 0)
+                                            except Exception: cnt = 0
+                                        total += cnt * delta
+                            else:
+                                total_key = (conf or {}).get('total_key') or 'default'
+                                for sc_col in scoring_cols:
+                                    sconf = sc_col.get('scoring_config')
+                                    if sconf and isinstance(sconf, str):
+                                        try: sconf = _json.loads(sconf)
+                                        except Exception: sconf = {}
+                                    if ((sconf or {}).get('total_key') or 'default') != total_key:
+                                        continue
+                                    items_cfg = (sconf or {}).get('items') or []
+                                    group_obj = custom_data.get(sc_col.get('column_key'), {})
+                                    if isinstance(group_obj, str):
+                                        try: group_obj = _json.loads(group_obj)
+                                        except Exception: group_obj = {}
+                                    for it in items_cfg:
+                                        iid = it.get('id')
+                                        delta = float(it.get('per_unit_delta') or 0)
+                                        cnt = 0
+                                        if isinstance(group_obj, dict) and iid in group_obj:
+                                            try: cnt = int(group_obj.get(iid) or 0)
+                                            except Exception: cnt = 0
+                                        total += cnt * delta
+                            ws.cell(row=row_idx, column=col_idx, value=total)
+                        except Exception:
+                            ws.cell(row=row_idx, column=col_idx, value='')
+                    else:
+                        v = custom_data.get(col['column_key'], '')
+                        ws.cell(row=row_idx, column=col_idx, value=_map_value(col, v))
                 col_idx += 1
         
         # 컬럼 너비 자동 조정
@@ -11166,10 +11294,10 @@ if __name__ == "__main__":
         # 스케줄 등록: 매일 07:00에 maybe_daily_sync() 호출
         schedule.clear()  # 혹시 있을지 모르는 기존 잡 제거
         schedule.every().day.at("07:00").do(maybe_daily_sync)
-        
+
         scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
         scheduler_thread.start()
-        
+
         logging.info("=" * 50)
         logging.info("자동 동기화 스케줄러 시작")
         logging.info("매일 오전 7시에 자동으로 데이터를 동기화합니다.")

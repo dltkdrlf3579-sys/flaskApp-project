@@ -627,8 +627,8 @@
                         </button>
                     </li>
                     <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="grade-criteria-tab" data-bs-toggle="tab" data-bs-target="#grade-criteria" type="button">
-                            <i class="bi bi-award"></i> 등급 기준
+                        <button class="nav-link" id="score-total-tab" data-bs-toggle="tab" data-bs-target="#score-total-settings" type="button">
+                            <i class="bi bi-calculator"></i> 총점 설정
                         </button>
                     </li>
                     <li class="nav-item" role="presentation">
@@ -646,9 +646,15 @@
                             <i class="bi bi-info-circle"></i> 각 항목별로 단위당 점수를 설정합니다. 음수는 감점, 양수는 가점입니다.
                         </div>
                         
-                        <div class="mb-3">
-                            <label class="form-label">기본 점수</label>
-                            <input type="number" id="scoringBaseScore" class="form-control" value="100" min="0" style="width: 150px;">
+                        <div class="mb-3 d-flex align-items-center gap-3">
+                            <div>
+                                <label class="form-label">기본 점수</label>
+                                <input type="number" id="scoringBaseScore" class="form-control" value="100" min="0" style="width: 150px;">
+                            </div>
+                            <div class="form-check" id="toggleUnitHintContainer">
+                                <input class="form-check-input" type="checkbox" id="showUnitHint" checked>
+                                <label class="form-check-label" for="showUnitHint">항목 옆 "점/건" 힌트 표시</label>
+                            </div>
                         </div>
 
                         <div class="d-flex justify-content-between align-items-center mb-3">
@@ -677,89 +683,15 @@
                         </div>
                     </div>
 
-                    <!-- 등급 기준 탭 -->
-                    <div class="tab-pane fade" id="grade-criteria" role="tabpanel">
+                    <!-- 총점 설정 탭 (score_total 전용) -->
+                    <div class="tab-pane fade" id="score-total-settings" role="tabpanel">
                         <div class="alert alert-info mb-3">
-                            <i class="bi bi-info-circle"></i> 점수 범위에 따른 등급 분류 기준을 설정합니다.
+                            <i class="bi bi-info-circle"></i> 컬럼 타입이 "총점(자동)"일 때, 포함할 채점 컬럼을 선택하세요. 선택된 채점 컬럼들의 항목 점수들이 합산됩니다.
                         </div>
-
-                        <div class="row g-3">
-                            <div class="col-md-6">
-                                <div class="card border-danger">
-                                    <div class="card-header bg-danger text-white">
-                                        <i class="bi bi-exclamation-triangle"></i> 중대 (Critical)
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="row g-2">
-                                            <div class="col-6">
-                                                <label class="form-label small">최소값</label>
-                                                <input type="number" id="criticalMin" class="form-control" value="-999">
-                                            </div>
-                                            <div class="col-6">
-                                                <label class="form-label small">최대값</label>
-                                                <input type="number" id="criticalMax" class="form-control" value="-10">
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="card border-warning">
-                                    <div class="card-header bg-warning">
-                                        <i class="bi bi-exclamation-circle"></i> 주요 (Major)
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="row g-2">
-                                            <div class="col-6">
-                                                <label class="form-label small">최소값</label>
-                                                <input type="number" id="majorMin" class="form-control" value="-9">
-                                            </div>
-                                            <div class="col-6">
-                                                <label class="form-label small">최대값</label>
-                                                <input type="number" id="majorMax" class="form-control" value="-5">
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="card border-info">
-                                    <div class="card-header bg-info text-white">
-                                        <i class="bi bi-info-circle"></i> 경미 (Minor)
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="row g-2">
-                                            <div class="col-6">
-                                                <label class="form-label small">최소값</label>
-                                                <input type="number" id="minorMin" class="form-control" value="-4">
-                                            </div>
-                                            <div class="col-6">
-                                                <label class="form-label small">최대값</label>
-                                                <input type="number" id="minorMax" class="form-control" value="-1">
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="card border-success">
-                                    <div class="card-header bg-success text-white">
-                                        <i class="bi bi-star"></i> 가점 (Bonus)
-                                    </div>
-                                    <div class="card-body">
-                                        <div class="row g-2">
-                                            <div class="col-6">
-                                                <label class="form-label small">최소값</label>
-                                                <input type="number" id="bonusMin" class="form-control" value="0.1" step="0.1">
-                                            </div>
-                                            <div class="col-6">
-                                                <label class="form-label small">최대값</label>
-                                                <input type="number" id="bonusMax" class="form-control" value="999">
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+                        <div class="mb-3">
+                            <label class="form-label">포함할 채점(Scoring) 컬럼</label>
+                            <div id="scoreTotalSourceList" class="border rounded p-3" style="max-height: 260px; overflow-y: auto;"></div>
+                            <small class="text-muted">체크된 컬럼들의 항목 점수(count × per_unit_delta)가 합산됩니다.</small>
                         </div>
                     </div>
 
@@ -1791,20 +1723,30 @@ let editingId = null;
             // 기본 점수 설정
             document.getElementById('scoringBaseScore').value = config.base_score || 100;
 
-            // 채점 항목 로드
-            scoringItems = config.items || [];
+            // 채점 항목 로드 (scoring 전용)
+            scoringItems = Array.isArray(config.items) ? config.items : [];
             renderScoringItems();
 
-            // 등급 기준 로드
-            if (config.grade_criteria) {
-                document.getElementById('criticalMin').value = config.grade_criteria.critical?.min || -999;
-                document.getElementById('criticalMax').value = config.grade_criteria.critical?.max || -10;
-                document.getElementById('majorMin').value = config.grade_criteria.major?.min || -9;
-                document.getElementById('majorMax').value = config.grade_criteria.major?.max || -5;
-                document.getElementById('minorMin').value = config.grade_criteria.minor?.min || -4;
-                document.getElementById('minorMax').value = config.grade_criteria.minor?.max || -1;
-                document.getElementById('bonusMin').value = config.grade_criteria.bonus?.min || 0.1;
-                document.getElementById('bonusMax').value = config.grade_criteria.bonus?.max || 999;
+            // 점/건 힌트 토글 (scoring 전용)
+            const showUnit = (config.show_unit_hint !== false);
+            const unitHintEl = document.getElementById('showUnitHint');
+            if (unitHintEl) unitHintEl.checked = showUnit;
+
+            // 총점 설정 탭 구성
+            const type = document.getElementById('columnType').value;
+            const scoreTotalTabBtn = document.getElementById('score-total-tab');
+            const unitHintContainer = document.getElementById('toggleUnitHintContainer');
+            if (type === 'score_total') {
+                if (scoreTotalTabBtn) scoreTotalTabBtn.parentElement.style.display = '';
+                if (unitHintContainer) unitHintContainer.style.display = 'none';
+                if (typeof renderScoreTotalSourceList === 'function') {
+                    renderScoreTotalSourceList(config);
+                }
+            } else {
+                if (scoreTotalTabBtn) scoreTotalTabBtn.parentElement.style.display = '';
+                if (unitHintContainer) unitHintContainer.style.display = '';
+                const list = document.getElementById('scoreTotalSourceList');
+                if (list) list.innerHTML = '<div class="text-muted">총점 컬럼이 아닙니다. (현재 타입: 채점)</div>';
             }
 
             // 미리보기 업데이트
@@ -1879,60 +1821,50 @@ let editingId = null;
 
         function updateScoringPreview() {
             const config = buildScoringConfig();
-            
-            // 항목 요약
             const itemsSummary = document.getElementById('scoringItemsSummary');
             if (itemsSummary) {
-                let html = `<div class="mb-2">기본 점수: <strong>${config.base_score}점</strong></div>`;
-                if (config.items.length > 0) {
-                    html += '<ul class="mb-0">';
-                    config.items.forEach(item => {
-                        const total = item.per_unit_delta * item.max_count;
-                        const type = item.per_unit_delta < 0 ? 'danger' : 'success';
-                        html += `<li>${item.label}: <span class="text-${type}">${item.per_unit_delta}점</span> × ${item.max_count}회 = <strong>${total}점</strong></li>`;
-                    });
-                    html += '</ul>';
+                const __baseScore = (typeof config.base_score === 'number') ? config.base_score : 100;
+                let html = `<div class="mb-2">기본 점수: <strong>${__baseScore}점</strong></div>`;
+                if (config.type === 'score_total') {
+                    const keys = Array.isArray(config.include_keys) ? config.include_keys : [];
+                    if (keys.length === 0) {
+                        html += '<p class="text-muted mb-0">선택된 채점 컬럼이 없습니다</p>';
+                    } else {
+                        html += '<div class="mb-2"><strong>포함 컬럼</strong></div>' +
+                                '<ul class="mb-0">' + keys.map(k => `<li><code>${k}</code></li>`).join('') + '</ul>';
+                    }
                 } else {
-                    html += '<p class="text-muted mb-0">채점 항목이 없습니다</p>';
+                    const items = Array.isArray(config.items) ? config.items : [];
+                    if (items.length > 0) {
+                        html += '<ul class="mb-0">';
+                        items.forEach(item => {
+                            const total = (Number(item.per_unit_delta || 0)) * (Number(item.max_count || 0));
+                            const tone = (Number(item.per_unit_delta || 0) < 0) ? 'danger' : 'success';
+                            html += `<li>${item.label}: <span class="text-${tone}">${item.per_unit_delta}점</span> × ${item.max_count}회 = <strong>${total}점</strong></li>`;
+                        });
+                        html += '</ul>';
+                    } else {
+                        html += '<p class="text-muted mb-0">채점 항목이 없습니다</p>';
+                    }
                 }
                 itemsSummary.innerHTML = html;
             }
 
-            // 등급 기준 요약
+            // 등급 요약은 사용하지 않음
             const criteriaSummary = document.getElementById('gradeCriteriaSummary');
-            if (criteriaSummary && config.grade_criteria) {
-                const gc = config.grade_criteria;
-                criteriaSummary.innerHTML = `
-                    <div class="row g-2">
-                        <div class="col-6">
-                            <span class="badge bg-danger">중대</span> ${gc.critical.min} ~ ${gc.critical.max}점
-                        </div>
-                        <div class="col-6">
-                            <span class="badge bg-warning">주요</span> ${gc.major.min} ~ ${gc.major.max}점
-                        </div>
-                        <div class="col-6">
-                            <span class="badge bg-info">경미</span> ${gc.minor.min} ~ ${gc.minor.max}점
-                        </div>
-                        <div class="col-6">
-                            <span class="badge bg-success">가점</span> ${gc.bonus.min} ~ ${gc.bonus.max}점
-                        </div>
-                    </div>
-                `;
-            }
+            if (criteriaSummary) criteriaSummary.innerHTML = '';
 
-            // JSON 미리보기
             const jsonPreview = document.getElementById('scoringJsonPreview');
-            if (jsonPreview) {
-                jsonPreview.textContent = JSON.stringify(config, null, 2);
-            }
+            if (jsonPreview) jsonPreview.textContent = JSON.stringify(config, null, 2);
 
-            // 메인 화면 레이블 업데이트
             const label = document.getElementById('scoringPreviewLabel');
             if (label) {
-                if (config.items.length > 0) {
-                    label.innerHTML = `<span class="text-success">✓ ${config.items.length}개 항목 설정됨</span>`;
+                if (config.type === 'score_total') {
+                    const n = (Array.isArray(config.include_keys) ? config.include_keys.length : 0);
+                    label.innerHTML = n > 0 ? `<span class="text-success">✓ ${n}개 컬럼 포함</span>` : '<span class="text-muted">설정되지 않음</span>';
                 } else {
-                    label.innerHTML = '<span class="text-muted">설정되지 않음</span>';
+                    const n = (Array.isArray(config.items) ? config.items.length : 0);
+                    label.innerHTML = n > 0 ? `<span class="text-success">✓ ${n}개 항목 설정됨</span>` : '<span class="text-muted">설정되지 않음</span>';
                 }
             }
         }
@@ -1940,32 +1872,51 @@ let editingId = null;
         function buildScoringConfig() {
             const type = document.getElementById('columnType').value;
             const baseScore = parseInt(document.getElementById('scoringBaseScore')?.value || '100');
-            
-            const config = {
-                type: type === 'score_total' ? 'score_total' : 'scoring',
+            if (type === 'score_total') {
+                const keys = [];
+                document.querySelectorAll('#scoreTotalSourceList input[type="checkbox"][data-scoring-key]').forEach(chk => {
+                    if (chk.checked) keys.push(chk.dataset.scoringKey);
+                });
+                return {
+                    type: 'score_total',
+                    base_score: baseScore,
+                    include_keys: keys
+                };
+            }
+            return {
+                type: 'scoring',
                 base_score: baseScore,
-                items: scoringItems.filter(item => item.label),
-                grade_criteria: {
-                    critical: {
-                        min: parseFloat(document.getElementById('criticalMin')?.value || '-999'),
-                        max: parseFloat(document.getElementById('criticalMax')?.value || '-10')
-                    },
-                    major: {
-                        min: parseFloat(document.getElementById('majorMin')?.value || '-9'),
-                        max: parseFloat(document.getElementById('majorMax')?.value || '-5')
-                    },
-                    minor: {
-                        min: parseFloat(document.getElementById('minorMin')?.value || '-4'),
-                        max: parseFloat(document.getElementById('minorMax')?.value || '-1')
-                    },
-                    bonus: {
-                        min: parseFloat(document.getElementById('bonusMin')?.value || '0.1'),
-                        max: parseFloat(document.getElementById('bonusMax')?.value || '999')
-                    }
-                }
+                show_unit_hint: document.getElementById('showUnitHint') ? document.getElementById('showUnitHint').checked : true,
+                items: scoringItems.filter(item => item.label)
             };
-            
-            return config;
+        }
+
+        function renderScoreTotalSourceList(config) {
+            const container = document.getElementById('scoreTotalSourceList');
+            const selected = (config && Array.isArray(config.include_keys)) ? new Set(config.include_keys) : new Set();
+            const scoringCols = (pendingColumns || []).filter(c => c.column_type === 'scoring');
+            if (!scoringCols || scoringCols.length === 0) {
+                container.innerHTML = '<div class="text-muted">선택 가능한 채점 컬럼이 없습니다. 먼저 채점(Scoring) 컬럼을 추가/저장하세요.</div>';
+                return;
+            }
+            let html = '<div class="row g-2">';
+            scoringCols.forEach(col => {
+                const key = col.column_key;
+                const name = col.column_name || key;
+                const checked = selected.has(key) ? 'checked' : '';
+                html += `
+                    <div class="col-6">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="st-src-${key}" data-scoring-key="${key}" ${checked}>
+                            <label class="form-check-label" for="st-src-${key}">
+                                <span class="badge bg-light text-dark">${key}</span> ${name}
+                            </label>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            container.innerHTML = html;
         }
 
         function saveScoringConfig() {

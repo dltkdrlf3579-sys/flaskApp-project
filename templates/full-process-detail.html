@@ -70,6 +70,8 @@
                                 {% set span = 4 %}
                             {% elif col.column_type == 'scoring' %}
                                 {% set span = 4 %}
+                            {% elif col.column_type == 'score_total' %}
+                                {% set span = 2 %}
                             {% endif %}
                             
                             {% if col.column_type == 'list' %}
@@ -353,7 +355,9 @@
                                                    data-score="{{ it.per_unit_delta }}"
                                                    data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}"
                                                    value="{{ values[it.id] if values and it.id in values else 0 }}">
+                                            {% if sc.get('show_unit_hint', True) %}
                                             <small class="hint">{{ it.per_unit_delta }}점/건</small>
+                                            {% endif %}
                                         </div>
                                         {% endfor %}
                                         <input type="hidden"
@@ -364,23 +368,23 @@
                                     </div>
                                     
                                 {% elif col.column_type == 'score_total' %}
-                                    <!-- 총점 필드 (자동 계산) -->
-                                    {% set sc = (col.scoring_config|from_json) %}
-                                    <div class="score-total-field" data-total-key="{{ sc.total_key if sc and sc.total_key else 'default' }}">
-                                        <div class="score-display">
-                                            <span class="score-value">0</span>점
-                                            <div class="score-breakdown">
-                                                <span class="critical-count">중대: 0</span>
-                                                <span class="major-count">주요: 0</span>
-                                                <span class="minor-count">경미: 0</span>
-                                                <span class="bonus-count">가점: 0</span>
-                                            </div>
+                                    <!-- 총점 필드 (자동 계산: 선택된 채점 컬럼들의 합산) -->
+                                    {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}
+                                    {% set base_score = sc.get('base_score') if sc and sc.get('base_score') else 100 %}
+                                    <div class="scoring-columns">
+                                        <div class="sc-col score-total-field" data-field="{{ col.column_key }}" data-config='{{ col.scoring_config|default("{}")|tojson }}' data-base-score="{{ base_score }}">
+                                            <label class="form-label">총점</label>
+                                            <input type="number"
+                                                   class="total-score-display"
+                                                   value="{{ base_score }}"
+                                                   readonly
+                                                   style="background: #f0f0f0; font-weight: bold;">
+                                            <input type="hidden"
+                                                   class="{{ section.section_key }}-input"
+                                                   data-field="{{ col.column_key }}"
+                                                   data-section="{{ section.section_key }}"
+                                                   value="{{ col_value }}">
                                         </div>
-                                        <input type="hidden" 
-                                               class="{{ section.section_key }}-input" 
-                                               data-field="{{ col.column_key }}"
-                                               data-section="{{ section.section_key }}"
-                                               value="{{ col_value }}">
                                     </div>
                                             
                                 {% else %}
@@ -898,174 +902,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 // 채점 시스템 초기화
-function initScoringSystem() {
-    // 모든 채점 필드 찾기
-    const scoringFields = document.querySelectorAll('.scoring-field');
-    
-    scoringFields.forEach(field => {
-        const config = JSON.parse(field.dataset.config || '{}');
-        const hiddenInput = field.querySelector('input[type="hidden"]');
-        const currentValue = JSON.parse(hiddenInput.value || '{}');
-        const itemsContainer = field.querySelector('.scoring-items');
-        
-        if (config.items && config.items.length > 0) {
-            // 채점 항목 렌더링
-            let html = '<div class="scoring-grid">';
-            config.items.forEach(item => {
-                const value = currentValue[item.id] || 0;
-                html += `
-                    <div class="scoring-item">
-                        <label>${item.label}</label>
-                        <div class="scoring-controls">
-                            <button type="button" class="scoring-btn minus" data-item="${item.id}" data-delta="${item.per_unit_delta}">-</button>
-                            <input type="number" class="scoring-count" 
-                                   data-item="${item.id}" 
-                                   data-max="${item.max_count}"
-                                   data-delta="${item.per_unit_delta}"
-                                   value="${value}" 
-                                   min="0" 
-                                   max="${item.max_count}">
-                            <button type="button" class="scoring-btn plus" data-item="${item.id}" data-delta="${item.per_unit_delta}">+</button>
-                            <span class="scoring-points">${value * item.per_unit_delta}점</span>
-                        </div>
-                    </div>
-                `;
-            });
-            html += '</div>';
-            itemsContainer.innerHTML = html;
-            
-            // 이벤트 리스너 추가
-            field.querySelectorAll('.scoring-btn').forEach(btn => {
-                btn.addEventListener('click', handleScoringButton);
-            });
-            
-            field.querySelectorAll('.scoring-count').forEach(input => {
-                input.addEventListener('change', handleScoringInput);
-            });
-        }
-    });
-    
-    // 총점 계산
-    calculateTotalScore();
-}
-
-function handleScoringButton(e) {
-    const btn = e.target;
-    const itemId = btn.dataset.item;
-    const field = btn.closest('.scoring-field');
-    const input = field.querySelector(`input[data-item="${itemId}"]`);
-    const max = parseInt(input.dataset.max);
-    let value = parseInt(input.value || 0);
-    
-    if (btn.classList.contains('plus')) {
-        value = Math.min(value + 1, max);
-    } else {
-        value = Math.max(value - 1, 0);
-    }
-    
-    input.value = value;
-    updateScoringValue(field, itemId, value);
-}
-
-function handleScoringInput(e) {
-    const input = e.target;
-    const itemId = input.dataset.item;
-    const field = input.closest('.scoring-field');
-    const max = parseInt(input.dataset.max);
-    let value = parseInt(input.value || 0);
-    
-    value = Math.max(0, Math.min(value, max));
-    input.value = value;
-    
-    updateScoringValue(field, itemId, value);
-}
-
-function updateScoringValue(field, itemId, value) {
-    const hiddenInput = field.querySelector('input[type="hidden"]');
-    const currentValue = JSON.parse(hiddenInput.value || '{}');
-    const input = field.querySelector(`input[data-item="${itemId}"]`);
-    const delta = parseFloat(input.dataset.delta);
-    const pointsSpan = input.parentElement.querySelector('.scoring-points');
-    
-    currentValue[itemId] = value;
-    hiddenInput.value = JSON.stringify(currentValue);
-    
-    // 점수 표시 업데이트
-    const points = value * delta;
-    pointsSpan.textContent = points + '점';
-    pointsSpan.className = 'scoring-points ' + (points < 0 ? 'negative' : points > 0 ? 'positive' : '');
-    
-    // 총점 재계산
-    calculateTotalScore();
-}
-
-function calculateTotalScore() {
-    const scoringFields = document.querySelectorAll('.scoring-field');
-    const totalField = document.querySelector('.score-total-field');
-    
-    if (!totalField) return;
-    
-    let totalScore = 100; // 기본 점수
-    let criticalCount = 0;
-    let majorCount = 0;
-    let minorCount = 0;
-    let bonusCount = 0;
-    
-    scoringFields.forEach(field => {
-        const config = JSON.parse(field.dataset.config || '{}');
-        const hiddenInput = field.querySelector('input[type="hidden"]');
-        const currentValue = JSON.parse(hiddenInput.value || '{}');
-        
-        // 등급 기준 가져오기
-        const criteria = config.grade_criteria || {
-            critical: { min: -999, max: -10 },
-            major: { min: -9, max: -5 },
-            minor: { min: -4, max: -1 },
-            bonus: { min: 0.1, max: 999 }
-        };
-        
-        if (config.items) {
-            config.items.forEach(item => {
-                const count = currentValue[item.id] || 0;
-                const points = count * item.per_unit_delta;
-                totalScore += points;
-                
-                // 등급별 카운트
-                if (points <= criteria.critical.max && points >= criteria.critical.min) {
-                    criticalCount += count;
-                } else if (points <= criteria.major.max && points >= criteria.major.min) {
-                    majorCount += count;
-                } else if (points <= criteria.minor.max && points >= criteria.minor.min) {
-                    minorCount += count;
-                } else if (points >= criteria.bonus.min) {
-                    bonusCount += count;
-                }
-            });
-        }
-    });
-    
-    // 총점 표시 업데이트
-    const scoreValue = totalField.querySelector('.score-value');
-    const hiddenInput = totalField.querySelector('input[type="hidden"]');
-    
-    scoreValue.textContent = totalScore;
-    scoreValue.className = 'score-value ' + (totalScore >= 90 ? 'excellent' : totalScore >= 70 ? 'good' : totalScore >= 50 ? 'fair' : 'poor');
-    
-    hiddenInput.value = JSON.stringify({
-        total: totalScore,
-        critical: criticalCount,
-        major: majorCount,
-        minor: minorCount,
-        bonus: bonusCount
-    });
-    
-    // 등급별 카운트 업데이트
-    totalField.querySelector('.critical-count').textContent = `중대: ${criticalCount}`;
-    totalField.querySelector('.major-count').textContent = `주요: ${majorCount}`;
-    totalField.querySelector('.minor-count').textContent = `경미: ${minorCount}`;
-    totalField.querySelector('.bonus-count').textContent = `가점: ${bonusCount}`;
-}
-
+// 채점 로직은 static/js/scoring-system.js 사용
 // 페이지 로드 시 초기화
 document.addEventListener('DOMContentLoaded', function() {
     initScoringSystem();

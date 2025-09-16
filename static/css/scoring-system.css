@@ -133,9 +133,10 @@
 /* Scoring as multiple columns (embedded like normal fields) */
 .scoring-columns {
     display: grid;
-    grid-template-columns: repeat(8, minmax(0,1fr));
+    grid-template-columns: repeat(8, minmax(0, 1fr)); /* 한 줄 8칸 = span(1/4)의 절반 단위 */
     gap: 10px;
 }
+.scoring-columns .sc-col { grid-column: span 1; }
 .scoring-columns .sc-col {
     display: flex;
     flex-direction: column;
@@ -217,7 +218,7 @@
         align-items: flex-start;
         gap: 8px;
     }
-    .scoring-columns { grid-template-columns: repeat(4, minmax(0,1fr)); }
+    .scoring-columns { grid-template-columns: repeat(4, minmax(0,1fr)); } /* 모바일에서는 1칸=1/4폭 */
     
     .scoring-controls {
         width: 100%;

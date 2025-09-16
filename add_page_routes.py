@@ -75,6 +75,98 @@ def follow_sop_route():
             col for col in dynamic_columns if col.get('tab') == section['section_key']
         ]
 
+    # 목록 표시용 컬럼(채점 항목 확장) + 총점/채점 목록 준비
+    display_columns = []
+    try:
+        import json as _json
+        def _expand_scoring_columns(_col):
+            sc = _col.get('scoring_config')
+            if sc and isinstance(sc, str):
+                try: sc = _json.loads(sc)
+                except Exception: sc = {}
+            items = (sc or {}).get('items') or []
+            out = []
+            for it in items:
+                iid = it.get('id')
+                label = it.get('label') or iid
+                if not iid:
+                    continue
+                out.append({
+                    'column_key': f"{_col.get('column_key')}__{iid}",
+                    'column_name': f"{_col.get('column_name', _col.get('column_key'))} - {label}",
+                    'column_type': 'number',
+                    'input_type': 'number_integer',
+                    'is_active': 1,
+                    'is_deleted': 0,
+                    'tab': _col.get('tab'),
+                    '_virtual': 1,
+                    '_source_scoring_key': _col.get('column_key'),
+                    '_source_item_id': iid
+                })
+            return out
+        excluded = {'detailed_content', 'violation_content', 'fullprocess_number', 'created_at'}
+        for col in dynamic_columns:
+            ck = col.get('column_key')
+            if not ck or ck in excluded:
+                continue
+            if col.get('column_type') == 'scoring':
+                display_columns.extend(_expand_scoring_columns(col))
+            else:
+                display_columns.append(col)
+        scoring_cols = [dict(c) for c in dynamic_columns if dict(c).get('column_type') == 'scoring']
+        score_total_cols = [dict(c) for c in dynamic_columns if dict(c).get('column_type') == 'score_total']
+    except Exception as _e:
+        scoring_cols, score_total_cols = [], []
+        logging.warning(f"[FULL_PROCESS] display_columns/scoring list build failed: {_e}")
+    
+    # 목록 표시용 컬럼: 채점(JSON) → 개별 가상 컬럼으로 확장
+    display_columns = []
+    try:
+        import json as _json
+        def _expand_scoring_columns(col):
+            sc = col.get('scoring_config')
+            if sc and isinstance(sc, str):
+                try: sc = _json.loads(sc)
+                except Exception: sc = {}
+            items = (sc or {}).get('items') or []
+            out = []
+            for it in items:
+                iid = it.get('id')
+                label = it.get('label') or iid
+                if not iid:
+                    continue
+                out.append({
+                    'column_key': f"{col.get('column_key')}__{iid}",
+                    'column_name': f"{col.get('column_name', col.get('column_key'))} - {label}",
+                    'column_type': 'number',
+                    'input_type': 'number_integer',
+                    'is_active': 1,
+                    'is_deleted': 0,
+                    'tab': col.get('tab'),
+                    '_virtual': 1,
+                    '_source_scoring_key': col.get('column_key'),
+                    '_source_item_id': iid
+                })
+            return out
+        excluded = {'detailed_content', 'violation_content', 'fullprocess_number', 'created_at'}
+        for col in dynamic_columns:
+            ck = col.get('column_key')
+            if not ck or ck in excluded:
+                continue
+            if (col.get('column_type') == 'scoring'):
+                display_columns.extend(_expand_scoring_columns(col))
+            else:
+                display_columns.append(col)
+    except Exception as _e:
+        logging.warning(f"[FULL_PROCESS] build display_columns failed: {_e}")
+    # 채점 및 총점 컬럼 목록 준비
+    try:
+        import json as _json
+        scoring_cols = [dict(c) for c in dynamic_columns if dict(c).get('column_type') == 'scoring']
+        score_total_cols = [dict(c) for c in dynamic_columns if dict(c).get('column_type') == 'score_total']
+    except Exception:
+        scoring_cols, score_total_cols = [], []
+
     # 목록 표시용 컬럼(중복 제거, 불필요 키 제외) + 채점 항목 컬럼 인라인 확장
     excluded_keys = {'detailed_content', 'violation_content', 'work_req_no', 'registered_date', 'created_at'}
     seen_keys = set()
@@ -215,6 +307,160 @@ def follow_sop_route():
                 custom_data = {}
             if isinstance(custom_data, dict):
                 item.update(custom_data)
+            # 채점 항목 평탄화 (가상 컬럼 채우기)
+            try:
+                for dcol in display_columns:
+                    if dcol.get('_virtual') == 1:
+                        src = dcol.get('_source_scoring_key')
+                        iid = dcol.get('_source_item_id')
+                        if not src or not iid:
+                            continue
+                        group_obj = custom_data.get(src)
+                        if isinstance(group_obj, str):
+                            try:
+                                import json as _json
+                                group_obj = _json.loads(group_obj)
+                            except Exception:
+                                group_obj = {}
+                        if isinstance(group_obj, dict):
+                            item_key = f"{src}__{iid}"
+                            item[item_key] = group_obj.get(iid, 0)
+            except Exception as _e:
+                logging.error(f"[FULL_PROCESS] scoring flatten error: {_e}")
+            # 총점 계산 (include_keys 우선)
+            try:
+                for stc in score_total_cols:
+                    conf = stc.get('scoring_config')
+                    if conf and isinstance(conf, str):
+                        try: conf = _json.loads(conf)
+                        except Exception: conf = {}
+                    base = (conf or {}).get('base_score', 100)
+                    total = base
+                    include_keys = (conf or {}).get('include_keys') or []
+                    if include_keys:
+                        for key in include_keys:
+                            sc_col = next((c for c in scoring_cols if c.get('column_key') == key), None)
+                            if not sc_col:
+                                continue
+                            sconf = sc_col.get('scoring_config')
+                            if sconf and isinstance(sconf, str):
+                                try: sconf = _json.loads(sconf)
+                                except Exception: sconf = {}
+                            items_cfg = (sconf or {}).get('items') or []
+                            group_obj = custom_data.get(key, {}) if isinstance(custom_data, dict) else {}
+                            if isinstance(group_obj, str):
+                                try: group_obj = _json.loads(group_obj)
+                                except Exception: group_obj = {}
+                            for it in items_cfg:
+                                iid = it.get('id')
+                                delta = float(it.get('per_unit_delta') or 0)
+                                cnt = 0
+                                if isinstance(group_obj, dict) and iid in group_obj:
+                                    try: cnt = int(group_obj.get(iid) or 0)
+                                    except Exception: cnt = 0
+                                total += cnt * delta
+                    else:
+                        total_key = (conf or {}).get('total_key') or 'default'
+                        for sc_col in scoring_cols:
+                            sconf = sc_col.get('scoring_config')
+                            if sconf and isinstance(sconf, str):
+                                try: sconf = _json.loads(sconf)
+                                except Exception: sconf = {}
+                            if ((sconf or {}).get('total_key') or 'default') != total_key:
+                                continue
+                            items_cfg = (sconf or {}).get('items') or []
+                            group_obj = custom_data.get(sc_col.get('column_key'), {}) if isinstance(custom_data, dict) else {}
+                            if isinstance(group_obj, str):
+                                try: group_obj = _json.loads(group_obj)
+                                except Exception: group_obj = {}
+                            for it in items_cfg:
+                                iid = it.get('id')
+                                delta = float(it.get('per_unit_delta') or 0)
+                                cnt = 0
+                                if isinstance(group_obj, dict) and iid in group_obj:
+                                    try: cnt = int(group_obj.get(iid) or 0)
+                                    except Exception: cnt = 0
+                                total += cnt * delta
+                    item[stc.get('column_key')] = total
+            except Exception as _e:
+                logging.error(f"[FULL_PROCESS] score_total compute error: {_e}")
+            # 채점 항목 평탄화: source__item = count
+            try:
+                for dcol in display_columns:
+                    if dcol.get('_virtual') == 1:
+                        src = dcol.get('_source_scoring_key')
+                        iid = dcol.get('_source_item_id')
+                        if not src or not iid:
+                            continue
+                        group_obj = custom_data.get(src)
+                        if isinstance(group_obj, str):
+                            try:
+                                import json as _json
+                                group_obj = _json.loads(group_obj)
+                            except Exception:
+                                group_obj = {}
+                        if isinstance(group_obj, dict):
+                            item[f"{src}__{iid}"] = group_obj.get(iid, 0)
+            except Exception as _e:
+                logging.error(f"[FULL_PROCESS] scoring flatten error: {_e}")
+        # score_total 계산 (include_keys 우선)
+        try:
+            for stc in score_total_cols:
+                conf = stc.get('scoring_config')
+                if conf and isinstance(conf, str):
+                    try: conf = _json.loads(conf)
+                    except Exception: conf = {}
+                base = (conf or {}).get('base_score', 100)
+                total = base
+                include_keys = (conf or {}).get('include_keys') or []
+                if include_keys:
+                    for key in include_keys:
+                        sc_col = next((c for c in scoring_cols if c.get('column_key') == key), None)
+                        if not sc_col:
+                            continue
+                        sconf = sc_col.get('scoring_config')
+                        if sconf and isinstance(sconf, str):
+                            try: sconf = _json.loads(sconf)
+                            except Exception: sconf = {}
+                        items_cfg = (sconf or {}).get('items') or []
+                        group_obj = custom_data.get(key, {}) if isinstance(custom_data, dict) else {}
+                        if isinstance(group_obj, str):
+                            try: group_obj = _json.loads(group_obj)
+                            except Exception: group_obj = {}
+                        for it in items_cfg:
+                            iid = it.get('id')
+                            delta = float(it.get('per_unit_delta') or 0)
+                            cnt = 0
+                            if isinstance(group_obj, dict) and iid in group_obj:
+                                try: cnt = int(group_obj.get(iid) or 0)
+                                except Exception: cnt = 0
+                            total += cnt * delta
+                else:
+                    # 하위호환: total_key 그룹
+                    total_key = (conf or {}).get('total_key') or 'default'
+                    for sc_col in scoring_cols:
+                        sconf = sc_col.get('scoring_config')
+                        if sconf and isinstance(sconf, str):
+                            try: sconf = _json.loads(sconf)
+                            except Exception: sconf = {}
+                        if ((sconf or {}).get('total_key') or 'default') != total_key:
+                            continue
+                        items_cfg = (sconf or {}).get('items') or []
+                        group_obj = custom_data.get(sc_col.get('column_key'), {}) if isinstance(custom_data, dict) else {}
+                        if isinstance(group_obj, str):
+                            try: group_obj = _json.loads(group_obj)
+                            except Exception: group_obj = {}
+                        for it in items_cfg:
+                            iid = it.get('id')
+                            delta = float(it.get('per_unit_delta') or 0)
+                            cnt = 0
+                            if isinstance(group_obj, dict) and iid in group_obj:
+                                try: cnt = int(group_obj.get(iid) or 0)
+                                except Exception: cnt = 0
+                            total += cnt * delta
+                item[stc.get('column_key')] = total
+        except Exception as _e:
+            logging.error(f"[FULL_PROCESS] score_total compute error: {_e}")
 
             # 채점 항목을 개별 키로 평탄화: source_scoring_key__item_id = count
             try:
@@ -237,7 +483,7 @@ def follow_sop_route():
             except Exception as _e:
                 logging.error(f"scoring flatten error: {_e}")
 
-            # 채점 총점(score_total) 계산: total_key 기준 합산
+            # 채점 총점(score_total) 계산: include_keys 우선, 없으면 total_key 기준 합산
             try:
                 # 미리 파싱된 scoring/score_total configs
                 # build map: group -> base_score (from score_total column config)
@@ -246,30 +492,55 @@ def follow_sop_route():
                     if conf and isinstance(conf, str):
                         try: conf = _json.loads(conf)
                         except Exception: conf = {}
-                    total_key = (conf or {}).get('total_key') or 'default'
                     base = (conf or {}).get('base_score', 100)
                     total = base
-                    # iterate scoring cols with same total_key
-                    for sc_col in scoring_cols:
-                        sconf = sc_col.get('scoring_config')
-                        if sconf and isinstance(sconf, str):
-                            try: sconf = _json.loads(sconf)
-                            except Exception: sconf = {}
-                        if ((sconf or {}).get('total_key') or 'default') != total_key:
-                            continue
-                        items_cfg = (sconf or {}).get('items') or []
-                        group_obj = custom_data.get(sc_col.get('column_key'), {})
-                        if isinstance(group_obj, str):
-                            try: group_obj = _json.loads(group_obj)
-                            except Exception: group_obj = {}
-                        for it in items_cfg:
-                            iid = it.get('id')
-                            delta = float(it.get('per_unit_delta') or 0)
-                            count = 0
-                            if isinstance(group_obj, dict) and iid in group_obj:
-                                try: count = int(group_obj.get(iid) or 0)
-                                except Exception: count = 0
-                            total += count * delta
+                    include_keys = (conf or {}).get('include_keys') or []
+                    if include_keys:
+                        # 명시된 채점 컬럼 키들만 합산
+                        for key in include_keys:
+                            sc_col = next((c for c in scoring_cols if c.get('column_key') == key), None)
+                            if not sc_col:
+                                continue
+                            sconf = sc_col.get('scoring_config')
+                            if sconf and isinstance(sconf, str):
+                                try: sconf = _json.loads(sconf)
+                                except Exception: sconf = {}
+                            items_cfg = (sconf or {}).get('items') or []
+                            group_obj = custom_data.get(key, {})
+                            if isinstance(group_obj, str):
+                                try: group_obj = _json.loads(group_obj)
+                                except Exception: group_obj = {}
+                            for it in items_cfg:
+                                iid = it.get('id')
+                                delta = float(it.get('per_unit_delta') or 0)
+                                count = 0
+                                if isinstance(group_obj, dict) and iid in group_obj:
+                                    try: count = int(group_obj.get(iid) or 0)
+                                    except Exception: count = 0
+                                total += count * delta
+                    else:
+                        # total_key 그룹 방식 (하위호환)
+                        total_key = (conf or {}).get('total_key') or 'default'
+                        for sc_col in scoring_cols:
+                            sconf = sc_col.get('scoring_config')
+                            if sconf and isinstance(sconf, str):
+                                try: sconf = _json.loads(sconf)
+                                except Exception: sconf = {}
+                            if ((sconf or {}).get('total_key') or 'default') != total_key:
+                                continue
+                            items_cfg = (sconf or {}).get('items') or []
+                            group_obj = custom_data.get(sc_col.get('column_key'), {})
+                            if isinstance(group_obj, str):
+                                try: group_obj = _json.loads(group_obj)
+                                except Exception: group_obj = {}
+                            for it in items_cfg:
+                                iid = it.get('id')
+                                delta = float(it.get('per_unit_delta') or 0)
+                                count = 0
+                                if isinstance(group_obj, dict) and iid in group_obj:
+                                    try: count = int(group_obj.get(iid) or 0)
+                                    except Exception: count = 0
+                                total += count * delta
                     # write into item using the score_total column key
                     item[stc.get('column_key')] = total
             except Exception as _e:
@@ -1067,6 +1338,51 @@ def full_process_route():
         section_columns[section['section_key']] = [
             col for col in dynamic_columns if col.get('tab') == section['section_key']
         ]
+
+    # 메인 목록 표시용 컬럼: 채점(JSON) → 개별 가상 컬럼으로 확장 + 총점(그대로)
+    display_columns = []
+    try:
+        import json as _json
+        def _expand_scoring_columns(_col):
+            sc = _col.get('scoring_config')
+            if sc and isinstance(sc, str):
+                try: sc = _json.loads(sc)
+                except Exception: sc = {}
+            items = (sc or {}).get('items') or []
+            out = []
+            for it in items:
+                iid = it.get('id')
+                label = it.get('label') or iid
+                if not iid:
+                    continue
+                out.append({
+                    'column_key': f"{_col.get('column_key')}__{iid}",
+                    'column_name': f"{_col.get('column_name', _col.get('column_key'))} - {label}",
+                    'column_type': 'number',
+                    'input_type': 'number_integer',
+                    'is_active': 1,
+                    'is_deleted': 0,
+                    'tab': _col.get('tab'),
+                    '_virtual': 1,
+                    '_source_scoring_key': _col.get('column_key'),
+                    '_source_item_id': iid
+                })
+            return out
+        excluded_keys = {'detailed_content', 'violation_content', 'fullprocess_number', 'created_at'}
+        for col in dynamic_columns:
+            ck = col.get('column_key')
+            if not ck or ck in excluded_keys:
+                continue
+            if col.get('column_type') == 'scoring':
+                display_columns.extend(_expand_scoring_columns(col))
+            else:
+                display_columns.append(col)
+        # 채점/총점 목록
+        scoring_cols = [dict(c) for c in dynamic_columns if dict(c).get('column_type') == 'scoring']
+        score_total_cols = [dict(c) for c in dynamic_columns if dict(c).get('column_type') == 'score_total']
+    except Exception as _e:
+        scoring_cols, score_total_cols = [], []
+        logging.warning(f"[FULL_PROCESS] display_columns build failed: {_e}")
     
     # 페이지네이션 처리
     page = request.args.get('page', 1, type=int)
@@ -1171,6 +1487,83 @@ def full_process_route():
                 custom_data = {}
             if isinstance(custom_data, dict):
                 item.update(custom_data)
+            # 채점 항목을 개별 키로 평탄화
+            try:
+                for dcol in display_columns:
+                    if dcol.get('_virtual') == 1:
+                        src = dcol.get('_source_scoring_key')
+                        iid = dcol.get('_source_item_id')
+                        if not src or not iid:
+                            continue
+                        group_obj = custom_data.get(src)
+                        if isinstance(group_obj, str):
+                            try:
+                                import json as _json
+                                group_obj = _json.loads(group_obj)
+                            except Exception:
+                                group_obj = {}
+                        if isinstance(group_obj, dict):
+                            item[f"{src}__{iid}"] = group_obj.get(iid, 0)
+            except Exception as _e:
+                logging.error(f"[FULL_PROCESS] scoring flatten error: {_e}")
+            # 총점 계산 (include_keys 우선)
+            try:
+                for stc in score_total_cols:
+                    conf = stc.get('scoring_config')
+                    if conf and isinstance(conf, str):
+                        try: conf = _json.loads(conf)
+                        except Exception: conf = {}
+                    base = (conf or {}).get('base_score', 100)
+                    total = base
+                    include_keys = (conf or {}).get('include_keys') or []
+                    if include_keys:
+                        for key in include_keys:
+                            sc_col = next((c for c in scoring_cols if c.get('column_key') == key), None)
+                            if not sc_col:
+                                continue
+                            sconf = sc_col.get('scoring_config')
+                            if sconf and isinstance(sconf, str):
+                                try: sconf = _json.loads(sconf)
+                                except Exception: sconf = {}
+                            items_cfg = (sconf or {}).get('items') or []
+                            group_obj = custom_data.get(key, {}) if isinstance(custom_data, dict) else {}
+                            if isinstance(group_obj, str):
+                                try: group_obj = _json.loads(group_obj)
+                                except Exception: group_obj = {}
+                            for it in items_cfg:
+                                iid = it.get('id')
+                                delta = float(it.get('per_unit_delta') or 0)
+                                cnt = 0
+                                if isinstance(group_obj, dict) and iid in group_obj:
+                                    try: cnt = int(group_obj.get(iid) or 0)
+                                    except Exception: cnt = 0
+                                total += cnt * delta
+                    else:
+                        # 하위호환: total_key 그룹 방식
+                        total_key = (conf or {}).get('total_key') or 'default'
+                        for sc_col in scoring_cols:
+                            sconf = sc_col.get('scoring_config')
+                            if sconf and isinstance(sconf, str):
+                                try: sconf = _json.loads(sconf)
+                                except Exception: sconf = {}
+                            if ((sconf or {}).get('total_key') or 'default') != total_key:
+                                continue
+                            items_cfg = (sconf or {}).get('items') or []
+                            group_obj = custom_data.get(sc_col.get('column_key'), {}) if isinstance(custom_data, dict) else {}
+                            if isinstance(group_obj, str):
+                                try: group_obj = _json.loads(group_obj)
+                                except Exception: group_obj = {}
+                            for it in items_cfg:
+                                iid = it.get('id')
+                                delta = float(it.get('per_unit_delta') or 0)
+                                cnt = 0
+                                if isinstance(group_obj, dict) and iid in group_obj:
+                                    try: cnt = int(group_obj.get(iid) or 0)
+                                    except Exception: cnt = 0
+                                total += cnt * delta
+                    item[stc.get('column_key')] = total
+            except Exception as _e:
+                logging.error(f"[FULL_PROCESS] score_total compute error: {_e}")
         # No 칼럼은 역순 번호로 설정 (총 개수에서 역순)
         item['no'] = total_count - offset - idx
         items.append(item)
@@ -1238,6 +1631,7 @@ def full_process_route():
                          fullprocesses=items,  # Full Process 전용 변수명
                          dynamic_columns=dynamic_columns,
                          sections=sections,
+                         display_columns=display_columns,
                          section_columns=section_columns,
                          pagination=pagination,
                          search_params=search_params,

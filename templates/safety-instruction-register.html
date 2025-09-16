@@ -268,7 +268,10 @@
                                                    data-score="{{ it.per_unit_delta }}"
                                                    data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}"
                                                    value="0">
+                                            {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}
+                                            {% if sc.get('show_unit_hint', True) %}
                                             <small class="hint">{{ it.per_unit_delta }}점/건</small>
+                                            {% endif %}
                                         </div>
                                         {% endfor %}
                                         <input type="hidden"
@@ -277,15 +280,14 @@
                                                data-section="{{ section.section_key }}"
                                                value='{}'>                                    </div>
                                 {% elif col.column_type == 'score_total' %}
-                                    {% set sc = (col.scoring_config|from_json) %}
-                                    <div class="score-summary" data-total-key="{{ sc.total_key if sc and sc.total_key else 'default' }}">
-                                        <div class="summary-row compact">
-                                            Crt: <span id="critical_count">0</span>
-                                            &nbsp;·&nbsp; Mj: <span id="major_count">0</span>
-                                            &nbsp;·&nbsp; Mi: <span id="minor_count">0</span>
-                                        </div>
-                                        <div class="summary-row total">
-                                            총점: <span id="total_score">{{ sc.base_score if sc and sc.base_score else 100 }}</span>
+                                    <!-- 총점 필드 (심플/자동 계산) -->
+                                    {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}
+                                    {% set base_score = sc.get('base_score') if sc and sc.get('base_score') else 100 %}
+                                    <div class="scoring-columns">
+                                        <div class="sc-col score-total-field" data-field="{{ col.column_key }}" data-config='{{ col.scoring_config|default("{}")|tojson }}' data-base-score="{{ base_score }}">
+                                            <label class="form-label">총점</label>
+                                            <input type="number" class="total-score-display" value="{{ base_score }}" readonly style="background: #f0f0f0; font-weight: bold;">
+                                            <input type="hidden" class="{{ section.section_key|replace('_', '-') }}-input" data-field="{{ col.column_key }}" data-section="{{ section.section_key }}" value="">
                                         </div>
                                     </div>
                                 {% elif col.column_type == 'textarea' %}
