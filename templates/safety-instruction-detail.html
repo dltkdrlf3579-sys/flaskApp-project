@@ -45,11 +45,11 @@
                 <!-- safety_instruction_id와 created_at 추가 (첫 번째 섹션에만) -->
                 {% if loop.index == 1 %}
                 <div class="info-row">
-                    <div class="info-cell span-1">
+                    <div class="info-cell span-2">
                         <label>발부번호</label>
                         <input type="text" value="{{ instruction.issue_number or '-' }}" readonly style="background-color: #f3f4f6;">
                     </div>
-                    <div class="info-cell span-1">
+                    <div class="info-cell span-2">
                         <label>등록일</label>
                         <input type="text" value="{{ (instruction.created_at|date_only) if instruction.created_at else '-' }}" readonly style="background-color: #f3f4f6;">
                     </div>
@@ -70,11 +70,16 @@
                 <div class="info-row">
                     {% for col in chunk %}
                         {% if col %}
-                            {% set span = col.column_span|default(1)|int %}
                             {% if col.column_type == 'list' %}
-                                {% set span = 4 %}
+                                {% set span = 8 %}
                             {% elif col.column_type == 'scoring' %}
+                                {% set span = 8 %}
+                            {% elif col.column_type == 'score_total' %}
                                 {% set span = 4 %}
+                            {% elif col.column_span and col.column_span|int > 0 %}
+                                {% set span = col.column_span|int %}
+                            {% else %}
+                                {% set span = 2 %}
                             {% endif %}
                             {% if col.column_key == 'created_at' %}
                                 {% set col_value = instruction.created_at | date_only if instruction.created_at else '' %}
@@ -82,7 +87,7 @@
                                 {% set col_value = instruction[col.column_key] | default('', true) %}
                             {% endif %}
                             
-                            <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
+                            <div class="info-cell span-{{ span }}">
                                 {# 렌더 타입 계산: 전역 키 + custom_data로 그룹 추정 #}
                                 {% set render_type = col.column_type %}
                                 {% if not render_type or render_type == 'text' %}
@@ -945,7 +950,7 @@ function showValidationMessage(input, message) {
 
 .info-row {
     display: grid !important;
-    grid-template-columns: repeat(4, 1fr) !important;
+    grid-template-columns: repeat(8, minmax(0, 1fr)) !important;
     gap: 16px !important;
     margin-bottom: 16px !important;
 }
@@ -979,17 +984,14 @@ function showValidationMessage(input, message) {
     min-height: 80px;
 }
 
-.info-cell.span-2 {
-    grid-column: span 2 !important;
-}
-
-.info-cell.span-3 {
-    grid-column: span 3 !important;
-}
-
-.info-cell.span-4 {
-    grid-column: span 4 !important;
-}
+.info-cell.span-1 { grid-column: span 1 !important; }
+.info-cell.span-2 { grid-column: span 2 !important; }
+.info-cell.span-3 { grid-column: span 3 !important; }
+.info-cell.span-4 { grid-column: span 4 !important; }
+.info-cell.span-5 { grid-column: span 5 !important; }
+.info-cell.span-6 { grid-column: span 6 !important; }
+.info-cell.span-7 { grid-column: span 7 !important; }
+.info-cell.span-8 { grid-column: span 8 !important; }
 
 .input-group {
     display: flex;

@@ -278,21 +278,7 @@
                 grid-column: span 1; /* 기본 1칸 */
             }
             
-            /* span 클래스들 */
-            .column-card-small.span-2 {
-                grid-column: span 2;
-                background: linear-gradient(90deg, #f8f9fa 0%, #e9ecef 100%);
-            }
-            
-            .column-card-small.span-3 {
-                grid-column: span 3;
-                background: linear-gradient(90deg, #f8f9fa 0%, #dee2e6 100%);
-            }
-            
-            .column-card-small.span-4 {
-                grid-column: span 4;
-                background: linear-gradient(90deg, #f8f9fa 0%, #ced4da 100%);
-            }
+            /* span 클래스들 제거 - 모든 컬럼 동일한 크기로 표시 */
             
             .column-card-small:hover {
                 border-color: #2f5fd3;
@@ -454,20 +440,20 @@
                                 <label class="btn btn-outline-primary" for="span1">
                                     <i class="bi bi-square"></i> 1칸
                                 </label>
-                                
+
                                 <input type="radio" class="btn-check" name="columnSpan" id="span2" value="2">
                                 <label class="btn btn-outline-primary" for="span2">
                                     <i class="bi bi-square"></i><i class="bi bi-square"></i> 2칸
                                 </label>
-                                
-                                <input type="radio" class="btn-check" name="columnSpan" id="span3" value="3">
-                                <label class="btn btn-outline-primary" for="span3">
-                                    <i class="bi bi-square"></i><i class="bi bi-square"></i><i class="bi bi-square"></i> 3칸
-                                </label>
-                                
+
                                 <input type="radio" class="btn-check" name="columnSpan" id="span4" value="4">
                                 <label class="btn btn-outline-primary" for="span4">
-                                    <i class="bi bi-square-fill"></i> 전체 너비 (4칸)
+                                    <i class="bi bi-square"></i><i class="bi bi-square"></i><i class="bi bi-square"></i><i class="bi bi-square"></i> 4칸
+                                </label>
+
+                                <input type="radio" class="btn-check" name="columnSpan" id="span8" value="8">
+                                <label class="btn btn-outline-primary" for="span8">
+                                    <i class="bi bi-square-fill"></i> 전체 너비 (8칸)
                                 </label>
                             </div>
                             <small class="text-muted">텍스트 필드가 차지할 너비를 선택하세요</small>
@@ -1193,9 +1179,8 @@ let editingId = null;
                 const card = document.createElement('div');
                 const inactiveClass = !column.is_active ? 'inactive' : '';
                 const deletedClass = column._toDelete ? 'to-delete' : '';
-                // span 클래스 추가 (텍스트 타입일 때만)
-                const spanClass = (column.column_type === 'text' && column.column_span) ? `span-${column.column_span}` : '';
-                card.className = `column-card-small ${inactiveClass} ${deletedClass} ${spanClass}`;
+                // span 클래스 제거 - 모든 컬럼 동일한 크기로 표시
+                card.className = `column-card-small ${inactiveClass} ${deletedClass}`;
                 card.dataset.id = column.id;
                 card.dataset.tab = column.tab || 'additional';
                 
@@ -1414,26 +1399,25 @@ let editingId = null;
             const typeSelectEl = document.getElementById('columnType');
             const isPopup = column.column_type && column.column_type.startsWith('popup_');
             const isLinked = column.column_type && column.column_type.startsWith('linked_');
-            let looksTable = isPopup || isLinked || column.input_type === 'table' || column._tableType || column.table_type;
-            // 보강: 형식이 깨진 경우 키 기반으로 그룹 추론
-            if (!looksTable) {
-                const suffixes = ['_id','_dept','_bizno','_code','_company'];
-                let baseKey = column.column_key || '';
-                suffixes.forEach(s => { if (baseKey.endsWith(s)) baseKey = baseKey.slice(0, -s.length); });
-                const sibling = (pendingColumns || []).find(c => String(c.id) !== String(column.id) && (
-                    c.column_key === baseKey || suffixes.some(s => c.column_key === baseKey + s)
-                ));
-                if (sibling && ( (sibling.column_type||'').startsWith('popup_') || (sibling.column_type||'').startsWith('linked_') || sibling._tableType || sibling.input_type === 'table' || sibling._tableGroup )) {
-                    looksTable = true;
-                }
+            // 채점/총점은 강제로 table로 전환하지 않음 (요구사항: 입력 타입 고정 허용)
+            if (column.column_type === 'scoring' || column.column_type === 'score_total') {
+                typeSelectEl.value = column.column_type;
+                typeSelectEl.disabled = false;
+                document.getElementById('tableConfigField').style.display = 'none';
+                document.getElementById('tableColumnsPreview').style.display = 'none';
+                typeSelectEl.dataset.originalType = typeSelectEl.value || column.column_type || '';
+                document.getElementById('isActive').checked = column.is_active;
+                // 점수/총점 타입일 때도 아래 공통 복원/토글/모달 표시 로직이 실행되도록 return 제거
             }
+            // 본질적 요구: popup_/linked_ 만 테이블로 간주. 그 외는 강제 고정 금지
+            let looksTable = false;
             // 타입 우선순위: 명시 dropdown은 테이블로 강제하지 않음
             if (column.column_type === 'dropdown') {
                 typeSelectEl.value = 'dropdown';
                 typeSelectEl.disabled = false;
                 document.getElementById('tableConfigField').style.display = 'none';
                 document.getElementById('tableColumnsPreview').style.display = 'none';
-            } else if (column._tableGroup || looksTable) {
+            } else if (isPopup || isLinked) {
                 // 테이블 그룹으로 판단되면 강제로 'table'로 고정
                 typeSelectEl.value = 'table';
                 // 테이블 그룹은 타입 변경 불가
@@ -1507,7 +1491,7 @@ let editingId = null;
                     document.getElementById('tableConfigField').style.display = 'block';
                 }
             } else {
-                const resolvedType = (column.column_type === 'table' || column.input_type === 'table' || column._tableType || column.table_type) ? 'table' : column.column_type;
+                const resolvedType = column.column_type; // 강제 고정 제거
                 typeSelectEl.value = resolvedType || '';
                 // 일반 컬럼은 타입 변경 가능
                 typeSelectEl.disabled = false;
@@ -1686,6 +1670,10 @@ let editingId = null;
                 type === 'number' ? 'block' : 'none';
         }
 
+        // 채점 모달 전역 상태 (앞에서 선언하여 TDZ 회피)
+        let scoringItems = [];
+        let scoringItemCounter = 0;
+
         function toggleScoringField() {
             const type = document.getElementById('columnType').value;
             const el = document.getElementById('scoringConfigField');
@@ -1708,8 +1696,6 @@ let editingId = null;
         }
 
         // 새로운 채점 모달 관련 함수들
-        let scoringItems = [];
-        let scoringItemCounter = 0;
 
         function openScoringModal() {
             const ta = document.getElementById('scoringConfig');
@@ -2198,8 +2184,10 @@ let editingId = null;
 
                     // 숫자형 수정 시 간단 가중치/등급을 scoring_config로 반영
                     if (columnType === 'number') {
-                        const per = parseFloat(document.getElementById('numberPerUnit').value || '0');
-                        const grade = document.getElementById('numberGrade').value || '';
+                        const perEl = document.getElementById('numberPerUnit');
+                        const gradeEl = document.getElementById('numberGrade');
+                        const per = perEl ? parseFloat(perEl.value || '0') : 0;
+                        const grade = gradeEl ? (gradeEl.value || '') : '';
                         const conf = { per_unit_delta: per };
                         if (grade) conf.grade = grade;
                         const ta = document.getElementById('scoringConfig');
@@ -2314,8 +2302,10 @@ let editingId = null;
                     
                     // 숫자형은 간단 가중치/등급을 scoring_config로 저장
                     if (columnType === 'number') {
-                        const per = parseFloat(document.getElementById('numberPerUnit').value || '0');
-                        const grade = document.getElementById('numberGrade').value || '';
+                        const perEl = document.getElementById('numberPerUnit');
+                        const gradeEl = document.getElementById('numberGrade');
+                        const per = perEl ? parseFloat(perEl.value || '0') : 0;
+                        const grade = gradeEl ? (gradeEl.value || '') : '';
                         const conf = { per_unit_delta: per };
                         if (grade) conf.grade = grade;
                         const ta = document.getElementById('scoringConfig');

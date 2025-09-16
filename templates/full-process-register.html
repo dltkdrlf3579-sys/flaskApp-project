@@ -40,11 +40,31 @@
         </div>
         <div class="section-content" id="{{ section.section_key|replace('_', '-') }}-content">
             <div class="info-table">
+                <!-- 평가번호와 등록일 추가 (첫 번째 섹션에만) -->
+                {% if loop.index == 1 %}
+                <div class="info-row">
+                    <div class="info-cell span-2">
+                        <label>평가번호</label>
+                        <div class="value" style="color: #6b7280; font-style: italic;">자동으로 입력됩니다</div>
+                    </div>
+                    <div class="info-cell span-2">
+                        <label>등록일</label>
+                        <input type="date"
+                               class="form-input date-input"
+                               name="created_at"
+                               data-field="created_at"
+                               value="{{ today_date }}"
+                               readonly
+                               style="background-color: #f3f4f6;">
+                    </div>
+                </div>
+                {% endif %}
+
                 {% set all_columns = section_columns[section.section_key] %}
-                <!-- detailed_content와 violation_content는 제외 -->
+                <!-- detailed_content와 violation_content, fullprocess_number, created_at는 제외 -->
                 {% set columns = [] %}
                 {% for col in all_columns %}
-                    {% if col.column_key not in ['detailed_content', 'violation_content'] %}
+                    {% if col.column_key not in ['detailed_content', 'violation_content', 'fullprocess_number', 'created_at'] %}
                         {% set _ = columns.append(col) %}
                     {% endif %}
                 {% endfor %}
@@ -55,16 +75,19 @@
                 <div class="info-row">
                     {% for col in chunk %}
                         {% if col %}
-                            {% set span = col.column_span|default(1)|int %}
                             {% if col.column_type == 'list' %}
-                                {% set span = 4 %}
+                                {% set span = 8 %}
                             {% elif col.column_type == 'scoring' %}
-                                {% set span = 4 %}
+                                {% set span = 8 %}
                             {% elif col.column_type == 'score_total' %}
+                                {% set span = 4 %}
+                            {% elif col.column_span and col.column_span|int > 0 %}
+                                {% set span = col.column_span|int %}
+                            {% else %}
                                 {% set span = 2 %}
                             {% endif %}
-                            
-                            <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
+
+                            <div class="info-cell span-{{ span }}">
                                 <label>{{ col.column_name }}</label>
                                 
                                 {% if col.column_key == 'fullprocess_number' %}
@@ -311,23 +334,33 @@ function toggleSection(sectionId) {
 // 동적 필드 수집 함수
 function collectDynamicFields() {
     const data = {};
-    
+
     // 모든 섹션 순회
     sections.forEach(section => {
         const sectionInputs = document.querySelectorAll(`[data-section="${section.section_key}"]`);
-        
+
         sectionInputs.forEach(input => {
             const fieldKey = input.dataset.field;
+            if (!fieldKey) return; // fieldKey가 없으면 건너뛰기
+
             let value = '';
-            
+
+            if (!input) {
+                console.warn(`Input element is null for field: ${fieldKey}`);
+                return;
+            }
+
             if (input.tagName === 'SELECT') {
-                value = input.value;
+                value = input.value || '';
             } else if (input.type === 'checkbox') {
                 value = input.checked ? '1' : '0';
+            } else if (input.type === 'number') {
+                // 숫자 타입 특별 처리
+                value = input.value || '0';
             } else if (input.tagName === 'TEXTAREA') {
-                value = input.value;
+                value = input.value || '';
             } else {
-                value = input.value;
+                value = input.value || '';
             }
             
             // 리스트 필드 처리 - 더 간단하고 확실한 방법
@@ -595,7 +628,7 @@ document.addEventListener('input', function(e) {
 
 .info-row {
     display: grid !important;
-    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(8, minmax(0, 1fr)) !important;
     gap: 16px !important;
     margin-bottom: 16px !important;
 }
@@ -632,17 +665,14 @@ document.addEventListener('input', function(e) {
     min-height: 80px;
 }
 
-.info-cell.span-2 {
-    grid-column: span 2 !important;
-}
-
-.info-cell.span-3 {
-    grid-column: span 3 !important;
-}
-
-.info-cell.span-4 {
-    grid-column: span 4 !important;
-}
+.info-cell.span-1 { grid-column: span 1 !important; }
+.info-cell.span-2 { grid-column: span 2 !important; }
+.info-cell.span-3 { grid-column: span 3 !important; }
+.info-cell.span-4 { grid-column: span 4 !important; }
+.info-cell.span-5 { grid-column: span 5 !important; }
+.info-cell.span-6 { grid-column: span 6 !important; }
+.info-cell.span-7 { grid-column: span 7 !important; }
+.info-cell.span-8 { grid-column: span 8 !important; }
 
 .input-group {
     display: flex;

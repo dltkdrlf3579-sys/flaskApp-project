@@ -265,10 +265,7 @@
                 grid-column: span 1; /* 기본 1칸 */
             }
             
-            /* span 클래스들 */
-            .column-card-small.span-2 { grid-column: span 2; background: linear-gradient(90deg, #f8f9fa 0%, #e9ecef 100%); }
-            .column-card-small.span-3 { grid-column: span 3; background: linear-gradient(90deg, #f8f9fa 0%, #dee2e6 100%); }
-            .column-card-small.span-4 { grid-column: span 4; background: linear-gradient(90deg, #f8f9fa 0%, #ced4da 100%); }
+            /* span 클래스들 제거 - 모든 컬럼 동일한 크기로 표시 */
             
             .column-card-small:hover {
                 border-color: #2f5fd3;
@@ -430,20 +427,20 @@
                                 <label class="btn btn-outline-primary" for="span1">
                                     <i class="bi bi-square"></i> 1칸
                                 </label>
-                                
+
                                 <input type="radio" class="btn-check" name="columnSpan" id="span2" value="2">
                                 <label class="btn btn-outline-primary" for="span2">
                                     <i class="bi bi-square"></i><i class="bi bi-square"></i> 2칸
                                 </label>
-                                
-                                <input type="radio" class="btn-check" name="columnSpan" id="span3" value="3">
-                                <label class="btn btn-outline-primary" for="span3">
-                                    <i class="bi bi-square"></i><i class="bi bi-square"></i><i class="bi bi-square"></i> 3칸
-                                </label>
-                                
+
                                 <input type="radio" class="btn-check" name="columnSpan" id="span4" value="4">
                                 <label class="btn btn-outline-primary" for="span4">
-                                    <i class="bi bi-square-fill"></i> 전체 너비 (4칸)
+                                    <i class="bi bi-square"></i><i class="bi bi-square"></i><i class="bi bi-square"></i><i class="bi bi-square"></i> 4칸
+                                </label>
+
+                                <input type="radio" class="btn-check" name="columnSpan" id="span8" value="8">
+                                <label class="btn btn-outline-primary" for="span8">
+                                    <i class="bi bi-square-fill"></i> 전체 너비 (8칸)
                                 </label>
                             </div>
                             <small class="text-muted">텍스트 필드가 차지할 너비를 선택하세요</small>
@@ -1402,9 +1399,8 @@ let editingId = null;
                 const card = document.createElement('div');
                 const inactiveClass = !column.is_active ? 'inactive' : '';
                 const deletedClass = column._toDelete ? 'to-delete' : '';
-                // span 클래스 추가 (텍스트 타입일 때만)
-                const spanClass = (column.column_type === 'text' && column.column_span) ? `span-${column.column_span}` : '';
-                card.className = `column-card-small ${inactiveClass} ${deletedClass} ${spanClass}`;
+                // span 클래스 제거 - 모든 컬럼 동일한 크기로 표시
+                card.className = `column-card-small ${inactiveClass} ${deletedClass}`;
                 card.dataset.id = column.id;
                 card.dataset.tab = column.tab || 'additional';
                 
@@ -1624,7 +1620,8 @@ let editingId = null;
             const isPopup = column.column_type && column.column_type.startsWith('popup_');
             const isLinked = column.column_type && column.column_type.startsWith('linked_');
             // 실제 타입/입력타입 기준으로만 테이블 판단 (메타 플래그는 무시)
-            let looksTable = (column.column_type === 'table') || isPopup || isLinked || (column.input_type === 'table');
+            // 본질: popup_/linked_만 테이블로 고정 대상으로 간주
+            let looksTable = (column.column_type === 'table') || isPopup || isLinked || false;
             // 보강: 형식이 깨진 경우 키 기반으로 그룹 추론
             if (!looksTable) {
                 const suffixes = ['_id','_dept','_bizno','_code','_company'];
@@ -1643,11 +1640,10 @@ let editingId = null;
                 typeSelectEl.disabled = false;
                 document.getElementById('tableConfigField').style.display = 'none';
                 document.getElementById('tableColumnsPreview').style.display = 'none';
-            } else if (looksTable) {
-                // 테이블/팝업/링크드 계열 처리
+            } else if (isPopup || isLinked) {
+                // 팝업/링크드만 강제 table 처리
                 typeSelectEl.value = 'table';
-                // 팝업/링크드는 타입 변경 불가, 순수 table은 변경 허용
-                typeSelectEl.disabled = (isPopup || isLinked);
+                typeSelectEl.disabled = true;
                 
                 // popup 타입들은 타입 변경 불가
                 if (column.column_type === 'popup_person' || 
@@ -2441,8 +2437,10 @@ let editingId = null;
 
             // 숫자형 수정 시 간단 가중치/등급을 scoring_config로 반영
             if (columnType === 'number') {
-                        const per = parseFloat(document.getElementById('numberPerUnit').value || '0');
-                        const grade = document.getElementById('numberGrade').value || '';
+                        const perEl = document.getElementById('numberPerUnit');
+                        const gradeEl = document.getElementById('numberGrade');
+                        const per = perEl ? parseFloat(perEl.value || '0') : 0;
+                        const grade = gradeEl ? (gradeEl.value || '') : '';
                         const conf = { per_unit_delta: per };
                         if (grade) conf.grade = grade;
                         const ta = document.getElementById('scoringConfig');
@@ -2561,8 +2559,10 @@ let editingId = null;
                     const newId = Date.now();
                     // 숫자형이면 간단 가중치/등급을 scoring_config로 반영
                     if (columnType === 'number') {
-                        const per = parseFloat(document.getElementById('numberPerUnit').value || '0');
-                        const grade = document.getElementById('numberGrade').value || '';
+                        const perEl = document.getElementById('numberPerUnit');
+                        const gradeEl = document.getElementById('numberGrade');
+                        const per = perEl ? parseFloat(perEl.value || '0') : 0;
+                        const grade = gradeEl ? (gradeEl.value || '') : '';
                         const conf = { per_unit_delta: per };
                         if (grade) conf.grade = grade;
                         const ta = document.getElementById('scoringConfig');

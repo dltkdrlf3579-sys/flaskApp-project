@@ -474,27 +474,9 @@ function coLocateScoreTotals() {
             // 그리드로 이동 (항목 옆으로 레고처럼 붙이기)
             grid.appendChild(totalContainer);
 
-            // 총점 타일의 라벨 교정: 원래 info-cell의 라벨을 타일 안 첫 요소로 이동
-            try {
-                const innerLabel = totalContainer.querySelector('label');
-                let outerLabel = null;
-                if (sourceInfoCell) {
-                    // 우선 순위: info-cell 직계 label
-                    outerLabel = sourceInfoCell.querySelector(':scope > label') || null;
-                    if (!outerLabel) {
-                        // fallback: 첫 번째 label
-                        outerLabel = sourceInfoCell.querySelector('label');
-                    }
-                }
-                if (outerLabel) {
-                    if (innerLabel) innerLabel.remove();
-                    outerLabel.classList.add('form-label');
-                    totalContainer.insertBefore(outerLabel, totalContainer.firstChild);
-                }
-            } catch(e) { /* ignore */ }
-
-            // 라벨/원본 셀은 숨기지 않음: 다른 칼럼 라벨이 사라지는 부작용 방지
-            // 필요시 추후 스타일로 원본 칸을 미세 조정 가능
+            // 라벨은 이동하지 않음: 각 info-cell의 라벨과 타일 내부 라벨을 모두 유지해
+            // 시각적으로도 헷갈리지 않도록 한다. (중복 표시는 허용)
+            // 원본 셀도 숨기지 않음: 다른 칼럼 라벨 손상 방지
         });
     } catch (e) {
         console.warn('coLocateScoreTotals error:', e);
