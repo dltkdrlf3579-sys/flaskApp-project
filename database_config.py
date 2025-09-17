@@ -1407,7 +1407,27 @@ class PartnerDataManager:
                     custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
 
                     # 주요 필드 추출 (영어 컬럼명만)
-                    request_number = row.get('request_number', f"REQ-{idx}")
+                    # request_number 생성: CRYYMMNNN 형식
+                    from datetime import datetime
+                    yymm = datetime.now().strftime('%y%m')
+                    # 해당 월의 마지막 번호 찾기
+                    cursor.execute("""
+                        SELECT request_number
+                        FROM partner_change_requests
+                        WHERE request_number LIKE %s
+                        ORDER BY request_number DESC
+                        LIMIT 1
+                    """, (f"CR{yymm}%",))
+                    last_num = cursor.fetchone()
+                    if last_num:
+                        try:
+                            last_seq = int(last_num[0][6:9])  # CR2412001 -> 001
+                            next_seq = last_seq + idx + 1
+                        except:
+                            next_seq = idx + 1
+                    else:
+                        next_seq = idx + 1
+                    request_number = row.get('request_number', f"CR{yymm}{next_seq:03d}")
                     requester_name = row.get('requester_name', '')
                     requester_department = row.get('requester_department', '')
                     company_name = row.get('company_name', '')

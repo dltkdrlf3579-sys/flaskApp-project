@@ -110,6 +110,30 @@ def simple_transform_example(df):
     Example transformation function
     Modify this to apply your transformations
     """
+    # Generate request_number if missing (CRYYMMNNN format)
+    if 'request_number' not in df.columns or df['request_number'].isna().any():
+        from datetime import datetime
+        yymm = datetime.now().strftime('%y%m')
+
+        # Get existing numbers for this month
+        engine = create_engine('postgresql://postgres:admin123@localhost:5432/portal_dev')
+        existing = pd.read_sql(
+            f"SELECT request_number FROM partner_change_requests WHERE request_number LIKE 'CR{yymm}%' ORDER BY request_number DESC LIMIT 1",
+            engine
+        )
+
+        if not existing.empty:
+            try:
+                last_seq = int(existing.iloc[0]['request_number'][6:9])
+            except:
+                last_seq = 0
+        else:
+            last_seq = 0
+
+        # Generate new numbers
+        df['request_number'] = [f"CR{yymm}{i+last_seq+1:03d}" for i in range(len(df))]
+        engine.dispose()
+
     # Example: Add other_info if missing
     if 'other_info' not in df.columns:
         df['other_info'] = '변경 요청 데이터'
