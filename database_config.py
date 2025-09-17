@@ -846,12 +846,9 @@ class PartnerDataManager:
             cursor = conn.cursor()
             
             
-            # 트랜잭션 시작
+            # 트랜잭션 시작 (캐시 없이 직접 처리)
             cursor.execute("BEGIN")
-            
-            # 기존 캐시 데이터 삭제
-            cursor.execute("DELETE FROM safety_instructions_cache")
-            
+
             # 배치 삽입을 위한 데이터 준비 (동적 컬럼 방식)
             rows = []
             for _, row in df.iterrows():
@@ -867,23 +864,67 @@ class PartnerDataManager:
                 # 원본 데이터 그대로 저장 (수동 업데이트로 변경)
                 custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
                 
-                # issue_number와 created_at 추출 (컬럼명이 한글일 수 있음)
+                # issue_number 추출
                 issue_number = (row.get('issue_number') or row.get('발부번호') or '').strip()
                 if not issue_number:
-                    # UNIQUE 키가 비어 있으면 스킵 (파이프라인 에러 방지)
+                    # UNIQUE 키가 비어 있으면 스킵
                     continue
+
+                # 외부 created_at 추출 (Full Process처럼)
+                created_at_str = (row.get('created_at', '') or
+                                row.get('CREATED_AT', '') or
+                                row.get('발부일', '') or
+                                row.get('작성일', '') or
+                                row.get('issue_date', '') or
+                                row.get('ISSUE_DATE', '') or
+                                row.get('등록일', '') or
+                                row.get('REG_DATE', '') or
+                                row.get('reg_date', ''))
+
+                # 날짜 파싱
+                created_dt = None
+                if created_at_str:
+                    # 다양한 날짜 형식 파싱 시도
+                    for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%Y/%m/%d', '%Y%m%d', '%d-%b-%y', '%d/%m/%Y']:
+                        try:
+                            created_dt = datetime.strptime(str(created_at_str).split('.')[0], fmt)
+                            break
+                        except:
+                            continue
+                if not created_dt:
+                    created_dt = datetime.now()
+
+                # created_dt를 문자열로 변환
+                created_at_iso = created_dt.strftime('%Y-%m-%d %H:%M:%S') if created_dt else None
+
                 rows.append((
                     issue_number,
                     custom_data,
+                    created_at_iso,
                     0  # is_deleted = 0
                 ))
             
-            # 배치 삽입
-            cursor.executemany('''
-                INSERT INTO safety_instructions_cache (
-                    issue_number, custom_data, is_deleted, created_at
-                ) VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
-            ''', rows)
+            # 캐시 없이 직접 메인 테이블에 삽입
+            # PostgreSQL vs SQLite 조건부 처리
+            if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                # PostgreSQL: UPSERT 사용
+                for issue_number, custom_data, created_at_iso, is_deleted in rows:
+                    cursor.execute('''
+                        INSERT INTO safety_instructions (issue_number, custom_data, created_at, is_deleted)
+                        VALUES (%s, %s, %s::timestamp, %s)
+                        ON CONFLICT (issue_number)
+                        DO UPDATE SET
+                            custom_data = EXCLUDED.custom_data,
+                            created_at = EXCLUDED.created_at,
+                            is_deleted = EXCLUDED.is_deleted,
+                            updated_at = CURRENT_TIMESTAMP
+                    ''', (issue_number, custom_data, created_at_iso, is_deleted))
+            else:
+                # SQLite: INSERT OR REPLACE
+                cursor.executemany('''
+                    INSERT OR REPLACE INTO safety_instructions (issue_number, custom_data, created_at, is_deleted)
+                    VALUES (?, ?, ?, ?)
+                ''', rows)
             
             conn.commit()
             conn.close()
