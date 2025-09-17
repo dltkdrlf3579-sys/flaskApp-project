@@ -680,12 +680,14 @@ def follow_sop_register():
                 return 'company'
             if any(((v+'_dept') in all_keys) or ((v+'_department') in all_keys) or ((v+'_department_code') in all_keys) for v in variants):
                 return 'department'
+            if any(((v+'_division_code') in all_keys) or ((v+'_division') in all_keys) for v in variants):
+                return 'division'
             if any(((v+'_id') in all_keys) for v in variants):
                 return 'person'
             if any(((v+'_company') in all_keys) for v in variants):
                 return 'contractor'
             return ''
-        popup_map = {'person':'popup_person','company':'popup_company','department':'popup_department','contractor':'popup_contractor'}
+        popup_map = {'person':'popup_person','company':'popup_company','department':'popup_department','contractor':'popup_contractor','division':'popup_division'}
         for col in dynamic_columns:
             ck = col.get('column_key') or ''
             bk = base_key_of(ck)
@@ -929,12 +931,14 @@ def follow_sop_detail(work_req_no):
                 return 'company'
             if any(((v+'_dept') in all_keys) or ((v+'_department') in all_keys) or ((v+'_department_code') in all_keys) for v in variants):
                 return 'department'
+            if any(((v+'_division_code') in all_keys) or ((v+'_division') in all_keys) for v in variants):
+                return 'division'
             if any(((v+'_id') in all_keys) for v in variants):
                 return 'person'
             if any(((v+'_company') in all_keys) for v in variants):
                 return 'contractor'
             return ''
-        popup_map = {'person':'popup_person','company':'popup_company','department':'popup_department','contractor':'popup_contractor'}
+        popup_map = {'person':'popup_person','company':'popup_company','department':'popup_department','contractor':'popup_contractor','division':'popup_division'}
         for col in dynamic_columns:
             ck = col.get('column_key') or ''
             bk = base_key_of(ck)
@@ -1303,12 +1307,14 @@ def full_process_route():
                 return 'company'
             if any(((v+'_dept') in all_keys) or ((v+'_department') in all_keys) or ((v+'_department_code') in all_keys) for v in variants):
                 return 'department'
+            if any(((v+'_division_code') in all_keys) or ((v+'_division') in all_keys) for v in variants):
+                return 'division'
             if any(((v+'_id') in all_keys) for v in variants):
                 return 'person'
             if any(((v+'_company') in all_keys) for v in variants):
                 return 'contractor'
             return ''
-        popup_map = {'person':'popup_person','company':'popup_company','department':'popup_department','contractor':'popup_contractor'}
+        popup_map = {'person':'popup_person','company':'popup_company','department':'popup_department','contractor':'popup_contractor','division':'popup_division'}
         for col in dynamic_columns:
             ck = col.get('column_key') or ''
             bk = base_key_of(ck)

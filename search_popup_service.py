@@ -111,6 +111,27 @@ class SearchPopupService:
                 'placeholder': '검색어를 입력하세요',
                 'order_by': 'worker_name',
                 'use_cache': True  # 로컬 테이블 사용
+            },
+            'division': {
+                'table': 'divisions_cache',  # cache 테이블 사용
+                'query_key': 'DIVISION_QUERY',  # config.ini의 쿼리 키
+                'search_fields': [
+                    {'field': 'division_name', 'label': '사업부명'},
+                    {'field': 'division_code', 'label': '사업부코드'}
+                ],
+                'default_search_field': 'division_name',
+                'display_fields': ['division_name', 'division_code', 'parent_division_code', 'division_level'],
+                'display_labels': {
+                    'division_name': '사업부명',
+                    'division_code': '사업부코드',
+                    'parent_division_code': '상위사업부',
+                    'division_level': '레벨'
+                },
+                'id_field': 'division_code',
+                'title': '사업부 검색',
+                'placeholder': '검색어를 입력하세요',
+                'order_by': 'division_name',
+                'use_cache': True  # 로컬 테이블 사용
             }
         }
         

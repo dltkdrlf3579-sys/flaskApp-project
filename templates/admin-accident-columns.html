@@ -1177,6 +1177,7 @@ let editingId = null;
                 'popup_contractor': '협력사 근로자',
                 'popup_department': '부서',
                 'popup_building': '건물',
+                'popup_division': '사업부',
                 'linked_dept': '연결-부서',
                 'linked_text': '연결-텍스트'
             };
@@ -1724,7 +1725,7 @@ let editingId = null;
                     const tableTypeGuess = existingColumn._tableType || keyHint || siblingType || (looksLikeTable ? (existingColumn._tableType || null) : null);
                     let newType = existingColumn._tableGroup ? existingColumn.column_type : columnType;
                     if (!isLinkedField && (!newType || newType === 'text') && tableTypeGuess) {
-                        const popupMap = { person:'popup_person', department:'popup_department', company:'popup_company', building:'popup_building', contractor:'popup_contractor' };
+                        const popupMap = { person:'popup_person', department:'popup_department', company:'popup_company', building:'popup_building', contractor:'popup_contractor', division:'popup_division' };
                         newType = popupMap[tableTypeGuess] || newType || 'text';
                     }
                     // 입력 서브타입 결정
@@ -2400,6 +2401,14 @@ let editingId = null;
                     { name: 'ID', key_suffix: '_id', type: 'linked_text' },
                     { name: '소속업체', key_suffix: '_company', type: 'popup_company' },
                     { name: '사업자번호', key_suffix: '_bizno', type: 'linked_text' }
+                ]
+            },
+            'division': {
+                name: '사업부',
+                columns: [
+                    { name: '사업부명', key_suffix: '', type: 'popup_division' },
+                    { name: '사업부코드', key_suffix: '_code', type: 'linked_text' },
+                    { name: '상위사업부', key_suffix: '_parent', type: 'linked_text' }
                 ]
             }
         };
