@@ -177,9 +177,12 @@ def get_external_scoring_data(cursor, fullprocess_number: str) -> Dict[str, Any]
 def apply_external_scoring_to_custom_data(cursor, fullprocess_number: str, existing_custom_data: Dict) -> Dict:
     """기존 custom_data의 scoring 필드에 외부 데이터 매핑"""
     try:
-        # config.ini 읽기
+        # config.ini 읽기 (절대 경로 사용)
+        import os
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.ini')
         config = configparser.ConfigParser()
-        config.read('config.ini', encoding='utf-8')
+        config.read(config_path, encoding='utf-8')
+        logging.info(f"[SCORING] Config loaded from: {config_path}")
 
         # 외부 데이터 가져오기
         external_data = get_external_scoring_data(cursor, fullprocess_number)
@@ -190,40 +193,53 @@ def apply_external_scoring_to_custom_data(cursor, fullprocess_number: str, exist
         # custom_data 복사 (원본 보존)
         updated_custom_data = existing_custom_data.copy() if existing_custom_data else {}
 
-        # custom_data의 각 필드 확인
-        for field_key, field_value in existing_custom_data.items():
-            # JSON 문자열인 경우만 처리 (scoring 필드 가능성)
-            if isinstance(field_value, str) and field_value.startswith('{'):
-                try:
-                    # JSON 파싱 시도
-                    parsed = json.loads(field_value)
+        # config.ini에서 scoring 관련 섹션 찾기
+        scoring_sections = []
+        for section_name in config.sections():
+            # SSO, DATABASE 같은 시스템 섹션 제외
+            if section_name.upper() not in ['DEFAULT', 'SSO', 'DATABASE', 'SECURITY', 'LOGGING',
+                                           'DASHBOARD', 'SQL_QUERIES', 'COLUMNS',
+                                           'MASTER_DATA_QUERIES', 'CONTENT_DATA_QUERIES',
+                                           'SCORING_MAPPING_SAFETY', 'SCORING_MAPPING_FOLLOWSOP',
+                                           'SCORING_MAPPING_FULLPROCESS']:
+                # item_ 패턴이 있으면 scoring 섹션
+                if any(key.startswith('item_') for key in config[section_name].keys()):
+                    scoring_sections.append(section_name)
+                    logging.info(f"[SCORING] Found scoring section: {section_name}")
 
-                    # item_1, item_2 같은 패턴이 있는지 확인
-                    if any(key.startswith('item_') for key in parsed.keys()):
-                        # config.ini에서 이 필드의 매핑 찾기
-                        if field_key in config:
-                            updated_items = {}
+        # 각 scoring 섹션에 대해 처리
+        for section_key in scoring_sections:
+            # custom_data에 이 키가 있는지 확인
+            if section_key in existing_custom_data:
+                field_value = existing_custom_data[section_key]
 
-                            for item_id in parsed.keys():
-                                # config.ini에서 매핑된 외부 컬럼명 찾기
-                                external_column = config[field_key].get(item_id, '')
+                # JSON 문자열인 경우 처리
+                if isinstance(field_value, str) and field_value.startswith('{'):
+                    try:
+                        parsed = json.loads(field_value)
+                        updated_items = {}
 
-                                if external_column and external_column in external_data:
-                                    # 외부 데이터 값 적용
-                                    value = external_data[external_column]
-                                    updated_items[item_id] = value if value else None
-                                    logging.info(f"[SCORING] {field_key}.{item_id} = {value} (from {external_column})")
-                                else:
-                                    # 매핑이 없거나 외부 데이터가 없으면 기존 값 유지
-                                    updated_items[item_id] = parsed[item_id]
+                        for item_id in parsed.keys():
+                            # config.ini에서 매핑된 외부 컬럼명 찾기
+                            external_column = config[section_key].get(item_id, '')
 
-                            # 업데이트된 값을 JSON 문자열로 저장
-                            updated_custom_data[field_key] = json.dumps(updated_items)
-                            logging.info(f"[SCORING] Updated {field_key}: {updated_custom_data[field_key]}")
+                            if external_column and external_column in external_data:
+                                # 외부 데이터 값 적용
+                                value = external_data[external_column]
+                                updated_items[item_id] = value if value else None
+                                logging.info(f"[SCORING] {section_key}.{item_id} = {value} (from {external_column})")
+                            else:
+                                # 매핑이 없거나 외부 데이터가 없으면 기존 값 유지
+                                updated_items[item_id] = parsed[item_id]
 
-                except json.JSONDecodeError:
-                    # JSON이 아니면 그대로 유지
-                    pass
+                        # 업데이트된 값을 JSON 문자열로 저장
+                        updated_custom_data[section_key] = json.dumps(updated_items)
+                        logging.info(f"[SCORING] Updated {section_key}: {updated_custom_data[section_key]}")
+
+                    except json.JSONDecodeError:
+                        logging.warning(f"[SCORING] Invalid JSON in {section_key}")
+            else:
+                logging.debug(f"[SCORING] Section {section_key} not found in custom_data")
 
         return updated_custom_data
 

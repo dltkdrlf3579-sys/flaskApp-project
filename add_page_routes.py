@@ -1960,7 +1960,7 @@ def full_process_detail(fullprocess_number):
     # 외부 scoring 데이터를 기존 custom_data에 매핑
     external_scoring_data = None  # 템플릿 호환성 유지
     try:
-        from scoring_external_service import apply_external_scoring_to_custom_data
+        from scoring_external_service_v2 import apply_external_scoring_to_custom_data
 
         # custom_data가 있을 때만 외부 데이터 매핑
         if custom_data:
