@@ -1262,37 +1262,69 @@ class PartnerDataManager:
 
     def sync_partner_change_requests_from_external_db(self):
         """외부 DB에서 Partner Change Requests 데이터 동기화 (동적 컬럼 방식)"""
+        print("\n" + "="*80)
+        print("[DEBUG] Partner Change Requests 동기화 시작")
+        print("="*80)
+
         if not IQADB_AVAILABLE:
             print("[ERROR] IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
             return False
 
         try:
             # config.ini에서 외부 DB용 쿼리 가져오기
+            print("[DEBUG-1] config.ini에서 쿼리 찾기...")
             if self.config.has_option('CONTENT_DATA_QUERIES', 'PARTNER_CHANGE_REQUESTS_QUERY'):
                 query = self.config.get('CONTENT_DATA_QUERIES', 'PARTNER_CHANGE_REQUESTS_QUERY')
+                print("[DEBUG-1] CONTENT_DATA_QUERIES 섹션에서 쿼리 발견")
             elif self.config.has_option('MASTER_DATA_QUERIES', 'PARTNER_CHANGE_REQUESTS_QUERY'):
                 query = self.config.get('MASTER_DATA_QUERIES', 'PARTNER_CHANGE_REQUESTS_QUERY')
+                print("[DEBUG-1] MASTER_DATA_QUERIES 섹션에서 쿼리 발견")
             else:
                 print("[WARNING] PARTNER_CHANGE_REQUESTS_QUERY가 config.ini에 정의되지 않았습니다.")
                 return False
 
-            print(f"[INFO] 실행할 Partner Change Requests 쿼리: {query[:100]}...")
+            print(f"[DEBUG-2] 실행할 쿼리: {query}")
 
             # 외부 DB에서 데이터 조회
-            print("[INFO] IQADB_CONNECT310을 사용하여 Partner Change Requests 데이터 조회 시작...")
-            df = execute_SQL(query)
-            print(f"[INFO] Partner Change Requests 데이터 조회 완료: {len(df)} 건")
+            print("[DEBUG-3] 외부 DB 연결 시도...")
+            try:
+                df = execute_SQL(query)
+                print(f"[DEBUG-3] 외부 DB 조회 성공: {len(df)} 건")
+            except Exception as db_error:
+                print(f"[ERROR] 외부 DB 조회 실패: {db_error}")
+                print(f"[ERROR] 쿼리 구문: {query}")
+                traceback.print_exc()
+                return False
 
             if df.empty:
                 print("[WARNING] 조회된 Partner Change Requests 데이터가 없습니다.")
                 return False
 
+            # DataFrame 컬럼 상세 분석
+            print(f"[DEBUG-4] DataFrame 컬럼 목록: {list(df.columns)}")
+            print(f"[DEBUG-4] DataFrame 샘플 (첫 2행):")
+            for idx, row in df.head(2).iterrows():
+                print(f"  Row {idx}:")
+                for col in df.columns:
+                    val = row[col]
+                    print(f"    {col}: {val} (type: {type(val).__name__})")
+
             # PostgreSQL 연결
-            conn = get_db_connection()
-            cursor = conn.cursor()
+            print("[DEBUG-5] PostgreSQL 연결 시도...")
+            conn = None
+            cursor = None
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                print("[DEBUG-5] PostgreSQL 연결 성공")
+            except Exception as pg_error:
+                print(f"[ERROR] PostgreSQL 연결 실패: {pg_error}")
+                traceback.print_exc()
+                return False
 
             try:
                 # partner_change_requests 본 테이블이 이미 있으면 스킵
+                print("[DEBUG-6] 테이블 존재 확인...")
                 cursor.execute("""
                     SELECT EXISTS (
                         SELECT 1 FROM information_schema.tables
@@ -1300,36 +1332,47 @@ class PartnerDataManager:
                     )
                 """)
                 table_exists = cursor.fetchone()[0]
+                print(f"[DEBUG-6] 테이블 존재 여부: {table_exists}")
 
                 if not table_exists:
-                    print("[INFO] partner_change_requests 테이블 생성 중...")
-                    cursor.execute('''
-                        CREATE TABLE partner_change_requests (
-                            id SERIAL PRIMARY KEY,
-                            request_number TEXT UNIQUE,
-                            requester_name TEXT,
-                            requester_department TEXT,
-                            company_name TEXT,
-                            business_number TEXT,
-                            change_type TEXT,
-                            current_value TEXT,
-                            new_value TEXT,
-                            change_reason TEXT,
-                            status TEXT DEFAULT 'pending',
-                            custom_data JSONB DEFAULT '{}',
-                            other_info TEXT,
-                            final_check_date DATE,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            is_deleted INTEGER DEFAULT 0
-                        )
-                    ''')
-                    conn.commit()
+                    print("[DEBUG-7] 테이블 생성 시작...")
+                    try:
+                        cursor.execute('''
+                            CREATE TABLE partner_change_requests (
+                                id SERIAL PRIMARY KEY,
+                                request_number TEXT UNIQUE,
+                                requester_name TEXT,
+                                requester_department TEXT,
+                                company_name TEXT,
+                                business_number TEXT,
+                                change_type TEXT,
+                                current_value TEXT,
+                                new_value TEXT,
+                                change_reason TEXT,
+                                status TEXT DEFAULT 'pending',
+                                custom_data JSONB DEFAULT '{}',
+                                other_info TEXT,
+                                final_check_date DATE,
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                is_deleted INTEGER DEFAULT 0
+                            )
+                        ''')
+                        conn.commit()
+                        print("[DEBUG-7] 테이블 생성 성공")
+                    except Exception as create_error:
+                        print(f"[ERROR] 테이블 생성 실패: {create_error}")
+                        traceback.print_exc()
+                        conn.rollback()
+                        return False
 
                 # 배치 삽입을 위한 데이터 준비 (동적 컬럼 방식)
-                print(f"[DEBUG] Partner Change Requests DataFrame 컬럼: {list(df.columns)}")
+                print(f"[DEBUG-8] 데이터 준비 시작...")
+                print(f"[DEBUG-8] 총 처리할 행 수: {len(df)}")
                 rows = []
                 for idx, row in df.iterrows():
+                    if idx == 0:
+                        print(f"\n[DEBUG-9] 첫 번째 행 상세 분석:")
                     # 모든 데이터를 custom_data에 JSON으로 저장
                     row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
                     # 날짜 타입들을 안전하게 문자열로 변환
@@ -1395,18 +1438,36 @@ class PartnerDataManager:
                     status = row.get('status', 'pending')
                     other_info = row.get('other_info', '')
                     final_check_date = row.get('final_check_date', None)
+                    if idx == 0:
+                        print(f"[DEBUG-10] final_check_date 원본: {final_check_date} (type: {type(final_check_date).__name__})")
+
                     if final_check_date and pd.notna(final_check_date):
                         try:
                             # 문자열을 date 객체로 변환
                             final_check_date = pd.to_datetime(final_check_date).date()
-                        except:
+                            if idx == 0:
+                                print(f"[DEBUG-10] final_check_date 변환 성공: {final_check_date} (type: {type(final_check_date).__name__})")
+                        except Exception as date_error:
+                            if idx == 0:
+                                print(f"[DEBUG-10] final_check_date 변환 실패: {date_error}")
                             final_check_date = None
 
                     if idx == 0:  # 첫 번째 행만 디버깅
-                        print(f"[DEBUG] request_number: {request_number}")
-                        print(f"[DEBUG] requester_name: {requester_name}")
-                        print(f"[DEBUG] company_name: {company_name}")
-                        print(f"[DEBUG] custom_data 길이: {len(custom_data)}")
+                        print(f"[DEBUG-11] 생성된 데이터:")
+                        print(f"  request_number: {request_number}")
+                        print(f"  requester_name: {requester_name}")
+                        print(f"  requester_department: {requester_department}")
+                        print(f"  company_name: {company_name}")
+                        print(f"  business_number: {business_number}")
+                        print(f"  change_type: {change_type}")
+                        print(f"  current_value: {current_value[:50] if current_value else 'None'}...")
+                        print(f"  new_value: {new_value[:50] if new_value else 'None'}...")
+                        print(f"  change_reason: {change_reason[:50] if change_reason else 'None'}...")
+                        print(f"  status: {status}")
+                        print(f"  other_info: {other_info[:50] if other_info else 'None'}...")
+                        print(f"  final_check_date: {final_check_date}")
+                        print(f"  custom_data 길이: {len(custom_data)}")
+                        print(f"  created_at_iso: {created_at_iso}")
 
                     # created_dt를 문자열로 변환
                     created_at_iso = created_dt.strftime('%Y-%m-%d %H:%M:%S') if created_dt else None
@@ -1420,11 +1481,31 @@ class PartnerDataManager:
                     ))
 
                 # 각 row를 개별적으로 삽입하여 에러 확인
-                print(f"[INFO] {len(rows)}개 레코드 삽입 시작...")
+                print(f"\n[DEBUG-12] 데이터 삽입 시작...")
+                print(f"[DEBUG-12] 총 {len(rows)}개 레코드 삽입 예정")
                 success_count = 0
                 error_count = 0
 
-                for row_data in rows:
+                # 트랜잭션 상태 확인
+                try:
+                    cursor.execute("SELECT 1")
+                    cursor.fetchone()
+                    print("[DEBUG-13] 트랜잭션 상태: 정상")
+                except Exception as tx_check:
+                    print(f"[ERROR] 트랜잭션 상태 이상: {tx_check}")
+                    conn.rollback()
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    print("[DEBUG-13] 트랜잭션 재시작")
+
+                for row_idx, row_data in enumerate(rows):
+                    if row_idx == 0:
+                        print(f"\n[DEBUG-14] 첫 번째 INSERT 시도:")
+                        print(f"  row_data 개수: {len(row_data)}")
+                        print(f"  request_number: {row_data[0]}")
+                        print(f"  final_check_date: {row_data[11]} (type: {type(row_data[11]).__name__})")
+                        print(f"  created_at: {row_data[13]} (type: {type(row_data[13]).__name__})")
+
                     try:
                         cursor.execute('''
                                 INSERT INTO partner_change_requests
@@ -1451,14 +1532,39 @@ class PartnerDataManager:
                                 updated_at = CURRENT_TIMESTAMP
                         ''', row_data)
                         success_count += 1
+                        if row_idx == 0:
+                            print(f"[DEBUG-14] 첫 번째 INSERT 성공!")
                     except Exception as row_error:
                         error_count += 1
-                        print(f"[ERROR] Row 삽입 실패 - request_number: {row_data[0]}")
-                        print(f"  에러: {row_error}")
-                        if error_count <= 3:  # 처음 3개 에러만 상세 출력
-                            print(f"  데이터: {row_data[:5]}...")  # 처음 5개 필드만 출력
+                        print(f"\n[ERROR-INSERT] Row {row_idx} 삽입 실패")
+                        print(f"  request_number: {row_data[0]}")
+                        print(f"  에러 타입: {type(row_error).__name__}")
+                        print(f"  에러 메시지: {str(row_error)}")
 
-                print(f"[INFO] 삽입 결과: 성공 {success_count}개, 실패 {error_count}개")
+                        if error_count <= 3:  # 처음 3개 에러만 상세 출력
+                            print(f"  전체 데이터 타입 확인:")
+                            for i, val in enumerate(row_data):
+                                field_names = ['request_number', 'requester_name', 'requester_department',
+                                             'company_name', 'business_number', 'change_type',
+                                             'current_value', 'new_value', 'change_reason',
+                                             'status', 'other_info', 'final_check_date',
+                                             'custom_data', 'created_at']
+                                if i < len(field_names):
+                                    print(f"    {field_names[i]}: {type(val).__name__} = {str(val)[:50] if val else 'None'}")
+
+                        # 트랜잭션 상태 재확인
+                        try:
+                            cursor.execute("SELECT 1")
+                            print(f"  트랜잭션 상태: 여전히 정상")
+                        except:
+                            print(f"  트랜잭션 상태: ABORTED - 재시작 필요")
+                            conn.rollback()
+                            conn = get_db_connection()
+                            cursor = conn.cursor()
+
+                print(f"\n[DEBUG-15] 삽입 완료")
+                print(f"  성공: {success_count}개")
+                print(f"  실패: {error_count}개")
 
                 # detailed_content를 partner_change_request_details 테이블에 저장 (full_process 방식)
                 if success_count > 0:
@@ -1508,19 +1614,32 @@ class PartnerDataManager:
                     print(f"[INFO] partner_change_request_details: {detail_count}개 저장")
 
                 if success_count > 0:
-                    conn.commit()
-                    print("[INFO] 데이터 커밋 완료")
+                    print(f"\n[DEBUG-16] 커밋 시도 (성공 {success_count}개)...")
+                    try:
+                        conn.commit()
+                        print("[DEBUG-16] 커밋 성공!")
+                    except Exception as commit_error:
+                        print(f"[ERROR] 커밋 실패: {commit_error}")
+                        traceback.print_exc()
+                        conn.rollback()
+                        return False
                 else:
+                    print("[DEBUG-16] 모든 삽입 실패로 롤백")
                     conn.rollback()
-                    print("[WARNING] 모든 삽입 실패로 롤백")
 
                 conn.close()
-
-                print(f"[SUCCESS] ✅ Partner Change Requests 데이터 {len(df)}건 처리 완료")
-                return True
+                print("="*80)
+                print(f"[FINAL] Partner Change Requests 동기화 결과:")
+                print(f"  - 전체: {len(df)}건")
+                print(f"  - 성공: {success_count}건")
+                print(f"  - 실패: {error_count}건")
+                print("="*80)
+                return success_count > 0
 
             except Exception as e:
-                print(f"[ERROR] ❌ Partner Change Requests 테이블 또는 데이터 준비 실패: {e}")
+                print(f"\n[ERROR-MAIN] 데이터 준비 중 예외 발생")
+                print(f"  에러 타입: {type(e).__name__}")
+                print(f"  에러 메시지: {e}")
                 traceback.print_exc()
                 if conn:
                     conn.rollback()
@@ -1528,7 +1647,9 @@ class PartnerDataManager:
                 return False
 
         except Exception as e:
-            print(f"[ERROR] ❌ Partner Change Requests 데이터 동기화 실패: {e}")
+            print(f"\n[ERROR-OUTER] 전체 함수 레벨 예외 발생")
+            print(f"  에러 타입: {type(e).__name__}")
+            print(f"  에러 메시지: {e}")
             traceback.print_exc()
             return False
 
