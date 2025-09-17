@@ -868,33 +868,8 @@ class PartnerDataManager:
                     elif pd.isna(v):
                         row_dict[k] = None
 
-                # config.ini에서 safety instruction scoring 매핑 읽기
-                scoring_mapping = {}
-                if self.config.has_section('SCORING_MAPPING_SAFETY'):
-                    scoring_mapping = dict(self.config.items('SCORING_MAPPING_SAFETY'))
-                    # 주석 제거 (# 로 시작하는 항목)
-                    scoring_mapping = {k: v for k, v in scoring_mapping.items() if not k.startswith('#')}
-
-                scoring_data = {}
-                cleaned_dict = {}
-
-                # 외부 DB 데이터를 내부 scoring 구조로 변환
-                for ext_col, int_item_id in scoring_mapping.items():
-                    if ext_col in row_dict and row_dict[ext_col]:
-                        # scoring_column_key_item_id 형식의 key 생성
-                        # column_key는 safety_instruction의 scoring 컬럼 key를 사용해야 함
-                        scoring_data[f'scoring_{int_item_id}'] = row_dict[ext_col]
-
-                # 나머지 데이터는 그대로 저장
-                for key, value in row_dict.items():
-                    if key not in SCORING_FIELD_MAPPING:
-                        cleaned_dict[key] = value
-
-                # scoring_data가 있으면 추가
-                if scoring_data:
-                    cleaned_dict['scoring_data'] = scoring_data
-
-                custom_data = json.dumps(cleaned_dict, ensure_ascii=False, default=str)
+                # 원본 데이터 그대로 저장 (수동 업데이트로 변경)
+                custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
                 
                 # issue_number와 created_at 추출 (컬럼명이 한글일 수 있음)
                 issue_number = (row.get('issue_number') or row.get('발부번호') or '').strip()
@@ -1206,10 +1181,8 @@ class PartnerDataManager:
                     elif pd.isna(v):
                         row_dict[k] = None
 
-                # ★ Scoring 매핑 적용 ★
-                from database_config_patch import transform_fullprocess_data
-                transformed_data = transform_fullprocess_data(row_dict)
-                custom_data = json.dumps(transformed_data, ensure_ascii=False, default=str)
+                # 원본 데이터 그대로 저장 (수동 업데이트로 변경)
+                custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
                 
                 # created_at 또는 평가일자 추출하여 FP 형식 번호 생성
                 # 외부 DB의 다양한 날짜 필드 확인

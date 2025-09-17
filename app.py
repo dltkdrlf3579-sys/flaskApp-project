@@ -3747,9 +3747,10 @@ def partner_change_request():
         offset = (page - 1) * per_page
         data_query = f"""
             SELECT id, requester_name, requester_department, company_name, business_number,
-                   change_type, current_value, new_value, change_reason, 
-                   created_at, status, request_number, custom_data
-            FROM partner_change_requests 
+                   change_type, current_value, new_value, change_reason,
+                   created_at, status, request_number, custom_data,
+                   other_info, final_check_date
+            FROM partner_change_requests
             {where_clause}
             ORDER BY created_at DESC
             LIMIT %s OFFSET %s
@@ -3811,7 +3812,9 @@ def partner_change_request():
                 'created_at': row['created_at'],
                 'status': status,
                 'status_label': status_label,  # 라벨 추가
-                'custom_data': custom_data  # custom_data 추가
+                'custom_data': custom_data,  # custom_data 추가
+                'other_info': row.get('other_info', ''),  # other_info 추가
+                'final_check_date': row.get('final_check_date', '')  # final_check_date 추가
             })()
             change_requests.append(change_request)
             
@@ -7858,7 +7861,7 @@ def delete_items(board_type):
         cursor = conn.cursor()
         
         # 소프트 삭제 수행
-        placeholders = ','.join('%s' * len(ids))
+        placeholders = ','.join(['%s'] * len(ids))
         cursor.execute(f"""
             UPDATE {table_name} 
             SET is_deleted = 1 
@@ -7892,7 +7895,7 @@ def delete_accidents():
         cursor = conn.cursor()
         
         # 모든 사고 삭제 가능 (ACC, K 모두)
-        placeholders = ','.join('%s' * len(ids))
+        placeholders = ','.join(['%s'] * len(ids))
         cursor.execute(f"""
             UPDATE accidents_cache 
             SET is_deleted = 1 
@@ -7926,7 +7929,7 @@ def delete_safety_instructions():
         cursor = conn.cursor()
         
         # 메인 테이블에서 소프트 삭제 (issue_number 기준)
-        placeholders = ','.join('%s' * len(ids))
+        placeholders = ','.join(['%s'] * len(ids))
         cursor.execute(f"""
             UPDATE safety_instructions 
             SET is_deleted = 1 
@@ -7960,7 +7963,7 @@ def delete_follow_sop():
         cursor = conn.cursor()
         
         # follow_sop 테이블에서 소프트 삭제 (work_req_no 기준)
-        placeholders = ','.join('%s' * len(ids))
+        placeholders = ','.join(['%s'] * len(ids))
         cursor.execute(f"""
             UPDATE follow_sop 
             SET is_deleted = 1 
@@ -7994,7 +7997,7 @@ def delete_full_process():
         cursor = conn.cursor()
         
         # full_process 테이블에서 소프트 삭제 (fullprocess_number 기준)
-        placeholders = ','.join('%s' * len(ids))
+        placeholders = ','.join(['%s'] * len(ids))
         cursor.execute(f"""
             UPDATE full_process 
             SET is_deleted = 1 
@@ -8028,7 +8031,7 @@ def restore_accidents():
         cursor = conn.cursor()
         
         # 선택한 사고들을 복구 (is_deleted = 0)
-        placeholders = ','.join('%s' * len(ids))
+        placeholders = ','.join(['%s'] * len(ids))
         cursor.execute(f"""
             UPDATE accidents_cache 
             SET is_deleted = 0 
@@ -8062,7 +8065,7 @@ def restore_partners():
         cursor = conn.cursor()
         
         # 선택한 협력사들을 복구 (is_deleted = 0)
-        placeholders = ','.join('%s' * len(business_numbers))
+        placeholders = ','.join(['%s'] * len(business_numbers))
         cursor.execute(f"""
             UPDATE partners_cache 
             SET is_deleted = 0 
@@ -8432,7 +8435,7 @@ def permanent_delete_accidents():
         cursor = conn.cursor()
         
         # 선택한 사고들을 영구 삭제
-        placeholders = ','.join('%s' * len(ids))
+        placeholders = ','.join(['%s'] * len(ids))
         cursor.execute(f"""
             DELETE FROM accidents_cache 
             WHERE id IN ({placeholders})
@@ -8512,7 +8515,7 @@ def admin_force_delete_si_columns():
 
         conn = get_db_connection()
         cursor = conn.cursor()
-        placeholders = ','.join('%s' * len(keys))
+        placeholders = ','.join(['%s'] * len(keys))
         cursor.execute(
             f"UPDATE safety_instruction_column_config SET is_deleted = 1 WHERE LOWER(column_key) IN ({placeholders})",
             [k.lower() for k in keys]
@@ -10468,7 +10471,7 @@ def delete_partners():
         cursor = conn.cursor()
         
         # Soft delete (is_deleted = 1로 설정)
-        placeholders = ','.join('%s' * len(business_numbers))
+        placeholders = ','.join(['%s'] * len(business_numbers))
         cursor.execute(f"""
             UPDATE partners_cache 
             SET is_deleted = 1 
@@ -10627,7 +10630,7 @@ def delete_change_requests():
             conn.commit()
         
         # 소프트 삭제 실행
-        placeholders = ','.join('%s' * len(ids))
+        placeholders = ','.join(['%s'] * len(ids))
         cursor.execute(f"""
             UPDATE partner_change_requests 
             SET is_deleted = 1 
