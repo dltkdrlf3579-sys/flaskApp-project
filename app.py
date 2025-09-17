@@ -1962,7 +1962,7 @@ def safety_instruction_route():
         section_columns[section['section_key']] = [
             col for col in dynamic_columns 
             if col.get('tab') == section['section_key'] 
-            and col['column_key'] not in ['detailed_content', 'violation_content']
+            and col['column_key'] not in ['detailed_content']
         ]
     
     # tab이 None인 컬럼들은 추가하지 않음 (관리자가 섹션을 지정하지 않은 컬럼은 표시하지 않음)

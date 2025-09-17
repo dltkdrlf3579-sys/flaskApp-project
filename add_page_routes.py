@@ -105,7 +105,7 @@ def follow_sop_route():
                     '_source_item_id': iid
                 })
             return out
-        excluded = {'detailed_content', 'violation_content', 'fullprocess_number', 'created_at'}
+        excluded = {'detailed_content', 'fullprocess_number', 'created_at'}
         for col in dynamic_columns:
             ck = col.get('column_key')
             if not ck or ck in excluded:
@@ -149,7 +149,7 @@ def follow_sop_route():
                     '_source_item_id': iid
                 })
             return out
-        excluded = {'detailed_content', 'violation_content', 'fullprocess_number', 'created_at'}
+        excluded = {'detailed_content', 'fullprocess_number', 'created_at'}
         for col in dynamic_columns:
             ck = col.get('column_key')
             if not ck or ck in excluded:
@@ -169,7 +169,7 @@ def follow_sop_route():
         scoring_cols, score_total_cols = [], []
 
     # 목록 표시용 컬럼(중복 제거, 불필요 키 제외) + 채점 항목 컬럼 인라인 확장
-    excluded_keys = {'detailed_content', 'violation_content', 'work_req_no', 'registered_date', 'created_at'}
+    excluded_keys = {'detailed_content', 'work_req_no', 'registered_date', 'created_at'}
     seen_keys = set()
     display_columns = []
 
@@ -1376,7 +1376,7 @@ def full_process_route():
                     '_source_item_id': iid
                 })
             return out
-        excluded_keys = {'detailed_content', 'violation_content', 'fullprocess_number', 'created_at'}
+        excluded_keys = {'detailed_content', 'fullprocess_number', 'created_at'}
         for col in dynamic_columns:
             ck = col.get('column_key')
             if not ck or ck in excluded_keys:
