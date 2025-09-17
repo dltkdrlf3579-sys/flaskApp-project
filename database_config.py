@@ -1357,36 +1357,45 @@ class PartnerDataManager:
             conn = get_db_connection()
             cursor = conn.cursor()
 
-            # partner_change_requests 본 테이블 생성 (없으면)
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS partner_change_requests (
-                    id SERIAL PRIMARY KEY,
-                    request_number TEXT UNIQUE,
-                    requester_name TEXT,
-                    requester_department TEXT,
-                    company_name TEXT,
-                    business_number TEXT,
-                    change_type TEXT,
-                    current_value TEXT,
-                    new_value TEXT,
-                    change_reason TEXT,
-                    status TEXT DEFAULT 'pending',
-                    custom_data TEXT DEFAULT '{}',
-                    other_info TEXT,
-                    final_check_date DATE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    is_deleted INTEGER DEFAULT 0
-                )
-            ''')
+            try:
+                # partner_change_requests 본 테이블이 이미 있으면 스킵
+                cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_name = 'partner_change_requests'
+                    )
+                """)
+                table_exists = cursor.fetchone()[0]
 
-            # 트랜잭션 시작
-            cursor.execute("BEGIN")
+                if not table_exists:
+                    print("[INFO] partner_change_requests 테이블 생성 중...")
+                    cursor.execute('''
+                        CREATE TABLE partner_change_requests (
+                            id SERIAL PRIMARY KEY,
+                            request_number TEXT UNIQUE,
+                            requester_name TEXT,
+                            requester_department TEXT,
+                            company_name TEXT,
+                            business_number TEXT,
+                            change_type TEXT,
+                            current_value TEXT,
+                            new_value TEXT,
+                            change_reason TEXT,
+                            status TEXT DEFAULT 'pending',
+                            custom_data JSONB DEFAULT '{}',
+                            other_info TEXT,
+                            final_check_date DATE,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            is_deleted INTEGER DEFAULT 0
+                        )
+                    ''')
+                    conn.commit()
 
-            # 배치 삽입을 위한 데이터 준비 (동적 컬럼 방식)
-            print(f"[DEBUG] Partner Change Requests DataFrame 컬럼: {list(df.columns)}")
-            rows = []
-            for idx, row in df.iterrows():
+                # 배치 삽입을 위한 데이터 준비 (동적 컬럼 방식)
+                print(f"[DEBUG] Partner Change Requests DataFrame 컬럼: {list(df.columns)}")
+                rows = []
+                for idx, row in df.iterrows():
                 # 모든 데이터를 custom_data에 JSON으로 저장
                 row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
                 # 날짜 타입들을 안전하게 문자열로 변환
@@ -1424,36 +1433,65 @@ class PartnerDataManager:
                     status, other_info, final_check_date, custom_data
                 ))
 
-            # 바로 본테이블에 삽입 (PostgreSQL)
-            cursor.executemany('''
-                INSERT INTO partner_change_requests
-                    (request_number, requester_name, requester_department,
-                     company_name, business_number, change_type,
-                     current_value, new_value, change_reason,
-                     status, other_info, final_check_date, custom_data, is_deleted)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0)
-                ON CONFLICT(request_number) DO UPDATE SET
-                    requester_name = EXCLUDED.requester_name,
-                    requester_department = EXCLUDED.requester_department,
-                    company_name = EXCLUDED.company_name,
-                    business_number = EXCLUDED.business_number,
-                    change_type = EXCLUDED.change_type,
-                    current_value = EXCLUDED.current_value,
-                    new_value = EXCLUDED.new_value,
-                    change_reason = EXCLUDED.change_reason,
-                    status = EXCLUDED.status,
-                    other_info = EXCLUDED.other_info,
-                    final_check_date = EXCLUDED.final_check_date,
-                    custom_data = EXCLUDED.custom_data,
-                    is_deleted = 0,
-                    updated_at = CURRENT_TIMESTAMP
-            ''', rows)
+            # 각 row를 개별적으로 삽입하여 에러 확인
+            print(f"[INFO] {len(rows)}개 레코드 삽입 시작...")
+            success_count = 0
+            error_count = 0
 
-            conn.commit()
+            for row_data in rows:
+                try:
+                    cursor.execute('''
+                        INSERT INTO partner_change_requests
+                            (request_number, requester_name, requester_department,
+                             company_name, business_number, change_type,
+                             current_value, new_value, change_reason,
+                             status, other_info, final_check_date, custom_data, is_deleted)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0)
+                        ON CONFLICT(request_number) DO UPDATE SET
+                            requester_name = EXCLUDED.requester_name,
+                            requester_department = EXCLUDED.requester_department,
+                            company_name = EXCLUDED.company_name,
+                            business_number = EXCLUDED.business_number,
+                            change_type = EXCLUDED.change_type,
+                            current_value = EXCLUDED.current_value,
+                            new_value = EXCLUDED.new_value,
+                            change_reason = EXCLUDED.change_reason,
+                            status = EXCLUDED.status,
+                            other_info = EXCLUDED.other_info,
+                            final_check_date = EXCLUDED.final_check_date,
+                            custom_data = EXCLUDED.custom_data,
+                            is_deleted = 0,
+                            updated_at = CURRENT_TIMESTAMP
+                    ''', row_data)
+                    success_count += 1
+                except Exception as row_error:
+                    error_count += 1
+                    print(f"[ERROR] Row 삽입 실패 - request_number: {row_data[0]}")
+                    print(f"  에러: {row_error}")
+                    if error_count <= 3:  # 처음 3개 에러만 상세 출력
+                        print(f"  데이터: {row_data[:5]}...")  # 처음 5개 필드만 출력
+
+            print(f"[INFO] 삽입 결과: 성공 {success_count}개, 실패 {error_count}개")
+
+            if success_count > 0:
+                conn.commit()
+                print("[INFO] 데이터 커밋 완료")
+            else:
+                conn.rollback()
+                print("[WARNING] 모든 삽입 실패로 롤백")
+
             conn.close()
 
-            print(f"[SUCCESS] ✅ Partner Change Requests 데이터 {len(df)}건 동기화 완료")
+            print(f"[SUCCESS] ✅ Partner Change Requests 데이터 {len(df)}건 처리 완료")
             return True
+
+            except Exception as e:
+                print(f"[ERROR] ❌ Partner Change Requests 테이블 또는 데이터 준비 실패: {e}")
+                traceback.print_exc()
+                if conn:
+                    conn.rollback()
+                    conn.close()
+                return False
 
         except Exception as e:
             print(f"[ERROR] ❌ Partner Change Requests 데이터 동기화 실패: {e}")
