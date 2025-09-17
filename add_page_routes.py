@@ -271,11 +271,12 @@ def follow_sop_route():
     total_count = _first(cursor.fetchone(), 0)
     
     # 데이터 조회
+    # work_req_no로 정렬 (FSYYYYMMDDHHMISS 형식이므로 문자열 정렬도 시간순)
     query = f"""
-        SELECT s.* 
+        SELECT s.*
         FROM {table_name} s
         WHERE {where_sql}
-        ORDER BY s.created_at DESC
+        ORDER BY s.created_at DESC, s.work_req_no DESC
         LIMIT %s OFFSET %s
     """
     

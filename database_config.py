@@ -1054,12 +1054,13 @@ class PartnerDataManager:
                         SELECT
                           c.work_req_no,
                           c.custom_data,
-                          COALESCE(c.created_at, c.sync_date, CURRENT_TIMESTAMP),
+                          c.created_at::timestamp,
                           0
                         FROM followsop_cache c
                         ON CONFLICT (work_req_no)
                         DO UPDATE SET
                             custom_data = EXCLUDED.custom_data,
+                            created_at = EXCLUDED.created_at,
                             is_deleted = 0,
                             updated_at = CURRENT_TIMESTAMP
                     ''')
@@ -1070,7 +1071,7 @@ class PartnerDataManager:
                         SELECT
                           c.work_req_no,
                           c.custom_data,
-                          COALESCE(c.created_at, c.sync_date, CURRENT_TIMESTAMP),
+                          c.created_at::timestamp,
                           0
                         FROM followsop_cache c
                         WHERE NOT EXISTS (
@@ -1080,6 +1081,7 @@ class PartnerDataManager:
                     cursor.execute('''
                         UPDATE follow_sop f
                         SET custom_data = c.custom_data,
+                            created_at = c.created_at::timestamp,
                             is_deleted = 0,
                             updated_at = CURRENT_TIMESTAMP
                         FROM followsop_cache c
@@ -1092,7 +1094,7 @@ class PartnerDataManager:
                     SELECT
                       c.work_req_no,
                       c.custom_data,
-                      COALESCE(c.sync_date, CURRENT_TIMESTAMP),
+                      c.created_at,
                       0
                     FROM followsop_cache c
                 ''')
