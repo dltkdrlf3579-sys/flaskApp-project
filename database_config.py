@@ -1154,6 +1154,7 @@ class PartnerDataManager:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     fullprocess_number TEXT UNIQUE,
                     custom_data TEXT DEFAULT '{}',
+                    created_at TIMESTAMP,
                     sync_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
@@ -1225,19 +1226,21 @@ class PartnerDataManager:
                     print(f"[DEBUG] fullprocess_number: {fullprocess_number}")
                     print(f"[DEBUG] custom_data 길이: {len(custom_data)}")
                 
-                rows.append((fullprocess_number, custom_data))
+                # created_dt를 문자열로 변환하여 저장
+                created_at_iso = created_dt.strftime('%Y-%m-%d %H:%M:%S') if created_dt else None
+                rows.append((fullprocess_number, custom_data, created_at_iso))
             
             # 배치 삽입 - PostgreSQL vs SQLite 조건부 처리
             if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                # PostgreSQL: bulk_upsert 사용 
+                # PostgreSQL: bulk_upsert 사용
                 from db.upsert import bulk_upsert
-                data_list = [{'fullprocess_number': row[0], 'custom_data': row[1]} for row in rows]
+                data_list = [{'fullprocess_number': row[0], 'custom_data': row[1], 'created_at': row[2]} for row in rows]
                 bulk_upsert(conn, 'fullprocess_cache', data_list)
             else:
                 # SQLite: INSERT OR REPLACE
                 cursor.executemany('''
-                    INSERT OR REPLACE INTO fullprocess_cache (fullprocess_number, custom_data) 
-                    VALUES (%s, %s)
+                    INSERT OR REPLACE INTO fullprocess_cache (fullprocess_number, custom_data, created_at)
+                    VALUES (?, ?, ?)
                 ''', rows)
             
             # GPT 지침: 캐시→본테이블 이관 (UPSERT) - 동기화된 데이터는 무조건 활성화
@@ -1268,12 +1271,13 @@ class PartnerDataManager:
                         SELECT
                           c.fullprocess_number,
                           c.custom_data,
-                          COALESCE(c.sync_date, CURRENT_TIMESTAMP),
+                          c.created_at::timestamp,
                           0
                         FROM fullprocess_cache c
-                        ON CONFLICT (fullprocess_number) 
-                        DO UPDATE SET 
+                        ON CONFLICT (fullprocess_number)
+                        DO UPDATE SET
                             custom_data = EXCLUDED.custom_data,
+                            created_at = EXCLUDED.created_at,
                             is_deleted = 0,
                             updated_at = CURRENT_TIMESTAMP
                     ''')
@@ -1284,7 +1288,7 @@ class PartnerDataManager:
                         SELECT
                           c.fullprocess_number,
                           c.custom_data,
-                          COALESCE(c.sync_date, CURRENT_TIMESTAMP),
+                          c.created_at::timestamp,
                           0
                         FROM fullprocess_cache c
                         WHERE NOT EXISTS (
@@ -1294,6 +1298,7 @@ class PartnerDataManager:
                     cursor.execute('''
                         UPDATE full_process f
                         SET custom_data = c.custom_data,
+                            created_at = c.created_at::timestamp,
                             is_deleted = 0,
                             updated_at = CURRENT_TIMESTAMP
                         FROM fullprocess_cache c
@@ -1306,7 +1311,7 @@ class PartnerDataManager:
                     SELECT
                       c.fullprocess_number,
                       c.custom_data,
-                      COALESCE(c.sync_date, CURRENT_TIMESTAMP),
+                      c.created_at,
                       0
                     FROM fullprocess_cache c
                 ''')
