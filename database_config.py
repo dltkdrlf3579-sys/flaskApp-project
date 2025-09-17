@@ -1421,8 +1421,24 @@ class PartnerDataManager:
                 # 배치 삽입을 위한 데이터 준비 (동적 컬럼 방식)
                 print(f"[DEBUG-8] 데이터 준비 시작...")
                 print(f"[DEBUG-8] 총 처리할 행 수: {len(df)}")
+
+                # DataFrame을 created_at 기준으로 오름차순 정렬 (오래된 것부터)
+                # 먼저 created_at 컬럼 찾기
+                date_col = None
+                for col in ['created_at', 'CREATED_AT', '등록일', 'REG_DATE', 'reg_date']:
+                    if col in df.columns:
+                        date_col = col
+                        break
+
+                if date_col:
+                    df_sorted = df.sort_values(by=date_col, ascending=True).reset_index(drop=True)
+                    print(f"[DEBUG-8] DataFrame을 {date_col} 기준으로 오름차순 정렬")
+                else:
+                    df_sorted = df
+                    print("[DEBUG-8] 날짜 컬럼을 찾을 수 없어 원본 순서 유지")
+
                 rows = []
-                for idx, row in df.iterrows():
+                for idx, row in df_sorted.iterrows():
                     if idx == 0:
                         print(f"\n[DEBUG-9] 첫 번째 행 상세 분석:")
                     # 모든 데이터를 custom_data에 JSON으로 저장
@@ -1461,24 +1477,44 @@ class PartnerDataManager:
 
                     # request_number 생성: CRYYMMNNN 형식 (외부 created_at 기준!)
                     yymm = created_dt.strftime('%y%m')  # 외부 날짜 기준!
-                    # 해당 월의 마지막 번호 찾기
-                    cursor.execute("""
-                        SELECT request_number
-                        FROM partner_change_requests
-                        WHERE request_number LIKE %s
-                        ORDER BY request_number DESC
-                        LIMIT 1
-                    """, (f"CR{yymm}%",))
-                    last_num = cursor.fetchone()
-                    if last_num:
-                        try:
-                            last_seq = int(last_num[0][6:9])  # CR2412001 -> 001
-                            next_seq = last_seq + idx + 1
-                        except:
-                            next_seq = idx + 1
+
+                    # 원본에 request_number가 있으면 그대로 사용
+                    if row.get('request_number'):
+                        request_number = row.get('request_number')
                     else:
-                        next_seq = idx + 1
-                    request_number = row.get('request_number', f"CR{yymm}{next_seq:03d}")
+                        # 해당 월의 마지막 번호 찾기 (현재 row까지만 고려)
+                        month_count = 0
+                        for prev_idx in range(idx):
+                            prev_row = df_sorted.iloc[prev_idx]
+                            prev_created = prev_row.get('created_at', '') or prev_row.get('CREATED_AT', '') or prev_row.get('등록일', '')
+                            if prev_created:
+                                try:
+                                    prev_dt = datetime.strptime(str(prev_created).split('.')[0], '%Y-%m-%d %H:%M:%S')
+                                    if prev_dt.strftime('%y%m') == yymm:
+                                        month_count += 1
+                                except:
+                                    pass
+
+                        # DB에서도 확인 (이미 존재하는 번호)
+                        cursor.execute("""
+                            SELECT request_number
+                            FROM partner_change_requests
+                            WHERE request_number LIKE %s
+                            ORDER BY request_number DESC
+                            LIMIT 1
+                        """, (f"CR{yymm}%",))
+                        last_num = cursor.fetchone()
+
+                        db_last_seq = 0
+                        if last_num:
+                            try:
+                                db_last_seq = int(last_num[0][6:9])  # CR2412001 -> 001
+                            except:
+                                pass
+
+                        # 더 큰 값 사용 (DB 또는 현재 카운트)
+                        next_seq = max(db_last_seq, month_count) + 1
+                        request_number = f"CR{yymm}{next_seq:03d}"
                     requester_name = row.get('requester_name', '')
                     requester_department = row.get('requester_department', '')
                     company_name = row.get('company_name', '')
