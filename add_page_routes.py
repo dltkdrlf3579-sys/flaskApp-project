@@ -1812,8 +1812,12 @@ def full_process_detail(fullprocess_number):
             # SQLite는 지원하지 않음 - PostgreSQL만 사용
             columns = []
 
+        # 문제가 되는 컬럼들 제외 (scoring 관련 실제 컬럼들)
+        exclude_columns = ['scre223', 'test224', 'test225', 'score', 'detailed_content', 'total2', 'tts']
+        filtered_columns = [col for col in columns if col not in exclude_columns]
+
         # 동적으로 SELECT 쿼리 생성
-        select_columns = ', '.join(columns)
+        select_columns = ', '.join(filtered_columns)
         cursor.execute(f"""
             SELECT {select_columns}
             FROM full_process
@@ -1823,8 +1827,8 @@ def full_process_detail(fullprocess_number):
         process_row = cursor.fetchone()
 
         if process_row:
-            # 컬럼 이름과 값을 매핑하여 딕셔너리 생성
-            process = {columns[i]: process_row[i] for i in range(len(columns))}
+            # 컬럼 이름과 값을 매핑하여 딕셔너리 생성 (필터링된 컬럼 사용)
+            process = {filtered_columns[i]: process_row[i] for i in range(len(filtered_columns))}
             logging.info(f"[DEBUG] Loaded process data with columns: {list(process.keys())}")
     except Exception as e:
         logging.error(f"full_process 조회 오류: {e}")
@@ -1960,7 +1964,7 @@ def full_process_detail(fullprocess_number):
     # 외부 scoring 데이터를 기존 custom_data에 매핑
     external_scoring_data = None  # 템플릿 호환성 유지
     try:
-        from scoring_external_service_v2 import apply_external_scoring_to_custom_data
+        from scoring_external_service_v3 import apply_external_scoring_to_custom_data
 
         # custom_data가 있을 때만 외부 데이터 매핑
         if custom_data:
