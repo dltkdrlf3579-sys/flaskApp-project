@@ -928,22 +928,8 @@ class PartnerDataManager:
             cursor = conn.cursor()
             
             
-            # followsop_cache 테이블 생성 (없으면)
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS followsop_cache (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    work_req_no TEXT UNIQUE,
-                    custom_data TEXT DEFAULT '{}',
-                    created_at TIMESTAMP,
-                    sync_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            # 트랜잭션 시작
+            # 트랜잭션 시작 (캐시 없이 직접 처리)
             cursor.execute("BEGIN")
-            
-            # 기존 캐시 데이터 삭제
-            cursor.execute("DELETE FROM followsop_cache")
             
             # 배치 삽입을 위한 데이터 준비 (동적 컬럼 방식)
             print(f"[DEBUG] FollowSOP DataFrame 컬럼: {list(df.columns)}")
@@ -1011,99 +997,35 @@ class PartnerDataManager:
                 created_at_iso = created_dt.strftime('%Y-%m-%d %H:%M:%S') if created_dt else None
                 rows.append((work_req_no, custom_data, created_at_iso))
             
-            # 배치 삽입 - PostgreSQL vs SQLite 조건부 처리
-            if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                # PostgreSQL: bulk_upsert 사용
-                from db.upsert import bulk_upsert
-                data_list = [{'work_req_no': row[0], 'custom_data': row[1], 'created_at': row[2]} for row in rows]
-                bulk_upsert(conn, 'followsop_cache', data_list)
-            else:
-                # SQLite: INSERT OR REPLACE
-                cursor.executemany('''
-                    INSERT OR REPLACE INTO followsop_cache (work_req_no, custom_data, created_at)
-                    VALUES (?, ?, ?)
-                ''', rows)
-            
-            # GPT 지침: 캐시→본테이블 이관 (UPSERT) - 동기화된 데이터는 무조건 활성화
+            # 캐시 없이 직접 메인 테이블에 삽입
             # PostgreSQL vs SQLite 조건부 처리
             if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                # PostgreSQL: Try fast path with ON CONFLICT if a UNIQUE constraint exists.
-                try:
-                    # Detect UNIQUE on follow_sop(work_req_no)
-                    cursor.execute(
-                        """
-                        SELECT 1
-                        FROM information_schema.table_constraints tc
-                        JOIN information_schema.constraint_column_usage ccu
-                          ON tc.constraint_name = ccu.constraint_name
-                        WHERE tc.table_schema='public'
-                          AND tc.table_name='follow_sop'
-                          AND tc.constraint_type='UNIQUE'
-                          AND ccu.column_name='work_req_no'
-                        LIMIT 1
-                        """
-                    )
-                    has_unique = cursor.fetchone() is not None
-                except Exception:
-                    has_unique = False
-
-                if has_unique:
-                    # Fast path: ON CONFLICT upsert
+                # PostgreSQL: UPSERT 사용
+                for work_req_no, custom_data, created_at_iso in rows:
                     cursor.execute('''
                         INSERT INTO follow_sop (work_req_no, custom_data, created_at, is_deleted)
-                        SELECT
-                          c.work_req_no,
-                          c.custom_data,
-                          c.created_at::timestamp,
-                          0
-                        FROM followsop_cache c
+                        VALUES (%s, %s, %s::timestamp, 0)
                         ON CONFLICT (work_req_no)
                         DO UPDATE SET
                             custom_data = EXCLUDED.custom_data,
                             created_at = EXCLUDED.created_at,
                             is_deleted = 0,
                             updated_at = CURRENT_TIMESTAMP
-                    ''')
-                else:
-                    # Fallback path without UNIQUE: insert missing rows, then update existing rows
-                    cursor.execute('''
-                        INSERT INTO follow_sop (work_req_no, custom_data, created_at, is_deleted)
-                        SELECT
-                          c.work_req_no,
-                          c.custom_data,
-                          c.created_at::timestamp,
-                          0
-                        FROM followsop_cache c
-                        WHERE NOT EXISTS (
-                          SELECT 1 FROM follow_sop f WHERE f.work_req_no = c.work_req_no
-                        )
-                    ''')
-                    cursor.execute('''
-                        UPDATE follow_sop f
-                        SET custom_data = c.custom_data,
-                            created_at = c.created_at::timestamp,
-                            is_deleted = 0,
-                            updated_at = CURRENT_TIMESTAMP
-                        FROM followsop_cache c
-                        WHERE f.work_req_no = c.work_req_no
-                    ''')
+                    ''', (work_req_no, custom_data, created_at_iso))
             else:
-                # SQLite용 INSERT OR REPLACE (avoid ::timestamp and json_extract dependency)
-                cursor.execute('''
+                # SQLite: INSERT OR REPLACE
+                cursor.executemany('''
                     INSERT OR REPLACE INTO follow_sop (work_req_no, custom_data, created_at, is_deleted)
-                    SELECT
-                      c.work_req_no,
-                      c.custom_data,
-                      c.created_at,
-                      0
-                    FROM followsop_cache c
-                ''')
+                    VALUES (?, ?, ?, 0)
+                ''', rows)
             
-            # 추가: 동기화된 데이터는 강제로 활성화 (삭제 상태 해제)
-            cursor.execute('''
-                UPDATE follow_sop SET is_deleted = 0 
-                WHERE work_req_no IN (SELECT work_req_no FROM followsop_cache)
-            ''')
+            # 동기화된 데이터 활성화 (삭제 상태 해제)
+            # 캐시 없이 rows의 work_req_no로 직접 업데이트
+            for work_req_no, _, _ in rows:
+                cursor.execute('''
+                    UPDATE follow_sop SET is_deleted = 0
+                    WHERE work_req_no = %s
+                ''', (work_req_no,) if hasattr(conn, 'is_postgres') else [work_req_no])
             
             conn.commit()
             conn.close()
@@ -1148,22 +1070,8 @@ class PartnerDataManager:
             cursor = conn.cursor()
             
             
-            # fullprocess_cache 테이블 생성 (없으면)
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS fullprocess_cache (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    fullprocess_number TEXT UNIQUE,
-                    custom_data TEXT DEFAULT '{}',
-                    created_at TIMESTAMP,
-                    sync_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            # 트랜잭션 시작
+            # 트랜잭션 시작 (캐시 없이 직접 처리)
             cursor.execute("BEGIN")
-            
-            # 기존 캐시 데이터 삭제
-            cursor.execute("DELETE FROM fullprocess_cache")
             
             # 배치 삽입을 위한 데이터 준비 (동적 컬럼 방식)
             print(f"[DEBUG] FullProcess DataFrame 컬럼: {list(df.columns)}")
@@ -1230,97 +1138,35 @@ class PartnerDataManager:
                 created_at_iso = created_dt.strftime('%Y-%m-%d %H:%M:%S') if created_dt else None
                 rows.append((fullprocess_number, custom_data, created_at_iso))
             
-            # 배치 삽입 - PostgreSQL vs SQLite 조건부 처리
-            if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                # PostgreSQL: bulk_upsert 사용
-                from db.upsert import bulk_upsert
-                data_list = [{'fullprocess_number': row[0], 'custom_data': row[1], 'created_at': row[2]} for row in rows]
-                bulk_upsert(conn, 'fullprocess_cache', data_list)
-            else:
-                # SQLite: INSERT OR REPLACE
-                cursor.executemany('''
-                    INSERT OR REPLACE INTO fullprocess_cache (fullprocess_number, custom_data, created_at)
-                    VALUES (?, ?, ?)
-                ''', rows)
-            
-            # GPT 지침: 캐시→본테이블 이관 (UPSERT) - 동기화된 데이터는 무조건 활성화
+            # 캐시 없이 직접 메인 테이블에 삽입
             # PostgreSQL vs SQLite 조건부 처리
             if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                # PostgreSQL: Try fast path with ON CONFLICT if a UNIQUE exists.
-                try:
-                    cursor.execute(
-                        """
-                        SELECT 1
-                        FROM information_schema.table_constraints tc
-                        JOIN information_schema.constraint_column_usage ccu
-                          ON tc.constraint_name = ccu.constraint_name
-                        WHERE tc.table_schema='public'
-                          AND tc.table_name='full_process'
-                          AND tc.constraint_type='UNIQUE'
-                          AND ccu.column_name='fullprocess_number'
-                        LIMIT 1
-                        """
-                    )
-                    has_unique = cursor.fetchone() is not None
-                except Exception:
-                    has_unique = False
-
-                if has_unique:
+                # PostgreSQL: UPSERT 사용
+                for fullprocess_number, custom_data, created_at_iso in rows:
                     cursor.execute('''
                         INSERT INTO full_process (fullprocess_number, custom_data, created_at, is_deleted)
-                        SELECT
-                          c.fullprocess_number,
-                          c.custom_data,
-                          c.created_at::timestamp,
-                          0
-                        FROM fullprocess_cache c
+                        VALUES (%s, %s, %s::timestamp, 0)
                         ON CONFLICT (fullprocess_number)
                         DO UPDATE SET
                             custom_data = EXCLUDED.custom_data,
                             created_at = EXCLUDED.created_at,
                             is_deleted = 0,
                             updated_at = CURRENT_TIMESTAMP
-                    ''')
-                else:
-                    # Fallback without UNIQUE
-                    cursor.execute('''
-                        INSERT INTO full_process (fullprocess_number, custom_data, created_at, is_deleted)
-                        SELECT
-                          c.fullprocess_number,
-                          c.custom_data,
-                          c.created_at::timestamp,
-                          0
-                        FROM fullprocess_cache c
-                        WHERE NOT EXISTS (
-                          SELECT 1 FROM full_process f WHERE f.fullprocess_number = c.fullprocess_number
-                        )
-                    ''')
-                    cursor.execute('''
-                        UPDATE full_process f
-                        SET custom_data = c.custom_data,
-                            created_at = c.created_at::timestamp,
-                            is_deleted = 0,
-                            updated_at = CURRENT_TIMESTAMP
-                        FROM fullprocess_cache c
-                        WHERE f.fullprocess_number = c.fullprocess_number
-                    ''')
+                    ''', (fullprocess_number, custom_data, created_at_iso))
             else:
-                # SQLite용 INSERT OR REPLACE (avoid ::timestamp and json_extract dependency)
-                cursor.execute('''
+                # SQLite: INSERT OR REPLACE
+                cursor.executemany('''
                     INSERT OR REPLACE INTO full_process (fullprocess_number, custom_data, created_at, is_deleted)
-                    SELECT
-                      c.fullprocess_number,
-                      c.custom_data,
-                      c.created_at,
-                      0
-                    FROM fullprocess_cache c
-                ''')
+                    VALUES (?, ?, ?, 0)
+                ''', rows)
             
-            # 추가: 동기화된 데이터는 강제로 활성화 (삭제 상태 해제)
-            cursor.execute('''
-                UPDATE full_process SET is_deleted = 0 
-                WHERE fullprocess_number IN (SELECT fullprocess_number FROM fullprocess_cache)
-            ''')
+            # 동기화된 데이터 활성화 (삭제 상태 해제)
+            # 캐시 없이 rows의 fullprocess_number로 직접 업데이트
+            for fullprocess_number, _, _ in rows:
+                cursor.execute('''
+                    UPDATE full_process SET is_deleted = 0
+                    WHERE fullprocess_number = %s
+                ''', (fullprocess_number,) if hasattr(conn, 'is_postgres') else [fullprocess_number])
             
             conn.commit()
             conn.close()
