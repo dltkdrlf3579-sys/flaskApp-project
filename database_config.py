@@ -1412,7 +1412,7 @@ class PartnerDataManager:
 
                     # 주요 필드 추출 (영어 컬럼명만)
                     # request_number 생성: CRYYMMNNN 형식
-                    from datetime import datetime
+                    # datetime은 이미 파일 상단에 import됨
                     yymm = datetime.now().strftime('%y%m')
                     # 해당 월의 마지막 번호 찾기
                     cursor.execute("""
@@ -1508,7 +1508,7 @@ class PartnerDataManager:
 
                         if detailed_content:
                             # request_number 재생성 (위와 동일한 로직)
-                            from datetime import datetime
+                            # datetime은 이미 파일 상단에 import됨
                             yymm = datetime.now().strftime('%y%m')
                             request_number = row.get('request_number', f"CR{yymm}{idx+1:03d}")
 
