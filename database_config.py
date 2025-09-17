@@ -1353,6 +1353,35 @@ class PartnerDataManager:
                 table_exists = cursor.fetchone()[0]
                 print(f"[DEBUG-6] 테이블 존재 여부: {table_exists}")
 
+                if table_exists:
+                    # 테이블이 이미 있으면 NOT NULL 제약 조건 제거
+                    print("[DEBUG-6.5] 기존 테이블의 NOT NULL 제약 조건 제거 중...")
+                    try:
+                        # 모든 텍스트 컬럼의 NOT NULL 제거 (NULL 허용)
+                        alter_statements = [
+                            "ALTER TABLE partner_change_requests ALTER COLUMN requester_name DROP NOT NULL",
+                            "ALTER TABLE partner_change_requests ALTER COLUMN requester_department DROP NOT NULL",
+                            "ALTER TABLE partner_change_requests ALTER COLUMN company_name DROP NOT NULL",
+                            "ALTER TABLE partner_change_requests ALTER COLUMN business_number DROP NOT NULL",
+                            "ALTER TABLE partner_change_requests ALTER COLUMN change_type DROP NOT NULL",
+                            "ALTER TABLE partner_change_requests ALTER COLUMN current_value DROP NOT NULL",
+                            "ALTER TABLE partner_change_requests ALTER COLUMN new_value DROP NOT NULL",
+                            "ALTER TABLE partner_change_requests ALTER COLUMN change_reason DROP NOT NULL",
+                            "ALTER TABLE partner_change_requests ALTER COLUMN other_info DROP NOT NULL"
+                        ]
+                        for stmt in alter_statements:
+                            try:
+                                cursor.execute(stmt)
+                                print(f"  ✓ {stmt.split('COLUMN')[1].split('DROP')[0].strip()} NULL 허용")
+                            except Exception as alter_err:
+                                # 이미 NULL 허용인 경우 무시
+                                pass
+                        conn.commit()
+                        print("[DEBUG-6.5] NOT NULL 제약 조건 제거 완료")
+                    except Exception as alter_error:
+                        print(f"[WARNING] ALTER 실행 중 오류 (무시): {alter_error}")
+                        conn.rollback()
+
                 if not table_exists:
                     print("[DEBUG-7] 테이블 생성 시작...")
                     try:
