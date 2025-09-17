@@ -363,7 +363,7 @@ class PartnerDataManager:
             # cursor.execute("PRAGMA synchronous=NORMAL")
             
             # 트랜잭션 시작
-            cursor.execute("BEGIN IMMEDIATE")
+            cursor.execute("BEGIN")
             
             # 기존 is_deleted 보존을 위해 백업 (custom_data는 없음)
             cursor.execute("""
@@ -845,13 +845,9 @@ class PartnerDataManager:
             conn = get_db_connection(self.local_db_path, timeout=30.0)
             cursor = conn.cursor()
             
-            # PRAGMA 설정
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA busy_timeout=5000")
-            cursor.execute("PRAGMA synchronous=NORMAL")
             
             # 트랜잭션 시작
-            cursor.execute("BEGIN IMMEDIATE")
+            cursor.execute("BEGIN")
             
             # 기존 캐시 데이터 삭제
             cursor.execute("DELETE FROM safety_instructions_cache")
@@ -931,10 +927,6 @@ class PartnerDataManager:
             conn = get_db_connection(self.local_db_path, timeout=30.0)
             cursor = conn.cursor()
             
-            # PRAGMA 설정
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA busy_timeout=5000")
-            cursor.execute("PRAGMA synchronous=NORMAL")
             
             # followsop_cache 테이블 생성 (없으면)
             cursor.execute('''
@@ -942,12 +934,13 @@ class PartnerDataManager:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     work_req_no TEXT UNIQUE,
                     custom_data TEXT DEFAULT '{}',
+                    created_at TIMESTAMP,
                     sync_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
             
             # 트랜잭션 시작
-            cursor.execute("BEGIN IMMEDIATE")
+            cursor.execute("BEGIN")
             
             # 기존 캐시 데이터 삭제
             cursor.execute("DELETE FROM followsop_cache")
@@ -980,6 +973,7 @@ class PartnerDataManager:
                 # 날짜 파싱 시도
                 from id_generator import generate_followsop_number
 
+                created_dt = None
                 try:
                     if created_at_str:
                         # 다양한 날짜 형식 파싱 시도
@@ -1006,24 +1000,28 @@ class PartnerDataManager:
                                   row.get('작업요청번호', '') or
                                   row.get('work_request_number', '') or
                                   f'FS{idx:06d}')
-                
+                    created_dt = datetime.now()
+
                 if idx == 0:  # 첫 번째 행만 디버깅
                     print(f"[DEBUG] work_req_no: {work_req_no}")
                     print(f"[DEBUG] custom_data 길이: {len(custom_data)}")
-                
-                rows.append((work_req_no, custom_data))
+                    print(f"[DEBUG] created_dt: {created_dt}")
+
+                # created_dt를 문자열로 변환하여 저장
+                created_at_iso = created_dt.strftime('%Y-%m-%d %H:%M:%S') if created_dt else None
+                rows.append((work_req_no, custom_data, created_at_iso))
             
             # 배치 삽입 - PostgreSQL vs SQLite 조건부 처리
             if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                # PostgreSQL: bulk_upsert 사용 
+                # PostgreSQL: bulk_upsert 사용
                 from db.upsert import bulk_upsert
-                data_list = [{'work_req_no': row[0], 'custom_data': row[1]} for row in rows]
+                data_list = [{'work_req_no': row[0], 'custom_data': row[1], 'created_at': row[2]} for row in rows]
                 bulk_upsert(conn, 'followsop_cache', data_list)
             else:
                 # SQLite: INSERT OR REPLACE
                 cursor.executemany('''
-                    INSERT OR REPLACE INTO followsop_cache (work_req_no, custom_data) 
-                    VALUES (%s, %s)
+                    INSERT OR REPLACE INTO followsop_cache (work_req_no, custom_data, created_at)
+                    VALUES (?, ?, ?)
                 ''', rows)
             
             # GPT 지침: 캐시→본테이블 이관 (UPSERT) - 동기화된 데이터는 무조건 활성화
@@ -1056,11 +1054,11 @@ class PartnerDataManager:
                         SELECT
                           c.work_req_no,
                           c.custom_data,
-                          COALESCE(c.sync_date, CURRENT_TIMESTAMP),
+                          COALESCE(c.created_at, c.sync_date, CURRENT_TIMESTAMP),
                           0
                         FROM followsop_cache c
-                        ON CONFLICT (work_req_no) 
-                        DO UPDATE SET 
+                        ON CONFLICT (work_req_no)
+                        DO UPDATE SET
                             custom_data = EXCLUDED.custom_data,
                             is_deleted = 0,
                             updated_at = CURRENT_TIMESTAMP
@@ -1072,7 +1070,7 @@ class PartnerDataManager:
                         SELECT
                           c.work_req_no,
                           c.custom_data,
-                          COALESCE(c.sync_date, CURRENT_TIMESTAMP),
+                          COALESCE(c.created_at, c.sync_date, CURRENT_TIMESTAMP),
                           0
                         FROM followsop_cache c
                         WHERE NOT EXISTS (
@@ -1147,10 +1145,6 @@ class PartnerDataManager:
             conn = get_db_connection(self.local_db_path, timeout=30.0)
             cursor = conn.cursor()
             
-            # PRAGMA 설정
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA busy_timeout=5000")
-            cursor.execute("PRAGMA synchronous=NORMAL")
             
             # fullprocess_cache 테이블 생성 (없으면)
             cursor.execute('''
@@ -1163,7 +1157,7 @@ class PartnerDataManager:
             ''')
             
             # 트랜잭션 시작
-            cursor.execute("BEGIN IMMEDIATE")
+            cursor.execute("BEGIN")
             
             # 기존 캐시 데이터 삭제
             cursor.execute("DELETE FROM fullprocess_cache")
@@ -1359,14 +1353,9 @@ class PartnerDataManager:
                 print("[WARNING] 조회된 Partner Change Requests 데이터가 없습니다.")
                 return False
 
-            # SQLite에 저장
-            conn = get_db_connection(self.local_db_path, timeout=30.0)
+            # PostgreSQL 연결
+            conn = get_db_connection()
             cursor = conn.cursor()
-
-            # PRAGMA 설정
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA busy_timeout=5000")
-            cursor.execute("PRAGMA synchronous=NORMAL")
 
             # partner_change_requests_cache 테이블 생성 (없으면)
             cursor.execute('''
@@ -1384,7 +1373,7 @@ class PartnerDataManager:
             ''')
 
             # 트랜잭션 시작
-            cursor.execute("BEGIN IMMEDIATE")
+            cursor.execute("BEGIN")
 
             # 기존 캐시 데이터 삭제
             cursor.execute("DELETE FROM partner_change_requests_cache")
@@ -1431,28 +1420,68 @@ class PartnerDataManager:
 
                 rows.append((request_number, company_name, business_number, status, custom_data))
 
-            # 배치 삽입 - PostgreSQL vs SQLite 조건부 처리
-            if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                # PostgreSQL용 (ON CONFLICT)
-                cursor.executemany('''
-                    INSERT INTO partner_change_requests_cache
-                        (request_number, company_name, business_number, status, custom_data)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON CONFLICT(request_number) DO UPDATE SET
-                        company_name = EXCLUDED.company_name,
-                        business_number = EXCLUDED.business_number,
-                        status = EXCLUDED.status,
-                        custom_data = EXCLUDED.custom_data,
-                        updated_at = CURRENT_TIMESTAMP,
-                        sync_date = CURRENT_TIMESTAMP
-                ''', rows)
-            else:
-                # SQLite용 (OR REPLACE)
-                cursor.executemany('''
-                    INSERT OR REPLACE INTO partner_change_requests_cache
-                        (request_number, company_name, business_number, status, custom_data)
-                    VALUES (%s, %s, %s, %s, %s)
-                ''', rows)
+            # 배치 삽입 (PostgreSQL)
+            cursor.executemany('''
+                INSERT INTO partner_change_requests_cache
+                    (request_number, company_name, business_number, status, custom_data)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT(request_number) DO UPDATE SET
+                    company_name = EXCLUDED.company_name,
+                    business_number = EXCLUDED.business_number,
+                    status = EXCLUDED.status,
+                    custom_data = EXCLUDED.custom_data,
+                    updated_at = CURRENT_TIMESTAMP,
+                    sync_date = CURRENT_TIMESTAMP
+            ''', rows)
+
+            # 캐시에서 본 테이블로 이관 (동일한 conn 사용)
+            # cursor는 이미 있음
+
+            # partner_change_requests 본 테이블 생성 (없으면)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS partner_change_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_number TEXT UNIQUE,
+                    requester_name TEXT,
+                    requester_department TEXT,
+                    company_name TEXT,
+                    business_number TEXT,
+                    change_type TEXT,
+                    current_value TEXT,
+                    new_value TEXT,
+                    change_reason TEXT,
+                    status TEXT DEFAULT 'pending',
+                    custom_data TEXT DEFAULT '{}',
+                    other_info TEXT,
+                    final_check_date DATE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_deleted INTEGER DEFAULT 0
+                )
+            ''')
+
+            # 캐시에서 본테이블로 이관 (PostgreSQL)
+            cursor.execute('''
+                INSERT INTO partner_change_requests
+                    (request_number, company_name, business_number, status, custom_data, created_at, is_deleted)
+                SELECT
+                    c.request_number,
+                    c.company_name,
+                    c.business_number,
+                    c.status,
+                    c.custom_data,
+                    COALESCE(c.created_at, CURRENT_TIMESTAMP),
+                    0
+                FROM partner_change_requests_cache c
+                ON CONFLICT (request_number)
+                DO UPDATE SET
+                    company_name = EXCLUDED.company_name,
+                    business_number = EXCLUDED.business_number,
+                    status = EXCLUDED.status,
+                    custom_data = EXCLUDED.custom_data,
+                    is_deleted = 0,
+                    updated_at = CURRENT_TIMESTAMP
+            ''')
 
             conn.commit()
             conn.close()
