@@ -40,6 +40,7 @@ pluggy==1.6.0
 psycopg==3.2.9
 psycopg-binary==3.2.9
 pyasn1==0.6.1
+PyJWT==2.10.1
 pycparser==2.22
 pyparsing==3.2.3
 pytest==7.4.2
