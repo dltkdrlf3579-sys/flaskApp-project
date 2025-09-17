@@ -1389,6 +1389,12 @@ class PartnerDataManager:
                     status = row.get('status', 'pending')
                     other_info = row.get('other_info', '')
                     final_check_date = row.get('final_check_date', None)
+                    if final_check_date and pd.notna(final_check_date):
+                        try:
+                            # 문자열을 date 객체로 변환
+                            final_check_date = pd.to_datetime(final_check_date).date()
+                        except:
+                            final_check_date = None
 
                     if idx == 0:  # 첫 번째 행만 디버깅
                         print(f"[DEBUG] request_number: {request_number}")
