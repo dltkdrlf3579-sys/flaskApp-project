@@ -904,27 +904,18 @@ class PartnerDataManager:
                     0  # is_deleted = 0
                 ))
             
-            # 캐시 없이 직접 메인 테이블에 삽입
-            # PostgreSQL vs SQLite 조건부 처리
-            if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                # PostgreSQL: UPSERT 사용
-                for issue_number, custom_data, created_at_iso, is_deleted in rows:
-                    cursor.execute('''
-                        INSERT INTO safety_instructions (issue_number, custom_data, created_at, is_deleted)
-                        VALUES (%s, %s, %s::timestamp, %s)
-                        ON CONFLICT (issue_number)
-                        DO UPDATE SET
-                            custom_data = EXCLUDED.custom_data,
-                            created_at = EXCLUDED.created_at,
-                            is_deleted = EXCLUDED.is_deleted,
-                            updated_at = CURRENT_TIMESTAMP
-                    ''', (issue_number, custom_data, created_at_iso, is_deleted))
-            else:
-                # SQLite: INSERT OR REPLACE
-                cursor.executemany('''
-                    INSERT OR REPLACE INTO safety_instructions (issue_number, custom_data, created_at, is_deleted)
-                    VALUES (?, ?, ?, ?)
-                ''', rows)
+            # 캐시 없이 직접 메인 테이블에 삽입 (PostgreSQL만 사용)
+            for issue_number, custom_data, created_at_iso, is_deleted in rows:
+                cursor.execute('''
+                    INSERT INTO safety_instructions (issue_number, custom_data, created_at, is_deleted)
+                    VALUES (%s, %s, %s::timestamp, %s)
+                    ON CONFLICT (issue_number)
+                    DO UPDATE SET
+                        custom_data = EXCLUDED.custom_data,
+                        created_at = EXCLUDED.created_at,
+                        is_deleted = EXCLUDED.is_deleted,
+                        updated_at = CURRENT_TIMESTAMP
+                ''', (issue_number, custom_data, created_at_iso, is_deleted))
             
             conn.commit()
             conn.close()
@@ -1038,35 +1029,25 @@ class PartnerDataManager:
                 created_at_iso = created_dt.strftime('%Y-%m-%d %H:%M:%S') if created_dt else None
                 rows.append((work_req_no, custom_data, created_at_iso))
             
-            # 캐시 없이 직접 메인 테이블에 삽입
-            # PostgreSQL vs SQLite 조건부 처리
-            if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                # PostgreSQL: UPSERT 사용
-                for work_req_no, custom_data, created_at_iso in rows:
-                    cursor.execute('''
-                        INSERT INTO follow_sop (work_req_no, custom_data, created_at, is_deleted)
-                        VALUES (%s, %s, %s::timestamp, 0)
-                        ON CONFLICT (work_req_no)
-                        DO UPDATE SET
-                            custom_data = EXCLUDED.custom_data,
-                            created_at = EXCLUDED.created_at,
-                            is_deleted = 0,
-                            updated_at = CURRENT_TIMESTAMP
-                    ''', (work_req_no, custom_data, created_at_iso))
-            else:
-                # SQLite: INSERT OR REPLACE
-                cursor.executemany('''
-                    INSERT OR REPLACE INTO follow_sop (work_req_no, custom_data, created_at, is_deleted)
-                    VALUES (?, ?, ?, 0)
-                ''', rows)
+            # 캐시 없이 직접 메인 테이블에 삽입 (PostgreSQL만 사용)
+            for work_req_no, custom_data, created_at_iso in rows:
+                cursor.execute('''
+                    INSERT INTO follow_sop (work_req_no, custom_data, created_at, is_deleted)
+                    VALUES (%s, %s, %s::timestamp, 0)
+                    ON CONFLICT (work_req_no)
+                    DO UPDATE SET
+                        custom_data = EXCLUDED.custom_data,
+                        created_at = EXCLUDED.created_at,
+                        is_deleted = 0,
+                        updated_at = CURRENT_TIMESTAMP
+                ''', (work_req_no, custom_data, created_at_iso))
             
             # 동기화된 데이터 활성화 (삭제 상태 해제)
-            # 캐시 없이 rows의 work_req_no로 직접 업데이트
             for work_req_no, _, _ in rows:
                 cursor.execute('''
                     UPDATE follow_sop SET is_deleted = 0
                     WHERE work_req_no = %s
-                ''', (work_req_no,) if hasattr(conn, 'is_postgres') else [work_req_no])
+                ''', (work_req_no,))
             
             conn.commit()
             conn.close()
@@ -1179,35 +1160,25 @@ class PartnerDataManager:
                 created_at_iso = created_dt.strftime('%Y-%m-%d %H:%M:%S') if created_dt else None
                 rows.append((fullprocess_number, custom_data, created_at_iso))
             
-            # 캐시 없이 직접 메인 테이블에 삽입
-            # PostgreSQL vs SQLite 조건부 처리
-            if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                # PostgreSQL: UPSERT 사용
-                for fullprocess_number, custom_data, created_at_iso in rows:
-                    cursor.execute('''
-                        INSERT INTO full_process (fullprocess_number, custom_data, created_at, is_deleted)
-                        VALUES (%s, %s, %s::timestamp, 0)
-                        ON CONFLICT (fullprocess_number)
-                        DO UPDATE SET
-                            custom_data = EXCLUDED.custom_data,
-                            created_at = EXCLUDED.created_at,
-                            is_deleted = 0,
-                            updated_at = CURRENT_TIMESTAMP
-                    ''', (fullprocess_number, custom_data, created_at_iso))
-            else:
-                # SQLite: INSERT OR REPLACE
-                cursor.executemany('''
-                    INSERT OR REPLACE INTO full_process (fullprocess_number, custom_data, created_at, is_deleted)
-                    VALUES (?, ?, ?, 0)
-                ''', rows)
+            # 캐시 없이 직접 메인 테이블에 삽입 (PostgreSQL만 사용)
+            for fullprocess_number, custom_data, created_at_iso in rows:
+                cursor.execute('''
+                    INSERT INTO full_process (fullprocess_number, custom_data, created_at, is_deleted)
+                    VALUES (%s, %s, %s::timestamp, 0)
+                    ON CONFLICT (fullprocess_number)
+                    DO UPDATE SET
+                        custom_data = EXCLUDED.custom_data,
+                        created_at = EXCLUDED.created_at,
+                        is_deleted = 0,
+                        updated_at = CURRENT_TIMESTAMP
+                ''', (fullprocess_number, custom_data, created_at_iso))
             
             # 동기화된 데이터 활성화 (삭제 상태 해제)
-            # 캐시 없이 rows의 fullprocess_number로 직접 업데이트
             for fullprocess_number, _, _ in rows:
                 cursor.execute('''
                     UPDATE full_process SET is_deleted = 0
                     WHERE fullprocess_number = %s
-                ''', (fullprocess_number,) if hasattr(conn, 'is_postgres') else [fullprocess_number])
+                ''', (fullprocess_number,))
             
             conn.commit()
             conn.close()
