@@ -1035,16 +1035,43 @@ class PartnerDataManager:
                 rows.append((work_req_no, custom_data, created_at_iso))
             
             # 캐시 없이 직접 메인 테이블에 삽입 (PostgreSQL만 사용)
-            for work_req_no, custom_data, created_at_iso in rows:
+            for idx, (work_req_no, custom_data, created_at_iso) in enumerate(rows):
+                # 중복 체크: 이미 존재하는 번호면 새로 생성
+                cursor.execute('''
+                    SELECT 1 FROM follow_sop WHERE work_req_no = %s
+                ''', (work_req_no,))
+
+                if cursor.fetchone():
+                    # 중복이면 새 번호 생성 (날짜 + 인덱스 기반)
+                    from id_generator import generate_followsop_number
+                    if created_at_iso:
+                        created_dt = datetime.strptime(created_at_iso, '%Y-%m-%d %H:%M:%S')
+                    else:
+                        created_dt = datetime.now()
+
+                    # PostgreSQL에서 마지막 번호 조회
+                    date_str = created_dt.strftime('%y%m%d')
+                    pattern = f'FS{date_str}%'
+                    cursor.execute('''
+                        SELECT work_req_no FROM follow_sop
+                        WHERE work_req_no LIKE %s
+                        ORDER BY work_req_no DESC
+                        LIMIT 1
+                    ''', (pattern,))
+
+                    last_result = cursor.fetchone()
+                    if last_result:
+                        last_counter = int(last_result[0][8:])  # FS + 6자리 날짜 이후
+                        new_counter = last_counter + 1
+                    else:
+                        new_counter = 1
+
+                    work_req_no = f'FS{date_str}{new_counter:04d}'
+
+                # INSERT (중복 체크 완료)
                 cursor.execute('''
                     INSERT INTO follow_sop (work_req_no, custom_data, created_at, is_deleted)
                     VALUES (%s, %s, %s::timestamp, 0)
-                    ON CONFLICT (work_req_no)
-                    DO UPDATE SET
-                        custom_data = EXCLUDED.custom_data,
-                        created_at = EXCLUDED.created_at,
-                        is_deleted = 0,
-                        updated_at = CURRENT_TIMESTAMP
                 ''', (work_req_no, custom_data, created_at_iso))
             
             # 동기화된 데이터 활성화 (삭제 상태 해제)
@@ -1170,16 +1197,43 @@ class PartnerDataManager:
                 rows.append((fullprocess_number, custom_data, created_at_iso))
             
             # 캐시 없이 직접 메인 테이블에 삽입 (PostgreSQL만 사용)
-            for fullprocess_number, custom_data, created_at_iso in rows:
+            for idx, (fullprocess_number, custom_data, created_at_iso) in enumerate(rows):
+                # 중복 체크: 이미 존재하는 번호면 새로 생성
+                cursor.execute('''
+                    SELECT 1 FROM full_process WHERE fullprocess_number = %s
+                ''', (fullprocess_number,))
+
+                if cursor.fetchone():
+                    # 중복이면 새 번호 생성 (날짜 + 인덱스 기반)
+                    from id_generator import generate_fullprocess_number
+                    if created_at_iso:
+                        created_dt = datetime.strptime(created_at_iso, '%Y-%m-%d %H:%M:%S')
+                    else:
+                        created_dt = datetime.now()
+
+                    # PostgreSQL에서 마지막 번호 조회
+                    date_str = created_dt.strftime('%y%m%d')
+                    pattern = f'FP{date_str}%'
+                    cursor.execute('''
+                        SELECT fullprocess_number FROM full_process
+                        WHERE fullprocess_number LIKE %s
+                        ORDER BY fullprocess_number DESC
+                        LIMIT 1
+                    ''', (pattern,))
+
+                    last_result = cursor.fetchone()
+                    if last_result:
+                        last_counter = int(last_result[0][8:])  # FP + 6자리 날짜 이후
+                        new_counter = last_counter + 1
+                    else:
+                        new_counter = 1
+
+                    fullprocess_number = f'FP{date_str}{new_counter:05d}'
+
+                # INSERT (중복 체크 완료)
                 cursor.execute('''
                     INSERT INTO full_process (fullprocess_number, custom_data, created_at, is_deleted)
                     VALUES (%s, %s, %s::timestamp, 0)
-                    ON CONFLICT (fullprocess_number)
-                    DO UPDATE SET
-                        custom_data = EXCLUDED.custom_data,
-                        created_at = EXCLUDED.created_at,
-                        is_deleted = 0,
-                        updated_at = CURRENT_TIMESTAMP
                 ''', (fullprocess_number, custom_data, created_at_iso))
             
             # 동기화된 데이터 활성화 (삭제 상태 해제)
