@@ -1263,10 +1263,28 @@ class PartnerDataManager:
                     # custom_data는 detailed_content 제외한 나머지만 저장
                     custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
 
-                    # 주요 필드 추출 (영어 컬럼명만)
-                    # request_number 생성: CRYYMMNNN 형식
-                    # datetime은 이미 파일 상단에 import됨
-                    yymm = datetime.now().strftime('%y%m')
+                    # 외부 created_at 추출 (Full Process처럼)
+                    created_at_str = (row.get('created_at', '') or
+                                    row.get('CREATED_AT', '') or
+                                    row.get('등록일', '') or
+                                    row.get('REG_DATE', '') or
+                                    row.get('reg_date', ''))
+
+                    # 날짜 파싱
+                    created_dt = None
+                    if created_at_str:
+                        # 다양한 날짜 형식 파싱 시도
+                        for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%Y/%m/%d', '%Y%m%d', '%d-%b-%y', '%d/%m/%Y']:
+                            try:
+                                created_dt = datetime.strptime(str(created_at_str).split('.')[0], fmt)
+                                break
+                            except:
+                                continue
+                    if not created_dt:
+                        created_dt = datetime.now()
+
+                    # request_number 생성: CRYYMMNNN 형식 (외부 created_at 기준!)
+                    yymm = created_dt.strftime('%y%m')  # 외부 날짜 기준!
                     # 해당 월의 마지막 번호 찾기
                     cursor.execute("""
                         SELECT request_number
@@ -1303,11 +1321,15 @@ class PartnerDataManager:
                         print(f"[DEBUG] company_name: {company_name}")
                         print(f"[DEBUG] custom_data 길이: {len(custom_data)}")
 
+                    # created_dt를 문자열로 변환
+                    created_at_iso = created_dt.strftime('%Y-%m-%d %H:%M:%S') if created_dt else None
+
                     rows.append((
                         request_number, requester_name, requester_department,
                         company_name, business_number, change_type,
                         current_value, new_value, change_reason,
-                        status, other_info, final_check_date, custom_data
+                        status, other_info, final_check_date, custom_data,
+                        created_at_iso  # created_at 추가!
                     ))
 
                 # 각 row를 개별적으로 삽입하여 에러 확인
@@ -1322,8 +1344,8 @@ class PartnerDataManager:
                                 (request_number, requester_name, requester_department,
                                  company_name, business_number, change_type,
                                  current_value, new_value, change_reason,
-                                 status, other_info, final_check_date, custom_data, is_deleted)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0)
+                                 status, other_info, final_check_date, custom_data, created_at, is_deleted)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::timestamp, 0)
                             ON CONFLICT(request_number) DO UPDATE SET
                                 requester_name = EXCLUDED.requester_name,
                                 requester_department = EXCLUDED.requester_department,
@@ -1337,6 +1359,7 @@ class PartnerDataManager:
                                 other_info = EXCLUDED.other_info,
                                 final_check_date = EXCLUDED.final_check_date,
                                 custom_data = EXCLUDED.custom_data,
+                                created_at = EXCLUDED.created_at,
                                 is_deleted = 0,
                                 updated_at = CURRENT_TIMESTAMP
                         ''', row_data)
@@ -1360,9 +1383,26 @@ class PartnerDataManager:
                         detailed_content = row_dict.get('detailed_content', '')
 
                         if detailed_content:
-                            # request_number 재생성 (위와 동일한 로직)
-                            # datetime은 이미 파일 상단에 import됨
-                            yymm = datetime.now().strftime('%y%m')
+                            # request_number 재생성 (외부 created_at 기준으로)
+                            # 외부 created_at 추출 (위와 동일)
+                            created_at_str = (row.get('created_at', '') or
+                                            row.get('CREATED_AT', '') or
+                                            row.get('등록일', '') or
+                                            row.get('REG_DATE', '') or
+                                            row.get('reg_date', ''))
+
+                            created_dt = None
+                            if created_at_str:
+                                for fmt in ['%Y-%m-%d %H:%M:%S', '%Y-%m-%d', '%Y/%m/%d', '%Y%m%d']:
+                                    try:
+                                        created_dt = datetime.strptime(str(created_at_str).split('.')[0], fmt)
+                                        break
+                                    except:
+                                        continue
+                            if not created_dt:
+                                created_dt = datetime.now()
+
+                            yymm = created_dt.strftime('%y%m')  # 외부 날짜 기준!
                             request_number = row.get('request_number', f"CR{yymm}{idx+1:03d}")
 
                             try:
