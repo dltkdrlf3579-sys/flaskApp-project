@@ -966,6 +966,7 @@ class PartnerDataManager:
             # 배치 삽입을 위한 데이터 준비 (동적 컬럼 방식)
             print(f"[DEBUG] FollowSOP DataFrame 컬럼: {list(df.columns)}")
             rows = []
+            date_counters = {}  # Track counters for each date within this batch
             for idx, row in df.iterrows():
                 # 모든 데이터를 custom_data에 JSON으로 저장
                 row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
@@ -989,8 +990,6 @@ class PartnerDataManager:
                                 row.get('reg_date', ''))
 
                 # 날짜 파싱 시도
-                from id_generator import generate_followsop_number
-
                 created_dt = None
                 try:
                     if created_at_str:
@@ -1010,8 +1009,36 @@ class PartnerDataManager:
                         print(f"[WARNING] 날짜 필드 없음, 현재 시간 사용")
                         created_dt = datetime.now()
 
-                    # FS 형식 번호 생성 (무조건 생성)
-                    work_req_no = generate_followsop_number(self.local_db_path, created_dt)
+                    # FS 형식 번호 생성 - PostgreSQL에서 직접 조회
+                    date_str = created_dt.strftime('%y%m%d')
+
+                    # Check if we already have a counter for this date in current batch
+                    if date_str in date_counters:
+                        # Use the next counter from our batch tracking
+                        new_counter = date_counters[date_str] + 1
+                    else:
+                        # First time seeing this date in batch, query DB for last number
+                        pattern = f'FS{date_str}%'
+                        cursor.execute('''
+                            SELECT work_req_no FROM follow_sop
+                            WHERE work_req_no LIKE %s
+                            ORDER BY work_req_no DESC
+                            LIMIT 1
+                        ''', (pattern,))
+
+                        last_result = cursor.fetchone()
+                        if last_result and len(last_result[0]) == 12:  # FS(2) + YYMMDD(6) + NNNN(4) = 12
+                            try:
+                                last_counter = int(last_result[0][8:12])  # Extract exactly 4 digits
+                                new_counter = last_counter + 1
+                            except ValueError:
+                                new_counter = 1  # Start from 1 if parsing fails
+                        else:
+                            new_counter = 1  # Start from 1 for new date
+
+                    # Update counter for this date
+                    date_counters[date_str] = new_counter
+                    work_req_no = f'FS{date_str}{new_counter:04d}'
                 except Exception as e:
                     # 번호 생성 실패시 원본 사용 또는 새 형식으로 생성
                     work_req_no = (row.get('work_req_no', '') or
@@ -1035,46 +1062,11 @@ class PartnerDataManager:
                 rows.append((work_req_no, custom_data, created_at_iso))
             
             # 캐시 없이 직접 메인 테이블에 삽입 (PostgreSQL만 사용)
-            for idx, (work_req_no, custom_data, created_at_iso) in enumerate(rows):
-                # 중복 체크: 이미 존재하는 번호면 새로 생성
-                cursor.execute('''
-                    SELECT 1 FROM follow_sop WHERE work_req_no = %s
-                ''', (work_req_no,))
-
-                if cursor.fetchone():
-                    # 중복이면 새 번호 생성 (날짜 + 인덱스 기반)
-                    from id_generator import generate_followsop_number
-                    if created_at_iso:
-                        created_dt = datetime.strptime(created_at_iso, '%Y-%m-%d %H:%M:%S')
-                    else:
-                        created_dt = datetime.now()
-
-                    # PostgreSQL에서 마지막 번호 조회
-                    date_str = created_dt.strftime('%y%m%d')
-                    pattern = f'FS{date_str}%'
-                    cursor.execute('''
-                        SELECT work_req_no FROM follow_sop
-                        WHERE work_req_no LIKE %s
-                        ORDER BY work_req_no DESC
-                        LIMIT 1
-                    ''', (pattern,))
-
-                    last_result = cursor.fetchone()
-                    if last_result and len(last_result[0]) >= 12:  # FSYYMMDDNNNN 최소 12자리
-                        try:
-                            last_counter = int(last_result[0][8:12])  # FS(2) + YYMMDD(6) 이후 4자리만
-                            new_counter = last_counter + 1
-                        except ValueError:
-                            new_counter = 1
-                    else:
-                        new_counter = 1
-
-                    work_req_no = f'FS{date_str}{new_counter:04d}'
-
-                # INSERT (중복 체크 완료)
+            for work_req_no, custom_data, created_at_iso in rows:
                 cursor.execute('''
                     INSERT INTO follow_sop (work_req_no, custom_data, created_at, is_deleted)
                     VALUES (%s, %s, %s::timestamp, 0)
+                    ON CONFLICT (work_req_no) DO NOTHING
                 ''', (work_req_no, custom_data, created_at_iso))
             
             # 동기화된 데이터 활성화 (삭제 상태 해제)
@@ -1133,6 +1125,7 @@ class PartnerDataManager:
             # 배치 삽입을 위한 데이터 준비 (동적 컬럼 방식)
             print(f"[DEBUG] FullProcess DataFrame 컬럼: {list(df.columns)}")
             rows = []
+            date_counters = {}  # Track counters for each date within this batch
             for idx, row in df.iterrows():
                 # 모든 데이터를 custom_data에 JSON으로 저장
                 row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
@@ -1158,8 +1151,6 @@ class PartnerDataManager:
                                 row.get('reg_date', ''))
 
                 # 날짜 파싱 시도
-                from id_generator import generate_fullprocess_number
-
                 try:
                     if created_at_str:
                         # 다양한 날짜 형식 파싱 시도
@@ -1178,8 +1169,36 @@ class PartnerDataManager:
                         print(f"[WARNING] 날짜 필드 없음, 현재 시간 사용")
                         created_dt = datetime.now()
 
-                    # FP 형식 번호 생성 (무조건 생성)
-                    fullprocess_number = generate_fullprocess_number(self.local_db_path, created_dt)
+                    # FP 형식 번호 생성 - PostgreSQL에서 직접 조회
+                    date_str = created_dt.strftime('%y%m%d')
+
+                    # Check if we already have a counter for this date in current batch
+                    if date_str in date_counters:
+                        # Use the next counter from our batch tracking
+                        new_counter = date_counters[date_str] + 1
+                    else:
+                        # First time seeing this date in batch, query DB for last number
+                        pattern = f'FP{date_str}%'
+                        cursor.execute('''
+                            SELECT fullprocess_number FROM full_process
+                            WHERE fullprocess_number LIKE %s
+                            ORDER BY fullprocess_number DESC
+                            LIMIT 1
+                        ''', (pattern,))
+
+                        last_result = cursor.fetchone()
+                        if last_result and len(last_result[0]) == 13:  # FP(2) + YYMMDD(6) + NNNNN(5) = 13
+                            try:
+                                last_counter = int(last_result[0][8:13])  # Extract exactly 5 digits
+                                new_counter = last_counter + 1
+                            except ValueError:
+                                new_counter = 1  # Start from 1 if parsing fails
+                        else:
+                            new_counter = 1  # Start from 1 for new date
+
+                    # Update counter for this date
+                    date_counters[date_str] = new_counter
+                    fullprocess_number = f'FP{date_str}{new_counter:05d}'
                 except Exception as e:
                     # 번호 생성 실패시 원본 사용 또는 새 형식으로 생성
                     fullprocess_number = (row.get('fullprocess_number', '') or
@@ -1452,6 +1471,9 @@ class PartnerDataManager:
                                 print(f"[DEBUG-10] final_check_date 변환 실패: {date_error}")
                             final_check_date = None
 
+                    # created_dt를 문자열로 변환 (디버깅 전에 먼저 정의!)
+                    created_at_iso = created_dt.strftime('%Y-%m-%d %H:%M:%S') if created_dt else None
+
                     if idx == 0:  # 첫 번째 행만 디버깅
                         print(f"[DEBUG-11] 생성된 데이터:")
                         print(f"  request_number: {request_number}")
@@ -1468,9 +1490,6 @@ class PartnerDataManager:
                         print(f"  final_check_date: {final_check_date}")
                         print(f"  custom_data 길이: {len(custom_data)}")
                         print(f"  created_at_iso: {created_at_iso}")
-
-                    # created_dt를 문자열로 변환
-                    created_at_iso = created_dt.strftime('%Y-%m-%d %H:%M:%S') if created_dt else None
 
                     rows.append((
                         request_number, requester_name, requester_department,
