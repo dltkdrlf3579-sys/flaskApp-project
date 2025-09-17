@@ -1060,9 +1060,12 @@ class PartnerDataManager:
                     ''', (pattern,))
 
                     last_result = cursor.fetchone()
-                    if last_result:
-                        last_counter = int(last_result[0][8:])  # FS + 6자리 날짜 이후
-                        new_counter = last_counter + 1
+                    if last_result and len(last_result[0]) >= 12:  # FSYYMMDDNNNN 최소 12자리
+                        try:
+                            last_counter = int(last_result[0][8:12])  # FS(2) + YYMMDD(6) 이후 4자리만
+                            new_counter = last_counter + 1
+                        except ValueError:
+                            new_counter = 1
                     else:
                         new_counter = 1
 
@@ -1222,9 +1225,12 @@ class PartnerDataManager:
                     ''', (pattern,))
 
                     last_result = cursor.fetchone()
-                    if last_result:
-                        last_counter = int(last_result[0][8:])  # FP + 6자리 날짜 이후
-                        new_counter = last_counter + 1
+                    if last_result and len(last_result[0]) >= 13:  # FPYYMMDDNNNNN 최소 13자리
+                        try:
+                            last_counter = int(last_result[0][8:13])  # FP(2) + YYMMDD(6) 이후 5자리만
+                            new_counter = last_counter + 1
+                        except ValueError:
+                            new_counter = 1
                     else:
                         new_counter = 1
 
