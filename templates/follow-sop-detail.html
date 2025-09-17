@@ -84,7 +84,7 @@
                                 {# 렌더 타입 계산: 전역 키 + custom_data로 그룹 추정 #}
                                 {% set render_type = col.column_type %}
                                 {% if not render_type or render_type == 'text' %}
-                                    {% set suffixes = ['_id','_dept','_bizno','_code','_company'] %}
+                                    {% set suffixes = ['_id','_dept','_bizno','_code','_company','_division'] %}
                                     {% set base_key = col.column_key %}
                                     {% for s in suffixes %}
                                         {% if base_key.endswith(s) %}
@@ -103,6 +103,8 @@
                                         {% set group = 'department' %}
                                     {% elif (base_key ~ '_company') in all_keys %}
                                         {% set group = 'contractor' %}
+                                    {% elif (base_key ~ '_division') in all_keys %}
+                                        {% set group = 'division' %}
                                     {% endif %}
                                     {% if columns | selectattr('column_key','equalto', base_key ~ '_bizno') | list | length > 0 %}
                                         {% set group = 'company' %}
@@ -112,6 +114,8 @@
                                         {% set group = 'department' %}
                                     {% elif columns | selectattr('column_key','equalto', base_key ~ '_company') | list | length > 0 %}
                                         {% set group = 'contractor' %}
+                                    {% elif columns | selectattr('column_key','equalto', base_key ~ '_division') | list | length > 0 %}
+                                        {% set group = 'division' %}
                                     {% endif %}
                                     {% if group == 'person' %}
                                         {% set render_type = 'popup_person' %}
@@ -121,6 +125,8 @@
                                         {% set render_type = 'popup_department' %}
                                     {% elif group == 'contractor' %}
                                         {% set render_type = 'popup_contractor' %}
+                                    {% elif group == 'division' %}
+                                        {% set render_type = 'popup_division' %}
                                     {% endif %}
                                 {% endif %}
                                 {% if col.column_type != 'list' %}
@@ -190,7 +196,7 @@
                                            readonly
                                            style="background-color: #f3f4f6;">
                                            
-                                {% elif render_type in ['popup','popup_person','popup_company','popup_department','popup_building','popup_contractor'] or (col.column_type and col.column_type.startswith('popup')) %}
+                                {% elif render_type in ['popup','popup_person','popup_company','popup_department','popup_building','popup_contractor','popup_division'] or (col.column_type and col.column_type.startswith('popup')) %}
                                     <!-- 팝업 필드 -->
                                     <div class="input-group">
                                         <input type="text"
@@ -203,7 +209,7 @@
                                                value="{{ col_value }}"
                                                readonly>
                                         <button class="btn btn-sm btn-primary"
-                                                onclick="{% if render_type == 'popup_person' or col.column_type == 'popup_person' %}openPersonSearch('{{ col.column_key }}'){% elif render_type == 'popup_company' or col.column_type == 'popup_company' %}openCompanySearch('{{ col.column_key }}'){% elif render_type == 'popup_building' or col.column_type == 'popup_building' %}openBuildingSearch('{{ col.column_key }}'){% elif render_type == 'popup_department' or col.column_type == 'popup_department' %}openDepartmentSearch('{{ col.column_key }}'){% elif render_type == 'popup_contractor' or col.column_type == 'popup_contractor' %}openContractorSearch('{{ col.column_key }}'){% else %}console.error('Unknown popup type: {{ col.column_type }}'){% endif %}">
+                                                onclick="{% if render_type == 'popup_person' or col.column_type == 'popup_person' %}openPersonSearch('{{ col.column_key }}'){% elif render_type == 'popup_company' or col.column_type == 'popup_company' %}openCompanySearch('{{ col.column_key }}'){% elif render_type == 'popup_building' or col.column_type == 'popup_building' %}openBuildingSearch('{{ col.column_key }}'){% elif render_type == 'popup_department' or col.column_type == 'popup_department' %}openDepartmentSearch('{{ col.column_key }}'){% elif render_type == 'popup_contractor' or col.column_type == 'popup_contractor' %}openContractorSearch('{{ col.column_key }}'){% elif render_type == 'popup_division' or col.column_type == 'popup_division' %}openDivisionSearch('{{ col.column_key }}'){% else %}console.error('Unknown popup type: {{ col.column_type }}'){% endif %}">
                                             검색
                                         </button>
                                     </div>

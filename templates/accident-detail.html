@@ -130,6 +130,8 @@
                                     {% set render_type = 'popup_department' %}
                                 {% elif group == 'contractor' %}
                                     {% set render_type = 'popup_contractor' %}
+                                {% elif group == 'division' %}
+                                    {% set render_type = 'popup_division' %}
                                 {% endif %}
                             {% endif %}
 
@@ -213,7 +215,7 @@
                                        value="{{ col_value }}"
                                        readonly
                                        style="background-color: #f3f4f6;">
-                            {% elif render_type == 'popup' or render_type in ['popup_person','popup_company','popup_department','popup_building','popup_contractor'] %}
+                            {% elif render_type == 'popup' or render_type in ['popup_person','popup_company','popup_department','popup_building','popup_contractor','popup_division'] %}
                                 <!-- 팝업 필드 -->
                                 <!-- ⚠️ IMPORTANT: 버튼 클래스는 btn-primary 유지 (파란색), 아이콘 없이 "검색" 텍스트만 사용 -->
                                 <!-- DO NOT CHANGE: btn-outline-secondary나 btn-outline-primary로 변경 금지 -->
@@ -228,7 +230,7 @@
                                            value="{{ col_value }}"
                                            readonly>
                                     <button class="btn btn-sm btn-primary" 
-                                            onclick="{% if render_type == 'popup_person' %}openPersonSearch('{{ col.column_key }}'){% elif render_type == 'popup_company' %}openCompanySearch('{{ col.column_key }}'){% elif render_type == 'popup_department' %}openDepartmentSearch('{{ col.column_key }}'){% elif render_type == 'popup_building' %}openBuildingSearch('{{ col.column_key }}'){% elif render_type == 'popup_contractor' %}openContractorSearch('{{ col.column_key }}'){% else %}alert('팝업 타입을 지정해주세요'){% endif %}">
+                                            onclick="{% if render_type == 'popup_person' %}openPersonSearch('{{ col.column_key }}'){% elif render_type == 'popup_company' %}openCompanySearch('{{ col.column_key }}'){% elif render_type == 'popup_department' %}openDepartmentSearch('{{ col.column_key }}'){% elif render_type == 'popup_building' %}openBuildingSearch('{{ col.column_key }}'){% elif render_type == 'popup_contractor' %}openContractorSearch('{{ col.column_key }}'){% elif render_type == 'popup_division' %}openDivisionSearch('{{ col.column_key }}'){% else %}alert('팝업 타입을 지정해주세요'){% endif %}">
                                         검색
                                     </button>
                                 </div>
@@ -317,6 +319,26 @@
                                            style="background-color: #f8f9fa;">
                                     <button class="btn btn-sm btn-primary"
                                             onclick="openContractorSearch('{{ col.column_key }}')">
+                                        검색
+                                    </button>
+                                </div>
+
+                            {% elif render_type == 'popup_division' %}
+                                <!-- 사업부 검색 필드 -->
+                                <div class="input-group">
+                                    <input type="text"
+                                           id="{{ col.column_key }}"
+                                           class="{{ section.section_key }}-input"
+                                           data-field="{{ col.column_key }}"
+                                           data-section="{{ section.section_key }}"
+                                           {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                           {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
+                                           data-input-type="popup_division"
+                                           value="{{ col_value }}"
+                                           readonly
+                                           style="background-color: #f8f9fa;">
+                                    <button class="btn btn-sm btn-primary"
+                                            onclick="openDivisionSearch('{{ col.column_key }}')">
                                         검색
                                     </button>
                                 </div>

@@ -148,7 +148,19 @@
                                        placeholder="협력사 근로자 선택">
                                 <button class="btn btn-sm btn-primary" onclick="openContractorPopup('{{ col.column_key }}')">선택</button>
                             </div>
-                            
+
+                        {% elif col.column_type == 'popup_division' %}
+                            <div class="input-group">
+                                <input type="text"
+                                       class="dynamic-input popup-division"
+                                       data-column-key="{{ col.column_key }}"
+                                       {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                       {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
+                                       value="{{ col_value.division_name if col_value is mapping else col_value }}"
+                                       placeholder="사업부 선택">
+                                <button class="btn btn-sm btn-primary" onclick="openDivisionPopup('{{ col.column_key }}')">선택</button>
+                            </div>
+
                         {% elif col.column_type == 'popup_building' %}
                             <div class="input-group">
                                 <input type="text"

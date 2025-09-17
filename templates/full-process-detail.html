@@ -329,12 +329,32 @@
                                                value="{{ col_value }}"
                                                readonly
                                                style="background-color: #f8f9fa;">
-                                        <button class="btn btn-sm btn-primary" 
+                                        <button class="btn btn-sm btn-primary"
                                                 onclick="openContractorSearch('{{ col.column_key }}')">
                                             검색
                                         </button>
                                     </div>
-                                    
+
+                                {% elif render_type == 'popup_division' %}
+                                    <!-- 사업부 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key }}-input"
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="popup_division"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
+                                               value="{{ col_value }}"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <button class="btn btn-sm btn-primary"
+                                                onclick="openDivisionSearch('{{ col.column_key }}')">
+                                            검색
+                                        </button>
+                                    </div>
+
                                 {% elif col.column_type == 'table' or col.input_type == 'table' %}
                                     <!-- 테이블 검색 필드 -->
                                     <div class="input-group">

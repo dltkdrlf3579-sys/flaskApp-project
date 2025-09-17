@@ -54,13 +54,21 @@ function updateLinkedFieldsByTableGroup(mainFieldKey, selectedData, tableGroup) 
             }
         } else if (fieldKey.includes('_dept') || fieldKey.includes('_department')) {
             field.value = selectedData.department_name || selectedData.department || '';
+        } else if (fieldKey.includes('_division')) {
+            field.value = selectedData.division_name || selectedData.division || '';
         } else if (fieldKey.includes('_code')) {
             if (tableType === 'building') {
                 field.value = selectedData.building_code || selectedData.code || '';
             } else if (tableType === 'department') {
                 field.value = selectedData.dept_code || selectedData.department_code || '';
+            } else if (tableType === 'division') {
+                field.value = selectedData.division_code || selectedData.code || '';
             } else {
                 field.value = selectedData.code || '';
+            }
+        } else if (fieldKey.includes('_parent')) {
+            if (tableType === 'division') {
+                field.value = selectedData.parent_division_code || '';
             }
         } else if (fieldKey.includes('_text')) {
             // linked_text 필드들에 대한 매핑
@@ -389,6 +397,75 @@ window.receiveDepartmentSelection = function(fieldKey, data) {
         codeField.value = data.dept_code || data.department_code || '';
         codeField.readOnly = true;
         codeField.style.backgroundColor = '#f3f4f6';
+    }
+};
+
+// 사업부 검색 팝업 열기
+function openDivisionSearch(fieldKey) {
+    const width = 1000;
+    const height = 600;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+
+    const popupUrl = `/search-popup?type=division&field=${fieldKey}`;
+    const popup = window.open(popupUrl, 'divisionSearch', popupOptions);
+
+    if (!popup || popup.closed) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+
+    popup.focus();
+}
+
+// 사업부 선택 콜백
+window.receiveDivisionSelection = function(fieldKey, data) {
+    console.log('Division selected:', fieldKey, data);
+
+    const mainField = document.getElementById(fieldKey) ||
+                      document.querySelector(`[data-field="${fieldKey}"]`);
+
+    if (mainField) {
+        mainField.value = data.division_name || '';
+        mainField.readOnly = true;
+        mainField.style.backgroundColor = '#f3f4f6';
+
+        // table_group 기반 linked 필드 자동 업데이트
+        const tableGroup = mainField.getAttribute('data-table-group');
+        if (tableGroup) {
+            updateLinkedFieldsByTableGroup(fieldKey, data, tableGroup);
+        }
+
+        // change 이벤트 발생
+        const event = new Event('change', { bubbles: true });
+        mainField.dispatchEvent(event);
+    }
+
+    // 사업부코드 필드 업데이트
+    const codeField = document.getElementById(fieldKey + '_code') ||
+                      document.querySelector(`[data-field="${fieldKey}_code"]`);
+    if (codeField) {
+        codeField.value = data.division_code || '';
+        codeField.readOnly = true;
+        codeField.style.backgroundColor = '#f3f4f6';
+    }
+
+    // 상위사업부 필드 업데이트
+    const parentField = document.getElementById(fieldKey + '_parent') ||
+                        document.querySelector(`[data-field="${fieldKey}_parent"]`);
+    if (parentField) {
+        parentField.value = data.parent_division_code || '';
+        parentField.readOnly = true;
+        parentField.style.backgroundColor = '#f3f4f6';
     }
 };
 

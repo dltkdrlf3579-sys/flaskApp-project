@@ -109,6 +109,8 @@
                                         {% set group = 'department' %}
                                     {% elif (base_key ~ '_company') in all_keys %}
                                         {% set group = 'contractor' %}
+                                    {% elif (base_key ~ '_division') in all_keys %}
+                                        {% set group = 'division' %}
                                     {% endif %}
                                     {% if group %}
                                         {% if col.column_key == base_key %}
@@ -120,6 +122,8 @@
                                                 {% set render_type = 'popup_department' %}
                                             {% elif group == 'contractor' %}
                                                 {% set render_type = 'popup_contractor' %}
+                                            {% elif group == 'division' %}
+                                                {% set render_type = 'popup_division' %}
                                             {% endif %}
                                         {% else %}
                                             {% if col.column_key.endswith('_dept') %}
@@ -200,7 +204,7 @@
                                            readonly
                                            style="background-color: #f3f4f6;">
                                            
-                                {% elif render_type in ['popup','popup_person','popup_company','popup_department','popup_building','popup_contractor'] %}
+                                {% elif render_type in ['popup','popup_person','popup_company','popup_department','popup_building','popup_contractor','popup_division'] %}
                                     <!-- 팝업 필드 -->
                                     <!-- ⚠️ IMPORTANT: btn-primary 유지, 아이콘 없이 "검색" 텍스트만 -->
                                     <!-- DO NOT CHANGE to btn-outline-secondary or add icons -->
@@ -215,7 +219,7 @@
                                                value="{{ col_value }}"
                                                readonly>
                                         <button class="btn btn-sm btn-primary"
-                                                onclick="{% if render_type == 'popup_person' %}openPersonSearch{% elif render_type == 'popup_company' %}openCompanySearch{% elif render_type == 'popup_department' %}openDepartmentSearch{% elif render_type == 'popup_building' %}openBuildingSearch{% elif render_type == 'popup_contractor' %}openContractorSearch{% else %}alert('팝업 타입을 지정해주세요'){% endif %}{% if render_type != 'popup' %}('{{ col.column_key }}'){% endif %}">
+                                                onclick="{% if render_type == 'popup_person' %}openPersonSearch{% elif render_type == 'popup_company' %}openCompanySearch{% elif render_type == 'popup_department' %}openDepartmentSearch{% elif render_type == 'popup_building' %}openBuildingSearch{% elif render_type == 'popup_contractor' %}openContractorSearch{% elif render_type == 'popup_division' %}openDivisionSearch{% else %}alert('팝업 타입을 지정해주세요'){% endif %}{% if render_type != 'popup' %}('{{ col.column_key }}'){% endif %}">
                                                 검색
                                             </button>
                                     </div>

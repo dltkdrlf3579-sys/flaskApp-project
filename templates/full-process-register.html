@@ -187,7 +187,7 @@
                                                placeholder="클릭하여 선택"
                                                readonly>
                                         <button class="btn btn-sm btn-primary"
-                                                onclick="{% if col.column_type == 'popup_person' %}openPersonSearch('{{ col.column_key }}'){% elif col.column_type == 'popup_company' %}openCompanySearch('{{ col.column_key }}'){% elif col.column_type == 'popup_building' %}openBuildingSearch('{{ col.column_key }}'){% elif col.column_type == 'popup_department' %}openDepartmentSearch('{{ col.column_key }}'){% elif col.column_type == 'popup_contractor' %}openContractorSearch('{{ col.column_key }}'){% else %}console.error('Unknown popup type: {{ col.column_type }}'){% endif %}">
+                                                onclick="{% if col.column_type == 'popup_person' %}openPersonSearch('{{ col.column_key }}'){% elif col.column_type == 'popup_company' %}openCompanySearch('{{ col.column_key }}'){% elif col.column_type == 'popup_building' %}openBuildingSearch('{{ col.column_key }}'){% elif col.column_type == 'popup_department' %}openDepartmentSearch('{{ col.column_key }}'){% elif col.column_type == 'popup_contractor' %}openContractorSearch('{{ col.column_key }}'){% elif col.column_type == 'popup_division' %}openDivisionSearch('{{ col.column_key }}'){% else %}console.error('Unknown popup type: {{ col.column_type }}'){% endif %}">
                                             검색
                                         </button>
                                     </div>
