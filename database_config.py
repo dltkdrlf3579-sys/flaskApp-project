@@ -1046,9 +1046,11 @@ class PartnerDataManager:
                                   row.get('work_request_number', ''))
                     if not work_req_no:
                         # 새 형식으로 fallback: FSYYMMDDNNNN
+                        # idx가 크면 모듈로 연산으로 제한
                         created_dt = datetime.now()
                         date_str = created_dt.strftime('%y%m%d')
-                        work_req_no = f'FS{date_str}{idx+1:04d}'
+                        safe_counter = (idx % 9999) + 1  # 1-9999 범위로 제한
+                        work_req_no = f'FS{date_str}{safe_counter:04d}'
                     else:
                         created_dt = datetime.now()
 
@@ -1206,9 +1208,11 @@ class PartnerDataManager:
                                          row.get('process_number', ''))
                     if not fullprocess_number:
                         # 새 형식으로 fallback: FPYYMMDDNNNNN
+                        # idx가 크면 모듈로 연산으로 제한
                         created_dt = datetime.now()
                         date_str = created_dt.strftime('%y%m%d')
-                        fullprocess_number = f'FP{date_str}{idx+1:05d}'
+                        safe_counter = (idx % 99999) + 1  # 1-99999 범위로 제한
+                        fullprocess_number = f'FP{date_str}{safe_counter:05d}'
                 
                 if idx == 0:  # 첫 번째 행만 디버깅
                     print(f"[DEBUG] fullprocess_number: {fullprocess_number}")
