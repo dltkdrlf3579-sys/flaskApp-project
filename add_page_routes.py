@@ -2,6 +2,7 @@
 # 이 파일은 app.py에서 exec()로 실행되므로 필요한 imports를 명시적으로 추가
 import logging
 import sqlite3
+import json
 from flask import request, render_template, jsonify, session
 from db_connection import get_db_connection
 from column_utils import normalize_column_types
@@ -1966,10 +1967,22 @@ def full_process_detail(fullprocess_number):
             original_custom_data = custom_data.copy()
             custom_data = apply_external_scoring_to_custom_data(cursor, fullprocess_number, custom_data)
 
-            # 변경된 필드 로깅
+            # 변경사항이 있으면 DB에 저장
+            has_changes = False
             for key in custom_data:
                 if key in original_custom_data and custom_data[key] != original_custom_data[key]:
                     logging.info(f"[SCORING] Updated {key}: {original_custom_data[key]} -> {custom_data[key]}")
+                    has_changes = True
+
+            if has_changes:
+                # DB에 업데이트된 custom_data 저장
+                cursor.execute("""
+                    UPDATE full_process
+                    SET custom_data = %s
+                    WHERE fullprocess_number = %s
+                """, (json.dumps(custom_data), fullprocess_number))
+                conn.commit()
+                logging.info(f"[SCORING] Saved updated custom_data to DB for {fullprocess_number}")
         else:
             logging.info(f"[SCORING] No custom_data to apply external scoring to")
     except Exception as e:
