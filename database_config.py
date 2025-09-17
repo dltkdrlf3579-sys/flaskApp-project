@@ -1013,12 +1013,17 @@ class PartnerDataManager:
                     # FS 형식 번호 생성 (무조건 생성)
                     work_req_no = generate_followsop_number(self.local_db_path, created_dt)
                 except Exception as e:
-                    # 번호 생성 실패시 원본 사용
+                    # 번호 생성 실패시 원본 사용 또는 새 형식으로 생성
                     work_req_no = (row.get('work_req_no', '') or
                                   row.get('작업요청번호', '') or
-                                  row.get('work_request_number', '') or
-                                  f'FS{idx:06d}')
-                    created_dt = datetime.now()
+                                  row.get('work_request_number', ''))
+                    if not work_req_no:
+                        # 새 형식으로 fallback: FSYYMMDDNNNN
+                        created_dt = datetime.now()
+                        date_str = created_dt.strftime('%y%m%d')
+                        work_req_no = f'FS{date_str}{idx+1:04d}'
+                    else:
+                        created_dt = datetime.now()
 
                 if idx == 0:  # 첫 번째 행만 디버깅
                     print(f"[DEBUG] work_req_no: {work_req_no}")
@@ -1146,11 +1151,15 @@ class PartnerDataManager:
                     # FP 형식 번호 생성 (무조건 생성)
                     fullprocess_number = generate_fullprocess_number(self.local_db_path, created_dt)
                 except Exception as e:
-                    # 번호 생성 실패시 원본 사용
+                    # 번호 생성 실패시 원본 사용 또는 새 형식으로 생성
                     fullprocess_number = (row.get('fullprocess_number', '') or
                                          row.get('프로세스번호', '') or
-                                         row.get('process_number', '') or
-                                         f'FP{idx:06d}')
+                                         row.get('process_number', ''))
+                    if not fullprocess_number:
+                        # 새 형식으로 fallback: FPYYMMDDNNNNN
+                        created_dt = datetime.now()
+                        date_str = created_dt.strftime('%y%m%d')
+                        fullprocess_number = f'FP{date_str}{idx+1:05d}'
                 
                 if idx == 0:  # 첫 번째 행만 디버깅
                     print(f"[DEBUG] fullprocess_number: {fullprocess_number}")
