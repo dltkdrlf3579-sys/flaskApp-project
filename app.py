@@ -3773,48 +3773,48 @@ def partner_change_request():
         # 데이터 변환
         change_requests = []
         for i, row in enumerate(rows):
+            # Row를 dict로 변환
+            row_dict = dict(row)
+
             # status 필드 안전하게 처리
-            try:
-                status = row['status'] if 'status' in row.keys() else 'pending'
-            except:
-                status = 'pending'
-            
+            status = row_dict.get('status', 'pending')
+
             # custom_data 파싱 (PostgreSQL JSONB는 이미 dict)
             custom_data = {}
-            if row['custom_data']:
+            if row_dict.get('custom_data'):
                 try:
-                    if isinstance(row['custom_data'], dict):
-                        custom_data = row['custom_data']  # PostgreSQL JSONB
+                    if isinstance(row_dict['custom_data'], dict):
+                        custom_data = row_dict['custom_data']  # PostgreSQL JSONB
                     else:
-                        custom_data = pyjson.loads(row['custom_data'])  # SQLite TEXT
+                        custom_data = pyjson.loads(row_dict['custom_data'])  # SQLite TEXT
                 except:
                     custom_data = {}
-                
+
             # 드롭다운 값을 라벨로 변환
-            change_type_value = row['change_type']
+            change_type_value = row_dict.get('change_type')
             change_type_label = change_type_map.get(change_type_value, change_type_value) if change_type_value else ''
-            
+
             status_label = status_map.get(status, status) if status else 'pending'
-                
+
             change_request = type('obj', (object,), {
-                'id': row['id'],
+                'id': row_dict['id'],
                 'no': total_count - offset - i,  # No 컬럼 (역순)
-                'request_number': row['request_number'],  # request_number 추가
-                'requester_name': row['requester_name'],
-                'requester_department': row['requester_department'],
-                'company_name': row['company_name'],
-                'business_number': row['business_number'],
+                'request_number': row_dict.get('request_number'),  # request_number 추가
+                'requester_name': row_dict.get('requester_name'),
+                'requester_department': row_dict.get('requester_department'),
+                'company_name': row_dict.get('company_name'),
+                'business_number': row_dict.get('business_number'),
                 'change_type': change_type_value,
                 'change_type_label': change_type_label,  # 라벨 추가
-                'current_value': row['current_value'],
-                'new_value': row['new_value'],
-                'change_reason': row['change_reason'],
-                'created_at': row['created_at'],
+                'current_value': row_dict.get('current_value'),
+                'new_value': row_dict.get('new_value'),
+                'change_reason': row_dict.get('change_reason'),
+                'created_at': row_dict.get('created_at'),
                 'status': status,
                 'status_label': status_label,  # 라벨 추가
                 'custom_data': custom_data,  # custom_data 추가
-                'other_info': row.get('other_info', ''),  # other_info 추가
-                'final_check_date': row.get('final_check_date', '')  # final_check_date 추가
+                'other_info': row_dict.get('other_info', ''),  # other_info 추가
+                'final_check_date': row_dict.get('final_check_date', '')  # final_check_date 추가
             })()
             change_requests.append(change_request)
             
