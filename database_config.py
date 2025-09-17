@@ -1404,6 +1404,10 @@ class PartnerDataManager:
                             row_dict[k] = str(v)
                         elif pd.isna(v):
                             row_dict[k] = None
+                    # detailed_content 분리 (full_process 방식)
+                    detailed_content = row_dict.pop('detailed_content', '') if 'detailed_content' in row_dict else ''
+
+                    # custom_data는 detailed_content 제외한 나머지만 저장
                     custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
 
                     # 주요 필드 추출 (영어 컬럼명만)
@@ -1492,6 +1496,36 @@ class PartnerDataManager:
                             print(f"  데이터: {row_data[:5]}...")  # 처음 5개 필드만 출력
 
                 print(f"[INFO] 삽입 결과: 성공 {success_count}개, 실패 {error_count}개")
+
+                # detailed_content를 partner_change_request_details 테이블에 저장 (full_process 방식)
+                if success_count > 0:
+                    print("[INFO] partner_change_request_details 테이블 업데이트 시작...")
+                    detail_count = 0
+                    for idx, row in df.iterrows():
+                        # detailed_content 추출
+                        row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+                        detailed_content = row_dict.get('detailed_content', '')
+
+                        if detailed_content:
+                            # request_number 재생성 (위와 동일한 로직)
+                            from datetime import datetime
+                            yymm = datetime.now().strftime('%y%m')
+                            request_number = row.get('request_number', f"CR{yymm}{idx+1:03d}")
+
+                            try:
+                                cursor.execute('''
+                                    INSERT INTO partner_change_request_details
+                                    (request_number, detailed_content, created_at, updated_at)
+                                    VALUES (%s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                                    ON CONFLICT(request_number) DO UPDATE SET
+                                        detailed_content = EXCLUDED.detailed_content,
+                                        updated_at = CURRENT_TIMESTAMP
+                                ''', (request_number, detailed_content))
+                                detail_count += 1
+                            except Exception as detail_error:
+                                print(f"[WARNING] Details 저장 실패 - {request_number}: {detail_error}")
+
+                    print(f"[INFO] partner_change_request_details: {detail_count}개 저장")
 
                 if success_count > 0:
                     conn.commit()
