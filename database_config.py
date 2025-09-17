@@ -1357,90 +1357,10 @@ class PartnerDataManager:
             conn = get_db_connection()
             cursor = conn.cursor()
 
-            # partner_change_requests_cache 테이블 생성 (없으면)
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS partner_change_requests_cache (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    request_number TEXT UNIQUE,
-                    company_name TEXT,
-                    business_number TEXT,
-                    status TEXT DEFAULT 'pending',
-                    custom_data TEXT DEFAULT '{}',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    sync_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-
-            # 트랜잭션 시작
-            cursor.execute("BEGIN")
-
-            # 기존 캐시 데이터 삭제
-            cursor.execute("DELETE FROM partner_change_requests_cache")
-
-            # 배치 삽입을 위한 데이터 준비 (동적 컬럼 방식)
-            print(f"[DEBUG] Partner Change Requests DataFrame 컬럼: {list(df.columns)}")
-            rows = []
-            for idx, row in df.iterrows():
-                # 모든 데이터를 custom_data에 JSON으로 저장
-                row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
-                # 날짜 타입들을 안전하게 문자열로 변환
-                for k, v in row_dict.items():
-                    if isinstance(v, (pd.Timestamp, datetime, date)) or str(type(v)).endswith(("numpy.datetime64'>", "numpy.timedelta64'>")):
-                        row_dict[k] = str(v)
-                    elif pd.isna(v):
-                        row_dict[k] = None
-                custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
-
-                # 주요 필드 추출
-                request_number = (row.get('request_number', '') or
-                                row.get('요청번호', '') or
-                                row.get('request_no', '') or
-                                f"REQ-{idx}")  # 없으면 인덱스 사용
-
-                company_name = (row.get('company_name', '') or
-                              row.get('회사명', '') or
-                              row.get('업체명', '') or
-                              '')
-
-                business_number = (row.get('business_number', '') or
-                                 row.get('사업자번호', '') or
-                                 row.get('사업자등록번호', '') or
-                                 '')
-
-                status = (row.get('status', '') or
-                        row.get('상태', '') or
-                        'pending')
-
-                if idx == 0:  # 첫 번째 행만 디버깅
-                    print(f"[DEBUG] request_number: {request_number}")
-                    print(f"[DEBUG] company_name: {company_name}")
-                    print(f"[DEBUG] business_number: {business_number}")
-                    print(f"[DEBUG] custom_data 길이: {len(custom_data)}")
-
-                rows.append((request_number, company_name, business_number, status, custom_data))
-
-            # 배치 삽입 (PostgreSQL)
-            cursor.executemany('''
-                INSERT INTO partner_change_requests_cache
-                    (request_number, company_name, business_number, status, custom_data)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT(request_number) DO UPDATE SET
-                    company_name = EXCLUDED.company_name,
-                    business_number = EXCLUDED.business_number,
-                    status = EXCLUDED.status,
-                    custom_data = EXCLUDED.custom_data,
-                    updated_at = CURRENT_TIMESTAMP,
-                    sync_date = CURRENT_TIMESTAMP
-            ''', rows)
-
-            # 캐시에서 본 테이블로 이관 (동일한 conn 사용)
-            # cursor는 이미 있음
-
             # partner_change_requests 본 테이블 생성 (없으면)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS partner_change_requests (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     request_number TEXT UNIQUE,
                     requester_name TEXT,
                     requester_department TEXT,
@@ -1460,28 +1380,74 @@ class PartnerDataManager:
                 )
             ''')
 
-            # 캐시에서 본테이블로 이관 (PostgreSQL)
-            cursor.execute('''
+            # 트랜잭션 시작
+            cursor.execute("BEGIN")
+
+            # 배치 삽입을 위한 데이터 준비 (동적 컬럼 방식)
+            print(f"[DEBUG] Partner Change Requests DataFrame 컬럼: {list(df.columns)}")
+            rows = []
+            for idx, row in df.iterrows():
+                # 모든 데이터를 custom_data에 JSON으로 저장
+                row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
+                # 날짜 타입들을 안전하게 문자열로 변환
+                for k, v in row_dict.items():
+                    if isinstance(v, (pd.Timestamp, datetime, date)) or str(type(v)).endswith(("numpy.datetime64'>", "numpy.timedelta64'>")):
+                        row_dict[k] = str(v)
+                    elif pd.isna(v):
+                        row_dict[k] = None
+                custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
+
+                # 주요 필드 추출 (영어 컬럼명만)
+                request_number = row.get('request_number', f"REQ-{idx}")
+                requester_name = row.get('requester_name', '')
+                requester_department = row.get('requester_department', '')
+                company_name = row.get('company_name', '')
+                business_number = row.get('business_number', '')
+                change_type = row.get('change_type', '')
+                current_value = row.get('current_value', '')
+                new_value = row.get('new_value', '')
+                change_reason = row.get('change_reason', '')
+                status = row.get('status', 'pending')
+                other_info = row.get('other_info', '')
+                final_check_date = row.get('final_check_date', None)
+
+                if idx == 0:  # 첫 번째 행만 디버깅
+                    print(f"[DEBUG] request_number: {request_number}")
+                    print(f"[DEBUG] requester_name: {requester_name}")
+                    print(f"[DEBUG] company_name: {company_name}")
+                    print(f"[DEBUG] custom_data 길이: {len(custom_data)}")
+
+                rows.append((
+                    request_number, requester_name, requester_department,
+                    company_name, business_number, change_type,
+                    current_value, new_value, change_reason,
+                    status, other_info, final_check_date, custom_data
+                ))
+
+            # 바로 본테이블에 삽입 (PostgreSQL)
+            cursor.executemany('''
                 INSERT INTO partner_change_requests
-                    (request_number, company_name, business_number, status, custom_data, created_at, is_deleted)
-                SELECT
-                    c.request_number,
-                    c.company_name,
-                    c.business_number,
-                    c.status,
-                    c.custom_data,
-                    COALESCE(c.created_at, CURRENT_TIMESTAMP),
-                    0
-                FROM partner_change_requests_cache c
-                ON CONFLICT (request_number)
-                DO UPDATE SET
+                    (request_number, requester_name, requester_department,
+                     company_name, business_number, change_type,
+                     current_value, new_value, change_reason,
+                     status, other_info, final_check_date, custom_data, is_deleted)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0)
+                ON CONFLICT(request_number) DO UPDATE SET
+                    requester_name = EXCLUDED.requester_name,
+                    requester_department = EXCLUDED.requester_department,
                     company_name = EXCLUDED.company_name,
                     business_number = EXCLUDED.business_number,
+                    change_type = EXCLUDED.change_type,
+                    current_value = EXCLUDED.current_value,
+                    new_value = EXCLUDED.new_value,
+                    change_reason = EXCLUDED.change_reason,
                     status = EXCLUDED.status,
+                    other_info = EXCLUDED.other_info,
+                    final_check_date = EXCLUDED.final_check_date,
                     custom_data = EXCLUDED.custom_data,
                     is_deleted = 0,
                     updated_at = CURRENT_TIMESTAMP
-            ''')
+            ''', rows)
 
             conn.commit()
             conn.close()
