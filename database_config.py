@@ -1205,7 +1205,11 @@ class PartnerDataManager:
                         row_dict[k] = str(v)
                     elif pd.isna(v):
                         row_dict[k] = None
-                custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
+
+                # ★ Scoring 매핑 적용 ★
+                from database_config_patch import transform_fullprocess_data
+                transformed_data = transform_fullprocess_data(row_dict)
+                custom_data = json.dumps(transformed_data, ensure_ascii=False, default=str)
                 
                 # created_at 또는 평가일자 추출하여 FP 형식 번호 생성
                 # 외부 DB의 다양한 날짜 필드 확인
