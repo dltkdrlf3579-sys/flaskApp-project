@@ -164,12 +164,12 @@ class SectionConfigService:
                     # 중복 검사 (보드 범위)
                     if self.table_name == 'section_config':
                         cursor.execute(
-                            "SELECT COUNT(*) FROM section_config WHERE board_type = ? AND LOWER(section_key) = LOWER(?)",
+                            "SELECT COUNT(*) FROM section_config WHERE board_type = %s AND LOWER(section_key) = LOWER(%s)",
                             (self.board_type, raw_key)
                         )
                     else:
                         cursor.execute(
-                            f"SELECT COUNT(*) FROM {self.table_name} WHERE LOWER(section_key) = LOWER(?)",
+                            f"SELECT COUNT(*) FROM {self.table_name} WHERE LOWER(section_key) = LOWER(%s)",
                             (raw_key,)
                         )
                     exists = (cursor.fetchone() or [0])[0] > 0
@@ -182,7 +182,7 @@ class SectionConfigService:
                     cursor.execute(
                         """
                         SELECT COUNT(*) FROM section_config
-                        WHERE board_type = ? AND section_key LIKE ?
+                        WHERE board_type = %s AND section_key LIKE %s
                         """,
                         (self.board_type, 'custom_section_%')
                     )
@@ -190,7 +190,7 @@ class SectionConfigService:
                     cursor.execute(
                         f"""
                         SELECT COUNT(*) FROM {self.table_name}
-                        WHERE section_key LIKE ?
+                        WHERE section_key LIKE %s
                         """,
                         ('custom_section_%',)
                     )
@@ -207,8 +207,8 @@ class SectionConfigService:
             # 마지막 순서 가져오기
             if self.table_name == 'section_config':
                 cursor.execute("""
-                    SELECT MAX(section_order) FROM section_config 
-                    WHERE board_type = ?
+                    SELECT MAX(section_order) FROM section_config
+                    WHERE board_type = %s
                 """, (self.board_type,))
             else:
                 cursor.execute(f"""
@@ -302,13 +302,13 @@ class SectionConfigService:
                 query = f"""
                     UPDATE section_config 
                     SET {', '.join(update_fields)}
-                    WHERE id = ? AND board_type = ?
+                    WHERE id = %s AND board_type = %s
                 """
             else:
                 query = f"""
                     UPDATE {self.table_name} 
                     SET {', '.join(update_fields)}
-                    WHERE id = ?
+                    WHERE id = %s
                 """
             
             cursor.execute(query, update_values)
@@ -352,23 +352,23 @@ class SectionConfigService:
                     cursor.execute("""
                         UPDATE section_config 
                         SET is_deleted = 1
-                        WHERE id = ? AND board_type = ?
+                        WHERE id = %s AND board_type = %s
                     """, (section_id, self.board_type))
                 else:
                     # 하드 삭제 폴백
                     cursor.execute("""
                         DELETE FROM section_config 
-                        WHERE id = ? AND board_type = ?
+                        WHERE id = %s AND board_type = %s
                     """, (section_id, self.board_type))
             else:
                 if has_deleted:
                     cursor.execute(f"""
-                        UPDATE {table} 
+                        UPDATE {table}
                         SET is_deleted = 1
-                        WHERE id = ?
+                        WHERE id = %s
                     """, (section_id,))
                 else:
-                    cursor.execute(f"DELETE FROM {table} WHERE id = ?", (section_id,))
+                    cursor.execute(f"DELETE FROM {table} WHERE id = %s", (section_id,))
             
             conn.commit()
             return {'success': True}
@@ -389,15 +389,15 @@ class SectionConfigService:
             for section_id, order in section_orders.items():
                 if self.table_name == 'section_config':
                     cursor.execute("""
-                        UPDATE section_config 
-                        SET section_order = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ? AND board_type = ?
+                        UPDATE section_config
+                        SET section_order = %s, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = %s AND board_type = %s
                     """, (order, section_id, self.board_type))
                 else:
                     cursor.execute(f"""
-                        UPDATE {self.table_name} 
-                        SET section_order = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE id = ?
+                        UPDATE {self.table_name}
+                        SET section_order = %s, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = %s
                     """, (order, section_id))
             
             conn.commit()

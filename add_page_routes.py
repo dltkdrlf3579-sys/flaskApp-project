@@ -1956,15 +1956,24 @@ def full_process_detail(fullprocess_number):
     logging.info(f"[TEMPLATE DEBUG] department in process: {process.get('department')}")
     logging.info(f"[TEMPLATE DEBUG] manager in process: {process.get('manager')}")
 
-    # 외부 scoring 데이터 매핑 적용
-    external_scoring_data = None
+    # 외부 scoring 데이터를 기존 custom_data에 매핑
+    external_scoring_data = None  # 템플릿 호환성 유지
     try:
-        from scoring_external_service import get_scoring_data_for_template
-        scoring_template_data = get_scoring_data_for_template(cursor, fullprocess_number)
-        external_scoring_data = scoring_template_data.get('scoring_columns', [])
-        logging.info(f"[SCORING] External scoring data loaded: {len(external_scoring_data)} columns")
+        from scoring_external_service import apply_external_scoring_to_custom_data
+
+        # custom_data가 있을 때만 외부 데이터 매핑
+        if custom_data:
+            original_custom_data = custom_data.copy()
+            custom_data = apply_external_scoring_to_custom_data(cursor, fullprocess_number, custom_data)
+
+            # 변경된 필드 로깅
+            for key in custom_data:
+                if key in original_custom_data and custom_data[key] != original_custom_data[key]:
+                    logging.info(f"[SCORING] Updated {key}: {original_custom_data[key]} -> {custom_data[key]}")
+        else:
+            logging.info(f"[SCORING] No custom_data to apply external scoring to")
     except Exception as e:
-        logging.warning(f"[SCORING] Failed to load external scoring data: {e}")
+        logging.warning(f"[SCORING] Failed to apply external scoring data: {e}")
 
     # DB 연결 닫기 (AttachmentService 사용 후)
     conn.close()

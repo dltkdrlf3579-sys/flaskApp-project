@@ -53,7 +53,7 @@ def get_scoring_columns(cursor) -> List[Dict[str, Any]]:
         return []
 
 
-def build_mapping_table(config_path: str = 'config.ini') -> Dict[str, Dict[str, str]]:
+def build_mapping_table(config_path: str = 'config.ini', cursor=None) -> Dict[str, Dict[str, str]]:
     """config.ini에서 매핑 테이블 생성"""
     try:
         config = configparser.ConfigParser()
@@ -61,14 +61,33 @@ def build_mapping_table(config_path: str = 'config.ini') -> Dict[str, Dict[str, 
 
         mapping = {}
 
-        # scoring 관련 섹션들 찾기 (tbm, safety_check, quality_audit 등)
+        # DB에서 실제 scoring 컬럼들 가져오기
+        scoring_column_keys = []
+        if cursor:
+            try:
+                cursor.execute("""
+                    SELECT DISTINCT column_key
+                    FROM full_process_column_config
+                    WHERE column_type = 'scoring'
+                    AND is_active = 1
+                    AND (is_deleted = 0 OR is_deleted IS NULL)
+                """)
+                scoring_column_keys = [row[0] for row in cursor.fetchall()]
+                logging.info(f"[SCORING] DB scoring columns: {scoring_column_keys}")
+            except Exception as e:
+                logging.warning(f"[SCORING] Could not get columns from DB: {e}")
+
+        # config.ini의 섹션 중 item_1, item_2 등의 패턴을 가진 섹션만 찾기
         scoring_sections = []
         for section_name in config.sections():
-            # SCORING_MAPPING_로 시작하지 않고, 소문자/언더스코어로 구성된 섹션들
-            if (not section_name.startswith('SCORING_MAPPING_') and
-                not section_name.isupper() and
-                section_name not in ['DEFAULT']):
-                scoring_sections.append(section_name)
+            # 섹션에 item_로 시작하는 키가 있는지 확인
+            if section_name in config:
+                section_items = list(config[section_name].keys())
+                # item_1, item_2 패턴이 있으면 scoring 섹션으로 간주
+                if any(key.startswith('item_') for key in section_items):
+                    # DB에서 가져온 컬럼과 매칭되거나, DB 정보가 없으면 포함
+                    if not scoring_column_keys or section_name in scoring_column_keys:
+                        scoring_sections.append(section_name)
 
         logging.info(f"[SCORING] Found scoring sections: {scoring_sections}")
 
@@ -155,63 +174,62 @@ def get_external_scoring_data(cursor, fullprocess_number: str) -> Dict[str, Any]
         }
 
 
-def apply_external_scoring(cursor, fullprocess_number: str, scoring_columns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """외부 데이터를 scoring 입력에 매핑"""
+def apply_external_scoring_to_custom_data(cursor, fullprocess_number: str, existing_custom_data: Dict) -> Dict:
+    """기존 custom_data의 scoring 필드에 외부 데이터 매핑"""
     try:
-        # 1. 매핑 테이블 생성
-        mapping = build_mapping_table()
-        if not mapping:
-            logging.warning("[SCORING] No mapping table available, skipping external scoring")
-            return scoring_columns
+        # config.ini 읽기
+        config = configparser.ConfigParser()
+        config.read('config.ini', encoding='utf-8')
 
-        # 2. 외부 데이터 가져오기
+        # 외부 데이터 가져오기
         external_data = get_external_scoring_data(cursor, fullprocess_number)
         if not external_data:
-            logging.warning("[SCORING] No external data available, skipping external scoring")
-            return scoring_columns
+            logging.warning("[SCORING] No external data available")
+            return existing_custom_data
 
-        # 3. 각 scoring 컬럼에 데이터 적용
-        updated_columns = []
+        # custom_data 복사 (원본 보존)
+        updated_custom_data = existing_custom_data.copy() if existing_custom_data else {}
 
-        for scoring_col in scoring_columns:
-            column_key = scoring_col['column_key']
-            # 원본 config 전체를 복사 (깊은 복사)
-            config = json.loads(json.dumps(scoring_col['config']))
+        # custom_data의 각 필드 확인
+        for field_key, field_value in existing_custom_data.items():
+            # JSON 문자열인 경우만 처리 (scoring 필드 가능성)
+            if isinstance(field_value, str) and field_value.startswith('{'):
+                try:
+                    # JSON 파싱 시도
+                    parsed = json.loads(field_value)
 
-            if column_key in mapping:
-                logging.info(f"[SCORING] Processing column_key: {column_key}")
+                    # item_1, item_2 같은 패턴이 있는지 확인
+                    if any(key.startswith('item_') for key in parsed.keys()):
+                        # config.ini에서 이 필드의 매핑 찾기
+                        if field_key in config:
+                            updated_items = {}
 
-                # config의 items 배열 수정
-                if 'items' in config:
-                    for item in config['items']:
-                        item_id = item['id']
+                            for item_id in parsed.keys():
+                                # config.ini에서 매핑된 외부 컬럼명 찾기
+                                external_column = config[field_key].get(item_id, '')
 
-                        if item_id in mapping[column_key]:
-                            external_column = mapping[column_key][item_id]
+                                if external_column and external_column in external_data:
+                                    # 외부 데이터 값 적용
+                                    value = external_data[external_column]
+                                    updated_items[item_id] = value if value else None
+                                    logging.info(f"[SCORING] {field_key}.{item_id} = {value} (from {external_column})")
+                                else:
+                                    # 매핑이 없거나 외부 데이터가 없으면 기존 값 유지
+                                    updated_items[item_id] = parsed[item_id]
 
-                            if external_column in external_data:
-                                # 핵심: value 필드 추가 (external_value가 아닌 value!)
-                                value = external_data[external_column]
-                                item['value'] = value
+                            # 업데이트된 값을 JSON 문자열로 저장
+                            updated_custom_data[field_key] = json.dumps(updated_items)
+                            logging.info(f"[SCORING] Updated {field_key}: {updated_custom_data[field_key]}")
 
-                                logging.info(f"[SCORING] 매핑 적용: {column_key}.{item_id} → {external_column} = {value}")
-                            else:
-                                logging.warning(f"[SCORING] External column '{external_column}' not found in data")
-                        else:
-                            logging.debug(f"[SCORING] item_id '{item_id}' not found in mapping for {column_key}")
+                except json.JSONDecodeError:
+                    # JSON이 아니면 그대로 유지
+                    pass
 
-            # 완전한 scoring_config 구조로 저장
-            updated_columns.append({
-                'column_key': column_key,
-                'scoring_config': config  # 수정된 완전한 JSON 구조
-            })
-
-        logging.info(f"[SCORING] Successfully processed {len(updated_columns)} scoring columns")
-        return updated_columns
+        return updated_custom_data
 
     except Exception as e:
         logging.error(f"[SCORING] Error applying external scoring: {e}")
-        return scoring_columns
+        return existing_custom_data
 
 
 def get_scoring_data_for_template(cursor, fullprocess_number: str) -> Dict[str, Any]:

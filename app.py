@@ -11482,50 +11482,33 @@ def acs():
             if nonce_expected and nonce_received and nonce_expected != nonce_received:
                 print(f"[SSO] Nonce mismatch: expected={nonce_expected}, received={nonce_received}")
 
-            # 세션에 사용자 정보 저장 (1시 방향 이름 표시 및 파일 업로드 추적용)
+            # 세션에 사용자 정보 저장
             if claim_val:
-                # 디버깅: 실제 클레임 키 확인
-                print("="*50)
-                print("SSO CLAIM DEBUG:")
-                print(f"All keys: {list(claim_val.keys())}")
+                # SSO에서 받은 사용자 정보 추출 (정확한 필드명만 사용)
+                sso_fields = {
+                    'user_id': claim_val.get('loginid', ''),
+                    'user_name': claim_val.get('username', ''),
+                    'userid': claim_val.get('userid', ''),
+                    'compid': claim_val.get('compid', ''),
+                    'deptid': claim_val.get('deptid', ''),
+                    'mail': claim_val.get('mail', ''),
+                    'deptname': claim_val.get('deptname', ''),
+                    'mobile': claim_val.get('mobile', '')
+                }
 
-                # 가능한 username 키들 체크
-                possible_name_keys = ['username', 'Username', 'UserName', 'userName', 'name', 'Name']
-                for key in possible_name_keys:
-                    if key in claim_val:
-                        print(f"✓ Found NAME key: '{key}' = '{claim_val[key]}'")
+                # 세션에 저장
+                for key, value in sso_fields.items():
+                    if value:  # 값이 있는 경우만 저장
+                        session[key] = value
 
-                # 가능한 loginid 키들 체크
-                possible_id_keys = ['loginid', 'LoginId', 'loginId', 'login_id', 'Login_Id', 'sub']
-                for key in possible_id_keys:
-                    if key in claim_val:
-                        print(f"✓ Found ID key: '{key}' = '{claim_val[key]}'")
-
-                # 대소문자 무관하게 찾기
-                user_name = ''
-                user_id = ''
-
-                # username 찾기 (순서대로 시도)
-                for key in ['username', 'Username', 'UserName', 'name', 'Name']:
-                    if key in claim_val and claim_val[key]:
-                        user_name = claim_val[key]
-                        print(f"→ Using '{key}' for user_name: '{user_name}'")
-                        break
-
-                # loginid 찾기 (순서대로 시도)
-                for key in ['loginid', 'LoginId', 'loginId', 'login_id', 'sub']:
-                    if key in claim_val and claim_val[key]:
-                        user_id = claim_val[key]
-                        print(f"→ Using '{key}' for user_id: '{user_id}'")
-                        break
-
-                session['user_id'] = user_id
-                session['user_name'] = user_name
+                # 인증 플래그 설정
                 session['authenticated'] = True
 
-                print(f"SAVED TO SESSION:")
-                print(f"  user_id: '{session.get('user_id')}'")
-                print(f"  user_name: '{session.get('user_name')}'")
+                # 디버깅 출력 (간결하게)
+                print("[SSO] Session updated:")
+                for key in ['user_id', 'user_name', 'deptname', 'mail']:
+                    if key in session:
+                        print(f"  {key}: '{session.get(key)}'")
                 print("="*50)
 
         except jwt.ExpiredSignatureError:
@@ -11537,8 +11520,6 @@ def acs():
         except Exception as e:
             isError = True
             Error_MSG = f'Error: {str(e)}'
-
-        print(claim_val)
 
         # 성공 시 원래 가려던 페이지로 리다이렉트
         if not isError and claim_val and session.get('user_name'):
