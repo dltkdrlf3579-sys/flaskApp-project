@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>메뉴별 권한 관리</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .main-header {
+            background: var(--primary-gradient);
+            color: white;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .menu-tabs {
+            border-bottom: 2px solid #dee2e6;
+            margin-bottom: 2rem;
+        }
+
+        .menu-tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            color: #6c757d;
+            font-weight: 500;
+            position: relative;
+            transition: all 0.3s;
+        }
+
+        .menu-tab.active {
+            color: #667eea;
+        }
+
+        .menu-tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: #667eea;
+        }
+
+        .user-card {
+            background: white;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            transition: all 0.3s;
+        }
+
+        .user-card:hover {
+            box-shadow: 0 5px 15px rgba(0,0,0,0.15);
+        }
+
+        .role-selector {
+            display: inline-flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+
+        .role-btn {
+            padding: 5px 12px;
+            border: 2px solid #dee2e6;
+            background: white;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .role-btn:hover {
+            border-color: #667eea;
+        }
+
+        .role-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        /* 역할별 색상 */
+        .role-btn.admin.active { background: #dc3545; border-color: #dc3545; }
+        .role-btn.manager.active { background: #6f42c1; border-color: #6f42c1; }
+        .role-btn.user1.active { background: #0d6efd; border-color: #0d6efd; }
+        .role-btn.user2.active { background: #17a2b8; border-color: #17a2b8; }
+        .role-btn.partner.active { background: #6c757d; border-color: #6c757d; }
+        .role-btn.viewer.active { background: #198754; border-color: #198754; }
+        .role-btn.none.active { background: #ffc107; border-color: #ffc107; color: #000; }
+
+        .permission-summary {
+            font-size: 0.8rem;
+            color: #6c757d;
+            margin-top: 10px;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 5px;
+        }
+
+        .legend-box {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .legend-item {
+            display: inline-block;
+            margin: 5px 15px 5px 0;
+        }
+
+        .legend-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-right: 5px;
+        }
+
+        .search-filter {
+            margin-bottom: 20px;
+        }
+
+        .batch-actions {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+        }
+
+        .user-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .user-details {
+            flex: 1;
+        }
+
+        .current-role {
+            font-weight: 600;
+            padding: 3px 8px;
+            border-radius: 5px;
+            font-size: 0.85rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-header">
+        <div class="container-fluid">
+            <h2><i class="bi bi-shield-lock"></i> 메뉴별 권한 관리</h2>
+            <p class="mb-0">각 사용자의 메뉴별 역할을 설정합니다</p>
+        </div>
+    </div>
+
+    <div class="container-fluid">
+        <!-- 범례 -->
+        <div class="legend-box">
+            <strong>역할별 권한:</strong>
+            <div class="mt-2">
+                <div class="legend-item">
+                    <span class="legend-badge" style="background: #dc3545; color: white;">Admin</span>
+                    모든 CRUD 가능
+                </div>
+                <div class="legend-item">
+                    <span class="legend-badge" style="background: #6f42c1; color: white;">Manager</span>
+                    모든 CRU 가능
+                </div>
+                <div class="legend-item">
+                    <span class="legend-badge" style="background: #0d6efd; color: white;">User1</span>
+                    CR 가능, 본인 글만 U
+                </div>
+                <div class="legend-item">
+                    <span class="legend-badge" style="background: #17a2b8; color: white;">User2</span>
+                    부서 관련 글만 CRU
+                </div>
+                <div class="legend-item">
+                    <span class="legend-badge" style="background: #6c757d; color: white;">Partner</span>
+                    자기 회사 글만 CRU
+                </div>
+                <div class="legend-item">
+                    <span class="legend-badge" style="background: #198754; color: white;">Viewer</span>
+                    읽기만 가능
+                </div>
+                <div class="legend-item">
+                    <span class="legend-badge" style="background: #ffc107; color: #000;">None</span>
+                    접근 불가
+                </div>
+            </div>
+        </div>
+
+        <!-- 메뉴 탭 -->
+        <div class="menu-tabs d-flex">
+            <button class="menu-tab active" data-menu="accident" onclick="switchMenu('accident')">
+                <i class="bi bi-exclamation-triangle"></i> 사고 관리
+            </button>
+            <button class="menu-tab" data-menu="safety" onclick="switchMenu('safety')">
+                <i class="bi bi-shield-check"></i> 안전지시서
+            </button>
+            <button class="menu-tab" data-menu="follow_sop" onclick="switchMenu('follow_sop')">
+                <i class="bi bi-list-check"></i> Follow SOP
+            </button>
+            <button class="menu-tab" data-menu="full_process" onclick="switchMenu('full_process')">
+                <i class="bi bi-diagram-3"></i> Full Process
+            </button>
+            <button class="menu-tab" data-menu="partner" onclick="switchMenu('partner')">
+                <i class="bi bi-building"></i> 협력사
+            </button>
+            <button class="menu-tab" data-menu="change_request" onclick="switchMenu('change_request')">
+                <i class="bi bi-arrow-repeat"></i> 변경 관리
+            </button>
+        </div>
+
+        <!-- 검색 필터 -->
+        <div class="search-filter row">
+            <div class="col-md-4">
+                <input type="text" class="form-control" id="userSearch" placeholder="🔍 사용자 검색 (사번, 이름, 부서)">
+            </div>
+            <div class="col-md-3">
+                <select class="form-select" id="deptFilter">
+                    <option value="">전체 부서</option>
+                    <option value="IT부서">IT부서</option>
+                    <option value="생산관리부서">생산관리부서</option>
+                    <option value="품질관리부서">품질관리부서</option>
+                    <option value="안전관리부서">안전관리부서</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <select class="form-select" id="roleFilter">
+                    <option value="">현재 역할 필터</option>
+                    <option value="admin">Admin</option>
+                    <option value="manager">Manager</option>
+                    <option value="user1">User1</option>
+                    <option value="user2">User2</option>
+                    <option value="partner">Partner</option>
+                    <option value="viewer">Viewer</option>
+                    <option value="none">None (권한 없음)</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-primary w-100" onclick="applyFilter()">
+                    <i class="bi bi-funnel"></i> 필터 적용
+                </button>
+            </div>
+        </div>
+
+        <!-- 사용자 목록 -->
+        <div id="userList" class="mt-3">
+            <!-- 동적으로 생성 -->
+        </div>
+    </div>
+
+    <!-- 저장 버튼 -->
+    <div class="batch-actions">
+        <button class="btn btn-lg btn-success" onclick="saveAllChanges()">
+            <i class="bi bi-check-circle"></i> 변경사항 저장
+        </button>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        let currentMenu = 'accident';
+        let userMenuRoles = {};  // 변경사항 저장
+        let originalRoles = {};  // 원본 데이터
+
+        // 페이지 로드시
+        $(document).ready(function() {
+            loadUsers();
+        });
+
+        function loadUsers() {
+            // API 호출하여 사용자 목록 및 메뉴별 역할 조회
+            $.ajax({
+                url: '/api/menu-roles/all',
+                method: 'GET',
+                success: function(data) {
+                    originalRoles = data;
+                    userMenuRoles = JSON.parse(JSON.stringify(data)); // 깊은 복사
+                    renderUserList();
+                },
+                error: function() {
+                    // 테스트 데이터
+                    const testData = {
+                        'EMP001': {
+                            name: '홍길동',
+                            department: 'IT부서',
+                            company: null,
+                            menu_roles: {
+                                'accident': 'admin',
+                                'safety': 'manager',
+                                'follow_sop': 'viewer',
+                                'full_process': 'viewer',
+                                'partner': 'none',
+                                'change_request': 'manager'
+                            }
+                        },
+                        'EMP002': {
+                            name: '김철수',
+                            department: '품질관리부서',
+                            company: null,
+                            menu_roles: {
+                                'accident': 'user1',
+                                'safety': 'user1',
+                                'follow_sop': 'viewer',
+                                'full_process': 'viewer',
+                                'partner': 'none',
+                                'change_request': 'user2'
+                            }
+                        },
+                        'PARTNER001': {
+                            name: '이영희',
+                            department: null,
+                            company: 'A협력사',
+                            menu_roles: {
+                                'accident': 'none',
+                                'safety': 'none',
+                                'follow_sop': 'none',
+                                'full_process': 'none',
+                                'partner': 'partner',
+                                'change_request': 'partner'
+                            }
+                        }
+                    };
+                    originalRoles = testData;
+                    userMenuRoles = JSON.parse(JSON.stringify(testData));
+                    renderUserList();
+                }
+            });
+        }
+
+        function renderUserList() {
+            const userList = $('#userList');
+            userList.empty();
+
+            Object.keys(userMenuRoles).forEach(emp_id => {
+                const user = userMenuRoles[emp_id];
+                const currentRole = user.menu_roles[currentMenu] || 'none';
+
+                const userCard = $(`
+                    <div class="user-card" data-emp="${emp_id}">
+                        <div class="user-info">
+                            <div class="user-details">
+                                <strong>${emp_id}</strong> - ${user.name}
+                                <br>
+                                <small class="text-muted">
+                                    ${user.department || user.company || '소속 없음'}
+                                </small>
+                            </div>
+                            <div>
+                                <span class="current-role" style="background: ${getRoleColor(currentRole)}; color: ${currentRole === 'none' ? '#000' : 'white'}">
+                                    현재: ${currentRole.toUpperCase()}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="role-selector" data-emp="${emp_id}">
+                            <button class="role-btn admin ${currentRole === 'admin' ? 'active' : ''}"
+                                    onclick="setRole('${emp_id}', 'admin')">Admin</button>
+                            <button class="role-btn manager ${currentRole === 'manager' ? 'active' : ''}"
+                                    onclick="setRole('${emp_id}', 'manager')">Manager</button>
+                            <button class="role-btn user1 ${currentRole === 'user1' ? 'active' : ''}"
+                                    onclick="setRole('${emp_id}', 'user1')">User1</button>
+                            <button class="role-btn user2 ${currentRole === 'user2' ? 'active' : ''}"
+                                    onclick="setRole('${emp_id}', 'user2')">User2</button>
+                            <button class="role-btn partner ${currentRole === 'partner' ? 'active' : ''}"
+                                    onclick="setRole('${emp_id}', 'partner')">Partner</button>
+                            <button class="role-btn viewer ${currentRole === 'viewer' ? 'active' : ''}"
+                                    onclick="setRole('${emp_id}', 'viewer')">Viewer</button>
+                            <button class="role-btn none ${currentRole === 'none' ? 'active' : ''}"
+                                    onclick="setRole('${emp_id}', 'none')">None</button>
+                        </div>
+                        <div class="permission-summary">
+                            ${getPermissionSummary(currentRole)}
+                        </div>
+                    </div>
+                `);
+
+                userList.append(userCard);
+            });
+        }
+
+        function switchMenu(menu) {
+            currentMenu = menu;
+            $('.menu-tab').removeClass('active');
+            $(`.menu-tab[data-menu="${menu}"]`).addClass('active');
+            renderUserList();
+        }
+
+        function setRole(emp_id, role) {
+            userMenuRoles[emp_id].menu_roles[currentMenu] = role;
+
+            // UI 업데이트
+            const card = $(`.user-card[data-emp="${emp_id}"]`);
+            card.find('.role-btn').removeClass('active');
+            card.find(`.role-btn.${role}`).addClass('active');
+
+            // 현재 역할 표시 업데이트
+            card.find('.current-role').text(`현재: ${role.toUpperCase()}`);
+            card.find('.current-role').css({
+                'background': getRoleColor(role),
+                'color': role === 'none' ? '#000' : 'white'
+            });
+
+            // 권한 요약 업데이트
+            card.find('.permission-summary').html(getPermissionSummary(role));
+
+            // 변경 표시
+            if (originalRoles[emp_id].menu_roles[currentMenu] !== role) {
+                card.css('border-left', '4px solid #ffc107');
+            } else {
+                card.css('border-left', '');
+            }
+        }
+
+        function getPermissionSummary(role) {
+            const summaries = {
+                'admin': '✅ 모든 CRUD 권한',
+                'manager': '✅ 생성/읽기/수정 가능 (삭제는 개별 설정)',
+                'user1': '📝 생성/읽기 가능, 본인 글만 수정',
+                'user2': '🏢 부서 관련 글만 생성/읽기/수정',
+                'partner': '🏭 자기 회사 글만 생성/읽기/수정',
+                'viewer': '👁️ 읽기만 가능',
+                'none': '🚫 접근 불가'
+            };
+            return summaries[role] || '';
+        }
+
+        function getRoleColor(role) {
+            const colors = {
+                'admin': '#dc3545',
+                'manager': '#6f42c1',
+                'user1': '#0d6efd',
+                'user2': '#17a2b8',
+                'partner': '#6c757d',
+                'viewer': '#198754',
+                'none': '#ffc107'
+            };
+            return colors[role] || '#6c757d';
+        }
+
+        function saveAllChanges() {
+            const changes = [];
+
+            // 변경된 항목만 찾기
+            Object.keys(userMenuRoles).forEach(emp_id => {
+                const user = userMenuRoles[emp_id];
+                const original = originalRoles[emp_id];
+
+                Object.keys(user.menu_roles).forEach(menu => {
+                    if (user.menu_roles[menu] !== original.menu_roles[menu]) {
+                        changes.push({
+                            emp_id: emp_id,
+                            menu_code: menu,
+                            role: user.menu_roles[menu]
+                        });
+                    }
+                });
+            });
+
+            if (changes.length === 0) {
+                alert('변경사항이 없습니다.');
+                return;
+            }
+
+            // API 호출
+            $.ajax({
+                url: '/api/menu-roles/batch-update',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({changes: changes}),
+                success: function() {
+                    alert(`${changes.length}개 권한이 업데이트되었습니다.`);
+                    originalRoles = JSON.parse(JSON.stringify(userMenuRoles));
+                    $('.user-card').css('border-left', '');
+                },
+                error: function() {
+                    alert('권한 저장에 실패했습니다.');
+                }
+            });
+        }
+
+        function applyFilter() {
+            const searchText = $('#userSearch').val().toLowerCase();
+            const deptFilter = $('#deptFilter').val();
+            const roleFilter = $('#roleFilter').val();
+
+            $('.user-card').each(function() {
+                const card = $(this);
+                const emp_id = card.data('emp');
+                const user = userMenuRoles[emp_id];
+
+                let show = true;
+
+                // 검색어 필터
+                if (searchText) {
+                    const text = `${emp_id} ${user.name} ${user.department || ''} ${user.company || ''}`.toLowerCase();
+                    if (!text.includes(searchText)) show = false;
+                }
+
+                // 부서 필터
+                if (deptFilter && user.department !== deptFilter) show = false;
+
+                // 역할 필터
+                if (roleFilter && user.menu_roles[currentMenu] !== roleFilter) show = false;
+
+                card.toggle(show);
+            });
+        }
+
+        // 검색 실시간 적용
+        $('#userSearch').on('keyup', applyFilter);
+    </script>
+</body>
+</html>

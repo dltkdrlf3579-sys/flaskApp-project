@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>통합 관리 대시보드</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f8f9fa;
+        }
+
+        .main-header {
+            background: var(--primary-gradient);
+            color: white;
+            padding: 2rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .dashboard-card {
+            background: white;
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            transition: all 0.3s;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .dashboard-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.15);
+        }
+
+        .dashboard-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: var(--primary-gradient);
+        }
+
+        .card-icon {
+            font-size: 2.5rem;
+            background: var(--primary-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 1rem;
+        }
+
+        .card-badge {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: #dc3545;
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 2rem 0;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            background: var(--primary-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .stat-label {
+            color: #6c757d;
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+
+        .quick-action-btn {
+            background: white;
+            border: 2px solid #667eea;
+            color: #667eea;
+            padding: 0.5rem 1.5rem;
+            border-radius: 5px;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+
+        .quick-action-btn:hover {
+            background: var(--primary-gradient);
+            color: white;
+            border-color: transparent;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-header">
+        <div class="container-fluid">
+            <div class="row align-items-center">
+                <div class="col-md-6">
+                    <h1><i class="bi bi-grid-3x3-gap-fill"></i> 통합 관리 대시보드</h1>
+                    <p class="mb-0">시스템 전체 관리 및 모니터링</p>
+                </div>
+                <div class="col-md-6 text-end">
+                    <span id="current-time" class="me-3"></span>
+                    <span class="badge bg-light text-dark">
+                        <i class="bi bi-person-circle"></i> {{ session.user_name or 'Admin' }}
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container-fluid mt-4">
+        <!-- 통계 요약 -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="total-users">0</div>
+                <div class="stat-label">전체 사용자</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="active-sessions">0</div>
+                <div class="stat-label">활성 세션</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="pending-requests">0</div>
+                <div class="stat-label">대기 요청</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="system-health">98%</div>
+                <div class="stat-label">시스템 건강도</div>
+            </div>
+        </div>
+
+        <!-- 메뉴 카드 -->
+        <div class="row mt-4">
+            <div class="col-md-4 col-lg-3">
+                <div class="dashboard-card" onclick="location.href='/admin/permissions'">
+                    <span class="card-badge" id="permission-badge" style="display:none;">0</span>
+                    <div class="card-icon">
+                        <i class="bi bi-shield-lock"></i>
+                    </div>
+                    <h4>권한 관리</h4>
+                    <p class="text-muted">사용자 권한 및 역할 관리</p>
+                </div>
+            </div>
+
+            <div class="col-md-4 col-lg-3">
+                <div class="dashboard-card" onclick="location.href='/monitoring'">
+                    <span class="card-badge" id="alert-badge" style="display:none;">0</span>
+                    <div class="card-icon">
+                        <i class="bi bi-speedometer2"></i>
+                    </div>
+                    <h4>시스템 모니터링</h4>
+                    <p class="text-muted">실시간 성능 모니터링</p>
+                </div>
+            </div>
+
+            <div class="col-md-4 col-lg-3">
+                <div class="dashboard-card" onclick="location.href='/admin/users'">
+                    <div class="card-icon">
+                        <i class="bi bi-people"></i>
+                    </div>
+                    <h4>사용자 관리</h4>
+                    <p class="text-muted">사용자 계정 관리</p>
+                </div>
+            </div>
+
+            <div class="col-md-4 col-lg-3">
+                <div class="dashboard-card" onclick="location.href='/admin/audit'">
+                    <div class="card-icon">
+                        <i class="bi bi-journal-text"></i>
+                    </div>
+                    <h4>감사 로그</h4>
+                    <p class="text-muted">시스템 활동 로그</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 빠른 작업 -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-light">
+                        <h5 class="mb-0"><i class="bi bi-lightning-fill text-warning"></i> 빠른 작업</h5>
+                    </div>
+                    <div class="card-body">
+                        <button class="quick-action-btn me-2 mb-2" onclick="createUser()">
+                            <i class="bi bi-person-plus"></i> 사용자 추가
+                        </button>
+                        <button class="quick-action-btn me-2 mb-2" onclick="grantPermission()">
+                            <i class="bi bi-shield-plus"></i> 권한 부여
+                        </button>
+                        <button class="quick-action-btn me-2 mb-2" onclick="syncData()">
+                            <i class="bi bi-arrow-repeat"></i> 데이터 동기화
+                        </button>
+                        <button class="quick-action-btn me-2 mb-2" onclick="clearCache()">
+                            <i class="bi bi-trash"></i> 캐시 정리
+                        </button>
+                        <button class="quick-action-btn me-2 mb-2" onclick="generateReport()">
+                            <i class="bi bi-file-text"></i> 리포트 생성
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 최근 활동 -->
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header bg-light">
+                        <h5 class="mb-0"><i class="bi bi-clock-history"></i> 최근 권한 변경</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="recent-changes">
+                            <p class="text-muted">로딩 중...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header bg-light">
+                        <h5 class="mb-0"><i class="bi bi-exclamation-triangle"></i> 시스템 알림</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="system-alerts">
+                            <p class="text-muted">알림 없음</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 현재 시간 표시
+        function updateTime() {
+            const now = new Date();
+            const timeStr = now.toLocaleString('ko-KR');
+            document.getElementById('current-time').textContent = timeStr;
+        }
+
+        // 통계 업데이트
+        function updateStats() {
+            fetch('/api/admin/dashboard/stats')
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('total-users').textContent = data.total_users || 0;
+                    document.getElementById('active-sessions').textContent = data.active_sessions || 0;
+                    document.getElementById('pending-requests').textContent = data.pending_requests || 0;
+                    document.getElementById('system-health').textContent = (data.system_health || 98) + '%';
+
+                    // 배지 업데이트
+                    if (data.pending_requests > 0) {
+                        const badge = document.getElementById('permission-badge');
+                        badge.textContent = data.pending_requests;
+                        badge.style.display = 'block';
+                    }
+
+                    if (data.active_alerts > 0) {
+                        const badge = document.getElementById('alert-badge');
+                        badge.textContent = data.active_alerts;
+                        badge.style.display = 'block';
+                    }
+                })
+                .catch(err => console.error('Error fetching stats:', err));
+        }
+
+        // 최근 활동 로드
+        function loadRecentActivity() {
+            fetch('/api/admin/recent-changes')
+                .then(res => res.json())
+                .then(data => {
+                    const container = document.getElementById('recent-changes');
+                    if (data.length > 0) {
+                        container.innerHTML = data.slice(0, 5).map(item => `
+                            <div class="mb-2">
+                                <small class="text-muted">${item.time}</small><br>
+                                <span>${item.description}</span>
+                            </div>
+                        `).join('');
+                    } else {
+                        container.innerHTML = '<p class="text-muted">최근 변경 사항 없음</p>';
+                    }
+                })
+                .catch(err => console.error('Error loading activity:', err));
+        }
+
+        // 빠른 작업 함수들
+        function createUser() {
+            window.location.href = '/admin/users/create';
+        }
+
+        function grantPermission() {
+            window.location.href = '/admin/permissions#grant';
+        }
+
+        function syncData() {
+            if (confirm('데이터를 동기화하시겠습니까?')) {
+                fetch('/api/admin/sync', { method: 'POST' })
+                    .then(res => res.json())
+                    .then(data => {
+                        alert('동기화 완료: ' + (data.message || 'Success'));
+                        updateStats();
+                    })
+                    .catch(err => alert('동기화 실패: ' + err));
+            }
+        }
+
+        function clearCache() {
+            if (confirm('캐시를 정리하시겠습니까?')) {
+                fetch('/api/admin/cache/clear', { method: 'POST' })
+                    .then(res => res.json())
+                    .then(data => {
+                        alert('캐시 정리 완료');
+                        updateStats();
+                    })
+                    .catch(err => alert('캐시 정리 실패: ' + err));
+            }
+        }
+
+        function generateReport() {
+            window.location.href = '/admin/reports/generate';
+        }
+
+        // 초기화
+        document.addEventListener('DOMContentLoaded', function() {
+            updateTime();
+            updateStats();
+            loadRecentActivity();
+
+            // 주기적 업데이트
+            setInterval(updateTime, 1000);
+            setInterval(updateStats, 30000); // 30초마다
+            setInterval(loadRecentActivity, 60000); // 1분마다
+        });
+    </script>
+</body>
+</html>

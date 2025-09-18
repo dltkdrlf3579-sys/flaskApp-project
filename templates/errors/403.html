@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}접근 권한 없음{% endblock %}
+
+{% block content %}
+<div class="container text-center mt-5">
+    <h1 class="display-1">403</h1>
+    <h2>접근 권한이 없습니다</h2>
+
+    <div class="alert alert-warning mt-4">
+        <p>요청하신 페이지에 접근할 권한이 없습니다.</p>
+        {% if g.required_menu %}
+        <p>필요한 권한: <strong>{{ g.required_menu }} - {{ g.required_action }}</strong></p>
+        {% endif %}
+    </div>
+
+    <div class="mt-4">
+        <a href="/" class="btn btn-primary">메인으로</a>
+        <button class="btn btn-secondary" onclick="requestPermission()">권한 요청</button>
+    </div>
+
+    {% if session.get('emp_id') %}
+    <div class="mt-4 text-muted">
+        <small>사번: {{ session.get('emp_id') }}</small>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+function requestPermission() {
+    const empId = '{{ session.get("emp_id") }}';
+    const menu = '{{ g.required_menu }}';
+
+    if(!empId) {
+        alert('로그인이 필요합니다.');
+        window.location.href = '/login';
+        return;
+    }
+
+    // 권한 요청 API 호출
+    fetch('/api/permissions/request', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            emp_id: empId,
+            menu_code: menu,
+            reason: prompt('권한 요청 사유를 입력하세요:')
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if(data.success) {
+            alert('권한 요청이 전송되었습니다. 관리자 승인을 기다려주세요.');
+        }
+    })
+    .catch(err => {
+        alert('권한 요청 중 오류가 발생했습니다.');
+    });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,31 @@
+
+□ 사전 준비 (운영 적용 1주 전)
+  □ SSO 팀과 필드 매핑 확인
+  □ 운영 DB 백업
+  □ 기존 사용자 데이터 분석
+  □ 운영 환경 config.ini.prod 준비
+
+□ 환경 설정
+  □ ENVIRONMENT=PRODUCTION 설정
+  □ config.ini.prod 사용
+  □ enabled=false로 시작
+  □ test_mode=false 확인
+  □ create_test_users=false 확인
+
+□ 단계적 적용
+  □ Step 1: 테이블만 생성 (권한 비활성화)
+  □ Step 2: LOG_ONLY 모드로 테스트
+  □ Step 3: 특정 메뉴만 활성화
+  □ Step 4: 전체 활성화
+
+□ 롤백 준비
+  □ rollback_permissions.sql 준비
+  □ 백업 파일 확인
+  □ 긴급 연락처 확인
+
+□ 모니터링
+  □ 접근 로그 모니터링
+  □ 캐시 효율성 확인
+  □ 비정상 접근 패턴 감지
+  □ 성능 지표 확인
+    

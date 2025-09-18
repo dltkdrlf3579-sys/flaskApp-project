@@ -1,0 +1,40 @@
+{
+  "timestamp": "2025-09-18T06:13:26.883733",
+  "statistics": {
+    "total_users": 5,
+    "migrated": 0,
+    "updated": 0,
+    "failed": 5,
+    "skipped": 0,
+    "new_users": [],
+    "updated_users": [],
+    "failed_users": [
+      {
+        "emp_id": "EMP001",
+        "error": "오류:  현재 트랜잭션은 중지되어 있습니다. 이 트랜잭션을 종료하기 전까지는 모든 명령이 무시될 것입니다\n"
+      },
+      {
+        "emp_id": "EMP002",
+        "error": "오류:  현재 트랜잭션은 중지되어 있습니다. 이 트랜잭션을 종료하기 전까지는 모든 명령이 무시될 것입니다\n"
+      },
+      {
+        "emp_id": "EMP003",
+        "error": "오류:  현재 트랜잭션은 중지되어 있습니다. 이 트랜잭션을 종료하기 전까지는 모든 명령이 무시될 것입니다\n"
+      },
+      {
+        "emp_id": "EMP004",
+        "error": "오류:  현재 트랜잭션은 중지되어 있습니다. 이 트랜잭션을 종료하기 전까지는 모든 명령이 무시될 것입니다\n"
+      },
+      {
+        "emp_id": "EMP005",
+        "error": "오류:  현재 트랜잭션은 중지되어 있습니다. 이 트랜잭션을 종료하기 전까지는 모든 명령이 무시될 것입니다\n"
+      }
+    ]
+  },
+  "summary": {
+    "success_rate": 0.0,
+    "total_processed": 5,
+    "successful": 0,
+    "failures": 5
+  }
+}

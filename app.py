@@ -7636,8 +7636,9 @@ def admin_menu_settings():
 @app.route("/admin/permission-settings")
 @require_admin_auth
 def admin_permission_settings():
-    """권한 설정 페이지"""
-    return render_template('admin-permission-settings.html', menu=MENU_CONFIG)
+    """권한 설정 페이지 - 세밀한 CRUD 권한 관리"""
+    # 사용자별 메뉴별 CRUD 권한 관리 페이지
+    return render_template('admin/permission_management.html', menu=MENU_CONFIG)
 
 @app.route("/admin/data-management")
 @require_admin_auth
@@ -11326,18 +11327,38 @@ def _get_config_value(cfg: configparser.ConfigParser, section: str, key: str, *f
     return default
 
 def _compute_redirect_uri(cfg: configparser.ConfigParser) -> str:
-    # Prefer explicit config
-    val = _get_config_value(cfg, 'SSO', 'sp_redirect_url', default='')
-    if val:
-        return val
-    # Fallback: build from current request
+    # config.ini에서 설정된 URL 우선 사용, 없으면 자동 감지
     try:
-        scheme = request.headers.get('X-Forwarded-Proto') or ('https' if request.is_secure else 'http')
-        host = request.headers.get('X-Forwarded-Host') or request.host
-        return f"{scheme}://{host}/acs"
-    except Exception:
-        # Final fallback (dev default)
-        return 'https://localhost:44369/acs'
+        # 1. config.ini의 명시적 설정값 확인
+        config_url = _get_config_value(cfg, 'SSO', 'sp_redirect_url', default='')
+        if config_url and config_url.strip():
+            # config에 값이 있으면 그대로 사용
+            return config_url.strip()
+
+        # 2. 설정이 없으면 현재 요청 기반으로 자동 생성
+        # 개발환경 (localhost)
+        if 'localhost' in request.host or '127.0.0.1' in request.host:
+            port = request.host.split(':')[1] if ':' in request.host else '44369'
+            return f"https://localhost:{port}/acs"
+
+        # 3. 운영환경 - X-Forwarded 헤더 확인
+        forwarded_host = request.headers.get('X-Forwarded-Host')
+        forwarded_proto = request.headers.get('X-Forwarded-Proto', 'https')
+
+        if forwarded_host:
+            return f"{forwarded_proto}://{forwarded_host}/acs"
+
+        # 4. 기본값: 현재 호스트 사용
+        scheme = request.headers.get('X-Forwarded-Proto') or request.scheme
+        if scheme == 'http' and 'localhost' not in request.host:
+            scheme = 'https'  # 운영환경은 HTTPS 가정
+
+        return f"{scheme}://{request.host}/acs"
+
+    except Exception as e:
+        print(f"[SSO] redirect_uri 계산 실패: {e}")
+        # 최종 폴백: config의 기본값 또는 localhost
+        return config_url if config_url else 'https://localhost:44369/acs'
 
 def _urlencode(params: dict) -> str:
     from urllib.parse import urlencode
@@ -11488,10 +11509,14 @@ def acs():
             # 세션에 사용자 정보 저장
             if claim_val:
                 # SSO에서 받은 사용자 정보 추출 (정확한 필드명만 사용)
+                emp_id = claim_val.get('userid', '')  # 시스템 고유 ID
+                login_id = claim_val.get('loginid', '')  # 로그인 ID
+
                 sso_fields = {
-                    'user_id': claim_val.get('loginid', ''),
+                    'user_id': login_id,  # 기존 코드 호환성 유지
+                    'emp_id': emp_id,     # 권한 시스템용 추가
                     'user_name': claim_val.get('username', ''),
-                    'userid': claim_val.get('userid', ''),
+                    'userid': emp_id,     # 원본 필드도 유지
                     'compid': claim_val.get('compid', ''),
                     'deptid': claim_val.get('deptid', ''),
                     'mail': claim_val.get('mail', ''),
@@ -11507,9 +11532,57 @@ def acs():
                 # 인증 플래그 설정
                 session['authenticated'] = True
 
+                # 권한 시스템: DB에 사용자 정보 저장/업데이트
+                if emp_id and login_id:
+                    try:
+                        conn = get_db_connection()
+                        cursor = conn.cursor()
+
+                        # system_users 테이블 업데이트
+                        cursor.execute("""
+                            INSERT INTO system_users
+                            (emp_id, login_id, user_name, dept_id, dept_name,
+                             company_id, email, last_login_at, is_active)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, TRUE)
+                            ON CONFLICT (emp_id) DO UPDATE SET
+                                login_id = EXCLUDED.login_id,
+                                user_name = EXCLUDED.user_name,
+                                dept_id = EXCLUDED.dept_id,
+                                dept_name = EXCLUDED.dept_name,
+                                company_id = EXCLUDED.company_id,
+                                email = EXCLUDED.email,
+                                last_login_at = CURRENT_TIMESTAMP,
+                                updated_at = CURRENT_TIMESTAMP
+                        """, (
+                            emp_id,
+                            login_id,
+                            claim_val.get('username', ''),
+                            claim_val.get('deptid', ''),
+                            claim_val.get('deptname', ''),
+                            claim_val.get('compid', ''),
+                            claim_val.get('mail', '')
+                        ))
+
+                        # 기본 역할(user) 할당 (없으면)
+                        cursor.execute("""
+                            INSERT INTO user_role_mapping (emp_id, role_code)
+                            VALUES (%s, 'user')
+                            ON CONFLICT (emp_id, role_code) DO NOTHING
+                        """, (emp_id,))
+
+                        conn.commit()
+                        cursor.close()
+                        conn.close()
+
+                        print(f"[SSO] User {emp_id}/{login_id} updated in DB")
+
+                    except Exception as e:
+                        print(f"[SSO] DB update error: {e}")
+                        # DB 오류가 있어도 로그인은 진행
+
                 # 디버깅 출력 (간결하게)
                 print("[SSO] Session updated:")
-                for key in ['user_id', 'user_name', 'deptname', 'mail']:
+                for key in ['user_id', 'emp_id', 'user_name', 'deptname', 'mail']:
                     if key in session:
                         print(f"  {key}: '{session.get(key)}'")
                 print("="*50)
@@ -11677,6 +11750,159 @@ X-Forwarded-Host: {request.headers.get('X-Forwarded-Host')}
         return html
     except Exception as e:
         return f"Diagnostics error: {e}", 500
+
+# ===== Day 3 에러 핸들러 =====
+@app.errorhandler(403)
+def forbidden(e):
+    """403 권한 없음 처리"""
+    return render_template('errors/403.html'), 403
+
+@app.errorhandler(401)
+def unauthorized(e):
+    """401 인증 필요"""
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Authentication required'}), 401
+    return redirect(url_for('login', next=request.url))
+
+# ===== Day 2 권한 관리 라우트 =====
+from permission_utils import check_permission, get_user_menus, clear_user_cache
+
+@app.route('/admin/permissions')
+@check_permission('permission_admin', 'view')
+def permission_dashboard():
+    """권한 관리 대시보드"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        # 통계 데이터 조회
+        cursor.execute("""
+            SELECT
+                (SELECT COUNT(*) FROM system_users) as user_count,
+                (SELECT COUNT(*) FROM system_roles) as role_count,
+                (SELECT COUNT(*) FROM user_role_mapping) as mapping_count,
+                (SELECT COUNT(*) FROM access_audit_log
+                 WHERE created_at > CURRENT_DATE) as today_access
+        """)
+
+        stats = cursor.fetchone()
+        return render_template('admin/permission_dashboard.html',
+                             stats=stats, menu=MENU_CONFIG)
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/admin/permissions/users')
+@check_permission('permission_admin', 'view')
+def permission_users():
+    """사용자별 권한 관리"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT u.emp_id, u.login_id, u.user_name, u.dept_name,
+                   STRING_AGG(r.role_name, ', ') as roles
+            FROM system_users u
+            LEFT JOIN user_role_mapping um ON u.emp_id = um.emp_id
+            LEFT JOIN system_roles r ON um.role_code = r.role_code
+            GROUP BY u.emp_id, u.login_id, u.user_name, u.dept_name
+            ORDER BY u.user_name
+        """)
+
+        users = cursor.fetchall()
+        return render_template('admin/permission_users.html',
+                             users=users, menu=MENU_CONFIG)
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/admin/permissions/audit')
+@check_permission('permission_admin', 'view')
+def permission_audit():
+    """접근 로그 조회"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT a.emp_id, a.login_id, a.action, a.menu_code,
+                   a.resource_id, a.ip_address, a.success, a.error_message,
+                   a.created_at, u.user_name
+            FROM access_audit_log a
+            LEFT JOIN system_users u ON a.emp_id = u.emp_id
+            ORDER BY a.created_at DESC
+            LIMIT 100
+        """)
+
+        logs = cursor.fetchall()
+        return render_template('admin/permission_audit.html',
+                             logs=logs, menu=MENU_CONFIG)
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/permissions/grant', methods=['POST'])
+@check_permission('permission_admin', 'create')
+def api_grant_permission():
+    """권한 부여 API"""
+    data = request.json
+    emp_id = data.get('emp_id')
+    menu_code = data.get('menu_code')
+    permissions = data.get('permissions', {})
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            INSERT INTO user_menu_permissions
+            (emp_id, menu_code, can_view, can_create, can_edit, can_delete, data_scope, granted_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (emp_id, menu_code) DO UPDATE SET
+                can_view = EXCLUDED.can_view,
+                can_create = EXCLUDED.can_create,
+                can_edit = EXCLUDED.can_edit,
+                can_delete = EXCLUDED.can_delete,
+                data_scope = EXCLUDED.data_scope,
+                granted_at = CURRENT_TIMESTAMP
+        """, (
+            emp_id, menu_code,
+            permissions.get('can_view', False),
+            permissions.get('can_create', False),
+            permissions.get('can_edit', False),
+            permissions.get('can_delete', False),
+            permissions.get('data_scope', 'own'),
+            session.get('emp_id')
+        ))
+
+        conn.commit()
+
+        # 캐시 클리어
+        clear_user_cache(emp_id)
+
+        return jsonify({'success': True})
+
+    except Exception as e:
+        conn.rollback()
+        logging.error(f"권한 부여 실패: {e}")
+        return jsonify({'success': False, 'error': str(e)})
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/permissions/cache/clear', methods=['POST'])
+@check_permission('permission_admin', 'edit')
+def api_clear_cache():
+    """권한 캐시 클리어"""
+    emp_id = request.json.get('emp_id') if request.json else None
+
+    if emp_id:
+        clear_user_cache(emp_id)
+    else:
+        clear_user_cache()  # 전체 캐시 클리어
+
+    return jsonify({'success': True})
 
 if __name__ == "__main__":
     print("Flask 앱 시작 중...", flush=True)

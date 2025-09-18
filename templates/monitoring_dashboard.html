@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Integrated Monitoring Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f8f9fa;
+        }
+        .main-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .metric-card {
+            background: white;
+            border-radius: 10px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            margin-bottom: 1.5rem;
+            transition: transform 0.3s;
+        }
+        .metric-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .metric-value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #333;
+        }
+        .metric-label {
+            color: #6c757d;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .status-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .status-healthy {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status-warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .status-critical {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .alert-item {
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            border-left: 3px solid;
+            background: white;
+            border-radius: 4px;
+        }
+        .alert-critical {
+            border-color: #dc3545;
+        }
+        .alert-warning {
+            border-color: #ffc107;
+        }
+        .chart-container {
+            background: white;
+            border-radius: 10px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            margin-bottom: 1.5rem;
+        }
+        .progress-bar-container {
+            margin-bottom: 1rem;
+        }
+        .progress-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.25rem;
+            font-size: 0.85rem;
+        }
+        .refresh-btn {
+            background: white;
+            border: 1px solid #dee2e6;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .refresh-btn:hover {
+            background: #f8f9fa;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-header">
+        <div class="container-fluid">
+            <div class="row align-items-center">
+                <div class="col-md-6">
+                    <h1 class="mb-0">
+                        <i class="bi bi-speedometer2"></i>
+                        Integrated Monitoring Dashboard
+                    </h1>
+                    <p class="mb-0 mt-2">Real-time System Performance & Health Monitoring</p>
+                </div>
+                <div class="col-md-6 text-end">
+                    <span id="current-time" class="me-3"></span>
+                    <span id="system-status" class="status-badge status-healthy">HEALTHY</span>
+                    <button class="refresh-btn ms-3" onclick="refreshDashboard()">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container-fluid">
+        <!-- Key Metrics Row -->
+        <div class="row">
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <div class="metric-label">CPU Usage</div>
+                    <div class="metric-value" id="cpu-usage">0%</div>
+                    <div class="progress mt-2" style="height: 4px;">
+                        <div class="progress-bar bg-primary" id="cpu-progress" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <div class="metric-label">Memory Usage</div>
+                    <div class="metric-value" id="memory-usage">0%</div>
+                    <div class="progress mt-2" style="height: 4px;">
+                        <div class="progress-bar bg-info" id="memory-progress" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <div class="metric-label">Active Users</div>
+                    <div class="metric-value" id="active-users">0</div>
+                    <small class="text-muted">Last 5 minutes</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <div class="metric-label">Requests/min</div>
+                    <div class="metric-value" id="requests-per-minute">0</div>
+                    <small class="text-muted">Current rate</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <div class="chart-container">
+                    <h5 class="mb-3">System Performance</h5>
+                    <canvas id="system-chart"></canvas>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="chart-container">
+                    <h5 class="mb-3">Application Metrics</h5>
+                    <canvas id="app-chart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Database & Alerts Row -->
+        <div class="row mt-4">
+            <div class="col-md-4">
+                <div class="metric-card">
+                    <h5 class="mb-3">Database Status</h5>
+                    <div class="progress-bar-container">
+                        <div class="progress-label">
+                            <span>Connections</span>
+                            <span id="db-connections">0</span>
+                        </div>
+                        <div class="progress" style="height: 8px;">
+                            <div class="progress-bar bg-success" id="db-conn-progress" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-label">
+                            <span>Cache Hit Ratio</span>
+                            <span id="cache-hit-ratio">0%</span>
+                        </div>
+                        <div class="progress" style="height: 8px;">
+                            <div class="progress-bar bg-info" id="cache-progress" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-label">
+                            <span>Active Queries</span>
+                            <span id="active-queries">0</span>
+                        </div>
+                        <div class="progress" style="height: 8px;">
+                            <div class="progress-bar bg-warning" id="query-progress" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="row text-center">
+                        <div class="col">
+                            <small class="text-muted">Size</small>
+                            <div class="fw-bold" id="db-size">0 MB</div>
+                        </div>
+                        <div class="col">
+                            <small class="text-muted">Deadlocks</small>
+                            <div class="fw-bold" id="db-deadlocks">0</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4">
+                <div class="metric-card">
+                    <h5 class="mb-3">Application Health</h5>
+                    <div class="progress-bar-container">
+                        <div class="progress-label">
+                            <span>Error Rate</span>
+                            <span id="error-rate">0%</span>
+                        </div>
+                        <div class="progress" style="height: 8px;">
+                            <div class="progress-bar bg-danger" id="error-progress" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-label">
+                            <span>Cache Efficiency</span>
+                            <span id="cache-efficiency">0%</span>
+                        </div>
+                        <div class="progress" style="height: 8px;">
+                            <div class="progress-bar bg-success" id="cache-eff-progress" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-label">
+                            <span>Response Time</span>
+                            <span id="response-time">0ms</span>
+                        </div>
+                        <div class="progress" style="height: 8px;">
+                            <div class="progress-bar bg-primary" id="response-progress" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="row text-center">
+                        <div class="col">
+                            <small class="text-muted">Permission Checks</small>
+                            <div class="fw-bold" id="permission-checks">0/min</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4">
+                <div class="metric-card" style="max-height: 400px; overflow-y: auto;">
+                    <h5 class="mb-3">Recent Alerts</h5>
+                    <div id="alerts-container">
+                        <p class="text-muted">No alerts</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Chart configurations
+        let systemChart = null;
+        let appChart = null;
+        const maxDataPoints = 30;
+
+        function initCharts() {
+            // System Performance Chart
+            const systemCtx = document.getElementById('system-chart').getContext('2d');
+            systemChart = new Chart(systemCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'CPU %',
+                            data: [],
+                            borderColor: 'rgb(255, 99, 132)',
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Memory %',
+                            data: [],
+                            borderColor: 'rgb(54, 162, 235)',
+                            tension: 0.1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100
+                        }
+                    }
+                }
+            });
+
+            // Application Metrics Chart
+            const appCtx = document.getElementById('app-chart').getContext('2d');
+            appChart = new Chart(appCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'Requests/min',
+                            data: [],
+                            borderColor: 'rgb(75, 192, 192)',
+                            tension: 0.1,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Error Rate %',
+                            data: [],
+                            borderColor: 'rgb(255, 159, 64)',
+                            tension: 0.1,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            beginAtZero: true
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            beginAtZero: true,
+                            max: 10,
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateDashboard() {
+            fetch('/api/monitoring/status')
+                .then(response => response.json())
+                .then(data => {
+                    // Update system status
+                    const statusElement = document.getElementById('system-status');
+                    statusElement.className = `status-badge status-${data.health.toLowerCase()}`;
+                    statusElement.textContent = data.health;
+
+                    // Update system metrics
+                    if (data.system) {
+                        updateMetric('cpu-usage', 'cpu-progress', data.system.cpu_percent, '%');
+                        updateMetric('memory-usage', 'memory-progress', data.system.memory_percent, '%');
+
+                        // Update chart
+                        const time = new Date().toLocaleTimeString();
+                        addChartData(systemChart, 0, time, data.system.cpu_percent);
+                        addChartData(systemChart, 1, time, data.system.memory_percent);
+                    }
+
+                    // Update database metrics
+                    if (data.database) {
+                        document.getElementById('db-connections').textContent = data.database.connection_count || 0;
+                        document.getElementById('db-conn-progress').style.width =
+                            Math.min(data.database.connection_count * 2, 100) + '%';
+
+                        const cacheHit = data.database.cache_hit_ratio || 0;
+                        document.getElementById('cache-hit-ratio').textContent = cacheHit.toFixed(1) + '%';
+                        document.getElementById('cache-progress').style.width = cacheHit + '%';
+
+                        document.getElementById('active-queries').textContent = data.database.active_queries || 0;
+                        document.getElementById('query-progress').style.width =
+                            Math.min(data.database.active_queries * 10, 100) + '%';
+
+                        document.getElementById('db-size').textContent =
+                            (data.database.database_size_mb || 0).toFixed(1) + ' MB';
+                        document.getElementById('db-deadlocks').textContent = data.database.deadlocks || 0;
+                    }
+
+                    // Update application metrics
+                    if (data.application) {
+                        document.getElementById('active-users').textContent = data.application.active_users || 0;
+                        document.getElementById('requests-per-minute').textContent =
+                            data.application.requests_per_minute || 0;
+
+                        const errorRate = data.application.error_rate || 0;
+                        document.getElementById('error-rate').textContent = errorRate.toFixed(1) + '%';
+                        document.getElementById('error-progress').style.width =
+                            Math.min(errorRate * 10, 100) + '%';
+
+                        const cacheEff = data.application.cache_efficiency || 0;
+                        document.getElementById('cache-efficiency').textContent = cacheEff.toFixed(1) + '%';
+                        document.getElementById('cache-eff-progress').style.width = cacheEff + '%';
+
+                        const responseTime = data.application.avg_response_time || 0;
+                        document.getElementById('response-time').textContent = responseTime.toFixed(0) + 'ms';
+                        document.getElementById('response-progress').style.width =
+                            Math.min(responseTime / 10, 100) + '%';
+
+                        document.getElementById('permission-checks').textContent =
+                            (data.application.permission_checks_per_minute || 0) + '/min';
+
+                        // Update chart
+                        const time = new Date().toLocaleTimeString();
+                        addChartData(appChart, 0, time, data.application.requests_per_minute);
+                        addChartData(appChart, 1, time, data.application.error_rate);
+                    }
+                })
+                .catch(error => console.error('Error fetching status:', error));
+
+            // Update alerts
+            fetch('/api/monitoring/alerts')
+                .then(response => response.json())
+                .then(alerts => {
+                    updateAlerts(alerts);
+                })
+                .catch(error => console.error('Error fetching alerts:', error));
+        }
+
+        function updateMetric(valueId, progressId, value, suffix) {
+            document.getElementById(valueId).textContent = value.toFixed(1) + suffix;
+            document.getElementById(progressId).style.width = value + '%';
+        }
+
+        function addChartData(chart, datasetIndex, label, data) {
+            if (chart.data.labels.length >= maxDataPoints) {
+                chart.data.labels.shift();
+                chart.data.datasets[datasetIndex].data.shift();
+            }
+
+            // Only add label if it's the first dataset
+            if (datasetIndex === 0) {
+                chart.data.labels.push(label);
+            }
+
+            chart.data.datasets[datasetIndex].data.push(data);
+            chart.update('none');  // Update without animation
+        }
+
+        function updateAlerts(alerts) {
+            const container = document.getElementById('alerts-container');
+
+            if (!alerts || alerts.length === 0) {
+                container.innerHTML = '<p class="text-muted">No alerts</p>';
+                return;
+            }
+
+            const recentAlerts = alerts.slice(-10).reverse();  // Last 10 alerts, newest first
+
+            container.innerHTML = recentAlerts.map(alert => `
+                <div class="alert-item alert-${alert.level.toLowerCase()}">
+                    <div class="d-flex justify-content-between">
+                        <small class="text-muted">${new Date(alert.timestamp).toLocaleTimeString()}</small>
+                        <span class="badge bg-${alert.level === 'CRITICAL' ? 'danger' : 'warning'}">
+                            ${alert.level}
+                        </span>
+                    </div>
+                    <div class="mt-1">${alert.message}</div>
+                </div>
+            `).join('');
+        }
+
+        function updateTime() {
+            document.getElementById('current-time').textContent = new Date().toLocaleString();
+        }
+
+        function refreshDashboard() {
+            updateDashboard();
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            initCharts();
+            updateTime();
+            updateDashboard();
+
+            // Auto-refresh every 10 seconds
+            setInterval(updateDashboard, 10000);
+            setInterval(updateTime, 1000);
+        });
+    </script>
+</body>
+</html>

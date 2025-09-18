@@ -1,0 +1,74 @@
+{
+  "timestamp": "2025-09-18T06:11:36.682056",
+  "checks": {
+    "Database Schema": {
+      "passed": false,
+      "score": 84,
+      "issues": [
+        "Missing table: menu_departments"
+      ]
+    },
+    "Data Integrity": {
+      "passed": false,
+      "score": 0,
+      "issues": [
+        "오류:  sr.role_id 칼럼 없음\nLINE 3: ...       LEFT JOIN system_roles sr ON rmp.role_id = sr.role_id\n                                                             ^\nHINT:  아마 \"rmp.role_id\" 칼럼이나 \"sr.role_code\" 칼럼을 참조하는 것 같습니다.\n"
+      ]
+    },
+    "Performance": {
+      "passed": true,
+      "score": 80,
+      "issues": [
+        "오류:  현재 트랜잭션은 중지되어 있습니다. 이 트랜잭션을 종료하기 전까지는 모든 명령이 무시될 것입니다\n"
+      ]
+    },
+    "Security": {
+      "passed": false,
+      "score": 0,
+      "issues": [
+        "오류:  현재 트랜잭션은 중지되어 있습니다. 이 트랜잭션을 종료하기 전까지는 모든 명령이 무시될 것입니다\n"
+      ]
+    },
+    "Configuration": {
+      "passed": true,
+      "score": 80,
+      "issues": [
+        "Missing config section: APPLICATION",
+        "Backup directory not found"
+      ]
+    },
+    "Dependencies": {
+      "passed": true,
+      "score": 70,
+      "issues": [
+        "Flask should be >= 2.0",
+        "Jinja2 should be >= 3.0",
+        "Werkzeug should be >= 2.0"
+      ]
+    }
+  },
+  "score": 52,
+  "status": "NOT_READY",
+  "critical_issues": [
+    "Missing table: menu_departments",
+    "오류:  sr.role_id 칼럼 없음\nLINE 3: ...       LEFT JOIN system_roles sr ON rmp.role_id = sr.role_id\n                                                             ^\nHINT:  아마 \"rmp.role_id\" 칼럼이나 \"sr.role_code\" 칼럼을 참조하는 것 같습니다.\n",
+    "오류:  현재 트랜잭션은 중지되어 있습니다. 이 트랜잭션을 종료하기 전까지는 모든 명령이 무시될 것입니다\n"
+  ],
+  "warnings": [
+    "오류:  현재 트랜잭션은 중지되어 있습니다. 이 트랜잭션을 종료하기 전까지는 모든 명령이 무시될 것입니다\n",
+    "Missing config section: APPLICATION",
+    "Backup directory not found",
+    "Flask should be >= 2.0",
+    "Jinja2 should be >= 3.0",
+    "Werkzeug should be >= 2.0"
+  ],
+  "recommendations": [
+    "Create backups directory",
+    "Clean up test data and fix orphan records",
+    "Implement password policy and review user permissions",
+    "Set up automated monitoring and alerting",
+    "Implement regular backup schedule",
+    "Create disaster recovery plan",
+    "Schedule security audit"
+  ]
+}
