@@ -81,6 +81,16 @@ UPSERT_REGISTRY = {
         'conflict_cols': ['fullprocess_number'],
         'update_cols': ['custom_data', 'is_deleted']
     },
+
+    # Safe Workplace 메인/상세 테이블
+    'safe_workplace': {
+        'conflict_cols': ['safeplace_no'],
+        'update_cols': ['custom_data', 'is_deleted']
+    },
+    'safe_workplace_details': {
+        'conflict_cols': ['safeplace_no'],
+        'update_cols': ['detailed_content', 'updated_at']
+    },
     
     # Sync 상태 테이블들
     'sync_state': {

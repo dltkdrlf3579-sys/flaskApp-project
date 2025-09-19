@@ -19,6 +19,7 @@ def _protected_for_board(board_type: str) -> set[str]:
         'change_request': {"request_number"},
         'follow_sop': {"work_req_no"},
         'full_process': {"fullprocess_number"},
+        'safe_workplace': {"safeplace_no"},
         'partner_standards': {"standard_number"},
     }
     return PROTECTED_KEYS | per_board.get(board_type, set())
@@ -62,7 +63,8 @@ class ColumnConfigService:
             'change_request': 'change_requests',
             'partner_standards': 'partner_standards',
             'follow_sop': 'follow_sop',
-            'full_process': 'full_process'
+            'full_process': 'full_process',
+            'safe_workplace': 'safe_workplace'
         }
         return table_map.get(self.board_type, f"{self.board_type}s")
     

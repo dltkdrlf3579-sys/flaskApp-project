@@ -1,0 +1,400 @@
+{% if is_popup %}
+{% extends "popup-base.html" %}
+{% else %}
+{% extends "base.html" %}
+{% endif %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/scoring-system.css') }}">
+<script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
+{% endblock %}
+
+{% block title %}안전한 일터 등록{% endblock %}
+{% block popup_title %}안전한 일터 등록{% endblock %}
+{% block content %}
+
+{% if not is_popup %}
+<div class="page-header">
+    <h2 class="page-title">안전한 일터 등록</h2>
+    <div class="breadcrumb">
+        <a href="{{ url_for('page_view', url='safe-workplace') }}">안전한 일터</a>
+        <span class="separator">></span>
+        <span class="current">신규 등록</span>
+    </div>
+</div>
+{% endif %}
+
+<style>
+.accident-detail-container {
+    padding: 20px;
+}
+
+.accident-detail-container .info-row {
+    display: grid;
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.accident-detail-container .info-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 60px;
+    grid-column: span 2;
+}
+
+.accident-detail-container .info-cell label {
+    font-weight: 600;
+    color: #374151;
+    font-size: 14px;
+    margin-bottom: 4px;
+}
+
+.accident-detail-container .info-cell input,
+.accident-detail-container .info-cell select,
+.accident-detail-container .info-cell textarea {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.accident-detail-container .info-cell input[readonly] {
+    background-color: #f3f4f6;
+}
+
+.accident-detail-container .info-cell.span-1 { grid-column: span 1; }
+.accident-detail-container .info-cell.span-2 { grid-column: span 2; }
+.accident-detail-container .info-cell.span-3 { grid-column: span 3; }
+.accident-detail-container .info-cell.span-4 { grid-column: span 4; }
+.accident-detail-container .info-cell.span-5 { grid-column: span 5; }
+.accident-detail-container .info-cell.span-6 { grid-column: span 6; }
+.accident-detail-container .info-cell.span-7 { grid-column: span 7; }
+.accident-detail-container .info-cell.span-8 { grid-column: span 8; }
+
+.accident-detail-container .section {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    overflow: hidden;
+}
+
+.accident-detail-container .section-header {
+    background: #f8f9fa;
+    padding: 15px 20px;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.accident-detail-container .collapse-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 5px 10px;
+    color: #666;
+}
+
+.accident-detail-container .section-content {
+    padding: 20px;
+}
+
+.accident-detail-container .detail-content-section textarea {
+    min-height: 200px;
+}
+
+@media (max-width: 1024px) {
+    .accident-detail-container .info-row {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 768px) {
+    .accident-detail-container .info-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .accident-detail-container .info-cell {
+        grid-column: span 2;
+    }
+}
+</style>
+
+<div class="accident-detail-container">
+    {% for section in sections %}
+    <div class="section {{ section.section_key|replace('_', '-') }}-section">
+        <div class="section-header">
+            <h3 class="section-title">{{ section.section_name }}</h3>
+            <button class="collapse-btn" onclick="toggleSection('{{ section.section_key|replace('_', '-') }}')">
+                <span class="collapse-icon">▲</span>
+            </button>
+        </div>
+        <div class="section-content" id="{{ section.section_key|replace('_', '-') }}-content">
+            <div class="info-table">
+                {% set columns = section_columns.get(section.section_key, []) %}
+                {% set columns_per_row = 8 %}
+                {% for chunk in columns | batch(columns_per_row, '') %}
+                <div class="info-row">
+                    {% for col in chunk %}
+                        {% if col %}
+                            {% if col.column_type == 'list' %}
+                                {% set span = 8 %}
+                            {% elif col.column_type == 'scoring' %}
+                                {% set span = 8 %}
+                            {% elif col.column_type == 'score_total' %}
+                                {% set span = 4 %}
+                            {% elif col.column_span and col.column_span|int > 0 %}
+                                {% set cs = col.column_span|int %}
+                                {% set span = cs if cs >= 2 else 2 %}
+                            {% else %}
+                                {% set span = 2 %}
+                            {% endif %}
+                            <div class="info-cell span-{{ span }}">
+                                <label>{{ col.column_name }}</label>
+                                {% if col.column_key == 'safeplace_no' %}
+                                    <input type="text" value="{{ safeplace_no }}" readonly style="background-color: #f3f4f6;">
+                                    <input type="hidden" name="safeplace_no" value="{{ safeplace_no }}">
+                                {% elif col.column_key == 'created_at' %}
+                                    <input type="text" value="{{ created_at }}" readonly style="background-color: #f3f4f6;">
+                                {% elif col.column_type == 'dropdown' %}
+                                    <select id="{{ col.column_key }}"
+                                            class="{{ section.section_key|replace('_', '-') }}-input"
+                                            data-field="{{ col.column_key }}"
+                                            data-section="{{ section.section_key }}">
+                                        <option value="">선택하세요</option>
+                                        {% if col.column_key in basic_options %}
+                                            {% for opt in basic_options[col.column_key] %}
+                                            <option value="{{ opt.code }}">{{ opt.value }}</option>
+                                            {% endfor %}
+                                        {% elif col.dropdown_options_mapped %}
+                                            {% for opt in col.dropdown_options_mapped %}
+                                            <option value="{{ opt.code }}">{{ opt.value }}</option>
+                                            {% endfor %}
+                                        {% endif %}
+                                    </select>
+                                {% elif col.column_type == 'date' %}
+                                    <input type="date"
+                                           class="{{ section.section_key|replace('_', '-') }}-input"
+                                           data-field="{{ col.column_key }}"
+                                           data-section="{{ section.section_key }}">
+                                {% elif col.column_type == 'number' %}
+                                    {% set _nt = 'integer' if col.input_type == 'number_integer' else 'float' %}
+                                    <input type="number"
+                                           class="{{ section.section_key|replace('_', '-') }}-input"
+                                           data-field="{{ col.column_key }}"
+                                           data-section="{{ section.section_key }}"
+                                           data-number-type="{{ _nt }}"
+                                           step="{% if _nt == 'integer' %}1{% else %}any{% endif %}"
+                                           oninput="validateNumberInput(this)"
+                                           onkeypress="return isNumberKey(event, this)">
+                                {% elif col.column_type == 'list' %}
+                                    {% from 'includes/list_field_v3.html' import render_list_field %}
+                                    {{ render_list_field(col, '', section, mode='register') }}
+                                {% elif col.column_type == 'textarea' %}
+                                    <textarea class="{{ section.section_key|replace('_', '-') }}-input"
+                                              data-field="{{ col.column_key }}"
+                                              data-section="{{ section.section_key }}"
+                                              rows="4"
+                                              placeholder="{{ col.column_name }} 입력"></textarea>
+                                {% elif col.column_type == 'scoring' %}
+                                    {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}
+                                    {% set items = sc['items'] if sc and ('items' in sc) else [] %}
+                                    <div class="scoring-group scoring-columns" data-field="{{ col.column_key }}" data-config='{{ col.scoring_config|default("{}")|tojson }}'>
+                                        {% for it in items %}
+                                        <div class="sc-col">
+                                            <label class="form-label">{{ it.name or it.label or '항목' }}</label>
+                                            <input type="number" min="0" step="1"
+                                                   class="scoring-input"
+                                                   data-item="{{ it.id }}"
+                                                   data-score="{{ it.per_unit_delta }}"
+                                                   value="0">
+                                        </div>
+                                        {% endfor %}
+                                        <input type="hidden"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               value='{}'>
+                                    </div>
+                                {% elif col.column_type == 'score_total' %}
+                                    {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}
+                                    {% set base_score = sc.get('base_score') if sc and sc.get('base_score') else 100 %}
+                                    <div class="scoring-columns">
+                                        <div class="sc-col score-total-field" data-field="{{ col.column_key }}" data-config='{{ col.scoring_config|default("{}")|tojson }}' data-base-score="{{ base_score }}">
+                                            <label class="form-label">총점</label>
+                                            <input type="number" class="total-score-display" value="{{ base_score }}" readonly style="background: #f0f0f0; font-weight: bold;">
+                                            <input type="hidden"
+                                                   class="{{ section.section_key|replace('_', '-') }}-input"
+                                                   data-field="{{ col.column_key }}"
+                                                   data-section="{{ section.section_key }}"
+                                                   value="">
+                                        </div>
+                                    </div>
+                                {% else %}
+                                    <input type="text"
+                                           class="{{ section.section_key|replace('_', '-') }}-input"
+                                           data-field="{{ col.column_key }}"
+                                           data-section="{{ section.section_key }}"
+                                           placeholder="{{ col.column_name }} 입력">
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+
+    <div class="section detail-content-section">
+        <div class="section-header">
+            <h3 class="section-title">상세내용</h3>
+        </div>
+        <div class="section-content">
+            <div class="content-editor">
+                <textarea id="detailed-content"
+                          class="editable-content"
+                          data-ckeditor="true"
+                          placeholder="상세내용을 입력하세요."></textarea>
+            </div>
+        </div>
+    </div>
+
+    {% from 'includes/attachment_section.html' import render_attachment_section, attachment_scripts, attachment_styles %}
+    {{ render_attachment_section([], 'safe_workplace') }}
+
+    <div class="save-section">
+        <button class="btn-save" onclick="submitSafeWorkplace()">등록완료</button>
+    </div>
+</div>
+
+<link rel="stylesheet" href="/static/styles/accident-register.css">
+{{ attachment_styles() }}
+
+<script>
+const sections = {{ sections | tojson | safe }};
+const sectionColumns = {{ section_columns | tojson | safe }};
+const safeplaceNo = {{ safeplace_no | tojson }};
+
+function toggleSection(sectionId) {
+    const content = document.getElementById(sectionId + '-content');
+    const icon = event.target;
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        icon.textContent = '▲';
+    } else {
+        content.style.display = 'none';
+        icon.textContent = '▼';
+    }
+}
+
+function collectDynamicFields() {
+    const data = {};
+    sections.forEach(section => {
+        const inputs = document.querySelectorAll(`[data-section="${section.section_key}"]`);
+        inputs.forEach(input => {
+            const fieldKey = input.dataset.field;
+            if (!fieldKey) return;
+            let value = '';
+            if (input.tagName === 'SELECT') {
+                value = input.value;
+            } else if (input.type === 'checkbox') {
+                value = input.checked ? '1' : '0';
+            } else if (input.tagName === 'TEXTAREA') {
+                value = input.value;
+            } else {
+                value = input.value;
+            }
+            if (input.getAttribute('data-field-type') === 'list' && value) {
+                try {
+                    value = JSON.parse(value);
+                } catch (e) {
+                    value = [];
+                }
+            }
+            data[fieldKey] = value;
+        });
+    });
+    return data;
+}
+
+function groupFieldsBySection(dynamicData) {
+    const grouped = {};
+    Object.keys(sectionColumns).forEach(sectionKey => {
+        const cols = sectionColumns[sectionKey] || [];
+        cols.forEach(col => {
+            if (!grouped[sectionKey]) grouped[sectionKey] = {};
+            const key = col.column_key;
+            if (dynamicData[key] !== undefined) {
+                grouped[sectionKey][key] = dynamicData[key];
+            }
+        });
+    });
+    return grouped;
+}
+
+function submitSafeWorkplace() {
+    const formData = new FormData();
+
+    const detailedEl = document.getElementById('detailed-content');
+    let detailedContent = '';
+
+    if (window.RichText && typeof window.RichText.getData === 'function') {
+        detailedContent = window.RichText.getData();
+    } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
+        detailedContent = window.editorInstance.getData();
+    } else if (window['editor_detailed-content'] && typeof window['editor_detailed-content'].getData === 'function') {
+        detailedContent = window['editor_detailed-content'].getData();
+    } else if (window.editor_detailed_content && typeof window.editor_detailed_content.getData === 'function') {
+        detailedContent = window.editor_detailed_content.getData();
+    } else if (detailedEl) {
+        detailedContent = detailedEl.value || '';
+    }
+
+    formData.append('detailed_content', detailedContent);
+
+    const dynamicData = collectDynamicFields();
+    const grouped = groupFieldsBySection(dynamicData);
+    Object.keys(grouped).forEach(sectionKey => {
+        formData.append(sectionKey, JSON.stringify(grouped[sectionKey]));
+    });
+    formData.append('custom_data', JSON.stringify(dynamicData));
+
+    if (typeof pendingFiles !== 'undefined') {
+        pendingFiles.forEach(file => formData.append('files', file));
+    }
+
+    const attachmentDescriptions = [];
+    document.querySelectorAll('.attachment-desc').forEach(input => {
+        attachmentDescriptions.push({ description: input.value || '', isNew: true });
+    });
+    formData.append('attachment_data', JSON.stringify(attachmentDescriptions));
+
+    fetch('/register-safe-workplace', {
+        method: 'POST',
+        body: formData
+    }).then(r => r.json()).then(data => {
+        if (data.success) {
+            alert('안전한 일터가 성공적으로 등록되었습니다.');
+            if (window.opener) {
+                window.opener.location.reload();
+                window.close();
+            } else {
+                window.location.href = '/safe-workplace';
+            }
+        } else {
+            alert('등록 실패: ' + (data.message || '알 수 없는 오류'));
+        }
+    }).catch(err => {
+        console.error(err);
+        alert('등록 중 오류가 발생했습니다.');
+    });
+}
+</script>
+
+{{ attachment_scripts() }}
+{% endblock %}

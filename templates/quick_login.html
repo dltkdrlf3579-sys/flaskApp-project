@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Quick Dev Login</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+        }
+        .login-container {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .login-btn {
+            display: block;
+            width: 100%;
+            padding: 15px;
+            margin: 10px 0;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .login-btn:hover {
+            background: #45a049;
+        }
+        .super-admin {
+            background: #ff6b6b;
+        }
+        .super-admin:hover {
+            background: #ff5252;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h1>🚀 Quick Dev Login</h1>
+        <p>개발/테스트용 빠른 로그인</p>
+
+        <form action="/quick-login" method="POST">
+            <button type="submit" name="user" value="dev_user" class="login-btn super-admin">
+                👑 개발자 (dev_user)
+                <br><small>슈퍼어드민 - 모든 권한</small>
+            </button>
+
+            <button type="submit" name="user" value="dev_super" class="login-btn super-admin">
+                🛡️ 슈퍼관리자 (dev_super)
+                <br><small>슈퍼어드민 - 모든 권한</small>
+            </button>
+
+            <button type="submit" name="user" value="test_user" class="login-btn">
+                👤 테스트 사용자 (test_user)
+                <br><small>일반 권한</small>
+            </button>
+        </form>
+    </div>
+</body>
+</html>

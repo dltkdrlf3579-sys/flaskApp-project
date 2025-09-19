@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}안전한 일터 컬럼 관리{% endblock %}
+
+{% block content %}
+<div class="admin-container">
+    <h2>안전한 일터 컬럼 관리</h2>
+
+    <div class="toolbar">
+        <button class="btn btn-primary" onclick="addColumn()">컬럼 추가</button>
+    </div>
+
+    <table class="admin-table">
+        <thead>
+            <tr>
+                <th>컬럼키</th>
+                <th>표시명</th>
+                <th>타입</th>
+                <th>섹션</th>
+                <th>순서</th>
+                <th>스팬</th>
+                <th>활성화</th>
+                <th>작업</th>
+            </tr>
+        </thead>
+        <tbody id="columnList">
+            <!-- 동적으로 로드 -->
+        </tbody>
+    </table>
+</div>
+
+<script>
+function loadColumns() {
+    fetch('/api/safe-workplace-columns')
+        .then(response => response.json())
+        .then(columns => {
+            const tbody = document.getElementById('columnList');
+            tbody.innerHTML = columns.map(col => `
+                <tr>
+                    <td>${col.column_key}</td>
+                    <td>${col.column_name}</td>
+                    <td>${col.column_type}</td>
+                    <td>${col.tab || '-'}</td>
+                    <td>${col.column_order}</td>
+                    <td>${col.column_span}</td>
+                    <td>${col.is_active ? '활성' : '비활성'}</td>
+                    <td>
+                        <button onclick="editColumn(${col.id})">수정</button>
+                        <button onclick="deleteColumn(${col.id})">삭제</button>
+                    </td>
+                </tr>
+            `).join('');
+        });
+}
+
+function addColumn() {
+    const column_key = prompt('컬럼 키를 입력하세요:');
+    if (!column_key) return;
+
+    const column_name = prompt('표시명을 입력하세요:');
+    if (!column_name) return;
+
+    const section = prompt('섹션을 입력하세요 (basic_info):');
+
+    fetch('/api/safe-workplace-columns', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            column_key: column_key,
+            column_name: column_name,
+            column_type: 'text',
+            tab: section || 'basic_info',
+            column_order: 999,
+            is_active: 1
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            loadColumns();
+        }
+    });
+}
+
+function editColumn(id) {
+    // TODO: 구현 필요
+    alert('수정 기능은 추후 구현 예정입니다.');
+}
+
+function deleteColumn(id) {
+    if (!confirm('정말 삭제하시겠습니까?')) return;
+
+    // TODO: DELETE API 구현 필요
+    alert('삭제 기능은 추후 구현 예정입니다.');
+}
+
+// 페이지 로드 시 컬럼 목록 로드
+document.addEventListener('DOMContentLoaded', loadColumns);
+</script>
+
+<style>
+.admin-container {
+    padding: 20px;
+}
+.toolbar {
+    margin-bottom: 20px;
+}
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.admin-table th,
+.admin-table td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: left;
+}
+.admin-table th {
+    background: #f8f9fa;
+    font-weight: 600;
+}
+.btn {
+    padding: 8px 16px;
+    margin: 0 2px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.btn-primary {
+    background: #007bff;
+    color: white;
+}
+</style>
+{% endblock %}

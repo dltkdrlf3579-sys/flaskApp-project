@@ -18,6 +18,7 @@ MENU_CONFIG = [
         "title": "작업안전",
         "submenu": [
             {"title": "Follow SOP", "url": "follow-sop"},
+            {"title": "안전한 일터", "url": "safe-workplace"},
         ],
     },
     {

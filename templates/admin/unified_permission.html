@@ -1,0 +1,2611 @@
+{% extends "base.html" %}
+{% block title %}통합 권한 관리 - 관리자{% endblock %}
+{% block content %}
+<style>
+    :root {
+        --primary-color: #6c757d;  /* 기본 회색 */
+        --secondary-color: #495057;  /* 진한 회색 */
+        --success-color: #28a745;
+        --warning-color: #ffc107;
+        --danger-color: #dc3545;
+        --border-color: #dee2e6;
+        --header-bg: #f8f9fa;
+        --fixed-column-bg: #ffffff;
+        --fixed-column-shadow: 4px 0 8px rgba(0,0,0,0.1);
+    }
+
+    .permission-container {
+        padding: 20px;
+        background: #f8f9fa;
+        min-height: 100vh;
+    }
+
+    .main-header {
+        background: linear-gradient(to right, #667eea, #764ba2);  /* 관리자 메뉴와 동일한 그라데이션 */
+        color: white;
+        padding: 2rem;
+        margin: -20px -20px 2rem -20px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .main-header h1 {
+        font-size: 2rem;
+        font-weight: 600;
+        margin: 0;
+    }
+
+    .header-stats {
+        display: flex;
+        gap: 2rem;
+        margin-top: 1rem;
+    }
+
+    .stat-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        background: rgba(255,255,255,0.2);
+        padding: 0.5rem 1rem;
+        border-radius: 20px;
+    }
+
+    /* 탭 네비게이션 */
+    .nav-tabs {
+        border-bottom: 2px solid #dee2e6;
+        margin-bottom: 2rem;
+    }
+
+    .nav-tabs .nav-link {
+        border: none;
+        color: #6c757d;
+        font-weight: 500;
+        padding: 1rem 2rem;
+        transition: all 0.3s;
+    }
+
+    .nav-tabs .nav-link.active {
+        background: none;
+        border-bottom: 3px solid #667eea;
+        color: #667eea;
+        margin-bottom: -2px;
+    }
+
+    .nav-tabs .nav-link:hover {
+        background: rgba(0, 0, 0, 0.05);
+    }
+
+    /* 검색 필터 섹션 */
+    .filter-section {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        margin-bottom: 2rem;
+    }
+
+    .permission-info {
+        background: #f8f9fa;
+        padding: 0.8rem;
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        height: 100%;
+    }
+
+    .filter-row {
+        display: flex;
+        gap: 1rem;
+        align-items: end;
+        flex-wrap: wrap;
+    }
+
+    .filter-group {
+        flex: 1;
+        min-width: 200px;
+    }
+
+    .filter-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 500;
+        color: #495057;
+    }
+
+    .filter-group input,
+    .filter-group select {
+        width: 100%;
+        padding: 0.5rem;
+        border: 1px solid var(--border-color);
+        border-radius: 5px;
+        font-size: 0.9rem;
+    }
+
+    .btn-primary {
+        background: white;
+        color: #495057;
+        border: 1px solid #dee2e6;
+        padding: 0.5rem 1.5rem;
+        font-weight: 500;
+        border-radius: 5px;
+        transition: all 0.3s;
+        cursor: pointer;
+    }
+
+    .btn-primary:hover {
+        background: #f8f9fa;
+        border-color: #adb5bd;
+        transform: translateY(-1px);
+    }
+
+    .btn-primary:active, .btn-primary:focus {
+        background: white;
+        color: #495057;
+        border-color: #dee2e6;
+        outline: none;
+        box-shadow: none;
+    }
+
+    .btn-secondary {
+        background: white;
+        color: #6c757d;
+        border: 1px solid #dee2e6;
+        padding: 0.5rem 1.5rem;
+        font-weight: 500;
+        border-radius: 5px;
+        transition: all 0.3s;
+    }
+
+    .btn-secondary:hover {
+        background: #f8f9fa;
+        border-color: #adb5bd;
+    }
+
+    .btn-outline-secondary {
+        background: white;
+        color: #6c757d;
+        border: 1px solid #dee2e6;
+        padding: 0.375rem 0.75rem;
+        border-radius: 0 5px 5px 0;
+    }
+
+    .btn-outline-secondary:hover {
+        background: #f8f9fa;
+    }
+
+    /* 권한 테이블 - 스크롤 가능한 래퍼 */
+    .table-wrapper {
+        background: white;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        overflow: hidden;
+        position: relative;
+    }
+
+    .table-scroll-container {
+        overflow-x: auto;
+        overflow-y: visible;
+        max-width: 100%;
+        position: relative;
+    }
+
+    .permission-table {
+        width: auto;
+        min-width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: 0.9rem;
+    }
+
+    .permission-table thead {
+        background: var(--header-bg);
+        position: sticky;
+        top: 0;
+        z-index: 20;
+    }
+
+    .permission-table th {
+        padding: 1rem;
+        text-align: left;
+        font-weight: 600;
+        color: #495057;
+        border-bottom: 2px solid var(--border-color);
+        white-space: nowrap;
+        background: var(--header-bg);
+    }
+
+    .permission-table tbody tr {
+        transition: background 0.2s;
+    }
+
+    .permission-table tbody tr:hover {
+        background: rgba(74, 144, 226, 0.05);
+    }
+
+    .permission-table td {
+        padding: 0.75rem;
+        border-bottom: 1px solid #f0f0f0;
+        white-space: nowrap;
+    }
+
+    /* 고정 컬럼 스타일 */
+    .fixed-column {
+        position: sticky;
+        left: 0;
+        background: var(--fixed-column-bg);
+        z-index: 10;
+    }
+
+    .fixed-column-1 {
+        position: sticky;
+        left: 0;
+        min-width: 50px;
+        background: var(--fixed-column-bg);
+        z-index: 11;
+    }
+
+    .fixed-column-2 {
+        position: sticky;
+        left: 50px;
+        min-width: 120px;
+        background: var(--fixed-column-bg);
+        z-index: 11;
+    }
+
+    .fixed-column-3 {
+        position: sticky;
+        left: 170px;
+        min-width: 100px;
+        background: var(--fixed-column-bg);
+        z-index: 11;
+    }
+
+    .fixed-column-4 {
+        position: sticky;
+        left: 270px;
+        min-width: 150px;
+        background: var(--fixed-column-bg);
+        z-index: 11;
+        box-shadow: 4px 0 8px rgba(0,0,0,0.1);
+    }
+
+    .fixed-column::after,
+    .fixed-column-4::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: 4px;
+        background: linear-gradient(90deg, rgba(0,0,0,0.1), transparent);
+        pointer-events: none;
+    }
+
+    thead .fixed-column,
+    thead .fixed-column-1,
+    thead .fixed-column-2,
+    thead .fixed-column-3,
+    thead .fixed-column-4 {
+        z-index: 21;
+    }
+
+    /* 부서 검색 한 줄 입력 */
+    .search-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    /* 권한 정의 테이블 */
+    .permission-definition-table {
+        width: auto;
+        max-width: 600px;
+        margin: 10px auto;
+        border-collapse: collapse;
+        font-size: 0.82rem;
+    }
+
+    .permission-definition-table th {
+        background: #f8f9fa;
+        padding: 6px 12px;
+        text-align: center;
+        border: 1px solid #dee2e6;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+
+    .permission-definition-table td {
+        padding: 6px 12px;
+        border: 1px solid #dee2e6;
+        text-align: center;
+    }
+
+    .permission-definition-table td:first-child {
+        background: #fafbfc;
+        font-weight: 600;
+        width: 100px;
+        white-space: nowrap;
+    }
+
+    /* 역할 선택 드롭다운 */
+    .role-select {
+        padding: 0.2rem 0.3rem;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        font-size: 0.75rem;
+        min-width: 60px;
+        background: white;
+        transition: all 0.2s;
+    }
+
+    .role-select:hover {
+        border-color: var(--primary-color);
+    }
+
+    .role-select:focus {
+        outline: none;
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+    }
+
+    .role-select option[value="0"] { color: #6c757d; }  /* 없음 */
+    .role-select option[value="1"] { color: var(--info-color); }  /* 본인 */
+    .role-select option[value="2"] { color: var(--success-color); }  /* 부서 */
+    .role-select option[value="3"] { color: var(--danger-color); }  /* 전체 */
+
+    /* 액션 버튼들 */
+    .action-buttons {
+        display: flex;
+        gap: 1rem;
+        margin-top: 2rem;
+        justify-content: space-between;
+    }
+
+    .btn-group {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    /* 부서 검색 팝업 */
+    .dept-search-popup {
+        display: none;
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: white;
+        border-radius: 10px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        z-index: 1000;
+        width: 600px;
+        max-height: 80vh;
+        overflow: hidden;
+    }
+
+    .dept-search-popup.active {
+        display: block;
+    }
+
+    .popup-header {
+        background: var(--primary-color);
+        color: white;
+        padding: 1rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .popup-body {
+        padding: 1.5rem;
+        max-height: 60vh;
+        overflow-y: auto;
+    }
+
+    .dept-tree {
+        list-style: none;
+        padding-left: 0;
+    }
+
+    .dept-tree li {
+        margin: 0.25rem 0;
+    }
+
+    .dept-tree .dept-item {
+        display: flex;
+        align-items: center;
+        padding: 0.5rem;
+        cursor: pointer;
+        border-radius: 4px;
+        transition: background 0.2s;
+    }
+
+    .dept-tree .dept-item:hover {
+        background: rgba(74, 144, 226, 0.1);
+    }
+
+    .dept-tree .dept-item.selected {
+        background: rgba(74, 144, 226, 0.2);
+        font-weight: 500;
+    }
+
+    .dept-tree .dept-children {
+        padding-left: 2rem;
+        margin-top: 0.25rem;
+    }
+
+    .dept-icon {
+        margin-right: 0.5rem;
+        transition: transform 0.2s;
+    }
+
+    .dept-icon.expanded {
+        transform: rotate(90deg);
+    }
+
+    /* 로딩 오버레이 */
+    .loading-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.5);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        z-index: 9999;
+    }
+
+    .loading-overlay.active {
+        display: flex;
+    }
+
+    /* 페이지네이션 */
+    .pagination-wrapper {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 2rem;
+        padding: 1rem;
+        background: white;
+        border-radius: 10px;
+    }
+
+    .pagination {
+        display: flex;
+        gap: 0.25rem;
+    }
+
+    .page-item {
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--border-color);
+        background: white;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .page-item:hover {
+        background: var(--primary-color);
+        color: white;
+    }
+
+    .page-item.active {
+        background: var(--primary-color);
+        color: white;
+        border-color: var(--primary-color);
+    }
+
+    .page-info {
+        color: #6c757d;
+        font-size: 0.9rem;
+    }
+
+
+    /* 메뉴 그룹 색상 구분 */
+    .menu-group-safety {
+        background: rgba(220, 53, 69, 0.05);
+    }
+
+    .menu-group-process {
+        background: rgba(74, 144, 226, 0.05);
+    }
+
+    .menu-group-partner {
+        background: rgba(40, 167, 69, 0.05);
+    }
+
+    .menu-header-safety {
+        border-bottom: 3px solid #dc3545;
+    }
+
+    .menu-header-process {
+        border-bottom: 3px solid #4a90e2;
+    }
+
+    .menu-header-partner {
+        border-bottom: 3px solid #28a745;
+    }
+</style>
+
+<div class="permission-container">
+    <!-- 메인 헤더 -->
+    <div class="main-header">
+        <h1>
+            <i class="bi bi-shield-lock-fill"></i>
+            통합 권한 관리 시스템
+        </h1>
+    </div>
+
+    <!-- 탭 네비게이션 -->
+    <ul class="nav nav-tabs" role="tablist">
+        <li class="nav-item">
+            <a class="nav-link active" data-bs-toggle="tab" href="#userPermissions">
+                <i class="bi bi-person-badge"></i> 사용자별 권한
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" data-bs-toggle="tab" href="#deptPermissions">
+                <i class="bi bi-diagram-3"></i> 부서별 권한
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" data-bs-toggle="tab" href="#permissionRequests">
+                <i class="bi bi-inbox"></i> 권한 신청 목록
+                <span class="badge bg-danger ms-1" id="requestCount">0</span>
+            </a>
+        </li>
+    </ul>
+
+    <!-- 탭 컨텐츠 -->
+    <div class="tab-content">
+        <!-- 사용자별 권한 탭 -->
+        <div class="tab-pane fade show active" id="userPermissions">
+            <!-- 권한 정의 테이블 -->
+            <div style="display: flex; justify-content: center; margin-bottom: 20px;">
+                <table class="permission-definition-table">
+                    <thead>
+                        <tr>
+                            <th>권한 레벨</th>
+                            <th>읽기 권한</th>
+                            <th>쓰기 권한</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>0 (없음)</strong></td>
+                            <td>권한 없음</td>
+                            <td>권한 없음</td>
+                        </tr>
+                        <tr>
+                            <td><strong>1 (본인)</strong></td>
+                            <td>본인 작성/담당 데이터만 조회</td>
+                            <td>등록 가능, 본인 작성 글만 수정</td>
+                        </tr>
+                        <tr>
+                            <td><strong>2 (부서)</strong></td>
+                            <td>부서 관련 데이터 조회</td>
+                            <td>등록 가능, 부서 관련 글 수정</td>
+                        </tr>
+                        <tr>
+                            <td><strong>3 (전체)</strong></td>
+                            <td>모든 데이터 조회</td>
+                            <td>등록 가능, 모든 글 수정</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 검색 필터 및 액션 버튼 -->
+            <div class="filter-section mb-3">
+                <div class="d-flex justify-content-between align-items-end">
+                    <div class="d-flex gap-2 align-items-end">
+                        <div style="display: flex; flex-direction: column;">
+                            <label style="font-size: 12px; margin-bottom: 2px; font-weight: 600; color: #495057;">부서</label>
+                            <input type="text" id="userDeptFilter" placeholder="부서명 입력" style="font-size: 13px; height: 30px; padding: 4px 8px; border: 1px solid #dee2e6; border-radius: 4px; width: 150px;">
+                        </div>
+                        <div style="display: flex; flex-direction: column;">
+                            <label style="font-size: 12px; margin-bottom: 2px; font-weight: 600; color: #495057;">이름</label>
+                            <input type="text" id="userNameFilter" placeholder="이름 입력" style="font-size: 13px; height: 30px; padding: 4px 8px; border: 1px solid #dee2e6; border-radius: 4px; width: 100px;">
+                        </div>
+                        <div style="display: flex; flex-direction: column;">
+                            <label style="font-size: 12px; margin-bottom: 2px; font-weight: 600; color: #495057;">Knox ID</label>
+                            <input type="text" id="userLoginIdFilter" placeholder="Knox ID 입력" style="font-size: 13px; height: 30px; padding: 4px 8px; border: 1px solid #dee2e6; border-radius: 4px; width: 120px;">
+                        </div>
+                        <button class="btn btn-primary" onclick="searchUsers()" style="height: 30px; padding: 0 15px; font-size: 13px; background-color: #2f5fd3; border-color: #2f5fd3; color: white;">검색</button>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary" onclick="addNewUser()" style="height: 30px; padding: 0 12px; font-size: 13px; background-color: #2f5fd3; border-color: #2f5fd3; color: white;">
+                            <i class="bi bi-plus-circle"></i> 사용자 추가
+                        </button>
+                        <button class="btn btn-danger" onclick="deleteSelectedUsers()" style="height: 30px; padding: 0 12px; font-size: 13px; color: white;">
+                            <i class="bi bi-trash"></i> 선택 삭제
+                        </button>
+                        <button class="btn btn-success" onclick="saveUserPermissions()" style="height: 30px; padding: 0 12px; font-size: 13px; background-color: #28a745; border-color: #28a745; color: white;">
+                            <i class="bi bi-save"></i> 변경사항 저장
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 권한 테이블 -->
+            <div class="table-wrapper">
+                <div class="table-scroll-container" id="userTableContainer">
+                    <table class="permission-table" id="userPermissionTable">
+                        <thead>
+                            <tr>
+                                <th class="fixed-column-1">
+                                    <input type="checkbox" id="selectAllUsers">
+                                </th>
+                                <th class="fixed-column-2">Knox ID</th>
+                                <th class="fixed-column-3">이름</th>
+                                <th class="fixed-column-4">부서</th>
+                                <!-- 메뉴 헤더는 동적으로 추가 -->
+                            </tr>
+                        </thead>
+                        <tbody id="userTableBody">
+                            <!-- 동적으로 생성 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 페이지네이션 -->
+            <div class="pagination-wrapper">
+                <div class="page-info">
+                    총 <span id="userTotalCount">0</span>명 중 <span id="userCurrentRange">0-0</span>
+                </div>
+                <div class="pagination" id="userPagination">
+                    <!-- 동적으로 생성 -->
+                </div>
+            </div>
+
+        </div>
+
+        <!-- 부서별 권한 탭 -->
+        <div class="tab-pane fade" id="deptPermissions">
+            <!-- 검색 필터 -->
+            <div class="filter-section">
+                <!-- 권한 정의 테이블 -->
+                <div style="display: flex; justify-content: center; margin-bottom: 20px;">
+                    <table class="permission-definition-table">
+                        <thead>
+                            <tr>
+                                <th>권한 레벨</th>
+                                <th>읽기 권한</th>
+                                <th>쓰기 권한</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>0 (없음)</strong></td>
+                                <td>권한 없음</td>
+                                <td>권한 없음</td>
+                            </tr>
+                            <tr>
+                                <td><strong>1 (본인)</strong></td>
+                                <td>본인 작성/담당 데이터만 조회</td>
+                                <td>등록 가능, 본인 작성 글만 수정</td>
+                            </tr>
+                            <tr>
+                                <td><strong>2 (부서)</strong></td>
+                                <td>부서 관련 데이터 조회</td>
+                                <td>등록 가능, 부서 관련 글 수정</td>
+                            </tr>
+                            <tr>
+                                <td><strong>3 (전체)</strong></td>
+                                <td>모든 데이터 조회</td>
+                                <td>등록 가능, 모든 글 수정</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- 부서명 검색 및 액션 버튼 -->
+                <div class="d-flex justify-content-between align-items-end mb-3">
+                    <div class="d-flex gap-2 align-items-end">
+                        <div style="display: flex; flex-direction: column;">
+                            <label style="font-size: 12px; margin-bottom: 2px; font-weight: 600; color: #495057;">부서명</label>
+                            <input type="text" id="deptNameFilter" placeholder="부서명 입력" style="font-size: 13px; height: 30px; padding: 4px 8px; border: 1px solid #dee2e6; border-radius: 4px; width: 150px;">
+                        </div>
+                        <button class="btn btn-primary" onclick="searchDepts()" style="height: 30px; padding: 0 15px; font-size: 13px; background-color: #2f5fd3; border-color: #2f5fd3; color: white;">검색</button>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary" onclick="addNewDept()" style="height: 30px; padding: 0 12px; font-size: 13px; background-color: #2f5fd3; border-color: #2f5fd3; color: white;">
+                            <i class="bi bi-plus-circle"></i> 부서 추가
+                        </button>
+                        <button class="btn btn-danger" onclick="deleteSelectedDepts()" style="height: 30px; padding: 0 12px; font-size: 13px; color: white;">
+                            <i class="bi bi-trash"></i> 선택 삭제
+                        </button>
+                        <button class="btn btn-success" onclick="saveDeptPermissions()" style="height: 30px; padding: 0 12px; font-size: 13px; background-color: #28a745; border-color: #28a745; color: white;">
+                            <i class="bi bi-save"></i> 변경사항 저장
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 권한 테이블 (부서용) -->
+            <div class="table-wrapper">
+                <div class="table-scroll-container" id="deptTableContainer">
+                    <table class="permission-table" id="deptPermissionTable">
+                        <thead>
+                            <tr>
+                                <th class="fixed-column-1">
+                                    <input type="checkbox" id="selectAllDepts">
+                                </th>
+                                <th class="fixed-column-2">부서코드</th>
+                                <th>부서명</th>
+                                <!-- 메뉴 헤더는 동적으로 추가 -->
+                            </tr>
+                        </thead>
+                        <tbody id="deptTableBody">
+                            <!-- 동적으로 생성 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 페이지네이션 -->
+            <div class="pagination-wrapper">
+                <div class="page-info">
+                    총 <span id="deptTotalCount">0</span>개 부서 중 <span id="deptCurrentRange">0-0</span>
+                </div>
+                <div class="pagination" id="deptPagination">
+                    <!-- 동적으로 생성 -->
+                </div>
+            </div>
+
+        </div>
+
+        <!-- 권한 신청 목록 탭 -->
+        <div class="tab-pane fade" id="permissionRequests">
+            <!-- 권한 정의 테이블 (사용자별 권한과 동일) -->
+            <div style="display: flex; justify-content: center; margin-bottom: 20px;">
+                <table class="permission-definition-table">
+                    <thead>
+                        <tr>
+                            <th>권한 레벨</th>
+                            <th>읽기 권한</th>
+                            <th>쓰기 권한</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>0 (없음)</strong></td>
+                            <td>권한 없음</td>
+                            <td>권한 없음</td>
+                        </tr>
+                        <tr>
+                            <td><strong>1 (본인)</strong></td>
+                            <td>본인 작성/담당 데이터만 조회</td>
+                            <td>등록 가능, 본인 작성 글만 수정</td>
+                        </tr>
+                        <tr>
+                            <td><strong>2 (부서)</strong></td>
+                            <td>부서 관련 데이터 조회</td>
+                            <td>등록 가능, 부서 관련 글 수정</td>
+                        </tr>
+                        <tr>
+                            <td><strong>3 (전체)</strong></td>
+                            <td>모든 데이터 조회</td>
+                            <td>등록 가능, 모든 글 수정</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 검색 필터 및 액션 버튼 -->
+            <div class="filter-section mb-3">
+                <div class="d-flex justify-content-between align-items-end">
+                    <div class="d-flex gap-2 align-items-end">
+                        <div style="display: flex; flex-direction: column;">
+                            <label style="font-size: 12px; margin-bottom: 2px; font-weight: 600; color: #495057;">부서</label>
+                            <input type="text" id="requestDeptFilter" placeholder="부서명 입력" style="font-size: 13px; height: 30px; padding: 4px 8px; border: 1px solid #dee2e6; border-radius: 4px; width: 150px;">
+                        </div>
+                        <div style="display: flex; flex-direction: column;">
+                            <label style="font-size: 12px; margin-bottom: 2px; font-weight: 600; color: #495057;">이름</label>
+                            <input type="text" id="requestNameFilter" placeholder="이름 입력" style="font-size: 13px; height: 30px; padding: 4px 8px; border: 1px solid #dee2e6; border-radius: 4px; width: 100px;">
+                        </div>
+                        <div style="display: flex; flex-direction: column;">
+                            <label style="font-size: 12px; margin-bottom: 2px; font-weight: 600; color: #495057;">Knox ID</label>
+                            <input type="text" id="requestLoginIdFilter" placeholder="Knox ID 입력" style="font-size: 13px; height: 30px; padding: 4px 8px; border: 1px solid #dee2e6; border-radius: 4px; width: 120px;">
+                        </div>
+                        <button class="btn btn-primary" onclick="searchRequests()" style="height: 30px; padding: 0 15px; font-size: 13px; background-color: #2f5fd3; border-color: #2f5fd3; color: white;">검색</button>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-danger" onclick="deleteSelectedRequests()" style="height: 30px; padding: 0 12px; font-size: 13px; color: white;">
+                            <i class="bi bi-trash"></i> 선택 삭제
+                        </button>
+                        <button class="btn btn-success" onclick="saveRequestPermissions()" style="height: 30px; padding: 0 12px; font-size: 13px; background-color: #28a745; border-color: #28a745; color: white;">
+                            <i class="bi bi-save"></i> 변경사항 저장
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 권한 테이블 -->
+            <div class="table-wrapper">
+                <div class="table-scroll-container" id="requestTableContainer">
+                    <table class="permission-table" id="requestPermissionTable">
+                        <thead>
+                            <tr>
+                                <th class="fixed-column-1">
+                                    <input type="checkbox" id="selectAllRequests">
+                                </th>
+                                <th class="fixed-column-2">Knox ID</th>
+                                <th class="fixed-column-3">이름</th>
+                                <th class="fixed-column-4">부서</th>
+                                <th class="fixed-column-5" style="background: #f8f9fa; width: 250px;">권한 신청란</th>
+                                <!-- 메뉴 헤더는 동적으로 추가 -->
+                            </tr>
+                        </thead>
+                        <tbody id="requestTableBody">
+                            <!-- 동적으로 생성 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 페이지네이션 -->
+            <div class="pagination-wrapper">
+                <div class="page-info">
+                    총 <span id="requestTotalCount">0</span>명 중 <span id="requestCurrentRange">0-0</span>
+                </div>
+                <div class="pagination" id="requestPagination">
+                    <!-- 동적으로 생성 -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 부서 검색 팝업 -->
+<div class="dept-search-popup" id="deptSearchPopup">
+    <div class="popup-header">
+        <h5>부서 검색</h5>
+        <button class="btn-close" onclick="closeDeptSearch()"></button>
+    </div>
+    <div class="popup-body">
+        <div class="mb-3">
+            <input type="text" class="form-control" id="deptSearchInput"
+                   placeholder="부서명 또는 부서코드 검색 (2자 이상 입력)" onkeyup="filterDeptTree()">
+        </div>
+        <div id="deptTreeContainer">
+            <!-- 부서 트리 동적 생성 -->
+        </div>
+    </div>
+</div>
+
+<!-- 로딩 오버레이 -->
+<div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner-border text-light" role="status">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+</div>
+
+
+<script>
+// 전역 변수
+let currentPage = { user: 1, dept: 1 };
+let pageSize = 50;
+let menus = [];
+let allUsers = {};
+let allDepts = {};
+let changes = { users: {}, depts: {} };
+let selectedDeptForFilter = null;
+let currentSearchMode = 'user';
+let selectedNewUserDept = null;
+let selectedNewDept = null;
+
+// 페이지 로드시 초기화
+document.addEventListener('DOMContentLoaded', function() {
+    loadMenus();
+    loadUserPermissions();
+    updateStats();
+});
+
+// 메뉴 목록 로드
+function loadMenus() {
+    // API에서 메뉴 목록 가져오기 (config/menu.py에서)
+    fetch('/api/menus')
+        .then(response => response.json())
+        .then(data => {
+            menus = data;
+            renderMenuHeaders();
+            renderSubHeaders();
+        })
+        .catch(error => {
+            console.error('메뉴 로드 오류:', error);
+        });
+}
+
+// 메뉴 헤더 렌더링
+function renderMenuHeaders() {
+    const userTable = document.querySelector('#userPermissionTable thead tr');
+    const deptTable = document.querySelector('#deptPermissionTable thead tr');
+
+    menus.forEach((menu, index) => {
+        // 각 메뉴마다 구분선 추가 (첫 번째 메뉴 제외)
+        if (index > 0) {
+            const separator = document.createElement('th');
+            separator.style.width = '1px';
+            separator.style.padding = '0';
+            separator.style.background = '#dee2e6';
+            separator.style.border = 'none';
+            separator.innerHTML = '';
+
+            userTable.appendChild(separator.cloneNode(true));
+            deptTable.appendChild(separator.cloneNode(true));
+        }
+
+        // 메뉴명을 한 번만 표시하고 읽기/쓰기 2개 열로 표시
+        const th = document.createElement('th');
+        th.setAttribute('colspan', '2');
+        th.style.borderBottom = '1px solid #dee2e6';
+        th.style.textAlign = 'center';
+        th.innerHTML = menu.name;
+
+        userTable.appendChild(th.cloneNode(true));
+        deptTable.appendChild(th.cloneNode(true));
+    });
+}
+
+// 서브 헤더 추가 (읽기/쓰기)
+function renderSubHeaders() {
+    // 사용자 테이블 서브헤더
+    const userTable = document.getElementById('userPermissionTable');
+    const userSubHeaderRow = document.createElement('tr');
+    userSubHeaderRow.innerHTML = `
+        <th class="fixed-column-1"></th>
+        <th class="fixed-column-2">Knox ID</th>
+        <th class="fixed-column-3">이름</th>
+        <th class="fixed-column-4">부서</th>
+    `;
+
+    menus.forEach((menu, index) => {
+        // 각 메뉴마다 구분선 추가 (첫 번째 제외)
+        if (index > 0) {
+            userSubHeaderRow.innerHTML += `<th style="width: 1px; padding: 0; background: #dee2e6; border: none;"></th>`;
+        }
+
+        userSubHeaderRow.innerHTML += `
+            <th style="font-size: 11px; padding: 5px; text-align: center;">읽기</th>
+            <th style="font-size: 11px; padding: 5px; text-align: center;">쓰기</th>
+        `;
+    });
+
+    const userThead = userTable.querySelector('thead');
+    userThead.appendChild(userSubHeaderRow);
+
+    // 부서 테이블 서브헤더
+    const deptTable = document.getElementById('deptPermissionTable');
+    const deptSubHeaderRow = document.createElement('tr');
+    deptSubHeaderRow.innerHTML = `
+        <th class="fixed-column-1"></th>
+        <th class="fixed-column-2">부서코드</th>
+        <th>부서명</th>
+    `;
+
+    menus.forEach((menu, index) => {
+        // 각 메뉴마다 구분선 추가 (첫 번째 제외)
+        if (index > 0) {
+            deptSubHeaderRow.innerHTML += `<th style="width: 1px; padding: 0; background: #dee2e6; border: none;"></th>`;
+        }
+
+        deptSubHeaderRow.innerHTML += `
+            <th style="font-size: 11px; padding: 5px; text-align: center;">읽기</th>
+            <th style="font-size: 11px; padding: 5px; text-align: center;">쓰기</th>
+        `;
+    });
+
+    const deptThead = deptTable.querySelector('thead');
+    deptThead.appendChild(deptSubHeaderRow);
+}
+
+// 사용자 권한 로드
+function loadUserPermissions(filters = {}) {
+    showLoading();
+
+    const params = new URLSearchParams({
+        page: currentPage.user,
+        size: pageSize,
+        ...filters
+    });
+
+    fetch(`/api/menu-roles/users?${params}`)
+        .then(response => response.json())
+        .then(data => {
+            renderUserTable(data.items);
+            renderPagination('user', data.total);
+            // document.getElementById('totalUsers').textContent = data.total;
+            hideLoading();
+        })
+        .catch(error => {
+            // 임시 데이터
+            const tempData = {
+                items: [
+                    {
+                        emp_id: 'E001234',
+                        login_id: 'hong.gildong',
+                        name: '홍길동',
+                        dept_name: '환경안전팀',
+                        permissions: {
+                            accident: 'admin',
+                            safety_instruction: 'admin',
+                            follow_sop: 'user',
+                            full_process: 'user',
+                            partners: 'viewer',
+                            change_request: 'none'
+                        }
+                    },
+                    {
+                        emp_id: 'E005678',
+                        login_id: 'kim.chulsoo',
+                        name: '김철수',
+                        dept_name: '생산1팀',
+                        permissions: {
+                            accident: 'viewer',
+                            safety_instruction: 'viewer',
+                            follow_sop: 'user',
+                            full_process: 'user',
+                            partners: 'none',
+                            change_request: 'none'
+                        }
+                    }
+                ],
+                total: 2
+            };
+            renderUserTable(tempData.items);
+            renderPagination('user', tempData.total);
+            // document.getElementById('totalUsers').textContent = tempData.total;
+            hideLoading();
+        });
+}
+
+// 사용자 테이블 렌더링
+function renderUserTable(users) {
+    const tbody = document.getElementById('userTableBody');
+    tbody.innerHTML = '';
+
+    users.forEach(user => {
+        const tr = document.createElement('tr');
+
+        // 체크박스 - login_id를 primary key로 사용
+        tr.innerHTML = `
+            <td class="fixed-column-1">
+                <input type="checkbox" class="user-select" value="${user.login_id}">
+            </td>
+            <td class="fixed-column-2">${user.login_id}</td>
+            <td class="fixed-column-3">${user.name}</td>
+            <td class="fixed-column-4">${user.dept_name || '-'}</td>
+        `;
+
+        // 메뉴별 읽기/쓰기 권한 (삭제 제거)
+        menus.forEach((menu, index) => {
+            // 각 메뉴마다 구분선 추가 (첫 번째 제외)
+            if (index > 0) {
+                const tdSeparator = document.createElement('td');
+                tdSeparator.style.width = '1px';
+                tdSeparator.style.padding = '0';
+                tdSeparator.style.background = '#dee2e6';
+                tdSeparator.style.border = 'none';
+                tr.appendChild(tdSeparator);
+            }
+
+            // 읽기 권한 드롭다운
+            const tdRead = document.createElement('td');
+            tdRead.style.textAlign = 'center';
+            const readLevel = user.permissions?.[menu.code]?.read_level || 0;
+            tdRead.innerHTML = `
+                <select class="role-select" style="text-align: center;"
+                        data-user="${user.login_id}"
+                        data-menu="${menu.code}"
+                        data-type="read"
+                        onchange="trackPermissionChange('user', '${user.login_id}', '${menu.code}', 'read', this.value)">
+                    <option value="0" ${readLevel === 0 ? 'selected' : ''}>없음</option>
+                    <option value="1" ${readLevel === 1 ? 'selected' : ''}>본인</option>
+                    <option value="2" ${readLevel === 2 ? 'selected' : ''}>부서</option>
+                    <option value="3" ${readLevel === 3 ? 'selected' : ''}>전체</option>
+                </select>
+            `;
+            tr.appendChild(tdRead);
+
+            // 쓰기 권한 드롭다운
+            const tdWrite = document.createElement('td');
+            tdWrite.style.textAlign = 'center';
+            const writeLevel = user.permissions?.[menu.code]?.write_level || 0;
+            tdWrite.innerHTML = `
+                <select class="role-select" style="text-align: center;"
+                        data-user="${user.login_id}"
+                        data-menu="${menu.code}"
+                        data-type="write"
+                        onchange="trackPermissionChange('user', '${user.login_id}', '${menu.code}', 'write', this.value)">
+                    <option value="0" ${writeLevel === 0 ? 'selected' : ''}>없음</option>
+                    <option value="1" ${writeLevel === 1 ? 'selected' : ''}>본인</option>
+                    <option value="2" ${writeLevel === 2 ? 'selected' : ''}>부서</option>
+                    <option value="3" ${writeLevel === 3 ? 'selected' : ''}>전체</option>
+                </select>
+            `;
+            tr.appendChild(tdWrite);
+        });
+
+        tbody.appendChild(tr);
+    });
+}
+
+// 부서 검색 팝업 열기
+function openDeptSearch(mode) {
+    currentSearchMode = mode;
+    document.getElementById('deptSearchPopup').classList.add('active');
+
+    // 검색 입력 초기화
+    document.getElementById('deptSearchInput').value = '';
+
+    // 초기에는 검색 안내만 표시
+    loadDeptTree(true);
+}
+
+// 부서 검색 팝업 닫기
+function closeDeptSearch() {
+    document.getElementById('deptSearchPopup').classList.remove('active');
+    // 팝업 닫을 때 상태 초기화
+    deptTreeLoaded = false;
+}
+
+// 부서 트리 로드 (lazy loading)
+function loadDeptTree(initialLoad = false) {
+    // 초기 로드 시에는 빈 상태로 시작
+    if (initialLoad) {
+        const container = document.getElementById('deptTreeContainer');
+        container.innerHTML = '<div style="text-align: center; color: #999; padding: 20px;">부서명을 검색하세요</div>';
+        return;
+    }
+
+    // 실제 데이터 로드
+    showLoading();
+    fetch('/api/dept-permissions/tree')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                renderDeptTree(data.data);
+            }
+            hideLoading();
+        })
+        .catch(error => {
+            hideLoading();
+            // 임시 데이터 (새로운 구조)
+            const tempTree = [
+                {
+                    sso_dept_id: 'DID001',
+                    dept_code: 'D001',
+                    dept_name: '제조본부',
+                    dept_full_path: 'D001',
+                    dept_level: 1,
+                    children: [
+                        {
+                            sso_dept_id: 'DID001-1',
+                            dept_code: 'D001-1',
+                            dept_name: '제1공장',
+                            dept_full_path: 'D001|D001-1',
+                            dept_level: 2,
+                            children: [
+                                {
+                                    sso_dept_id: 'DID001-1-1',
+                                    dept_code: 'D001-1-1',
+                                    dept_name: '생산1팀',
+                                    dept_full_path: 'D001|D001-1|D001-1-1',
+                                    dept_level: 3,
+                                    children: []
+                                },
+                                {
+                                    sso_dept_id: 'DID001-1-2',
+                                    dept_code: 'D001-1-2',
+                                    dept_name: '생산2팀',
+                                    dept_full_path: 'D001|D001-1|D001-1-2',
+                                    dept_level: 3,
+                                    children: []
+                                }
+                            ]
+                        },
+                        {
+                            sso_dept_id: 'DID001-2',
+                            dept_code: 'D001-2',
+                            dept_name: '제2공장',
+                            dept_full_path: 'D001|D001-2',
+                            dept_level: 2,
+                            children: [
+                                {
+                                    sso_dept_id: 'DID001-2-1',
+                                    dept_code: 'D001-2-1',
+                                    dept_name: '생산3팀',
+                                    dept_full_path: 'D001|D001-2|D001-2-1',
+                                    dept_level: 3,
+                                    children: []
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    sso_dept_id: 'DID002',
+                    dept_code: 'D002',
+                    dept_name: '경영지원본부',
+                    dept_full_path: 'D002',
+                    dept_level: 1,
+                    children: [
+                        {
+                            sso_dept_id: 'DID002-1',
+                            dept_code: 'D002-1',
+                            dept_name: '안전환경실',
+                            dept_full_path: 'D002|D002-1',
+                            dept_level: 2,
+                            children: [
+                                {
+                                    sso_dept_id: 'DID002-1-1',
+                                    dept_code: 'D002-1-1',
+                                    dept_name: '환경안전팀',
+                                    dept_full_path: 'D002|D002-1|D002-1-1',
+                                    dept_level: 3,
+                                    children: []
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ];
+            renderDeptTree(tempTree);
+        });
+}
+
+// 부서 트리 렌더링
+function renderDeptTree(depts, container = null, level = 0) {
+    if (!container) {
+        container = document.getElementById('deptTreeContainer');
+        container.innerHTML = '';
+    }
+
+    const ul = document.createElement('ul');
+    ul.className = 'dept-tree';
+    if (level > 0) ul.className += ' dept-children';
+
+    depts.forEach(dept => {
+        const li = document.createElement('li');
+        const hasChildren = dept.children && dept.children.length > 0;
+
+        const itemDiv = document.createElement('div');
+        itemDiv.className = 'dept-item';
+        itemDiv.dataset.ssoDeptId = dept.sso_dept_id;
+        itemDiv.dataset.deptCode = dept.dept_code;
+        itemDiv.dataset.deptName = dept.dept_name;
+        itemDiv.dataset.deptFullPath = dept.dept_full_path;
+
+        // 부서명 표시 (SSO ID와 dept_code 함께 표시)
+        itemDiv.innerHTML = `
+            ${hasChildren ? '<i class="bi bi-chevron-right dept-icon"></i>' : '<i class="bi bi-dash"></i>'}
+            <span style="flex: 1;">
+                ${dept.dept_name}
+                <small style="color: #888; margin-left: 8px;">
+                    [${dept.dept_code}]
+                </small>
+            </span>
+            <small style="color: #aaa; font-size: 0.8em;">
+                ${dept.sso_dept_id}
+            </small>
+        `;
+
+        itemDiv.onclick = function(e) {
+            if (e.target.classList.contains('dept-icon')) {
+                // 토글 확장
+                e.target.classList.toggle('expanded');
+                const childrenUl = li.querySelector('.dept-children');
+                if (childrenUl) {
+                    childrenUl.style.display = childrenUl.style.display === 'none' ? 'block' : 'none';
+                }
+            } else {
+                // 부서 선택 (SSO dept_id와 dept_code 모두 전달)
+                selectDept(dept.sso_dept_id, dept.dept_code, dept.dept_name, dept.dept_full_path);
+            }
+        };
+
+        li.appendChild(itemDiv);
+
+        if (hasChildren) {
+            renderDeptTree(dept.children, li, level + 1);
+        }
+
+        ul.appendChild(li);
+    });
+
+    container.appendChild(ul);
+}
+
+// 부서 선택 (SSO deptid와 dept_code 모두 처리)
+function selectDept(ssoDeptId, deptCode, deptName, deptFullPath) {
+    const deptInfo = {
+        sso_dept_id: ssoDeptId,
+        dept_code: deptCode,
+        dept_name: deptName,
+        dept_full_path: deptFullPath
+    };
+
+    if (currentSearchMode === 'user') {
+        document.getElementById('userDeptFilter').value = deptName;
+        selectedDeptForFilter = deptInfo;
+    } else if (currentSearchMode === 'newUser') {
+        document.getElementById('newUserDept').value = deptName;
+        selectedNewUserDept = deptInfo;
+    } else if (currentSearchMode === 'newDept') {
+        document.getElementById('newDeptName').value = deptName;
+        selectedNewDept = deptInfo;
+    }
+
+    closeDeptSearch();
+}
+
+// 부서 트리 필터링
+let deptTreeLoaded = false;
+function filterDeptTree() {
+    const searchText = document.getElementById('deptSearchInput').value.trim();
+
+    // 검색어가 2자 이상일 때만 검색
+    if (searchText.length < 2) {
+        if (searchText.length === 0 && deptTreeLoaded) {
+            // 검색어를 지우면 초기 상태로
+            const container = document.getElementById('deptTreeContainer');
+            container.innerHTML = '<div style="text-align: center; color: #999; padding: 20px;">부서명을 검색하세요</div>';
+            deptTreeLoaded = false;
+        }
+        return;
+    }
+
+    // 처음 검색 시 데이터 로드
+    if (!deptTreeLoaded) {
+        loadDeptTree(false);
+        deptTreeLoaded = true;
+        // 데이터 로드 후 필터링 적용 (딜레이 후)
+        setTimeout(() => filterDeptTreeItems(searchText), 500);
+    } else {
+        // 이미 로드된 상태에서는 바로 필터링
+        filterDeptTreeItems(searchText);
+    }
+}
+
+function filterDeptTreeItems(searchText) {
+    const searchLower = searchText.toLowerCase();
+    const items = document.querySelectorAll('.dept-item');
+
+    items.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        const li = item.parentElement;
+
+        if (text.includes(searchLower)) {
+            li.style.display = '';
+            // 부모 노드들도 표시
+            let parent = li.parentElement;
+            while (parent && parent.id !== 'deptTreeContainer') {
+                if (parent.tagName === 'LI') {
+                    parent.style.display = '';
+                }
+                parent = parent.parentElement;
+            }
+        } else {
+            li.style.display = 'none';
+        }
+    });
+}
+
+// 사용자 검색 (테이블에서 필터링)
+function searchUsers() {
+    const loginIdFilter = document.getElementById('userLoginIdFilter').value.trim().toLowerCase();
+    const nameFilter = document.getElementById('userNameFilter').value.trim().toLowerCase();
+    const deptFilter = document.getElementById('userDeptFilter').value.trim().toLowerCase();
+
+    const rows = document.querySelectorAll('#userTableBody tr');
+
+    rows.forEach(row => {
+        const knoxId = row.querySelector('.fixed-column-2')?.textContent.toLowerCase() || '';
+        const name = row.querySelector('.fixed-column-3')?.textContent.toLowerCase() || '';
+        const dept = row.querySelector('.fixed-column-4')?.textContent.toLowerCase() || '';
+
+        let show = true;
+
+        if (loginIdFilter && !knoxId.includes(loginIdFilter)) {
+            show = false;
+        }
+        if (nameFilter && !name.includes(nameFilter)) {
+            show = false;
+        }
+        if (deptFilter && !dept.includes(deptFilter)) {
+            show = false;
+        }
+
+        row.style.display = show ? '' : 'none';
+    });
+}
+
+// 부서 검색 (테이블에서 필터링)
+function searchDepts() {
+    const deptNameFilter = document.getElementById('deptNameFilter').value.trim().toLowerCase();
+
+    const rows = document.querySelectorAll('#deptTableBody tr');
+
+    rows.forEach(row => {
+        const deptName = row.querySelector('td:nth-child(3)')?.textContent.toLowerCase() || '';
+
+        const show = !deptNameFilter || deptName.includes(deptNameFilter);
+        row.style.display = show ? '' : 'none';
+    });
+}
+
+// 부서 권한 로드
+function loadDeptPermissions(filters = {}) {
+    showLoading();
+
+    const params = new URLSearchParams({
+        page: currentPage.dept,
+        size: pageSize,
+        ...filters
+    });
+
+    fetch(`/api/menu-roles/departments?${params}`)
+        .then(response => response.json())
+        .then(data => {
+            renderDeptTable(data.items);
+            renderPagination('dept', data.total);
+            // document.getElementById('totalDepts').textContent = data.total;
+            hideLoading();
+        })
+        .catch(error => {
+            // 임시 데이터
+            const tempData = {
+                items: [
+                    {
+                        dept_id: 'D002-1-1',
+                        dept_name: '환경안전팀',
+                        parent_name: '안전환경실',
+                        level: 3,
+                        member_count: 12,
+                        permissions: {
+                            accident: 'admin',
+                            safety_instruction: 'admin',
+                            follow_sop: 'user',
+                            full_process: 'user',
+                            partners: 'user',
+                            change_request: 'viewer'
+                        }
+                    }
+                ],
+                total: 1
+            };
+            renderDeptTable(tempData.items);
+            renderPagination('dept', tempData.total);
+            // document.getElementById('totalDepts').textContent = tempData.total;
+            hideLoading();
+        });
+}
+
+// 부서 테이블 렌더링 (SSO deptid 포함)
+function renderDeptTable(depts) {
+    const tbody = document.getElementById('deptTableBody');
+    tbody.innerHTML = '';
+
+    depts.forEach(dept => {
+        const tr = document.createElement('tr');
+
+        // 데이터 속성 추가 (하위부서 적용 시 사용)
+        tr.dataset.deptCode = dept.dept_code;
+        tr.dataset.deptFullPath = dept.dept_full_path;
+
+        tr.innerHTML = `
+            <td class="fixed-column-1">
+                <input type="checkbox" class="dept-select" value="${dept.sso_dept_id}">
+            </td>
+            <td class="fixed-column-2" title="SSO: ${dept.sso_dept_id}">
+                ${dept.dept_code}
+                <small style="color: #999; display: block; font-size: 0.8em;">
+                    ${dept.sso_dept_id}
+                </small>
+            </td>
+            <td>${dept.dept_name}</td>
+        `;
+
+        // 메뉴별 읽기/쓰기 권한 (삭제 제거)
+        menus.forEach((menu, index) => {
+            // 각 메뉴마다 구분선 추가 (첫 번째 제외)
+            if (index > 0) {
+                const tdSeparator = document.createElement('td');
+                tdSeparator.style.width = '1px';
+                tdSeparator.style.padding = '0';
+                tdSeparator.style.background = '#dee2e6';
+                tdSeparator.style.border = 'none';
+                tr.appendChild(tdSeparator);
+            }
+
+            // 읽기 권한 드롭다운
+            const tdRead = document.createElement('td');
+            tdRead.style.textAlign = 'center';
+            const readLevel = dept.permissions?.[menu.code]?.read_level || 0;
+            tdRead.innerHTML = `
+                <select class="role-select" style="text-align: center;"
+                        data-dept="${dept.sso_dept_id}"
+                        data-menu="${menu.code}"
+                        data-type="read"
+                        onchange="trackPermissionChange('dept', '${dept.sso_dept_id}', '${menu.code}', 'read', this.value)">
+                    <option value="0" ${readLevel === 0 ? 'selected' : ''}>없음</option>
+                    <option value="1" ${readLevel === 1 ? 'selected' : ''}>본인</option>
+                    <option value="2" ${readLevel === 2 ? 'selected' : ''}>부서</option>
+                    <option value="3" ${readLevel === 3 ? 'selected' : ''}>전체</option>
+                </select>
+            `;
+            tr.appendChild(tdRead);
+
+            // 쓰기 권한 드롭다운
+            const tdWrite = document.createElement('td');
+            tdWrite.style.textAlign = 'center';
+            const writeLevel = dept.permissions?.[menu.code]?.write_level || 0;
+            tdWrite.innerHTML = `
+                <select class="role-select" style="text-align: center;"
+                        data-dept="${dept.sso_dept_id}"
+                        data-menu="${menu.code}"
+                        data-type="write"
+                        onchange="trackPermissionChange('dept', '${dept.sso_dept_id}', '${menu.code}', 'write', this.value)">
+                    <option value="0" ${writeLevel === 0 ? 'selected' : ''}>없음</option>
+                    <option value="1" ${writeLevel === 1 ? 'selected' : ''}>본인</option>
+                    <option value="2" ${writeLevel === 2 ? 'selected' : ''}>부서</option>
+                    <option value="3" ${writeLevel === 3 ? 'selected' : ''}>전체</option>
+                </select>
+            `;
+            tr.appendChild(tdWrite);
+        });
+
+        tbody.appendChild(tr);
+    });
+}
+
+// 변경사항 추적
+// 기존 trackChange 함수를 호환성을 위해 남겨둠
+function trackChange(type, id, menu, value) {
+    trackPermissionChange(type, id, menu, 'read', value);
+}
+
+// 새로운 권한 변경 추적 함수 (읽기/쓰기 분리)
+function trackPermissionChange(type, id, menu, permType, value) {
+    if (type === 'user') {
+        if (!changes.users[id]) changes.users[id] = {};
+        if (!changes.users[id][menu]) changes.users[id][menu] = {};
+
+        if (permType === 'read') {
+            changes.users[id][menu].read_level = parseInt(value);
+        } else if (permType === 'write') {
+            changes.users[id][menu].write_level = parseInt(value);
+        }
+    } else {
+        if (!changes.depts[id]) changes.depts[id] = {};
+        if (!changes.depts[id][menu]) changes.depts[id][menu] = {};
+
+        if (permType === 'read') {
+            changes.depts[id][menu].read_level = parseInt(value);
+        } else if (permType === 'write') {
+            changes.depts[id][menu].write_level = parseInt(value);
+        }
+    }
+
+    // 변경사항 표시
+    updateChangeIndicator();
+}
+
+// 변경사항 표시 업데이트
+function updateChangeIndicator() {
+    const userChanges = Object.keys(changes.users).length;
+    const deptChanges = Object.keys(changes.depts).length;
+
+    if (userChanges > 0 || deptChanges > 0) {
+        // 저장 버튼 강조
+        document.querySelectorAll('.btn-success').forEach(btn => {
+            btn.classList.add('pulse');
+        });
+    }
+}
+
+// 페이지네이션 렌더링
+function renderPagination(type, total) {
+    const currentPageNum = currentPage[type];
+    const totalPages = Math.ceil(total / pageSize);
+    const container = document.getElementById(`${type}Pagination`);
+
+    container.innerHTML = '';
+
+    // 이전 버튼
+    if (currentPageNum > 1) {
+        const prev = document.createElement('div');
+        prev.className = 'page-item';
+        prev.innerHTML = '&laquo;';
+        prev.onclick = () => changePage(type, currentPageNum - 1);
+        container.appendChild(prev);
+    }
+
+    // 페이지 번호
+    let start = Math.max(1, currentPageNum - 2);
+    let end = Math.min(totalPages, start + 4);
+
+    for (let i = start; i <= end; i++) {
+        const page = document.createElement('div');
+        page.className = 'page-item';
+        if (i === currentPageNum) page.classList.add('active');
+        page.textContent = i;
+        page.onclick = () => changePage(type, i);
+        container.appendChild(page);
+    }
+
+    // 다음 버튼
+    if (currentPageNum < totalPages) {
+        const next = document.createElement('div');
+        next.className = 'page-item';
+        next.innerHTML = '&raquo;';
+        next.onclick = () => changePage(type, currentPageNum + 1);
+        container.appendChild(next);
+    }
+
+    // 현재 범위 업데이트
+    const startIdx = (currentPageNum - 1) * pageSize + 1;
+    const endIdx = Math.min(currentPageNum * pageSize, total);
+    document.getElementById(`${type}CurrentRange`).textContent = `${startIdx}-${endIdx}`;
+    document.getElementById(`${type}TotalCount`).textContent = total;
+}
+
+// 페이지 변경
+function changePage(type, page) {
+    currentPage[type] = page;
+    if (type === 'user') {
+        loadUserPermissions();
+    } else {
+        loadDeptPermissions();
+    }
+}
+
+// 사용자 권한 저장
+function saveUserPermissions() {
+    if (Object.keys(changes.users).length === 0) {
+        alert('변경사항이 없습니다.');
+        return;
+    }
+
+    showLoading();
+
+    const payload = {
+        changes: Object.entries(changes.users).flatMap(([userId, menus]) =>
+            Object.entries(menus).map(([menu, perms]) => ({
+                login_id: userId,
+                menu_code: menu,
+                read_level: perms.read_level || 0,
+                write_level: perms.write_level || 0
+            }))
+        )
+    };
+
+    fetch('/api/menu-roles/batch-update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(response => response.json())
+    .then(data => {
+        alert(`${data.count}개 권한이 업데이트되었습니다.`);
+        changes.users = {};
+        loadUserPermissions();
+        hideLoading();
+    })
+    .catch(error => {
+        alert('저장 중 오류가 발생했습니다.');
+        hideLoading();
+    });
+}
+
+// 사용자 추가 - 공통 팝업 사용
+function addNewUser() {
+    const popupUrl = '/search-popup?type=person&field=permission_user&callback=handlePermissionUserSelection';
+    const popupWindow = window.open(popupUrl, 'searchPopup', 'width=800,height=600,scrollbars=yes');
+
+    // 팝업에서 선택 완료시 처리
+    window.handlePermissionUserSelection = function(data) {
+        console.log('선택된 사용자 전체 데이터:', data);
+
+        // SearchPopupService의 person 타입은 employee_name, employee_id, department_name 필드 사용
+        const knoxId = data.employee_id || data.emp_id;
+        const name = data.employee_name || data.name;
+        const deptName = data.department_name || data.dept_name || '';
+
+        console.log('처리할 데이터:', { knoxId, name, deptName });
+
+        if (knoxId && name) {
+            addUserToTable(knoxId, name, deptName);
+        } else {
+            console.error('필수 데이터 누락 - employee_id:', data.employee_id, 'employee_name:', data.employee_name);
+            alert('사용자 정보가 올바르지 않습니다.');
+        }
+    };
+}
+
+// 테이블에 사용자 추가
+function addUserToTable(knoxId, name, deptName) {
+    console.log('addUserToTable 호출:', { knoxId, name, deptName });
+
+    // menus 변수 확인
+    if (!menus || menus.length === 0) {
+        console.error('메뉴 목록이 없습니다. loadMenus 실행 필요');
+        alert('메뉴 정보를 먼저 불러와야 합니다.');
+        return;
+    }
+
+    // 중복 체크
+    const existing = document.querySelector(`#userTableBody input[value="${knoxId}"]`);
+    if (existing) {
+        alert('이미 추가된 사용자입니다.');
+        return;
+    }
+
+    // 테이블에 새 행 추가
+    const tbody = document.getElementById('userTableBody');
+    const tr = document.createElement('tr');
+
+    tr.innerHTML = `
+        <td class="fixed-column-1">
+            <input type="checkbox" class="user-select" value="${knoxId}">
+        </td>
+        <td class="fixed-column-2">${knoxId}</td>
+        <td class="fixed-column-3">${name}</td>
+        <td class="fixed-column-4">${deptName || '-'}</td>
+    `;
+
+    // 각 메뉴에 대한 기본 권한 (0: 없음)
+    menus.forEach((menu, index) => {
+        if (index > 0) {
+            const tdSeparator = document.createElement('td');
+            tdSeparator.style.width = '1px';
+            tdSeparator.style.padding = '0';
+            tdSeparator.style.background = '#dee2e6';
+            tdSeparator.style.border = 'none';
+            tr.appendChild(tdSeparator);
+        }
+
+        // 읽기 권한
+        const tdRead = document.createElement('td');
+        tdRead.style.textAlign = 'center';
+        tdRead.innerHTML = `
+            <select class="role-select" style="text-align: center;"
+                    data-user="${knoxId}"
+                    data-menu="${menu.code}"
+                    data-type="read"
+                    onchange="trackPermissionChange('user', '${knoxId}', '${menu.code}', 'read', this.value)">
+                <option value="0" selected>없음</option>
+                <option value="1">본인</option>
+                <option value="2">부서</option>
+                <option value="3">전체</option>
+            </select>
+        `;
+        tr.appendChild(tdRead);
+
+        // 쓰기 권한
+        const tdWrite = document.createElement('td');
+        tdWrite.style.textAlign = 'center';
+        tdWrite.innerHTML = `
+            <select class="role-select" style="text-align: center;"
+                    data-user="${knoxId}"
+                    data-menu="${menu.code}"
+                    data-type="write"
+                    onchange="trackPermissionChange('user', '${knoxId}', '${menu.code}', 'write', this.value)">
+                <option value="0" selected>없음</option>
+                <option value="1">본인</option>
+                <option value="2">부서</option>
+                <option value="3">전체</option>
+            </select>
+        `;
+        tr.appendChild(tdWrite);
+    });
+
+    console.log('행 추가 직전 - tbody:', tbody);
+    console.log('행 추가 직전 - tr:', tr);
+    console.log('tr.innerHTML:', tr.innerHTML);
+
+    tbody.insertBefore(tr, tbody.firstChild); // 맨 위에 추가
+
+    console.log('행 추가 완료');
+    console.log('추가 후 tbody 첫 번째 행:', tbody.firstChild);
+}
+
+// 선택한 사용자 삭제
+function deleteSelectedUsers() {
+    const selected = Array.from(document.querySelectorAll('.user-select:checked'));
+
+    if (selected.length === 0) {
+        alert('삭제할 사용자를 선택해주세요.');
+        return;
+    }
+
+    if (confirm(`선택한 ${selected.length}명의 사용자를 삭제하시겠습니까?`)) {
+        selected.forEach(checkbox => {
+            const row = checkbox.closest('tr');
+            row.remove();
+        });
+    }
+}
+
+// 부서 추가 - 공통 팝업 사용
+function addNewDept() {
+    const popupUrl = '/search-popup?type=department&field=permission_dept&callback=handlePermissionDeptSelection';
+    const popupWindow = window.open(popupUrl, 'searchPopup', 'width=800,height=600,scrollbars=yes');
+
+    // 팝업에서 선택 완료시 처리
+    window.handlePermissionDeptSelection = function(data) {
+        console.log('선택된 부서 전체 데이터:', data);
+
+        // SearchPopupService의 department 타입은 dept_name, dept_code 필드 사용
+        const deptId = data.dept_code;  // dept_code를 ID로 사용
+        const deptCode = data.dept_code;
+        const deptName = data.dept_name;
+
+        console.log('처리할 부서 데이터:', { deptId, deptCode, deptName });
+
+        if (deptCode && deptName) {
+            addDeptToTable(deptId, deptCode, deptName);
+        } else {
+            console.error('필수 데이터 누락 - dept_code:', data.dept_code, 'dept_name:', data.dept_name);
+            alert('부서 정보가 올바르지 않습니다.');
+        }
+    };
+}
+
+// 테이블에 부서 추가
+function addDeptToTable(deptId, deptCode, deptName) {
+    // 중복 체크
+    const existing = document.querySelector(`#deptTableBody input[value="${deptId}"]`);
+    if (existing) {
+        alert('이미 추가된 부서입니다.');
+        return;
+    }
+
+    // 테이블에 새 행 추가
+    const tbody = document.getElementById('deptTableBody');
+    const tr = document.createElement('tr');
+
+    tr.dataset.deptCode = deptCode;
+    tr.dataset.deptId = deptId;
+
+    tr.innerHTML = `
+        <td class="fixed-column-1">
+            <input type="checkbox" class="dept-select" value="${deptId}">
+        </td>
+        <td class="fixed-column-2" title="SSO: ${deptId}">
+            ${deptCode}
+            <small style="color: #999; display: block; font-size: 0.8em;">
+                ${deptId}
+            </small>
+        </td>
+        <td>${deptName}</td>
+    `;
+
+    // 각 메뉴에 대한 기본 권한 (0: 없음)
+    menus.forEach((menu, index) => {
+        if (index > 0) {
+            const tdSeparator = document.createElement('td');
+            tdSeparator.style.width = '1px';
+            tdSeparator.style.padding = '0';
+            tdSeparator.style.background = '#dee2e6';
+            tdSeparator.style.border = 'none';
+            tr.appendChild(tdSeparator);
+        }
+
+        // 읽기 권한
+        const tdRead = document.createElement('td');
+        tdRead.style.textAlign = 'center';
+        tdRead.innerHTML = `
+            <select class="role-select" style="text-align: center;"
+                    data-dept="${deptId}"
+                    data-menu="${menu.code}"
+                    data-type="read"
+                    onchange="trackPermissionChange('dept', '${deptId}', '${menu.code}', 'read', this.value)">
+                <option value="0" selected>없음</option>
+                <option value="1">본인</option>
+                <option value="2">부서</option>
+                <option value="3">전체</option>
+            </select>
+        `;
+        tr.appendChild(tdRead);
+
+        // 쓰기 권한
+        const tdWrite = document.createElement('td');
+        tdWrite.style.textAlign = 'center';
+        tdWrite.innerHTML = `
+            <select class="role-select" style="text-align: center;"
+                    data-dept="${deptId}"
+                    data-menu="${menu.code}"
+                    data-type="write"
+                    onchange="trackPermissionChange('dept', '${deptId}', '${menu.code}', 'write', this.value)">
+                <option value="0" selected>없음</option>
+                <option value="1">본인</option>
+                <option value="2">부서</option>
+                <option value="3">전체</option>
+            </select>
+        `;
+        tr.appendChild(tdWrite);
+    });
+
+    tbody.insertBefore(tr, tbody.firstChild); // 맨 위에 추가
+}
+
+// 선택한 부서 삭제
+function deleteSelectedDepts() {
+    const selected = Array.from(document.querySelectorAll('.dept-select:checked'));
+
+    if (selected.length === 0) {
+        alert('삭제할 부서를 선택해주세요.');
+        return;
+    }
+
+    if (confirm(`선택한 ${selected.length}개 부서를 삭제하시겠습니까?`)) {
+        selected.forEach(checkbox => {
+            const row = checkbox.closest('tr');
+            row.remove();
+        });
+    }
+}
+
+// 부서 권한 저장
+function saveDeptPermissions() {
+    if (Object.keys(changes.depts).length === 0) {
+        alert('변경사항이 없습니다.');
+        return;
+    }
+
+    showLoading();
+
+    const payload = {
+        changes: Object.entries(changes.depts).flatMap(([deptId, menus]) =>
+            Object.entries(menus).map(([menu, perms]) => ({
+                dept_id: deptId,
+                menu_code: menu,
+                read_level: perms.read_level || 0,
+                write_level: perms.write_level || 0
+            }))
+        )
+    };
+
+    fetch('/api/dept-roles/batch-update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(response => response.json())
+    .then(data => {
+        alert(`${data.count}개 부서 권한이 업데이트되었습니다.`);
+        changes.depts = {};
+        loadDeptPermissions();
+        hideLoading();
+    })
+    .catch(error => {
+        alert('저장 중 오류가 발생했습니다.');
+        hideLoading();
+    });
+}
+
+// 하위부서 일괄적용 (dept_full_path 기반)
+function applyToSubDepts() {
+    const selected = Array.from(document.querySelectorAll('.dept-select:checked'))
+        .map(cb => {
+            // 체크박스 value는 sso_dept_id
+            const row = cb.closest('tr');
+            return {
+                sso_dept_id: cb.value,
+                dept_code: row.dataset.deptCode,
+                dept_full_path: row.dataset.deptFullPath
+            };
+        });
+
+    if (selected.length === 0) {
+        alert('부서를 선택해주세요.');
+        return;
+    }
+
+    if (!confirm(`선택한 ${selected.length}개 부서의 권한을 모든 하위부서에 적용하시겠습니까?\n\n하위부서는 dept_full_path 기준으로 자동 탐색됩니다.`)) {
+        return;
+    }
+
+    showLoading();
+
+    // 선택된 부서들의 권한 수집
+    const permissions = {};
+    selected.forEach(dept => {
+        const deptPermissions = {};
+        menus.forEach(menu => {
+            const select = document.querySelector(`select[data-dept="${dept.sso_dept_id}"][data-menu="${menu.code}"]`);
+            if (select) {
+                deptPermissions[menu.code] = select.value;
+            }
+        });
+        permissions[dept.sso_dept_id] = deptPermissions;
+    });
+
+    fetch('/api/dept-permissions/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            departments: selected,
+            permissions: permissions,
+            apply_to_children: true
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`${data.affected_count}개 권한이 적용되었습니다.`);
+            loadDeptPermissions();
+        } else {
+            alert('적용 중 오류: ' + data.error);
+        }
+        hideLoading();
+    })
+    .catch(error => {
+        alert('적용 중 오류가 발생했습니다.');
+        hideLoading();
+    });
+}
+
+
+// 필터 초기화 (제거 - 개별 검색 버튼만 사용)
+function resetFilters(type) {
+    if (type === 'user') {
+        document.getElementById('userLoginIdFilter').value = '';
+        document.getElementById('userNameFilter').value = '';
+        document.getElementById('userDeptFilter').value = '';
+        selectedDeptForFilter = null;
+        loadUserPermissions();
+    } else {
+        document.getElementById('deptNameFilter').value = '';
+        loadDeptPermissions();
+    }
+}
+
+// 일괄 수정
+function batchUpdateUsers() {
+    const selected = Array.from(document.querySelectorAll('.user-select:checked'))
+        .map(cb => cb.value);
+
+    if (selected.length === 0) {
+        alert('사용자를 선택해주세요.');
+        return;
+    }
+
+    const menu = prompt('메뉴 코드 입력 (accident, safety_instruction, follow_sop 등):');
+    if (!menu) return;
+
+    const role = prompt('권한 입력 (none, viewer, user, admin, super_admin):');
+    if (!role) return;
+
+    selected.forEach(userId => {
+        const select = document.querySelector(`select[data-user="${userId}"][data-menu="${menu}"]`);
+        if (select) {
+            select.value = role;
+            trackChange('user', userId, menu, role);
+        }
+    });
+}
+
+// 부서 일괄 수정
+function batchUpdateDepts() {
+    const selected = Array.from(document.querySelectorAll('.dept-select:checked'))
+        .map(cb => cb.value);
+
+    if (selected.length === 0) {
+        alert('부서를 선택해주세요.');
+        return;
+    }
+
+    const menu = prompt('메뉴 코드 입력 (accident, safety_instruction, follow_sop 등):');
+    if (!menu) return;
+
+    const role = prompt('권한 입력 (none, viewer, user, admin, super_admin):');
+    if (!role) return;
+
+    selected.forEach(deptId => {
+        const select = document.querySelector(`select[data-dept="${deptId}"][data-menu="${menu}"]`);
+        if (select) {
+            select.value = role;
+            trackChange('dept', deptId, menu, role);
+        }
+    });
+}
+
+// 전체 선택
+document.getElementById('selectAllUsers').addEventListener('change', function() {
+    document.querySelectorAll('.user-select').forEach(cb => {
+        cb.checked = this.checked;
+    });
+});
+
+document.getElementById('selectAllDepts').addEventListener('change', function() {
+    document.querySelectorAll('.dept-select').forEach(cb => {
+        cb.checked = this.checked;
+    });
+});
+
+// 권한 신청 탭 전체 선택
+setTimeout(() => {
+    const selectAllRequests = document.getElementById('selectAllRequests');
+    if (selectAllRequests) {
+        selectAllRequests.addEventListener('change', function() {
+            document.querySelectorAll('.request-select').forEach(cb => {
+                cb.checked = this.checked;
+            });
+        });
+    }
+}, 100);
+
+// 통계 업데이트
+function updateStats() {
+    // API에서 통계 가져오기
+    fetch('/api/menu-roles/stats')
+        .then(response => response.json())
+        .then(data => {
+            // document.getElementById('totalUsers').textContent = data.users || 0;
+            // document.getElementById('totalDepts').textContent = data.depts || 0;
+            // document.getElementById('totalMenus').textContent = data.menus || 0;
+        })
+        .catch(error => {
+            // 기본값
+        });
+}
+
+// 로딩 표시
+function showLoading() {
+    document.getElementById('loadingOverlay').classList.add('active');
+}
+
+// 로딩 숨김
+function hideLoading() {
+    document.getElementById('loadingOverlay').classList.remove('active');
+}
+
+// 탭 변경시 데이터 로드
+document.querySelectorAll('.nav-link').forEach(tab => {
+    tab.addEventListener('shown.bs.tab', function(e) {
+        const target = e.target.getAttribute('href');
+        if (target === '#deptPermissions') {
+            loadDeptPermissions();
+        } else if (target === '#permissionRequests') {
+            loadPermissionRequests();
+        }
+    });
+});
+
+// ===================== 권한 신청 관련 함수 =====================
+let currentRequestPage = 1;
+let requestPageSize = 50;
+let pendingRequests = {};
+let requestChanges = {};
+
+// 권한 신청 목록 로드 (pending 상태만)
+function loadPermissionRequests(page = 1) {
+    currentRequestPage = page;
+
+    showLoading();
+    fetch(`/api/permission-requests?status=pending&page=${page}&size=${requestPageSize}`)
+        .then(response => response.json())
+        .then(data => {
+            pendingRequests = {};
+            (data.data || []).forEach(req => {
+                if (!pendingRequests[req.login_id]) {
+                    pendingRequests[req.login_id] = [];
+                }
+                pendingRequests[req.login_id].push(req);
+            });
+            renderPermissionRequestsTable();
+            renderRequestPagination(data.total || 0);
+            updateRequestCount();
+            hideLoading();
+        })
+        .catch(error => {
+            console.error('Error loading permission requests:', error);
+            hideLoading();
+        });
+}
+
+// 권한 신청 검색
+function searchRequests() {
+    const deptFilter = document.getElementById('requestDeptFilter').value.toLowerCase();
+    const nameFilter = document.getElementById('requestNameFilter').value.toLowerCase();
+    const loginIdFilter = document.getElementById('requestLoginIdFilter').value.toLowerCase();
+
+    showLoading();
+    fetch(`/api/permission-requests?status=pending&page=1&size=1000`)
+        .then(response => response.json())
+        .then(data => {
+            pendingRequests = {};
+            (data.data || []).forEach(req => {
+                const matchDept = !deptFilter || (req.dept_name && req.dept_name.toLowerCase().includes(deptFilter));
+                const matchName = !nameFilter || (req.user_name && req.user_name.toLowerCase().includes(nameFilter));
+                const matchLoginId = !loginIdFilter || (req.login_id && req.login_id.toLowerCase().includes(loginIdFilter));
+
+                if (matchDept && matchName && matchLoginId) {
+                    if (!pendingRequests[req.login_id]) {
+                        pendingRequests[req.login_id] = [];
+                    }
+                    pendingRequests[req.login_id].push(req);
+                }
+            });
+            renderPermissionRequestsTable();
+            hideLoading();
+        })
+        .catch(error => {
+            console.error('Error searching requests:', error);
+            hideLoading();
+        });
+}
+
+// 권한 신청 테이블 렌더링 (사용자별 권한과 동일한 형태)
+function renderPermissionRequestsTable() {
+    const tbody = document.getElementById('requestTableBody');
+    tbody.innerHTML = '';
+
+    // 헤더에 메뉴 추가 (처음 한 번만)
+    if (!document.querySelector('#requestPermissionTable .menu-header-added')) {
+        const headerRow = document.querySelector('#requestPermissionTable thead tr');
+        menus.forEach((menu, index) => {
+            if (index > 0) {
+                const separator = document.createElement('th');
+                separator.style.width = '1px';
+                separator.style.padding = '0';
+                separator.style.background = '#dee2e6';
+                separator.style.border = 'none';
+                separator.className = 'menu-header-added';
+                headerRow.appendChild(separator);
+            }
+
+            const th = document.createElement('th');
+            th.setAttribute('colspan', '2');
+            th.style.textAlign = 'center';
+            th.innerHTML = menu.name;
+            th.className = 'menu-header-added';
+            headerRow.appendChild(th);
+        });
+
+        // 서브헤더 추가 (읽기/쓰기)
+        const subHeaderRow = document.createElement('tr');
+        subHeaderRow.innerHTML = `
+            <th class="fixed-column-1"></th>
+            <th class="fixed-column-2">Knox ID</th>
+            <th class="fixed-column-3">이름</th>
+            <th class="fixed-column-4">부서</th>
+            <th class="fixed-column-5">권한 신청란</th>
+        `;
+
+        menus.forEach((menu, index) => {
+            if (index > 0) {
+                subHeaderRow.innerHTML += `<th style="width: 1px; padding: 0; background: #dee2e6; border: none;"></th>`;
+            }
+            subHeaderRow.innerHTML += `
+                <th style="font-size: 11px; padding: 5px; text-align: center;">읽기</th>
+                <th style="font-size: 11px; padding: 5px; text-align: center;">쓰기</th>
+            `;
+        });
+
+        const thead = document.querySelector('#requestPermissionTable thead');
+        thead.appendChild(subHeaderRow);
+    }
+
+    if (Object.keys(pendingRequests).length === 0) {
+        tbody.innerHTML = '<tr><td colspan="20" style="text-align: center; padding: 20px;">대기중인 권한 신청이 없습니다</td></tr>';
+        return;
+    }
+
+    // 사용자별로 그룹화하여 렌더링
+    Object.entries(pendingRequests).forEach(([loginId, requests]) => {
+        const firstRequest = requests[0];
+        const row = document.createElement('tr');
+
+        // 체크박스와 기본 정보
+        row.innerHTML = `
+            <td class="fixed-column-1">
+                <input type="checkbox" class="request-select" data-login-id="${loginId}">
+            </td>
+            <td class="fixed-column-2">${loginId}</td>
+            <td class="fixed-column-3">${firstRequest.user_name || ''}</td>
+            <td class="fixed-column-4">${firstRequest.dept_name || ''}</td>
+            <td class="fixed-column-5" style="background: #f8f9fa;">
+                <div style="max-height: 60px; overflow-y: auto; font-size: 11px;">
+                    ${requests.map(r => `${r.menu_name}: ${r.reason}`).join('<br>')}
+                </div>
+            </td>
+        `;
+
+        // 각 메뉴별 권한 셀렉트 박스 추가
+        menus.forEach((menu, menuIndex) => {
+            if (menuIndex > 0) {
+                const separatorTd = document.createElement('td');
+                separatorTd.style.width = '1px';
+                separatorTd.style.padding = '0';
+                separatorTd.style.background = '#dee2e6';
+                separatorTd.style.border = 'none';
+                row.appendChild(separatorTd);
+            }
+
+            // 해당 메뉴에 대한 신청이 있는지 확인
+            const menuRequest = requests.find(r => r.menu_code === menu.code);
+            let readLevel = 0;
+            let writeLevel = 0;
+
+            if (menuRequest) {
+                if (menuRequest.permission_type === 'read') {
+                    readLevel = 3; // 전체 읽기
+                } else if (menuRequest.permission_type === 'read_write') {
+                    readLevel = 3;
+                    writeLevel = 3; // 전체 읽기/쓰기
+                }
+            }
+
+            // 읽기 권한 셀렉트
+            const readTd = document.createElement('td');
+            readTd.innerHTML = `
+                <select class="form-select form-select-sm permission-select"
+                        data-login-id="${loginId}"
+                        data-menu="${menu.code}"
+                        data-type="read"
+                        onchange="trackRequestChange('${loginId}', '${menu.code}', 'read', this.value)"
+                        style="font-size: 11px; padding: 2px 4px; height: 24px;">
+                    <option value="0" ${readLevel === 0 ? 'selected' : ''}>0</option>
+                    <option value="1" ${readLevel === 1 ? 'selected' : ''}>1</option>
+                    <option value="2" ${readLevel === 2 ? 'selected' : ''}>2</option>
+                    <option value="3" ${readLevel === 3 ? 'selected' : ''}>3</option>
+                </select>
+            `;
+            row.appendChild(readTd);
+
+            // 쓰기 권한 셀렉트
+            const writeTd = document.createElement('td');
+            writeTd.innerHTML = `
+                <select class="form-select form-select-sm permission-select"
+                        data-login-id="${loginId}"
+                        data-menu="${menu.code}"
+                        data-type="write"
+                        onchange="trackRequestChange('${loginId}', '${menu.code}', 'write', this.value)"
+                        style="font-size: 11px; padding: 2px 4px; height: 24px;">
+                    <option value="0" ${writeLevel === 0 ? 'selected' : ''}>0</option>
+                    <option value="1" ${writeLevel === 1 ? 'selected' : ''}>1</option>
+                    <option value="2" ${writeLevel === 2 ? 'selected' : ''}>2</option>
+                    <option value="3" ${writeLevel === 3 ? 'selected' : ''}>3</option>
+                </select>
+            `;
+            row.appendChild(writeTd);
+        });
+
+        tbody.appendChild(row);
+    });
+}
+
+// 권한 신청 변경사항 추적
+function trackRequestChange(loginId, menuCode, type, value) {
+    if (!requestChanges[loginId]) {
+        requestChanges[loginId] = {};
+    }
+    if (!requestChanges[loginId][menuCode]) {
+        requestChanges[loginId][menuCode] = {};
+    }
+    requestChanges[loginId][menuCode][type] = parseInt(value);
+}
+
+// 권한 신청 저장 (일괄 승인)
+function saveRequestPermissions() {
+    if (!confirm('선택한 권한을 부여하시겠습니까?\n\n권한이 설정된 사용자들의 신청이 승인되며,\n권한이 0으로 설정된 신청은 거절됩니다.')) return;
+
+    const approvals = [];
+    const rejections = [];
+
+    // 각 사용자의 권한 설정 확인
+    Object.entries(pendingRequests).forEach(([loginId, requests]) => {
+        let hasAnyPermission = false;
+        const permissions = {};
+
+        // 변경된 권한 확인
+        if (requestChanges[loginId]) {
+            menus.forEach(menu => {
+                const menuChanges = requestChanges[loginId][menu.code];
+                if (menuChanges) {
+                    const readLevel = menuChanges.read || 0;
+                    const writeLevel = menuChanges.write || 0;
+                    if (readLevel > 0 || writeLevel > 0) {
+                        hasAnyPermission = true;
+                        permissions[menu.code] = {
+                            read_level: readLevel,
+                            write_level: writeLevel
+                        };
+                    }
+                }
+            });
+        } else {
+            // 변경사항이 없으면 현재 테이블의 값 확인
+            document.querySelectorAll(`select[data-login-id="${loginId}"]`).forEach(select => {
+                const menuCode = select.dataset.menu;
+                const type = select.dataset.type;
+                const value = parseInt(select.value);
+
+                if (value > 0) {
+                    hasAnyPermission = true;
+                    if (!permissions[menuCode]) {
+                        permissions[menuCode] = { read_level: 0, write_level: 0 };
+                    }
+                    if (type === 'read') {
+                        permissions[menuCode].read_level = value;
+                    } else {
+                        permissions[menuCode].write_level = value;
+                    }
+                }
+            });
+        }
+
+        // 권한이 부여된 경우 승인, 아니면 거절
+        requests.forEach(req => {
+            if (hasAnyPermission) {
+                approvals.push({
+                    id: req.id,
+                    permissions: permissions
+                });
+            } else {
+                rejections.push(req.id);
+            }
+        });
+    });
+
+    // 승인 처리
+    const approvalPromises = approvals.map(approval => {
+        return fetch(`/api/permission-requests/${approval.id}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                comment: '',
+                permissions: approval.permissions
+            })
+        });
+    });
+
+    // 거절 처리
+    const rejectionPromises = rejections.map(id => {
+        return fetch(`/api/permission-requests/${id}/reject`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                comment: '권한 미부여'
+            })
+        });
+    });
+
+    showLoading();
+    Promise.all([...approvalPromises, ...rejectionPromises])
+        .then(responses => {
+            const successCount = responses.filter(r => r.ok).length;
+            const failCount = responses.length - successCount;
+
+            if (failCount > 0) {
+                alert(`${successCount}개 처리 성공, ${failCount}개 실패`);
+            } else {
+                alert(`${approvals.length}개 승인, ${rejections.length}개 거절 완료`);
+            }
+
+            // 초기화 및 새로고침
+            requestChanges = {};
+            loadPermissionRequests(currentRequestPage);
+
+            // 사용자 권한 탭도 새로고침
+            if (document.querySelector('#userPermissions').classList.contains('active')) {
+                loadUserPermissions();
+            }
+        })
+        .catch(error => {
+            console.error('Error processing requests:', error);
+            alert('처리 중 오류가 발생했습니다');
+        })
+        .finally(() => {
+            hideLoading();
+        });
+}
+
+// 선택된 신청 삭제
+function deleteSelectedRequests() {
+    const selected = Array.from(document.querySelectorAll('.request-select:checked'))
+        .map(cb => cb.dataset.loginId);
+
+    if (selected.length === 0) {
+        alert('삭제할 신청을 선택해주세요');
+        return;
+    }
+
+    if (!confirm(`선택한 ${selected.length}개의 신청을 거절하시겠습니까?`)) return;
+
+    const deletePromises = [];
+    selected.forEach(loginId => {
+        if (pendingRequests[loginId]) {
+            pendingRequests[loginId].forEach(req => {
+                deletePromises.push(
+                    fetch(`/api/permission-requests/${req.id}/reject`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            comment: '관리자에 의해 거절됨'
+                        })
+                    })
+                );
+            });
+        }
+    });
+
+    showLoading();
+    Promise.all(deletePromises)
+        .then(() => {
+            alert('선택한 신청이 거절되었습니다');
+            loadPermissionRequests(currentRequestPage);
+        })
+        .catch(error => {
+            console.error('Error deleting requests:', error);
+            alert('삭제 중 오류가 발생했습니다');
+        })
+        .finally(() => {
+            hideLoading();
+        });
+}
+
+
+// 권한 신청 페이지네이션 렌더링
+function renderRequestPagination(total) {
+    const totalPages = Math.ceil(total / requestPageSize);
+    const pagination = document.getElementById('requestPagination');
+    const pageInfo = document.getElementById('requestCurrentRange');
+    const totalCount = document.getElementById('requestTotalCount');
+
+    totalCount.textContent = total;
+
+    const start = (currentRequestPage - 1) * requestPageSize + 1;
+    const end = Math.min(currentRequestPage * requestPageSize, total);
+    pageInfo.textContent = total > 0 ? `${start}-${end}` : '0-0';
+
+    pagination.innerHTML = '';
+
+    // 이전 버튼
+    if (currentRequestPage > 1) {
+        pagination.innerHTML += `<span class="page-item" onclick="loadPermissionRequests(${currentRequestPage - 1})">이전</span>`;
+    }
+
+    // 페이지 번호
+    const maxPages = 5;
+    let startPage = Math.max(1, currentRequestPage - 2);
+    let endPage = Math.min(totalPages, startPage + maxPages - 1);
+
+    if (endPage - startPage < maxPages - 1) {
+        startPage = Math.max(1, endPage - maxPages + 1);
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+        pagination.innerHTML += `<span class="page-item ${i === currentRequestPage ? 'active' : ''}" onclick="loadPermissionRequests(${i})">${i}</span>`;
+    }
+
+    // 다음 버튼
+    if (currentRequestPage < totalPages) {
+        pagination.innerHTML += `<span class="page-item" onclick="loadPermissionRequests(${currentRequestPage + 1})">다음</span>`;
+    }
+}
+
+// 대기중인 권한 신청 개수 업데이트
+function updateRequestCount() {
+    fetch('/api/permission-requests?status=pending&size=1')
+        .then(response => response.json())
+        .then(data => {
+            const badge = document.getElementById('requestCount');
+            if (badge) {
+                const count = data.total || 0;
+                badge.textContent = count;
+                badge.style.display = count > 0 ? 'inline-block' : 'none';
+            }
+        })
+        .catch(error => console.error('Error updating request count:', error));
+}
+
+// 페이지 로드시 대기중인 신청 개수 표시
+updateRequestCount();
+</script>
+
+{% endblock %}

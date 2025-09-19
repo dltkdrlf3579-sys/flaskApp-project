@@ -87,3 +87,56 @@ def generate_followsop_number(db_path, base_datetime=None):
 def generate_fullprocess_number(db_path, base_datetime=None):
     """Full Process 평가번호 생성 (FPYYMMDDNNNNN - 5자리 순번)"""
     return generate_unique_id('FP', db_path, 'full_process', 'fullprocess_number', base_datetime, counter_digits=5)
+
+def generate_safeplace_number(db_path, base_datetime=None):
+    """Safe Workplace 점검번호 생성 (SPYYMMDDNNNN - 4자리 순번)
+
+    기본적으로 PostgreSQL을 사용하고, 실패 시 기존 SQLite 로직으로 폴백한다.
+    """
+    korean_time = base_datetime or get_korean_time()
+    base_id = korean_time.strftime('%y%m%d')
+    prefix = 'SP'
+
+    try:
+        from db_connection import get_db_connection
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        pattern = f"{prefix}{base_id}%"
+        cursor.execute(
+            """
+            SELECT safeplace_no
+            FROM safe_workplace
+            WHERE safeplace_no LIKE %s
+            ORDER BY safeplace_no DESC
+            LIMIT 1
+            """,
+            (pattern,)
+        )
+
+        row = cursor.fetchone()
+        if row and row[0]:
+            last_id = row[0]
+            try:
+                last_counter = int(last_id[len(prefix) + 6:])
+            except ValueError:
+                last_counter = 0
+            new_counter = last_counter + 1
+        else:
+            new_counter = 1
+
+        max_counter = 10 ** 4 - 1
+        if new_counter > max_counter:
+            logging.warning(f"Safe Workplace counter overflow for {prefix}{base_id}, resetting to 1")
+            new_counter = 1
+
+        unique_id = f"{prefix}{base_id}{new_counter:04d}"
+
+        cursor.close()
+        conn.close()
+        logging.info(f"Safe Workplace 고유 ID 생성(PostgreSQL): {unique_id}")
+        return unique_id
+
+    except Exception as e:
+        logging.error(f"Safe Workplace ID 생성(PostgreSQL) 실패: {e}")
+        raise

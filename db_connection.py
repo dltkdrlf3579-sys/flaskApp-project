@@ -45,12 +45,11 @@ def get_db_connection(db_path: str = None, timeout: float = 10.0, row_factory: b
             logging.debug(f"PostgreSQL connection established: {dsn}")
         except Exception as e:
             logging.error(f"PostgreSQL connection error: {e}")
-            # Strict 모드일 경우 SQLite로 폴백하지 않고 예외 발생
-            strict = config.getboolean('DATABASE', 'strict_postgres', fallback=False)
+            # 기본값을 강제해 SQLite 폴백을 차단 (요청 사항 준수)
+            strict = config.getboolean('DATABASE', 'strict_postgres', fallback=True)
             if strict:
                 raise
-            logging.warning("Falling back to SQLite (set DATABASE.strict_postgres=true to disable)")
-            # Fallback to SQLite
+            logging.warning("Falling back to SQLite (DATABASE.strict_postgres=false 일 때만 허용)")
             backend = 'sqlite'
         else:
             # PostgreSQL 연결 성공 시 row_factory 설정

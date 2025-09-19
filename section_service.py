@@ -18,6 +18,8 @@ class SectionConfigService:
             return 'follow_sop_sections'
         elif self.board_type == 'full_process':
             return 'full_process_sections'
+        elif self.board_type == 'safe_workplace':
+            return 'safe_workplace_sections'
         else:
             return 'section_config'
         
@@ -140,6 +142,12 @@ class SectionConfigService:
                 {'section_key': 'basic_info', 'section_name': '기본정보', 'section_order': 1},
                 {'section_key': 'process_info', 'section_name': '프로세스정보', 'section_order': 2},
                 {'section_key': 'additional', 'section_name': '추가기입정보', 'section_order': 3}
+            ]
+        if self.board_type == 'safe_workplace':
+            return [
+                {'section_key': 'basic_info', 'section_name': '기본정보', 'section_order': 1},
+                {'section_key': 'workplace_info', 'section_name': '작업장정보', 'section_order': 2},
+                {'section_key': 'safety_info', 'section_name': '안전정보', 'section_order': 3}
             ]
         return []
     

@@ -1,0 +1,875 @@
+{% extends "base.html" %}
+{% block title %}통합 권한 관리 - 관리자{% endblock %}
+{% block content %}
+<style>
+        :root {
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --success-color: #28a745;
+            --warning-color: #ffc107;
+            --danger-color: #dc3545;
+            --info-color: #17a2b8;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif;
+            background: #f8f9fa;
+        }
+
+        /* 메인 헤더 */
+        .main-header {
+            background: var(--primary-gradient);
+            color: white;
+            padding: 2rem;
+            margin: -20px -20px 2rem -20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .main-header h1 {
+            font-size: 1.8rem;
+            font-weight: 600;
+            margin: 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .main-header h1 i {
+            margin-right: 12px;
+        }
+
+        .header-stats {
+            display: flex;
+            gap: 2rem;
+            margin-top: 1rem;
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+
+        /* 탭 네비게이션 */
+        .nav-tabs {
+            border-bottom: 2px solid #e9ecef;
+            margin-bottom: 2rem;
+        }
+
+        .nav-tabs .nav-link {
+            color: #6c757d;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .nav-tabs .nav-link:hover {
+            color: #667eea;
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .nav-tabs .nav-link.active {
+            color: #667eea;
+            background: white;
+            border-bottom: 3px solid #667eea;
+        }
+
+        /* 필터 섹션 */
+        .filter-section {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .filter-row {
+            display: flex;
+            gap: 1rem;
+            align-items: end;
+        }
+
+        .filter-group {
+            flex: 1;
+        }
+
+        .filter-group label {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #495057;
+            margin-bottom: 0.5rem;
+        }
+
+        /* 권한 테이블 */
+        .permission-table {
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .table {
+            margin: 0;
+        }
+
+        .table thead th {
+            background: #f8f9fa;
+            font-weight: 600;
+            font-size: 0.875rem;
+            color: #495057;
+            border-bottom: 2px solid #dee2e6;
+            padding: 1rem;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .table tbody td {
+            padding: 0.75rem 1rem;
+            vertical-align: middle;
+        }
+
+        .table tbody tr:hover {
+            background: rgba(102, 126, 234, 0.03);
+        }
+
+        /* 역할 선택 드롭다운 */
+        .role-select {
+            padding: 0.375rem 0.75rem;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+            font-size: 0.875rem;
+            transition: all 0.2s;
+            min-width: 120px;
+        }
+
+        .role-select:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+
+        /* 역할별 색상 */
+        .role-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 15px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            display: inline-block;
+        }
+
+        .role-admin { background: #dc3545; color: white; }
+        .role-manager { background: #ffc107; color: #333; }
+        .role-user1 { background: #28a745; color: white; }
+        .role-user2 { background: #17a2b8; color: white; }
+        .role-partner { background: #6610f2; color: white; }
+        .role-viewer { background: #6c757d; color: white; }
+        .role-none { background: #e9ecef; color: #6c757d; }
+
+        /* 액션 버튼들 */
+        .action-buttons {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+            padding: 1.5rem;
+            background: #f8f9fa;
+            border-top: 1px solid #dee2e6;
+        }
+
+        .btn-save {
+            background: var(--primary-gradient);
+            color: white;
+            border: none;
+            padding: 0.75rem 2rem;
+            border-radius: 5px;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .btn-save:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+            color: white;
+        }
+
+        .btn-bulk {
+            background: white;
+            color: #495057;
+            border: 1px solid #dee2e6;
+            padding: 0.75rem 1.5rem;
+            border-radius: 5px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .btn-bulk:hover {
+            background: #f8f9fa;
+            border-color: #adb5bd;
+        }
+
+        /* 일괄 설정 모달 */
+        .modal-header {
+            background: var(--primary-gradient);
+            color: white;
+        }
+
+        .modal-title {
+            font-weight: 600;
+        }
+
+        /* 로딩 상태 */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+
+        .loading-overlay.active {
+            display: flex;
+        }
+
+        .spinner-border {
+            width: 3rem;
+            height: 3rem;
+            border-width: 0.3rem;
+        }
+
+        /* 반응형 */
+        @media (max-width: 768px) {
+            .filter-row {
+                flex-direction: column;
+            }
+
+            .table {
+                font-size: 0.875rem;
+            }
+
+            .role-select {
+                min-width: 100px;
+            }
+        }
+</style>
+
+<div class="container-fluid">
+        <!-- 메인 헤더 -->
+        <div class="main-header">
+            <h1>
+                <i class="bi bi-shield-lock-fill"></i>
+                통합 권한 관리 시스템
+            </h1>
+            <div class="header-stats">
+                <div class="stat-item">
+                    <i class="bi bi-people-fill"></i>
+                    <span id="totalUsers">0</span>명 사용자
+                </div>
+                <div class="stat-item">
+                    <i class="bi bi-grid-3x3-gap-fill"></i>
+                    <span>6</span>개 메뉴
+                </div>
+                <div class="stat-item">
+                    <i class="bi bi-clock-fill"></i>
+                    <span id="lastUpdate">-</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 탭 네비게이션 -->
+        <ul class="nav nav-tabs" role="tablist">
+            <li class="nav-item">
+                <a class="nav-link active" data-bs-toggle="tab" href="#userPermissions" role="tab">
+                    <i class="bi bi-person-fill"></i> 사용자별 권한
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#departmentDefaults" role="tab">
+                    <i class="bi bi-building"></i> 부서별 기본값
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#roleDefaults" role="tab">
+                    <i class="bi bi-diagram-3-fill"></i> 역할별 기본값
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-bs-toggle="tab" href="#accessLog" role="tab">
+                    <i class="bi bi-journal-text"></i> 접근 로그
+                </a>
+            </li>
+        </ul>
+
+        <!-- 탭 콘텐츠 -->
+        <div class="tab-content">
+            <!-- 사용자별 권한 탭 -->
+            <div class="tab-pane fade show active" id="userPermissions" role="tabpanel">
+                <!-- 필터 섹션 -->
+                <div class="filter-section">
+                    <div class="filter-row">
+                        <div class="filter-group">
+                            <label for="filterDepartment">부서</label>
+                            <select id="filterDepartment" class="form-select">
+                                <option value="">전체 부서</option>
+                                <option value="안전환경팀">안전환경팀</option>
+                                <option value="생산팀">생산팀</option>
+                                <option value="품질팀">품질팀</option>
+                                <option value="관리팀">관리팀</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="filterRole">역할</label>
+                            <select id="filterRole" class="form-select">
+                                <option value="">전체 역할</option>
+                                <option value="admin">Admin</option>
+                                <option value="manager">Manager</option>
+                                <option value="user">User</option>
+                                <option value="partner">Partner</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="searchUser">사용자 검색</label>
+                            <input type="text" id="searchUser" class="form-control" placeholder="이름 또는 사번">
+                        </div>
+                        <button class="btn btn-primary" onclick="applyFilters()">
+                            <i class="bi bi-search"></i> 필터 적용
+                        </button>
+                        <button class="btn btn-outline-secondary" onclick="resetFilters()">
+                            <i class="bi bi-arrow-clockwise"></i> 초기화
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 권한 테이블 -->
+                <div class="permission-table">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th width="50">
+                                    <input type="checkbox" class="form-check-input" id="selectAll">
+                                </th>
+                                <th width="100">사번</th>
+                                <th width="120">이름</th>
+                                <th width="150">부서</th>
+                                <th width="100">기본역할</th>
+                                <th>사고관리</th>
+                                <th>안전지시</th>
+                                <th>표준준수</th>
+                                <th>전체프로세스</th>
+                                <th>협력사</th>
+                                <th>변경요청</th>
+                                <th width="100">작업</th>
+                            </tr>
+                        </thead>
+                        <tbody id="userTableBody">
+                            <!-- 사용자 데이터가 여기에 동적으로 로드됩니다 -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- 액션 버튼들 -->
+                <div class="action-buttons">
+                    <button class="btn btn-save" onclick="saveChanges()">
+                        <i class="bi bi-check-lg"></i> 변경사항 저장
+                    </button>
+                    <button class="btn btn-bulk" onclick="showBulkModal()">
+                        <i class="bi bi-layers"></i> 일괄 설정
+                    </button>
+                    <button class="btn btn-bulk" onclick="showCopyModal()">
+                        <i class="bi bi-files"></i> 권한 복사
+                    </button>
+                    <button class="btn btn-bulk" onclick="exportPermissions()">
+                        <i class="bi bi-download"></i> Excel 내보내기
+                    </button>
+                </div>
+            </div>
+
+            <!-- 부서별 기본값 탭 -->
+            <div class="tab-pane fade" id="departmentDefaults" role="tabpanel">
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle-fill"></i>
+                    부서별 기본 권한을 설정합니다. 개인별 권한이 없는 경우 이 설정이 적용됩니다.
+                </div>
+                <!-- 부서별 권한 테이블 -->
+                <div class="permission-table">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>부서명</th>
+                                <th>사고관리</th>
+                                <th>안전지시</th>
+                                <th>표준준수</th>
+                                <th>전체프로세스</th>
+                                <th>협력사</th>
+                                <th>변경요청</th>
+                            </tr>
+                        </thead>
+                        <tbody id="departmentTableBody">
+                            <!-- 부서 데이터가 여기에 로드됩니다 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 역할별 기본값 탭 -->
+            <div class="tab-pane fade" id="roleDefaults" role="tabpanel">
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle-fill"></i>
+                    역할별 기본 권한을 설정합니다. 개인별, 부서별 권한이 없는 경우 이 설정이 적용됩니다.
+                </div>
+                <!-- 역할별 권한 테이블 -->
+                <div class="permission-table">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>역할</th>
+                                <th>사고관리</th>
+                                <th>안전지시</th>
+                                <th>표준준수</th>
+                                <th>전체프로세스</th>
+                                <th>협력사</th>
+                                <th>변경요청</th>
+                            </tr>
+                        </thead>
+                        <tbody id="roleTableBody">
+                            <!-- 역할 데이터가 여기에 로드됩니다 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 접근 로그 탭 -->
+            <div class="tab-pane fade" id="accessLog" role="tabpanel">
+                <div class="filter-section">
+                    <div class="filter-row">
+                        <div class="filter-group">
+                            <label>기간</label>
+                            <input type="date" class="form-control" id="logStartDate">
+                        </div>
+                        <div class="filter-group">
+                            <label>&nbsp;</label>
+                            <input type="date" class="form-control" id="logEndDate">
+                        </div>
+                        <button class="btn btn-primary" onclick="loadAccessLogs()">
+                            <i class="bi bi-search"></i> 조회
+                        </button>
+                    </div>
+                </div>
+                <div class="permission-table">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>시간</th>
+                                <th>사용자</th>
+                                <th>메뉴</th>
+                                <th>작업</th>
+                                <th>결과</th>
+                                <th>IP</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logTableBody">
+                            <!-- 로그 데이터가 여기에 로드됩니다 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 일괄 설정 모달 -->
+    <div class="modal fade" id="bulkModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-layers"></i> 일괄 권한 설정
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">적용할 메뉴</label>
+                        <select id="bulkMenu" class="form-select">
+                            <option value="all">모든 메뉴</option>
+                            <option value="accident">사고관리</option>
+                            <option value="safety">안전지시</option>
+                            <option value="follow_sop">표준준수</option>
+                            <option value="full_process">전체프로세스</option>
+                            <option value="partner">협력사</option>
+                            <option value="change_request">변경요청</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">설정할 역할</label>
+                        <select id="bulkRole" class="form-select">
+                            <option value="admin">Admin - 모든 권한</option>
+                            <option value="manager">Manager - CRU 권한</option>
+                            <option value="user1">User1 - CR, 본인 U</option>
+                            <option value="user2">User2 - 부서 CRU</option>
+                            <option value="partner">Partner - 회사 CRU</option>
+                            <option value="viewer">Viewer - R만</option>
+                            <option value="none">None - 권한 없음</option>
+                        </select>
+                    </div>
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        선택한 사용자들의 해당 메뉴 권한이 일괄 변경됩니다.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                    <button type="button" class="btn btn-primary" onclick="applyBulkSettings()">적용</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 권한 복사 모달 -->
+    <div class="modal fade" id="copyModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-files"></i> 권한 복사
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">복사할 사용자</label>
+                        <select id="copySource" class="form-select">
+                            <!-- 사용자 목록이 동적으로 로드됩니다 -->
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">대상 사용자 (다중 선택)</label>
+                        <select id="copyTargets" class="form-select" multiple size="10">
+                            <!-- 사용자 목록이 동적으로 로드됩니다 -->
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                    <button type="button" class="btn btn-primary" onclick="copyPermissions()">복사</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 로딩 오버레이 -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="text-center">
+            <div class="spinner-border text-light" role="status"></div>
+            <div class="text-light mt-3">처리 중...</div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        // 전역 변수
+        let currentData = {};
+        let changedData = {};
+        const menuCodes = ['accident', 'safety', 'follow_sop', 'full_process', 'partner', 'change_request'];
+        const menuNames = {
+            'accident': '사고관리',
+            'safety': '안전지시',
+            'follow_sop': '표준준수',
+            'full_process': '전체프로세스',
+            'partner': '협력사',
+            'change_request': '변경요청'
+        };
+
+        // 페이지 로드 시 초기화
+        document.addEventListener('DOMContentLoaded', function() {
+            loadUserPermissions();
+            updateLastUpdateTime();
+        });
+
+        // 사용자 권한 로드
+        function loadUserPermissions() {
+            showLoading();
+            fetch('/api/menu-roles/all')
+                .then(response => response.json())
+                .then(data => {
+                    currentData = data;
+                    renderUserTable(data);
+                    updateStats(data);
+                    hideLoading();
+                })
+                .catch(error => {
+                    console.error('Error loading permissions:', error);
+                    hideLoading();
+                    alert('권한 정보를 불러오는데 실패했습니다.');
+                });
+        }
+
+        // 사용자 테이블 렌더링
+        function renderUserTable(data) {
+            const tbody = document.getElementById('userTableBody');
+            tbody.innerHTML = '';
+
+            Object.entries(data).forEach(([empId, userData]) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><input type="checkbox" class="form-check-input user-select" data-emp-id="${empId}"></td>
+                    <td>${empId}</td>
+                    <td>${userData.name}</td>
+                    <td>${userData.department}</td>
+                    <td><span class="role-badge role-${userData.role || 'user'}">${userData.role || 'User'}</span></td>
+                    ${menuCodes.map(menu => `
+                        <td>
+                            <select class="role-select" data-emp-id="${empId}" data-menu="${menu}"
+                                    onchange="trackChange('${empId}', '${menu}', this.value)">
+                                <option value="none" ${userData.menu_roles[menu] === 'none' ? 'selected' : ''}>없음</option>
+                                <option value="viewer" ${userData.menu_roles[menu] === 'viewer' ? 'selected' : ''}>Viewer</option>
+                                <option value="user1" ${userData.menu_roles[menu] === 'user1' ? 'selected' : ''}>User1</option>
+                                <option value="user2" ${userData.menu_roles[menu] === 'user2' ? 'selected' : ''}>User2</option>
+                                <option value="partner" ${userData.menu_roles[menu] === 'partner' ? 'selected' : ''}>Partner</option>
+                                <option value="manager" ${userData.menu_roles[menu] === 'manager' ? 'selected' : ''}>Manager</option>
+                                <option value="admin" ${userData.menu_roles[menu] === 'admin' ? 'selected' : ''}>Admin</option>
+                            </select>
+                        </td>
+                    `).join('')}
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary" onclick="viewUserDetail('${empId}')">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        // 변경사항 추적
+        function trackChange(empId, menu, value) {
+            if (!changedData[empId]) {
+                changedData[empId] = {};
+            }
+            changedData[empId][menu] = value;
+
+            // 변경된 셀 하이라이트
+            const select = document.querySelector(`select[data-emp-id="${empId}"][data-menu="${menu}"]`);
+            select.style.backgroundColor = '#fff3cd';
+        }
+
+        // 변경사항 저장
+        function saveChanges() {
+            if (Object.keys(changedData).length === 0) {
+                alert('변경사항이 없습니다.');
+                return;
+            }
+
+            showLoading();
+            const changes = [];
+
+            Object.entries(changedData).forEach(([empId, menus]) => {
+                Object.entries(menus).forEach(([menu, role]) => {
+                    changes.push({
+                        emp_id: empId,
+                        menu_code: menu,
+                        role: role
+                    });
+                });
+            });
+
+            fetch('/api/menu-roles/batch-update', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ changes: changes })
+            })
+            .then(response => response.json())
+            .then(data => {
+                hideLoading();
+                if (data.success) {
+                    alert(`${data.count}개의 권한이 업데이트되었습니다.`);
+                    changedData = {};
+                    loadUserPermissions();
+                } else {
+                    alert('저장 중 오류가 발생했습니다.');
+                }
+            })
+            .catch(error => {
+                hideLoading();
+                console.error('Error saving changes:', error);
+                alert('저장 중 오류가 발생했습니다.');
+            });
+        }
+
+        // 필터 적용
+        function applyFilters() {
+            const department = document.getElementById('filterDepartment').value;
+            const role = document.getElementById('filterRole').value;
+            const search = document.getElementById('searchUser').value.toLowerCase();
+
+            let filteredData = {};
+
+            Object.entries(currentData).forEach(([empId, userData]) => {
+                let include = true;
+
+                if (department && userData.department !== department) include = false;
+                if (role && userData.role !== role) include = false;
+                if (search && !userData.name.toLowerCase().includes(search) && !empId.toLowerCase().includes(search)) include = false;
+
+                if (include) {
+                    filteredData[empId] = userData;
+                }
+            });
+
+            renderUserTable(filteredData);
+        }
+
+        // 필터 초기화
+        function resetFilters() {
+            document.getElementById('filterDepartment').value = '';
+            document.getElementById('filterRole').value = '';
+            document.getElementById('searchUser').value = '';
+            renderUserTable(currentData);
+        }
+
+        // 일괄 설정 모달 표시
+        function showBulkModal() {
+            const selectedUsers = document.querySelectorAll('.user-select:checked');
+            if (selectedUsers.length === 0) {
+                alert('사용자를 선택해주세요.');
+                return;
+            }
+            const modal = new bootstrap.Modal(document.getElementById('bulkModal'));
+            modal.show();
+        }
+
+        // 일괄 설정 적용
+        function applyBulkSettings() {
+            const menu = document.getElementById('bulkMenu').value;
+            const role = document.getElementById('bulkRole').value;
+            const selectedUsers = document.querySelectorAll('.user-select:checked');
+
+            selectedUsers.forEach(checkbox => {
+                const empId = checkbox.dataset.empId;
+
+                if (menu === 'all') {
+                    menuCodes.forEach(m => {
+                        trackChange(empId, m, role);
+                        const select = document.querySelector(`select[data-emp-id="${empId}"][data-menu="${m}"]`);
+                        if (select) select.value = role;
+                    });
+                } else {
+                    trackChange(empId, menu, role);
+                    const select = document.querySelector(`select[data-emp-id="${empId}"][data-menu="${menu}"]`);
+                    if (select) select.value = role;
+                }
+            });
+
+            bootstrap.Modal.getInstance(document.getElementById('bulkModal')).hide();
+        }
+
+        // 권한 복사 모달 표시
+        function showCopyModal() {
+            // 사용자 목록 로드
+            const sourceSelect = document.getElementById('copySource');
+            const targetSelect = document.getElementById('copyTargets');
+
+            sourceSelect.innerHTML = '';
+            targetSelect.innerHTML = '';
+
+            Object.entries(currentData).forEach(([empId, userData]) => {
+                sourceSelect.innerHTML += `<option value="${empId}">${empId} - ${userData.name}</option>`;
+                targetSelect.innerHTML += `<option value="${empId}">${empId} - ${userData.name}</option>`;
+            });
+
+            const modal = new bootstrap.Modal(document.getElementById('copyModal'));
+            modal.show();
+        }
+
+        // 권한 복사
+        function copyPermissions() {
+            const sourceId = document.getElementById('copySource').value;
+            const targetSelect = document.getElementById('copyTargets');
+            const targetIds = Array.from(targetSelect.selectedOptions).map(opt => opt.value);
+
+            if (!sourceId || targetIds.length === 0) {
+                alert('복사할 사용자와 대상을 선택해주세요.');
+                return;
+            }
+
+            showLoading();
+            fetch('/api/menu-roles/copy-roles', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    source_emp_id: sourceId,
+                    target_emp_ids: targetIds
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                hideLoading();
+                if (data.success) {
+                    alert(data.message);
+                    loadUserPermissions();
+                    bootstrap.Modal.getInstance(document.getElementById('copyModal')).hide();
+                }
+            })
+            .catch(error => {
+                hideLoading();
+                console.error('Error copying permissions:', error);
+                alert('권한 복사 중 오류가 발생했습니다.');
+            });
+        }
+
+        // 전체 선택/해제
+        document.getElementById('selectAll').addEventListener('change', function() {
+            const checkboxes = document.querySelectorAll('.user-select');
+            checkboxes.forEach(cb => cb.checked = this.checked);
+        });
+
+        // 통계 업데이트
+        function updateStats(data) {
+            document.getElementById('totalUsers').textContent = Object.keys(data).length;
+        }
+
+        // 마지막 업데이트 시간
+        function updateLastUpdateTime() {
+            const now = new Date();
+            document.getElementById('lastUpdate').textContent =
+                `마지막 업데이트: ${now.toLocaleString('ko-KR')}`;
+        }
+
+        // 로딩 표시
+        function showLoading() {
+            document.getElementById('loadingOverlay').classList.add('active');
+        }
+
+        // 로딩 숨김
+        function hideLoading() {
+            document.getElementById('loadingOverlay').classList.remove('active');
+        }
+
+        // 사용자 상세 보기
+        function viewUserDetail(empId) {
+            alert(`${empId} 사용자의 상세 권한을 확인합니다.`);
+            // 추후 구현
+        }
+
+        // Excel 내보내기
+        function exportPermissions() {
+            alert('권한 데이터를 Excel로 내보냅니다.');
+            // 추후 구현
+        }
+
+        // 접근 로그 로드
+        function loadAccessLogs() {
+            alert('접근 로그를 조회합니다.');
+            // 추후 구현
+        }
+</script>
+{% endblock %}

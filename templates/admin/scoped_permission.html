@@ -1,0 +1,474 @@
+{% extends "base.html" %}
+{% block title %}환경안전 권한 관리{% endblock %}
+{% block content %}
+<style>
+    .permission-container {
+        padding: 20px;
+        background: #f8f9fa;
+        min-height: 100vh;
+    }
+
+    .main-header {
+        background: linear-gradient(to right, #667eea, #764ba2);
+        color: white;
+        padding: 2rem;
+        margin: -20px -20px 2rem -20px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .main-header h1 {
+        font-size: 2rem;
+        font-weight: 600;
+        margin: 0;
+    }
+
+    .nav-tabs {
+        border-bottom: 2px solid #dee2e6;
+        margin-bottom: 2rem;
+    }
+
+    .nav-tabs .nav-link {
+        border: none;
+        color: #6c757d;
+        font-weight: 500;
+        padding: 1rem 2rem;
+    }
+
+    .nav-tabs .nav-link.active {
+        background: none;
+        border-bottom: 3px solid #667eea;
+        color: #667eea;
+        margin-bottom: -2px;
+    }
+
+    .filter-section {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        margin-bottom: 2rem;
+    }
+
+    .permission-table {
+        background: white;
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .permission-table th {
+        background: #f8f9fa;
+        padding: 12px;
+        font-weight: 600;
+        text-align: left;
+        border-bottom: 2px solid #dee2e6;
+        font-size: 0.9rem;
+    }
+
+    .permission-table td {
+        padding: 10px;
+        border-bottom: 1px solid #dee2e6;
+        font-size: 0.9rem;
+    }
+
+    .permission-select {
+        width: 120px;
+        padding: 5px;
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+        font-size: 0.85rem;
+    }
+
+    .permission-info {
+        background: #e8f4fd;
+        padding: 1rem;
+        border-radius: 6px;
+        margin-bottom: 1rem;
+        border-left: 4px solid #0066cc;
+    }
+
+    .level-badge {
+        padding: 3px 8px;
+        border-radius: 3px;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+
+    .level-0 { background: #f8f9fa; color: #6c757d; }
+    .level-1 { background: #fff3cd; color: #856404; }
+    .level-2 { background: #d1ecf1; color: #0c5460; }
+    .level-3 { background: #d4edda; color: #155724; }
+
+    .delete-checkbox {
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+    }
+</style>
+
+<div class="permission-container">
+    <div class="main-header">
+        <h1>환경안전 권한 관리</h1>
+        <div class="header-stats">
+            <span>데이터 범위 기반 권한 시스템</span>
+        </div>
+    </div>
+
+    <!-- 탭 네비게이션 -->
+    <ul class="nav nav-tabs">
+        <li class="nav-item">
+            <a class="nav-link active" data-bs-toggle="tab" href="#userPermissions">
+                사용자별 권한
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" data-bs-toggle="tab" href="#deptPermissions">
+                부서별 권한
+            </a>
+        </li>
+    </ul>
+
+    <!-- 탭 컨텐츠 -->
+    <div class="tab-content">
+        <!-- 사용자별 권한 탭 -->
+        <div class="tab-pane fade show active" id="userPermissions">
+            <!-- 권한 레벨 설명 -->
+            <div class="permission-info">
+                <div class="row">
+                    <div class="col-md-6">
+                        <strong>읽기 권한 레벨</strong><br>
+                        <span class="level-badge level-0">Lv.0</span> 접근 불가<br>
+                        <span class="level-badge level-1">Lv.1</span> 본인 관련 데이터만 조회<br>
+                        <span class="level-badge level-2">Lv.2</span> 부서 관련 데이터 조회<br>
+                        <span class="level-badge level-3">Lv.3</span> 전체 데이터 조회
+                    </div>
+                    <div class="col-md-6">
+                        <strong>등록/수정 권한 레벨</strong><br>
+                        <span class="level-badge level-0">Lv.0</span> 작성 불가<br>
+                        <span class="level-badge level-1">Lv.1</span> 등록 가능, 본인 글만 수정<br>
+                        <span class="level-badge level-2">Lv.2</span> 등록 가능, 부서 글 수정<br>
+                        <span class="level-badge level-3">Lv.3</span> 등록 가능, 모든 글 수정
+                    </div>
+                </div>
+            </div>
+
+            <!-- 검색 필터 -->
+            <div class="filter-section">
+                <div class="row">
+                    <div class="col-md-3">
+                        <label>Knox ID</label>
+                        <input type="text" id="userLoginIdFilter" class="form-control form-control-sm" placeholder="Knox ID 입력">
+                    </div>
+                    <div class="col-md-3">
+                        <label>이름</label>
+                        <input type="text" id="userNameFilter" class="form-control form-control-sm" placeholder="이름 입력">
+                    </div>
+                    <div class="col-md-3">
+                        <label>부서</label>
+                        <input type="text" id="userDeptFilter" class="form-control form-control-sm" placeholder="부서명 입력" readonly>
+                        <button class="btn btn-sm btn-outline-secondary mt-1" onclick="openDeptSearch('user')">부서 선택</button>
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-primary btn-sm w-100 mt-4" onclick="searchUsers()">검색</button>
+                        <button class="btn btn-secondary btn-sm w-100 mt-1" onclick="resetFilters('user')">초기화</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 권한 테이블 -->
+            <div class="table-responsive">
+                <table class="permission-table" id="userPermissionTable">
+                    <thead>
+                        <tr>
+                            <th rowspan="2" style="width: 40px">
+                                <input type="checkbox" id="selectAllUsers">
+                            </th>
+                            <th rowspan="2" style="width: 120px">Knox ID</th>
+                            <th rowspan="2" style="width: 100px">이름</th>
+                            <th rowspan="2" style="width: 150px">부서</th>
+                            <!-- 메뉴별 권한 헤더 (동적 생성) -->
+                        </tr>
+                        <tr id="menuHeaderRow">
+                            <!-- 각 메뉴별로 읽기/쓰기/삭제 컬럼 추가 -->
+                        </tr>
+                    </thead>
+                    <tbody id="userTableBody">
+                        <!-- 동적 생성 -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 액션 버튼 -->
+            <div class="mt-3">
+                <button class="btn btn-success" onclick="saveUserPermissions()">변경사항 저장</button>
+                <button class="btn btn-warning" onclick="applyBatchPermission('user')">일괄 적용</button>
+            </div>
+        </div>
+
+        <!-- 부서별 권한 탭 -->
+        <div class="tab-pane fade" id="deptPermissions">
+            <!-- 권한 레벨 설명 (동일) -->
+            <div class="permission-info">
+                <div class="row">
+                    <div class="col-md-6">
+                        <strong>읽기 권한 레벨</strong><br>
+                        <span class="level-badge level-0">Lv.0</span> 접근 불가<br>
+                        <span class="level-badge level-1">Lv.1</span> 본인 관련 데이터만 조회<br>
+                        <span class="level-badge level-2">Lv.2</span> 부서 관련 데이터 조회<br>
+                        <span class="level-badge level-3">Lv.3</span> 전체 데이터 조회
+                    </div>
+                    <div class="col-md-6">
+                        <strong>등록/수정 권한 레벨</strong><br>
+                        <span class="level-badge level-0">Lv.0</span> 작성 불가<br>
+                        <span class="level-badge level-1">Lv.1</span> 등록 가능, 본인 글만 수정<br>
+                        <span class="level-badge level-2">Lv.2</span> 등록 가능, 부서 글 수정<br>
+                        <span class="level-badge level-3">Lv.3</span> 등록 가능, 모든 글 수정
+                    </div>
+                </div>
+            </div>
+
+            <!-- 검색 필터 -->
+            <div class="filter-section">
+                <div class="row">
+                    <div class="col-md-4">
+                        <label>부서명</label>
+                        <input type="text" id="deptNameFilter" class="form-control form-control-sm" placeholder="부서명 입력">
+                    </div>
+                    <div class="col-md-2">
+                        <button class="btn btn-primary btn-sm w-100 mt-4" onclick="searchDepts()">검색</button>
+                        <button class="btn btn-secondary btn-sm w-100 mt-1" onclick="resetFilters('dept')">초기화</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 부서 권한 테이블 -->
+            <div class="table-responsive">
+                <table class="permission-table" id="deptPermissionTable">
+                    <thead>
+                        <tr>
+                            <th rowspan="2" style="width: 40px">
+                                <input type="checkbox" id="selectAllDepts">
+                            </th>
+                            <th rowspan="2" style="width: 150px">부서코드</th>
+                            <th rowspan="2" style="width: 200px">부서명</th>
+                            <!-- 메뉴별 권한 헤더 (동적 생성) -->
+                        </tr>
+                        <tr id="deptMenuHeaderRow">
+                            <!-- 각 메뉴별로 읽기/쓰기/삭제 컬럼 추가 -->
+                        </tr>
+                    </thead>
+                    <tbody id="deptTableBody">
+                        <!-- 동적 생성 -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 액션 버튼 -->
+            <div class="mt-3">
+                <button class="btn btn-success" onclick="saveDeptPermissions()">변경사항 저장</button>
+                <button class="btn btn-warning" onclick="applyBatchPermission('dept')">일괄 적용</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 전역 변수
+let menus = [];
+let changes = { users: {}, depts: {} };
+
+// 페이지 로드시 초기화
+document.addEventListener('DOMContentLoaded', function() {
+    loadMenus();
+    loadUserPermissions();
+});
+
+// 메뉴 목록 로드
+function loadMenus() {
+    // 메뉴 목록 (실제로는 API에서 가져옴)
+    menus = [
+        { code: 'accident', name: '사고관리' },
+        { code: 'safety_instruction', name: '안전수칙' },
+        { code: 'follow_sop', name: 'Follow SOP' },
+        { code: 'full_process', name: 'Full Process' },
+        { code: 'partners', name: '협력사' },
+        { code: 'change_request', name: '변경요청' }
+    ];
+
+    renderMenuHeaders();
+}
+
+// 메뉴 헤더 렌더링
+function renderMenuHeaders() {
+    const userHeaderRow = document.getElementById('menuHeaderRow');
+    const deptHeaderRow = document.getElementById('deptMenuHeaderRow');
+
+    menus.forEach(menu => {
+        // 사용자 테이블 헤더
+        const userTh = document.createElement('th');
+        userTh.setAttribute('colspan', '3');
+        userTh.style.textAlign = 'center';
+        userTh.innerHTML = `<strong>${menu.name}</strong>`;
+        userHeaderRow.appendChild(userTh);
+
+        // 부서 테이블 헤더
+        const deptTh = userTh.cloneNode(true);
+        deptHeaderRow.appendChild(deptTh);
+    });
+
+    // 하위 헤더 추가 (읽기/쓰기/삭제)
+    const parentUserRow = userHeaderRow.parentElement;
+    const subHeaderRow = document.createElement('tr');
+
+    menus.forEach(menu => {
+        subHeaderRow.innerHTML += `
+            <th style="width: 100px">읽기</th>
+            <th style="width: 100px">쓰기</th>
+            <th style="width: 60px">삭제</th>
+        `;
+    });
+
+    parentUserRow.parentElement.appendChild(subHeaderRow);
+}
+
+// 사용자 권한 로드
+function loadUserPermissions() {
+    // 실제로는 API 호출
+    const users = [
+        {
+            login_id: 'hong123',
+            name: '홍길동',
+            dept_name: '환경안전팀',
+            permissions: {
+                'accident': { read_level: 3, write_level: 2, can_delete: true },
+                'safety_instruction': { read_level: 2, write_level: 1, can_delete: false }
+            }
+        }
+    ];
+
+    renderUserTable(users);
+}
+
+// 사용자 테이블 렌더링
+function renderUserTable(users) {
+    const tbody = document.getElementById('userTableBody');
+    tbody.innerHTML = '';
+
+    users.forEach(user => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><input type="checkbox" class="user-select" data-id="${user.login_id}"></td>
+            <td>${user.login_id}</td>
+            <td>${user.name}</td>
+            <td>${user.dept_name}</td>
+        `;
+
+        menus.forEach(menu => {
+            const perm = user.permissions[menu.code] || {};
+            const readLevel = perm.read_level || 0;
+            const writeLevel = perm.write_level || 0;
+            const canDelete = perm.can_delete || false;
+
+            // 읽기 권한 드롭다운
+            tr.innerHTML += `
+                <td>
+                    <select class="permission-select"
+                            onchange="trackChange('user', '${user.login_id}', '${menu.code}', 'read', this.value)">
+                        <option value="0" ${readLevel === 0 ? 'selected' : ''}>Lv.0</option>
+                        <option value="1" ${readLevel === 1 ? 'selected' : ''}>Lv.1</option>
+                        <option value="2" ${readLevel === 2 ? 'selected' : ''}>Lv.2</option>
+                        <option value="3" ${readLevel === 3 ? 'selected' : ''}>Lv.3</option>
+                    </select>
+                </td>
+            `;
+
+            // 쓰기 권한 드롭다운
+            tr.innerHTML += `
+                <td>
+                    <select class="permission-select"
+                            onchange="trackChange('user', '${user.login_id}', '${menu.code}', 'write', this.value)">
+                        <option value="0" ${writeLevel === 0 ? 'selected' : ''}>Lv.0</option>
+                        <option value="1" ${writeLevel === 1 ? 'selected' : ''}>Lv.1</option>
+                        <option value="2" ${writeLevel === 2 ? 'selected' : ''}>Lv.2</option>
+                        <option value="3" ${writeLevel === 3 ? 'selected' : ''}>Lv.3</option>
+                    </select>
+                </td>
+            `;
+
+            // 삭제 권한 체크박스
+            tr.innerHTML += `
+                <td style="text-align: center">
+                    <input type="checkbox" class="delete-checkbox"
+                           ${canDelete ? 'checked' : ''}
+                           onchange="trackChange('user', '${user.login_id}', '${menu.code}', 'delete', this.checked)">
+                </td>
+            `;
+        });
+
+        tbody.appendChild(tr);
+    });
+}
+
+// 변경사항 추적
+function trackChange(type, id, menuCode, permType, value) {
+    if (!changes[type + 's'][id]) {
+        changes[type + 's'][id] = {};
+    }
+    if (!changes[type + 's'][id][menuCode]) {
+        changes[type + 's'][id][menuCode] = {};
+    }
+
+    if (permType === 'read') {
+        changes[type + 's'][id][menuCode].read_level = parseInt(value);
+    } else if (permType === 'write') {
+        changes[type + 's'][id][menuCode].write_level = parseInt(value);
+    } else if (permType === 'delete') {
+        changes[type + 's'][id][menuCode].can_delete = value;
+    }
+
+    console.log('Changes:', changes);
+}
+
+// 사용자 권한 저장
+function saveUserPermissions() {
+    if (Object.keys(changes.users).length === 0) {
+        alert('변경사항이 없습니다.');
+        return;
+    }
+
+    // API 호출
+    fetch('/api/scoped-permissions/users/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(changes.users)
+    })
+    .then(response => response.json())
+    .then(data => {
+        alert('저장되었습니다.');
+        changes.users = {};
+        loadUserPermissions();
+    });
+}
+
+// 부서 권한 저장
+function saveDeptPermissions() {
+    if (Object.keys(changes.depts).length === 0) {
+        alert('변경사항이 없습니다.');
+        return;
+    }
+
+    // API 호출
+    fetch('/api/scoped-permissions/depts/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(changes.depts)
+    })
+    .then(response => response.json())
+    .then(data => {
+        alert('저장되었습니다.');
+        changes.depts = {};
+        loadDeptPermissions();
+    });
+}
+</script>
+
+{% endblock %}

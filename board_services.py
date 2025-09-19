@@ -51,6 +51,14 @@ BOARD_CONFIGS = {
         'cache_table': 'full_process',
         'column_table': 'full_process_column_config',
         'upload_path': 'uploads/full_process/',
+    },
+    'safe_workplace': {
+        'board_type': 'safe_workplace',
+        'display_name': 'Safe Workplace',
+        'number_prefix': 'SP',
+        'cache_table': 'safe_workplace',
+        'column_table': 'safe_workplace_column_config',
+        'upload_path': 'uploads/safe_workplace/',
     }
 }
 
@@ -564,7 +572,8 @@ class AttachmentService:
         'safety_instruction': 'issue_number',
         'follow_sop': 'work_req_no',
         'full_process': 'fullprocess_number',
-        'change_request': 'request_number'
+        'change_request': 'request_number',
+        'safe_workplace': 'safeplace_no'
     }
     
     def __init__(self, board_type: str, db_path: str, conn=None):

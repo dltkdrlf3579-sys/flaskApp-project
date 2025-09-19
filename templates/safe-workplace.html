@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{% block title %}안전한 일터{% endblock %}
+
+{% from 'includes/table_controls.html' import render_table_controls %}
+{% from 'includes/search_controls.html' import render_search_buttons %}
+
+{% block content %}
+{% include 'includes/list_page_styles.html' %}
+<div class="page-header">
+    <h2 class="page-title">안전한 일터</h2>
+</div>
+
+<div class="search-section">
+    <form method="GET" class="search-form">
+        <div class="search-fields">
+            <div class="search-group">
+                <label>협력사명</label>
+                <input type="text" name="company_name" value="{{ request.args.get('company_name', '') }}" placeholder="협력사명을 입력하세요">
+            </div>
+            <div class="search-group">
+                <label>사업자번호</label>
+                <input type="text" name="business_number" value="{{ request.args.get('business_number', '') }}" placeholder="사업자번호를 입력하세요">
+            </div>
+        </div>
+    </form>
+</div>
+
+<div class="search-buttons-section">
+    {{ render_search_buttons() }}
+</div>
+
+<div class="table-section">
+    {{ render_table_controls(total_count, show_excel=True, show_register=True, show_delete=True, register_callback='openRegisterPopup()') }}
+    <div class="table-wrapper">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th class="checkbox-column"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
+                    <th class="fixed-col" style="width: 60px;">No</th>
+                    <th>점검번호</th>
+                    <th style="width: 120px;">등록일</th>
+                    {% for col in display_columns %}
+                        <th>{{ col['column_name'] }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for workplace in workplaces %}
+                <tr>
+                    <td class="checkbox-column">
+                        <input type="checkbox" class="safe-checkbox" value="{{ workplace.safeplace_no }}" onchange="updateDeleteButton()">
+                    </td>
+                    <td class="fixed-col" style="width: 60px;">{{ workplace.no }}</td>
+                    <td>
+                        <a href="javascript:void(0)" class="company-link" onclick="openDetailPopup('{{ workplace.safeplace_no }}')">{{ workplace.safeplace_no or '-' }}</a>
+                    </td>
+                    <td style="width: 120px;">{{ (workplace.created_at|date_only) if workplace.created_at else '-' }}</td>
+                    {% for col in display_columns %}
+                        <td {% if col['column_type'] == 'list' %}data-col="list"{% endif %}>
+                            {% set col_key = col['column_key'] %}
+                            {% if col['column_type'] == 'dropdown' %}
+                                {% set field_label = col_key + '_label' %}
+                                {% if workplace.custom_mapped and col_key in workplace.custom_mapped %}
+                                    {{ workplace.custom_mapped[col_key] or '-' }}
+                                {% elif field_label in workplace and workplace[field_label] %}
+                                    {{ workplace[field_label] }}
+                                {% elif col_key in workplace and workplace[col_key] %}
+                                    {{ workplace[col_key] }}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            {% elif col['column_type'] == 'list' %}
+                                {% if workplace.custom_mapped and col_key in workplace.custom_mapped %}
+                                    {{ workplace.custom_mapped[col_key] | list_summary }}
+                                {% elif col_key in workplace %}
+                                    {{ workplace[col_key] | list_summary }}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            {% else %}
+                                {% if workplace.custom_mapped and col_key in workplace.custom_mapped %}
+                                    {{ workplace.custom_mapped[col_key] or '-' }}
+                                {% elif col_key in workplace %}
+                                    {{ workplace[col_key] or '-' }}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                    {% endfor %}
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="100" class="no-data">검색 결과가 없습니다.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if pagination.pages > 1 %}
+<div class="pagination-section">
+    <div class="pagination">
+        {% set window_info = pagination.get_window_info() %}
+        {% if window_info.has_prev_window %}
+            <a href="{{ url_for('page_view', url='safe-workplace', page=window_info.prev_window_start, **request.args.to_dict()) }}" class="page-btn">&laquo; 이전</a>
+        {% endif %}
+        {% for page in pagination.iter_pages() %}
+            {% if page == pagination.page %}
+                <span class="page-btn active">{{ page }}</span>
+            {% else %}
+                <a href="{{ url_for('page_view', url='safe-workplace', page=page, **request.args.to_dict()) }}" class="page-btn">{{ page }}</a>
+            {% endif %}
+        {% endfor %}
+        {% if window_info.has_next_window %}
+            <a href="{{ url_for('page_view', url='safe-workplace', page=window_info.next_window_start, **request.args.to_dict()) }}" class="page-btn">다음 &raquo;</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<script>
+function openDetailPopup(safeplaceNo) {
+    const width = 1400;
+    const height = 900;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    const options = [`width=${width}`, `height=${height}`, `left=${left}`, `top=${top}`, 'scrollbars=yes', 'resizable=yes'].join(',');
+    const popup = window.open(`/safe-workplace-detail/${encodeURIComponent(safeplaceNo)}?popup=1`, 'safeWorkplaceDetail', options);
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+    } else {
+        popup.focus();
+    }
+}
+
+function openRegisterPopup() {
+    const width = 1400;
+    const height = 900;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+    const options = [`width=${width}`, `height=${height}`, `left=${left}`, `top=${top}`, 'scrollbars=yes', 'resizable=yes'].join(',');
+    const popup = window.open('/safe-workplace-register?popup=1', 'safeWorkplaceRegister', options);
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+    } else {
+        popup.focus();
+    }
+}
+
+function exportToExcel() {
+    const url = new URL(window.location);
+    const params = new URLSearchParams(url.search);
+    window.location.href = '/api/safe-workplace-export?' + params.toString();
+}
+
+function toggleSelectAll() {
+    const selectAll = document.getElementById('selectAll');
+    document.querySelectorAll('.safe-checkbox').forEach(cb => cb.checked = selectAll.checked);
+    updateDeleteButton();
+}
+
+function updateDeleteButton() {
+    const checked = document.querySelectorAll('.safe-checkbox:checked');
+    const deleteBtn = document.querySelector('.btn-delete');
+    if (deleteBtn) {
+        if (checked.length > 0) {
+            deleteBtn.style.display = 'inline-block';
+            deleteBtn.textContent = `선택 삭제 (${checked.length}건)`;
+        } else {
+            deleteBtn.style.display = 'none';
+        }
+    }
+}
+
+function deleteSelectedWithPassword() {
+    PwModal.show(deleteSelected);
+}
+
+function deleteSelected() {
+    const ids = Array.from(document.querySelectorAll('.safe-checkbox:checked')).map(cb => cb.value);
+    if (ids.length === 0) {
+        alert('삭제할 항목을 선택하세요.');
+        return;
+    }
+    if (!confirm(`선택한 ${ids.length}개의 안전한 일터를 삭제하시겠습니까?\n(삭제된 항목은 관리자 메뉴에서 복구 가능합니다)`)) {
+        return;
+    }
+    fetch('/api/safe-workplace/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids })
+    }).then(r => r.json()).then(data => {
+        if (data.success) {
+            alert(`${data.deleted_count}건이 삭제되었습니다.`);
+            location.reload();
+        } else {
+            alert('삭제 실패: ' + (data.message || '알 수 없는 오류'));
+        }
+    }).catch(err => {
+        console.error(err);
+        alert('삭제 중 오류가 발생했습니다.');
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const deleteBtn = document.querySelector('.btn-delete');
+    if (deleteBtn) {
+        deleteBtn.style.display = 'none';
+    }
+});
+</script>
+
+{% include 'includes/password_modal.html' %}
+{% endblock %}

@@ -3,10 +3,9 @@
 import logging
 import sqlite3
 import json
-from flask import request, render_template, jsonify, session, flash, redirect, url_for
+from flask import request, render_template, jsonify, session
 from db_connection import get_db_connection
-from column_utils import normalize_column_types, determine_linked_type
-from common_mapping import smart_apply_mappings
+from column_utils import normalize_column_types
 
 # 공통: fetchone() 결과 첫 번째 값 안전 추출
 def _first(row, default=0):
@@ -31,6 +30,7 @@ from config.menu import MENU_CONFIG
 @app.route("/follow-sop")
 def follow_sop_route():
     """Follow SOP 페이지 라우트"""
+    from common_mapping import smart_apply_mappings
     import math
     import sqlite3
     from section_service import SectionConfigService
@@ -568,6 +568,7 @@ def follow_sop_route():
     
     # smart_apply_mappings 적용 (드롭다운 코드를 라벨로 변환)
     if items:
+        from common_mapping import smart_apply_mappings
         items = smart_apply_mappings(items, 'follow_sop', dynamic_columns, DB_PATH)
     
     # 섹션 보정은 유지
@@ -1189,674 +1190,59 @@ def register_follow_sop():
         if conn:
             conn.close()
 
-# ============= Safe-Workplace 관련 라우트 =============
-@app.route("/safe-workplace")
-def safe_workplace_route():
-    """Safe Workplace 목록 페이지"""
-    import math
-    import sqlite3
-    from section_service import SectionConfigService
-
-    conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    board_type = 'safe_workplace'
-    primary_key = 'safeplace_no'
-
-    section_service = SectionConfigService(board_type, DB_PATH)
-    cursor.execute("SELECT COUNT(*) FROM safe_workplace_sections WHERE section_key = 'basic_info'")
-    if _first(cursor.fetchone(), 0) == 0:
-        default_sections = [
-            ('basic_info', '기본정보', 1),
-            ('workplace_info', '작업장정보', 2),
-            ('safety_info', '안전정보', 3)
-        ]
-        for key, name, order in default_sections:
-            cursor.execute(
-                """
-                INSERT INTO safe_workplace_sections (section_key, section_name, section_order, is_active, is_deleted)
-                VALUES (%s, %s, %s, 1, 0)
-                ON CONFLICT (section_key) DO NOTHING
-                """,
-                (key, name, order)
-            )
-        conn.commit()
-
-    sections = section_service.get_sections()
-
-    cursor.execute(
-        """
-        SELECT * FROM safe_workplace_column_config
-        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
-        ORDER BY column_order
-        """
-    )
-    dynamic_columns_rows = cursor.fetchall()
-    dynamic_columns = [dict(row) for row in dynamic_columns_rows]
-    dynamic_columns = normalize_column_types(dynamic_columns)
-
-    section_columns = {}
-    for section in sections:
-        section_columns[section['section_key']] = [
-            col for col in dynamic_columns if col.get('tab') == section['section_key']
-        ]
-
-    display_columns = []
-    scoring_cols, score_total_cols = [], []
-    try:
-        import json as _json
-
-        def _expand_scoring_columns(col):
-            sc = col.get('scoring_config')
-            if sc and isinstance(sc, str):
-                try:
-                    sc = _json.loads(sc)
-                except Exception:
-                    sc = {}
-            items = (sc or {}).get('items') or []
-            out = []
-            for it in items:
-                iid = it.get('id')
-                label = it.get('label') or iid
-                if not iid:
-                    continue
-                out.append({
-                    'column_key': f"{col.get('column_key')}__{iid}",
-                    'column_name': f"{col.get('column_name', col.get('column_key'))} - {label}",
-                    'column_type': 'number',
-                    'input_type': 'number_integer',
-                    'is_active': 1,
-                    'is_deleted': 0,
-                    'tab': col.get('tab'),
-                    '_virtual': 1,
-                    '_source_scoring_key': col.get('column_key'),
-                    '_source_item_id': iid
-                })
-            return out
-
-        excluded = {'detailed_content', primary_key, 'created_at'}
-        seen_keys = set()
-        for col in dynamic_columns:
-            column_key = col.get('column_key')
-            if not column_key or column_key in excluded:
-                continue
-            if col.get('column_type') == 'scoring':
-                for vcol in _expand_scoring_columns(col):
-                    vkey = vcol['column_key']
-                    if vkey in seen_keys:
-                        continue
-                    seen_keys.add(vkey)
-                    display_columns.append(vcol)
-            else:
-                if column_key in seen_keys:
-                    continue
-                seen_keys.add(column_key)
-                display_columns.append(col)
-
-        scoring_cols = [dict(c) for c in dynamic_columns if dict(c).get('column_type') == 'scoring']
-        score_total_cols = [dict(c) for c in dynamic_columns if dict(c).get('column_type') == 'score_total']
-    except Exception as _e:
-        logging.warning(f"[SAFE_WORKPLACE] display column build failed: {_e}")
-
-    search_params = {}
-    where_clauses = ["(sw.is_deleted = 0 OR sw.is_deleted IS NULL)"]
-    query_params = []
-
-    company_name = request.args.get('company_name', '').strip()
-    business_number = request.args.get('business_number', '').strip()
-
-    if company_name:
-        search_params['company_name'] = company_name
-        if hasattr(conn, 'is_postgres') and conn.is_postgres:
-            where_clauses.append("((sw.custom_data->>'company_name') ILIKE %s OR (sw.custom_data->>'company_name_1cha') ILIKE %s)")
-        else:
-            where_clauses.append("(JSON_EXTRACT(sw.custom_data, '$.company_name') LIKE %s OR JSON_EXTRACT(sw.custom_data, '$.company_name_1cha') LIKE %s)")
-        query_params.extend([f"%{company_name}%", f"%{company_name}%"])
-
-    if business_number:
-        search_params['business_number'] = business_number
-        if hasattr(conn, 'is_postgres') and conn.is_postgres:
-            where_clauses.append("((sw.custom_data->>'business_number') ILIKE %s OR (sw.custom_data->>'company_name_1cha_bizno') ILIKE %s)")
-        else:
-            where_clauses.append("(JSON_EXTRACT(sw.custom_data, '$.business_number') LIKE %s OR JSON_EXTRACT(sw.custom_data, '$.company_name_1cha_bizno') LIKE %s)")
-        query_params.extend([f"%{business_number}%", f"%{business_number}%"])
-
-    where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
-
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 20, type=int)
-    offset = (page - 1) * per_page
-
-    cursor.execute(f"SELECT COUNT(*) FROM safe_workplace sw WHERE {where_sql}", query_params)
-    total_count = _first(cursor.fetchone(), 0)
-
-    data_query = f"""
-        SELECT sw.*
-        FROM safe_workplace sw
-        WHERE {where_sql}
-        ORDER BY sw.created_at DESC, sw.{primary_key} DESC
-        LIMIT %s OFFSET %s
-        """
-    cursor.execute(data_query, query_params + [per_page, offset])
-
-    import json as _json
-    items = []
-    for idx, row in enumerate(cursor.fetchall()):
-        item = dict(row)
-        raw_custom = item.get('custom_data')
-        custom_data = {}
-        if raw_custom:
-            try:
-                if isinstance(raw_custom, dict):
-                    custom_data = raw_custom
-                else:
-                    custom_data = _json.loads(raw_custom)
-            except Exception as _e:
-                logging.debug(f"[SAFE_WORKPLACE] custom_data parse failed: {_e}")
-                custom_data = {}
-            if isinstance(custom_data, dict):
-                item.update(custom_data)
-
-        for dcol in display_columns:
-            if dcol.get('_virtual') == 1:
-                src = dcol.get('_source_scoring_key')
-                key = dcol.get('_source_item_id')
-                block = item.get(src)
-                if isinstance(block, str):
-                    try:
-                        block = _json.loads(block)
-                    except Exception:
-                        block = {}
-                if isinstance(block, dict):
-                    item[dcol['column_key']] = block.get(key, 0)
-
-        for stc in score_total_cols:
-            try:
-                conf = stc.get('scoring_config')
-                if conf and isinstance(conf, str):
-                    conf = _json.loads(conf)
-                base = (conf or {}).get('base_score', 100)
-                include_keys = (conf or {}).get('include_keys') or []
-                total = base
-                if include_keys:
-                    for key in include_keys:
-                        sc_col = next((c for c in scoring_cols if c.get('column_key') == key), None)
-                        if not sc_col:
-                            continue
-                        group_obj = item.get(key)
-                        if isinstance(group_obj, str):
-                            try:
-                                group_obj = _json.loads(group_obj)
-                            except Exception:
-                                group_obj = {}
-                        if isinstance(group_obj, dict):
-                            for value in group_obj.values():
-                                try:
-                                    total += float(value or 0)
-                                except Exception:
-                                    pass
-                item[stc.get('column_key')] = total
-            except Exception as _e:
-                logging.debug(f"[SAFE_WORKPLACE] score total compute failed: {_e}")
-
-        item['no'] = total_count - offset - idx
-        items.append(item)
-
-    conn.close()
-
-    if items:
-        items = smart_apply_mappings(items, board_type, dynamic_columns, DB_PATH)
-
-    class Pagination:
-        def __init__(self, page, per_page, total_count):
-            self.page = page
-            self.per_page = per_page
-            self.total_count = total_count
-            self.pages = math.ceil(total_count / per_page) if total_count > 0 else 1
-            self.has_prev = page > 1
-            self.prev_num = page - 1 if self.has_prev else None
-            self.has_next = page < self.pages
-            self.next_num = page + 1 if self.has_next else None
-
-        def iter_pages(self, window_size=10):
-            start = ((self.page - 1) // window_size) * window_size + 1
-            end = min(start + window_size - 1, self.pages)
-            for num in range(start, end + 1):
-                yield num
-
-        def get_window_info(self, window_size=10):
-            start = ((self.page - 1) // window_size) * window_size + 1
-            end = min(start + window_size - 1, self.pages)
-            has_prev_window = start > 1
-            has_next_window = end < self.pages
-            prev_window_start = max(1, start - window_size)
-            next_window_start = min(end + 1, self.pages)
-            return {
-                'start': start,
-                'end': end,
-                'has_prev_window': has_prev_window,
-                'has_next_window': has_next_window,
-                'prev_window_start': prev_window_start,
-                'next_window_start': next_window_start
-            }
-
-    pagination = Pagination(page=page, per_page=per_page, total_count=total_count)
-
-    return render_template(
-        'safe-workplace.html',
-        workplaces=items,
-        dynamic_columns=dynamic_columns,
-        sections=sections,
-        section_columns=section_columns,
-        display_columns=display_columns,
-        pagination=pagination,
-        search_params=search_params,
-        total_count=total_count,
-        menu=MENU_CONFIG
-    )
-
-
-@app.route("/safe-workplace-register")
-def safe_workplace_register():
-    """Safe Workplace 등록 페이지"""
-    import sqlite3
-    from section_service import SectionConfigService
-    from timezone_config import get_korean_time
-    from id_generator import generate_safeplace_number
-
-    conn = get_db_connection()
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    section_service = SectionConfigService('safe_workplace', DB_PATH)
-
-    cursor.execute("SELECT COUNT(*) FROM safe_workplace_sections WHERE section_key = 'basic_info'")
-    if _first(cursor.fetchone(), 0) == 0:
-        default_sections = [
-            ('basic_info', '기본정보', 1),
-            ('workplace_info', '작업장정보', 2),
-            ('safety_info', '안전정보', 3)
-        ]
-        for key, name, order in default_sections:
-            cursor.execute(
-                """
-                INSERT INTO safe_workplace_sections (section_key, section_name, section_order, is_active, is_deleted)
-                VALUES (%s, %s, %s, 1, 0)
-                ON CONFLICT (section_key) DO NOTHING
-                """,
-                (key, name, order)
-            )
-        conn.commit()
-
-    sections = section_service.get_sections()
-
-    cursor.execute(
-        """
-        SELECT * FROM safe_workplace_column_config
-        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
-        ORDER BY column_order
-        """
-    )
-    dynamic_columns = [dict(row) for row in cursor.fetchall()]
-    dynamic_columns = normalize_column_types(dynamic_columns)
-
-    created_at_dt = get_korean_time()
-    created_at = created_at_dt.strftime('%Y-%m-%d %H:%M:%S')
-    safeplace_no = generate_safeplace_number(DB_PATH, created_at_dt)
-
-    dynamic_columns = [col for col in dynamic_columns if col.get('column_key') not in ['safeplace_no', 'created_at']]
-
-    basic_fields = [
-        {
-            'column_key': 'safeplace_no',
-            'column_name': '점검번호',
-            'column_type': 'text',
-            'is_required': 1,
-            'is_readonly': 1,
-            'tab': 'basic_info',
-            'default_value': safeplace_no
-        },
-        {
-            'column_key': 'created_at',
-            'column_name': '등록일',
-            'column_type': 'datetime',
-            'is_required': 0,
-            'is_readonly': 1,
-            'tab': 'basic_info',
-            'default_value': created_at
-        }
-    ]
-
-    basic_info_dynamic = [col for col in dynamic_columns if col.get('tab') == 'basic_info']
-    basic_fields.extend(basic_info_dynamic)
-
-    section_columns = {'basic_info': basic_fields}
-    for section in sections:
-        if section['section_key'] != 'basic_info':
-            section_columns[section['section_key']] = [
-                col for col in dynamic_columns if col.get('tab') == section['section_key']
-            ]
-
-    basic_options = {}
-    try:
-        from app import get_dropdown_options_for_display as _get_opts
-        for col in dynamic_columns:
-            if col.get('column_type') == 'dropdown':
-                col_key = col.get('column_key')
-                if col_key:
-                    opts = _get_opts('safe_workplace', col_key)
-                    if opts:
-                        basic_options[col_key] = opts
-    except Exception as _e:
-        logging.error(f"Safe workplace dropdown option load failed: {_e}")
-
-    is_popup = request.args.get('popup') == '1'
-
-    conn.close()
-
-    return render_template(
-        'safe-workplace-register.html',
-        sections=sections,
-        section_columns=section_columns,
-        dynamic_columns=dynamic_columns,
-        basic_options=basic_options,
-        safeplace_no=safeplace_no,
-        created_at=created_at,
-        is_popup=is_popup,
-        menu=MENU_CONFIG
-    )
-
-
-@app.route("/safe-workplace-detail/<safeplace_no>")
-def safe_workplace_detail(safeplace_no):
-    """Safe Workplace 상세 페이지"""
-    import json
-    logging.info(f"Safe Workplace 상세 정보 조회: {safeplace_no}")
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        SELECT safeplace_no, custom_data, created_at, updated_at, is_deleted
-        FROM safe_workplace
-        WHERE safeplace_no = %s AND (is_deleted = 0 OR is_deleted IS NULL)
-        """,
-        (safeplace_no,)
-    )
-
-    row = cursor.fetchone()
-    if not row:
-        conn.close()
-        return "Safe Workplace 데이터를 찾을 수 없습니다.", 404
-
-    workplace = {
-        'safeplace_no': row[0],
-        'custom_data': row[1],
-        'created_at': row[2],
-        'updated_at': row[3],
-        'is_deleted': row[4],
-        'created_by': None,
-        'updated_by': None
-    }
-
-    custom_data = {}
-    if workplace.get('custom_data'):
-        raw = workplace.get('custom_data')
-        try:
-            if isinstance(raw, dict):
-                custom_data = raw
-            else:
-                custom_data = json.loads(raw) if raw else {}
-        except Exception as _e:
-            logging.error(f"Safe Workplace custom_data parse error: {_e}")
-            custom_data = {}
-        if isinstance(custom_data, dict):
-            workplace.update(custom_data)
-
-    try:
-        cursor.execute(
-            """
-            SELECT detailed_content
-            FROM safe_workplace_details
-            WHERE safeplace_no = %s
-            """,
-            (safeplace_no,)
-        )
-        detail_row = cursor.fetchone()
-        workplace['detailed_content'] = detail_row[0] if detail_row and detail_row[0] else ''
-    except Exception as _e:
-        logging.warning(f"Safe Workplace details load 실패: {_e}")
-        workplace.setdefault('detailed_content', '')
-
-    cursor.execute(
-        """
-        SELECT * FROM safe_workplace_column_config
-        WHERE is_active = 1 AND (is_deleted = 0 OR is_deleted IS NULL)
-        ORDER BY column_order
-        """
-    )
-    dynamic_columns = [dict(row) for row in cursor.fetchall()]
-    dynamic_columns = normalize_column_types(dynamic_columns)
-
-    from section_service import SectionConfigService
-    section_service = SectionConfigService('safe_workplace', DB_PATH)
-    sections = section_service.get_sections()
-
-    section_columns = {}
-    for section in sections:
-        section_columns[section['section_key']] = [
-            col for col in dynamic_columns if col.get('tab') == section['section_key']
-        ]
-
-    basic_fields = [
-        {
-            'column_key': 'safeplace_no',
-            'column_name': '점검번호',
-            'column_type': 'text',
-            'is_required': 1,
-            'is_readonly': 1,
-            'tab': 'basic_info'
-        },
-        {
-            'column_key': 'created_at',
-            'column_name': '등록일',
-            'column_type': 'text',
-            'is_required': 0,
-            'is_readonly': 1,
-            'tab': 'basic_info'
-        }
-    ]
-
-    dynamic_columns = [col for col in dynamic_columns if col.get('column_key') not in ['safeplace_no', 'created_at']]
-
-    basic_info_dynamic = [col for col in dynamic_columns if col.get('tab') == 'basic_info']
-    basic_fields.extend(basic_info_dynamic)
-
-    section_columns['basic_info'] = basic_fields
-    for section in sections:
-        if section['section_key'] != 'basic_info':
-            section_columns[section['section_key']] = [
-                col for col in dynamic_columns if col.get('tab') == section['section_key']
-            ]
-
-    attachments = []
-    try:
-        from board_services import AttachmentService
-        attachment_service = AttachmentService('safe_workplace', DB_PATH, conn)
-        attachments = attachment_service.list(safeplace_no)
-    except Exception as _e:
-        logging.error(f"Safe Workplace 첨부파일 조회 오류: {_e}")
-        attachments = []
-
-    basic_options = {}
-    try:
-        from app import get_dropdown_options_for_display as _get_opts
-        for col in dynamic_columns:
-            if col.get('column_type') == 'dropdown':
-                col_key = col.get('column_key')
-                if col_key:
-                    opts = _get_opts('safe_workplace', col_key)
-                    if opts:
-                        basic_options[col_key] = opts
-    except Exception as _e:
-        logging.error(f"Safe Workplace dropdown 옵션 로드 실패: {_e}")
-
-    all_column_keys = [c.get('column_key') for c in dynamic_columns if c.get('column_key')]
-
-    is_popup = request.args.get('popup') == '1'
-
-    conn.close()
-
-    mapped = smart_apply_mappings([workplace], 'safe_workplace', dynamic_columns, DB_PATH)
-    if mapped:
-        workplace = mapped[0]
-
-    return render_template(
-        'safe-workplace-detail.html',
-        workplace=workplace,
-        custom_data=custom_data,
-        sections=sections,
-        section_columns=section_columns,
-        all_column_keys=all_column_keys,
-        basic_options=basic_options,
-        attachments=attachments,
-        is_popup=is_popup,
-        menu=MENU_CONFIG
-    )
-
-
-@app.route('/register-safe-workplace', methods=['POST'])
-def register_safe_workplace():
-    """Safe Workplace 신규 등록"""
+# 이 라우트는 app.py에 더 완전한 버전이 있으므로 백업으로 변경
+# @app.route('/update-follow-sop', methods=['POST'])
+def update_follow_sop_simple():
+    """Follow SOP 수정"""
     conn = None
     try:
         import json
-        from timezone_config import get_korean_time
-        from db.upsert import safe_upsert
-        from section_service import SectionConfigService
-        from id_generator import generate_safeplace_number
-
+        
+        # safety-instruction과 동일한 방식으로 FormData 받기
+        work_req_no = request.form.get('work_req_no')
+        detailed_content = request.form.get('detailed_content', '')
+        custom_data = request.form.get('custom_data', '{}')
+        
+        if not work_req_no:
+            return jsonify({'success': False, 'message': '점검번호가 필요합니다.'}), 400
+        
+        # JSON 파싱
+        try:
+            # PostgreSQL JSONB는 이미 dict로 반환됨
+            if isinstance(custom_data, dict):
+                custom_data_dict = custom_data
+            else:
+                custom_data_dict = json.loads(custom_data) if custom_data and custom_data != '{}' else {}
+        except ValueError:
+            return jsonify({"success": False, "message": "잘못된 데이터 형식입니다."}), 400
+        
         conn = get_db_connection()
         cursor = conn.cursor()
-
-        section_service = SectionConfigService('safe_workplace', DB_PATH)
-        sections = section_service.get_sections()
-        if not sections:
-            sections = [
-                {'section_key': 'basic_info'},
-                {'section_key': 'workplace_info'},
-                {'section_key': 'safety_info'}
-            ]
-
-        all_fields = {}
-        for section in sections:
-            section_key = section['section_key']
-            section_data_str = request.form.get(section_key, '{}')
-            logging.info(f"[SW REGISTER DEBUG] 섹션 {section_key} raw: {section_data_str[:500]}")
-            try:
-                section_data = json.loads(section_data_str)
-                all_fields.update(section_data)
-                for k, v in section_data.items():
-                    if v and v not in ('', [], None):
-                        logging.info(f"  -> {k}: {str(v)[:100]}")
-            except Exception as _e:
-                logging.warning(f"[SW REGISTER] 섹션 {section_key} 파싱 실패: {_e}")
-
-        custom_data_raw = request.form.get('custom_data', '{}')
-        try:
-            if isinstance(custom_data_raw, dict):
-                custom_data_compat = custom_data_raw
-            else:
-                custom_data_compat = json.loads(custom_data_raw) if custom_data_raw else {}
-            if custom_data_compat:
-                all_fields.update(custom_data_compat)
-                logging.info(f"[SW REGISTER] custom_data 병합: {custom_data_compat}")
-        except Exception:
-            pass
-
-        detailed_content = request.form.get('detailed_content', '')
-        files = request.files.getlist('files')
-        try:
-            attachment_data = json.loads(request.form.get('attachment_data', '[]'))
-        except Exception:
-            attachment_data = []
-
-        created_at = get_korean_time()
-        safeplace_no = generate_safeplace_number(DB_PATH, created_at)
-
-        if isinstance(all_fields, dict):
-            all_fields.setdefault('safeplace_no', safeplace_no)
-            all_fields.setdefault('created_at', created_at.strftime('%Y-%m-%d %H:%M:%S'))
-            custom_data_json = json.dumps(all_fields, ensure_ascii=False)
-        else:
-            custom_data_json = all_fields
-
-        upsert_data = {
-            'safeplace_no': safeplace_no,
-            'custom_data': custom_data_json,
-            'created_at': created_at.strftime('%Y-%m-%d %H:%M:%S'),
-            'created_by': session.get('user_id', 'system'),
-            'is_deleted': 0
-        }
-
-        safe_upsert(
-            conn,
-            'safe_workplace',
-            upsert_data,
-            conflict_cols=['safeplace_no'],
-            update_cols=['custom_data', 'updated_at', 'is_deleted']
-        )
-
-        try:
-            from db.upsert import safe_upsert as _su
-            _su(conn, 'safe_workplace_details', {
-                'safeplace_no': safeplace_no,
-                'detailed_content': detailed_content,
-                'updated_at': None
-            }, conflict_cols=['safeplace_no'], update_cols=['detailed_content', 'updated_at'])
-        except Exception as _e_det:
-            logging.warning(f"[SW REGISTER] details upsert warning: {_e_det}")
-
-        if files:
-            import os
-            from werkzeug.utils import secure_filename
-            upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'safe_workplace')
-            os.makedirs(upload_folder, exist_ok=True)
-
-            for idx, file in enumerate(files):
-                if file and file.filename:
-                    filename = secure_filename(file.filename)
-                    timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
-                    unique_filename = f"{safeplace_no}_{timestamp}_{filename}".replace('-', '_')
-                    file_path = os.path.join(upload_folder, unique_filename)
-                    file.save(file_path)
-
-                    description = ''
-                    if idx < len(attachment_data):
-                        description = attachment_data[idx].get('description', '')
-
-                    cursor.execute(
-                        """
-                        INSERT INTO safe_workplace_attachments (safeplace_no, file_name, file_path, file_size, description)
-                        VALUES (%s, %s, %s, %s, %s)
-                        """,
-                        (safeplace_no, filename, file_path, os.path.getsize(file_path), description)
-                    )
-
+        
+        # custom_data에 detailed_content 포함
+        if detailed_content:
+            custom_data_dict['detailed_content'] = detailed_content
+        
+        custom_data_json = json.dumps(custom_data_dict, ensure_ascii=False)
+        
+        # Follow SOP 업데이트
+        cursor.execute("""
+            UPDATE follow_sop
+            SET custom_data = %s, updated_by = %s
+            WHERE work_req_no = %s
+        """, (custom_data_json, session.get('user_id', 'system'), work_req_no))
+        
         conn.commit()
-
+        
         return jsonify({
             'success': True,
-            'message': '안전한 일터가 등록되었습니다.',
-            'safeplace_no': safeplace_no
+            'message': 'Follow SOP가 수정되었습니다.'
         })
-
+        
     except Exception as e:
         if conn:
             conn.rollback()
-        logging.error(f"Safe Workplace 등록 중 오류: {e}")
+        logging.error(f"Follow SOP 수정 중 오류: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500
     finally:
         if conn:
@@ -1866,6 +1252,7 @@ def register_safe_workplace():
 @app.route("/full-process")
 def full_process_route():
     """Full Process 페이지 라우트"""
+    from common_mapping import smart_apply_mappings
     import math
     import sqlite3
     from section_service import SectionConfigService
@@ -2199,6 +1586,7 @@ def full_process_route():
     
     # smart_apply_mappings 적용 (드롭다운 코드를 라벨로 변환)
     if items:
+        from common_mapping import smart_apply_mappings
         items = smart_apply_mappings(items, 'full_process', dynamic_columns, DB_PATH)
     
     # 섹션 보정은 유지

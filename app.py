@@ -553,7 +553,66 @@ def init_db():
         if 'is_deleted' not in columns:
             cursor.execute("ALTER TABLE follow_sop_sections ADD COLUMN is_deleted INTEGER DEFAULT 0")
             logging.info("follow_sop_sections 테이블에 is_deleted 컬럼 추가")
-        
+
+        # Safe Workplace 데이터 테이블 (동적 컬럼 데이터 저장용)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS safe_workplace (
+                safeplace_no TEXT PRIMARY KEY,
+                custom_data TEXT DEFAULT '{}',
+                is_deleted INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_by TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_by TEXT
+            )
+        ''')
+
+        cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'safe_workplace'
+        """)
+        columns = [col[0] for col in cursor.fetchall()]
+        if 'is_deleted' not in columns:
+            cursor.execute("ALTER TABLE safe_workplace ADD COLUMN is_deleted INTEGER DEFAULT 0")
+
+        # Safe Workplace sections 테이블 생성
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS safe_workplace_sections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                section_key TEXT UNIQUE,
+                section_name TEXT,
+                section_order INTEGER,
+                is_active INTEGER DEFAULT 1
+            )
+        ''')
+
+        cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_name = 'safe_workplace_sections'
+        """)
+        columns = [col[0] for col in cursor.fetchall()]
+        if 'section_order' not in columns:
+            cursor.execute("ALTER TABLE safe_workplace_sections ADD COLUMN section_order INTEGER DEFAULT 1")
+            logging.info("safe_workplace_sections 테이블에 section_order 컬럼 추가")
+        if 'is_active' not in columns:
+            cursor.execute("ALTER TABLE safe_workplace_sections ADD COLUMN is_active INTEGER DEFAULT 1")
+            logging.info("safe_workplace_sections 테이블에 is_active 컬럼 추가")
+        if 'is_deleted' not in columns:
+            cursor.execute("ALTER TABLE safe_workplace_sections ADD COLUMN is_deleted INTEGER DEFAULT 0")
+            logging.info("safe_workplace_sections 테이블에 is_deleted 컬럼 추가")
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS safe_workplace_details (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                safeplace_no TEXT UNIQUE NOT NULL,
+                detailed_content TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         # Full Process 데이터 테이블 (동적 컬럼 데이터 저장용)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS full_process (
@@ -662,6 +721,18 @@ def init_db():
             """)
             logging.info("follow_sop_sections 초기 데이터 추가")
             
+        # Safe Workplace 섹션
+        cursor.execute("SELECT COUNT(*) FROM safe_workplace_sections")
+        if cursor.fetchone()[0] == 0:
+            cursor.execute("""
+                INSERT INTO safe_workplace_sections (section_key, section_name, section_order, is_active, is_deleted)
+                VALUES 
+                    ('basic_info', '기본정보', 1, 1, 0),
+                    ('workplace_info', '작업장정보', 2, 1, 0),
+                    ('safety_info', '안전정보', 3, 1, 0)
+            """)
+            logging.info("safe_workplace_sections 초기 데이터 추가")
+            
         # Full Process 섹션
         cursor.execute("SELECT COUNT(*) FROM full_process_sections")
         if cursor.fetchone()[0] == 0:
@@ -732,6 +803,44 @@ def init_db():
             WHERE (tab IS NULL OR tab = '') 
               AND {_wa_fs}
               AND {_wd_fs}
+        """)
+        
+        # Safe Workplace
+        cursor.execute("""
+            UPDATE safe_workplace_column_config 
+            SET tab = 'basic_info' 
+            WHERE tab IS NULL AND column_key IN (
+                'safeplace_no', 'company_name', 'business_number', 'created_at',
+                'created_by', 'work_date', 'department'
+            )
+        """)
+
+        cursor.execute("""
+            UPDATE safe_workplace_column_config 
+            SET tab = 'workplace_info' 
+            WHERE tab IS NULL AND column_key IN (
+                'work_name', 'work_location', 'building_code', 'worker_count',
+                'safety_manager', 'work_type', 'risk_assessment'
+            )
+        """)
+
+        cursor.execute("""
+            UPDATE safe_workplace_column_config 
+            SET tab = 'safety_info' 
+            WHERE tab IS NULL AND column_key IN (
+                'safety_measures', 'hazard_identification', 'protective_equipment',
+                'emergency_contact', 'inspection_result'
+            )
+        """)
+
+        _wa_sw = sql_is_active_true('is_active', conn)
+        _wd_sw = sql_is_deleted_false('is_deleted', conn)
+        cursor.execute(f"""
+            UPDATE safe_workplace_column_config 
+            SET tab = 'additional' 
+            WHERE (tab IS NULL OR tab = '') 
+              AND {_wa_sw}
+              AND {_wd_sw}
         """)
         
         # Full Process
@@ -3193,6 +3302,270 @@ def update_follow_sop():
     except Exception as e:
         import traceback
         logging.error(f"Follow SOP 업데이트 오류: {e}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
+        if conn:
+            conn.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.route('/update-safe-workplace', methods=['POST'])
+def update_safe_workplace():
+    """Safe Workplace 정보 업데이트"""
+    from board_services import AttachmentService
+    from section_service import SectionConfigService
+    conn = None
+
+    try:
+        safeplace_no = request.form.get('safeplace_no')
+        detailed_content = request.form.get('detailed_content', '')
+
+        print(f"\n[SW UPDATE DEBUG] safeplace_no: {safeplace_no}")
+        print(f"[SW UPDATE DEBUG] FormData keys: {list(request.form.keys())}")
+        print(f"[SW UPDATE DEBUG] detailed_content received: {detailed_content[:100] if detailed_content else 'EMPTY'}")
+        for key in request.form.keys():
+            if key not in ['detailed_content', 'attachment_data', 'deleted_attachments']:
+                value = request.form.get(key)
+                print(f"[SW UPDATE DEBUG] {key}: {value[:200] if value else 'None'}")
+
+        try:
+            deleted_attachments = pyjson.loads(request.form.get('deleted_attachments', '[]'))
+        except Exception:
+            deleted_attachments = []
+
+        try:
+            attachment_data_raw = request.form.get('attachment_data', '[]')
+            if isinstance(attachment_data_raw, str):
+                attachment_data = pyjson.loads(attachment_data_raw)
+            else:
+                attachment_data = attachment_data_raw
+            if not isinstance(attachment_data, list):
+                attachment_data = []
+        except Exception as e:
+            logging.warning(f"attachment_data 파싱 실패: {e}")
+            attachment_data = []
+
+        files = request.files.getlist('files')
+
+        logging.info(f"[SW UPDATE] attachment_data: {attachment_data}")
+        logging.info(f"[SW UPDATE] files count: {len(files)}")
+
+        conn = get_db_connection(timeout=30.0)
+        cursor = conn.cursor()
+
+        section_service = SectionConfigService('safe_workplace', DB_PATH)
+        sections = section_service.get_sections()
+        if not sections:
+            sections = [
+                {'section_key': 'basic_info'},
+                {'section_key': 'workplace_info'},
+                {'section_key': 'safety_info'}
+            ]
+
+        all_fields = {}
+        for section in sections:
+            section_key = section['section_key']
+            section_data_str = request.form.get(section_key, '{}')
+            logging.info(f"[SW UPDATE DEBUG] 섹션 {section_key} raw: {section_data_str[:500]}")
+            try:
+                section_data = pyjson.loads(section_data_str)
+                all_fields.update(section_data)
+                logging.info(f"[SW UPDATE] 섹션 {section_key} 데이터: {section_data}")
+                for k, v in section_data.items():
+                    if v and v not in ('', [], None):
+                        logging.info(f"  -> {k}: {str(v)[:100]}")
+            except Exception as e:
+                logging.warning(f"[SW UPDATE] 섹션 {section_key} 파싱 실패: {e}")
+
+        custom_data_raw = request.form.get('custom_data', '{}')
+        try:
+            custom_data_compat = pyjson.loads(custom_data_raw) if isinstance(custom_data_raw, str) else (custom_data_raw or {})
+            if custom_data_compat:
+                all_fields.update(custom_data_compat)
+                logging.info(f"[SW UPDATE] custom_data 병합: {custom_data_compat}")
+        except Exception:
+            pass
+
+        custom_data = all_fields
+
+        for key, value in list(custom_data.items()):
+            if isinstance(value, str) and value.startswith('[') and value.endswith(']'):
+                try:
+                    custom_data[key] = pyjson.loads(value)
+                    logging.info(f"List field {key} normalized from string")
+                except Exception:
+                    pass
+
+        cursor.execute("""
+            SELECT custom_data
+            FROM safe_workplace
+            WHERE safeplace_no = %s
+        """, (safeplace_no,))
+
+        existing_row = cursor.fetchone()
+        existing_custom_data = {}
+        if existing_row and existing_row[0]:
+            if isinstance(existing_row[0], dict):
+                existing_custom_data = pyjson.loads(pyjson.dumps(existing_row[0]))
+            elif isinstance(existing_row[0], str):
+                try:
+                    existing_custom_data = pyjson.loads(existing_row[0])
+                except Exception:
+                    existing_custom_data = {}
+
+        def is_list_field(field_value):
+            if isinstance(field_value, list):
+                return True
+            if isinstance(field_value, str) and field_value.strip():
+                return field_value.startswith('[') and field_value.endswith(']')
+            return False
+
+        for key, value in custom_data.items():
+            existing_value = existing_custom_data.get(key, None)
+            if is_list_field(value) or (existing_value is not None and is_list_field(existing_value)):
+                logging.info(f"[SW MERGE] {key} 리스트 필드 병합")
+                if isinstance(existing_value, str) and existing_value.strip():
+                    try:
+                        existing_value = pyjson.loads(existing_value)
+                    except Exception:
+                        existing_value = []
+                if not isinstance(existing_value, list):
+                    existing_value = []
+
+                if isinstance(value, str) and value.strip():
+                    if value.startswith('[') and value.endswith(']'):
+                        try:
+                            value = pyjson.loads(value)
+                        except Exception:
+                            value = []
+                if not isinstance(value, list):
+                    value = []
+
+                if len(value) > 0 and len(existing_value) > 0:
+                    first_existing_id = existing_value[0].get('id', '') if existing_value and isinstance(existing_value[0], dict) else ''
+                    has_existing_data = any(
+                        isinstance(item, dict) and item.get('id') == first_existing_id
+                        for item in value
+                    ) if first_existing_id else False
+
+                    if has_existing_data:
+                        existing_custom_data[key] = value
+                        logging.info(f"[SW MERGE] {key} 전체 교체 {len(value)}개")
+                    else:
+                        merged_list = list(existing_value)
+                        existing_ids = {item.get('id', '') for item in existing_value if isinstance(item, dict)}
+                        for new_item in value:
+                            if isinstance(new_item, dict) and new_item.get('id') not in existing_ids:
+                                merged_list.append(new_item)
+                                existing_ids.add(new_item.get('id'))
+                        existing_custom_data[key] = merged_list
+                        logging.info(f"[SW MERGE] {key} 병합 완료 -> {len(merged_list)}개")
+                else:
+                    if len(value) > 0:
+                        existing_custom_data[key] = value
+                    elif len(existing_value) > 0:
+                        existing_custom_data[key] = existing_value
+            else:
+                if value is not None:
+                    existing_custom_data[key] = value
+
+        logging.info("detailed_content는 별도 details 테이블에 저장")
+
+        try:
+            from db.upsert import safe_upsert as _su
+            logging.info(f"[SW] Attempting to upsert safe_workplace_details - safeplace_no: {safeplace_no}, detailed_content length: {len(detailed_content)}")
+            _su(conn, 'safe_workplace_details', {
+                'safeplace_no': safeplace_no,
+                'detailed_content': detailed_content,
+                'updated_at': None
+            }, conflict_cols=['safeplace_no'], update_cols=['detailed_content', 'updated_at'])
+            logging.info("[SW] details upsert applied successfully")
+        except Exception as _e_det:
+            logging.error(f"[SW] details upsert FAILED: {_e_det}")
+            import traceback
+            logging.error(f"[SW] Traceback: {traceback.format_exc()}")
+
+        import json
+        custom_data_json = json.dumps(existing_custom_data, ensure_ascii=False)
+
+        logging.info(f"[SW UPDATE] safe_upsert 호출 전 - safeplace_no: {safeplace_no}")
+        from db.upsert import safe_upsert
+        safe_upsert(
+            conn,
+            'safe_workplace',
+            {
+                'safeplace_no': safeplace_no,
+                'custom_data': custom_data_json,
+                'updated_at': None
+            },
+            conflict_cols=['safeplace_no'],
+            update_cols=['custom_data', 'updated_at']
+        )
+        logging.info(f"[SW UPDATE] safe_upsert 완료")
+
+        logging.info(f"[SW UPDATE] 첨부파일 처리 시작 - deleted: {deleted_attachments}")
+        if deleted_attachments:
+            placeholders = ','.join(['%s'] * len(deleted_attachments))
+            cursor.execute(f"""
+                DELETE FROM safe_workplace_attachments
+                WHERE id IN ({placeholders})
+            """, deleted_attachments)
+            logging.info(f"첨부파일 {len(deleted_attachments)}개 삭제")
+
+        for item in attachment_data:
+            if isinstance(item, dict) and item.get('id') and not item.get('isNew'):
+                cursor.execute("""
+                    UPDATE safe_workplace_attachments
+                    SET description = %s
+                    WHERE id = %s
+                """, (item.get('description', ''), item['id']))
+
+        if files:
+            import os
+            from werkzeug.utils import secure_filename
+            from timezone_config import get_korean_time
+
+            upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'safe_workplace')
+            os.makedirs(upload_folder, exist_ok=True)
+
+            new_file_descriptions = []
+            for item in attachment_data:
+                if isinstance(item, dict) and item.get('isNew'):
+                    new_file_descriptions.append(item.get('description', ''))
+
+            for idx, file in enumerate(files):
+                if file and file.filename:
+                    filename = secure_filename(file.filename)
+                    timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
+                    unique_filename = f"{safeplace_no}_{timestamp}_{filename}".replace('-', '_')
+                    file_path = os.path.join(upload_folder, unique_filename)
+
+                    file.save(file_path)
+
+                    description = ''
+                    if idx < len(new_file_descriptions):
+                        description = new_file_descriptions[idx]
+
+                    cursor.execute("""
+                        INSERT INTO safe_workplace_attachments (safeplace_no, file_name, file_path, file_size, description)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (safeplace_no, filename, file_path, os.path.getsize(file_path), description))
+                    logging.info(f"새 첨부파일 저장: {filename}, 설명: {description}")
+
+        conn.commit()
+        logging.info(f"Safe Workplace {safeplace_no} 업데이트 성공")
+
+        return jsonify({
+            "success": True,
+            "message": "안전한 일터가 성공적으로 수정되었습니다.",
+            "safeplace_no": safeplace_no
+        })
+
+    except Exception as e:
+        import traceback
+        logging.error(f"Safe Workplace 업데이트 오류: {e}")
         logging.error(f"Traceback: {traceback.format_exc()}")
         if conn:
             conn.rollback()
@@ -7710,6 +8083,21 @@ def get_deleted_follow_sop():
     return jsonify({"success": True, "items": [dict(row) for row in deleted_items]})
 
 
+@app.route("/api/safe-workplace/deleted")
+def get_deleted_safe_workplace():
+    """삭제된 Safe Workplace 목록 API"""
+    conn = get_db_connection()
+
+    deleted_items = conn.execute("""
+        SELECT * FROM safe_workplace
+        WHERE is_deleted = 1
+        ORDER BY created_at DESC
+    """).fetchall()
+
+    conn.close()
+    return jsonify({"success": True, "items": [dict(row) for row in deleted_items]})
+
+
 @app.route("/api/full-process")
 def get_full_process():
     """Full Process 목록 API (일반 데이터)"""
@@ -7808,6 +8196,29 @@ def restore_follow_sop():
         
     except Exception as e:
         logging.error(f"Error restoring follow SOP: {str(e)}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/safe-workplace/restore", methods=['POST'])
+def restore_safe_workplace():
+    """Safe Workplace 복구 API"""
+    try:
+        data = request.get_json()
+        ids = data.get('ids', [])
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        for item_id in ids:
+            cursor.execute("UPDATE safe_workplace SET is_deleted = 0 WHERE safeplace_no = %s", (item_id,))
+
+        conn.commit()
+        conn.close()
+
+        return jsonify({"success": True, "message": f"복구 완료: {len(ids)}개 항목"})
+
+    except Exception as e:
+        logging.error(f"Error restoring safe workplace: {str(e)}")
         return jsonify({"success": False, "message": str(e)}), 500
 
 
@@ -7982,6 +8393,39 @@ def delete_follow_sop():
         })
     except Exception as e:
         logging.error(f"Follow SOP 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@app.route('/api/safe-workplace/delete', methods=['POST'])
+def delete_safe_workplace():
+    """선택한 Safe Workplace를 소프트 삭제"""
+    try:
+        data = request.json
+        ids = data.get('ids', [])  # safeplace_no 목록
+
+        if not ids:
+            return jsonify({"success": False, "message": "삭제할 항목이 없습니다."}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        placeholders = ','.join(['%s'] * len(ids))
+        cursor.execute(f"""
+            UPDATE safe_workplace
+            SET is_deleted = 1
+            WHERE safeplace_no IN ({placeholders})
+        """, ids)
+
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+
+        return jsonify({
+            "success": True,
+            "deleted_count": deleted_count,
+            "message": f"{deleted_count}건이 삭제되었습니다."
+        })
+    except Exception as e:
+        logging.error(f"Safe Workplace 삭제 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route('/api/full-process/delete', methods=['POST'])
@@ -9484,6 +9928,250 @@ def export_follow_sop_excel():
     except Exception as e:
         import traceback
         logging.error(f"Follow SOP 엑셀 다운로드 중 오류: {e}")
+        logging.error(traceback.format_exc())
+        if conn:
+            conn.close()
+        return jsonify({"success": False, "message": str(e)}), 500
+
+# ===== Safe Workplace 엑셀 다운로드 API =====
+@app.route('/api/safe-workplace-export')
+def export_safe_workplace_excel():
+    """Safe Workplace 데이터 엑셀 다운로드"""
+    try:
+        import openpyxl
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill
+        import io
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        section_sql = f"""
+            SELECT section_key, section_name, section_order
+            FROM safe_workplace_sections
+            WHERE {sql_is_active_true('is_active', conn)}
+              AND {sql_is_deleted_false('is_deleted', conn)}
+            ORDER BY section_order
+        """
+        try:
+            cursor.execute(section_sql)
+            sections = [dict(row) for row in cursor.fetchall()]
+        except Exception:
+            sections = []
+
+        where_c_active = sql_is_active_true('is_active', conn)
+        where_c_notdel = sql_is_deleted_false('is_deleted', conn)
+        cursor.execute(f"""
+            SELECT * FROM safe_workplace_column_config
+            WHERE {where_c_active}
+              AND {where_c_notdel}
+            ORDER BY column_order
+        """)
+        dynamic_columns_all = [dict(row) for row in cursor.fetchall()]
+
+        dynamic_columns = []
+        if sections:
+            for section in sections:
+                section_columns = [col for col in dynamic_columns_all if col.get('tab') == section['section_key']]
+                dynamic_columns.extend(section_columns)
+            no_section_columns = [col for col in dynamic_columns_all if not col.get('tab') or not any(s['section_key'] == col.get('tab') for s in sections)]
+            dynamic_columns.extend(no_section_columns)
+        else:
+            dynamic_columns = dynamic_columns_all
+
+        cursor.execute(f"""
+            SELECT * FROM safe_workplace
+            WHERE {sql_is_deleted_false('is_deleted', conn)}
+            ORDER BY created_at DESC
+        """)
+        data = [dict(row) for row in cursor.fetchall()]
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Safe Workplace"
+
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_align = Alignment(horizontal="center", vertical="center")
+
+        col_idx = 1
+        basic_headers = ['점검번호', '등록일', '작성자']
+        for header in basic_headers:
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            col_idx += 1
+
+        def _expand_scoring_columns(_cols):
+            out = []
+            import json as _json
+            for c in _cols:
+                if c.get('column_type') == 'scoring':
+                    sc = c.get('scoring_config')
+                    if sc and isinstance(sc, str):
+                        try:
+                            sc = _json.loads(sc)
+                        except Exception:
+                            sc = {}
+                    items = (sc or {}).get('items') or []
+                    for it in items:
+                        iid = it.get('id')
+                        label = it.get('label') or iid
+                        if not iid:
+                            continue
+                        out.append({
+                            'column_key': f"{c['column_key']}__{iid}",
+                            'column_name': f"{c.get('column_name', c.get('column_key'))} - {label}",
+                            'column_type': 'number',
+                            '_virtual': 1,
+                            '_source_scoring_key': c['column_key'],
+                            '_source_item_id': iid
+                        })
+                else:
+                    out.append(dict(c))
+            return out
+
+        dyn_cols_list = [dict(x) for x in dynamic_columns]
+        expanded_columns = _expand_scoring_columns(dyn_cols_list)
+
+        import json as _json
+        scoring_cols = [dict(c) for c in dyn_cols_list if dict(c).get('column_type') == 'scoring']
+        score_total_cols = [dict(c) for c in dyn_cols_list if dict(c).get('column_type') == 'score_total']
+
+        for col in expanded_columns:
+            cell = ws.cell(row=1, column=col_idx, value=col['column_name'])
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            col_idx += 1
+
+        for row_idx, row in enumerate(data, 2):
+            row_dict = dict(row)
+            col_idx = 1
+
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('safeplace_no', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('created_at', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('created_by', ''))
+            col_idx += 1
+
+            custom_data = row_dict.get('custom_data', {})
+            if not isinstance(custom_data, dict):
+                try:
+                    custom_data = _json.loads(custom_data) if custom_data else {}
+                except Exception:
+                    custom_data = {}
+
+            def _map_value(col, value):
+                if isinstance(value, dict):
+                    return value.get('name') or str(value)
+                if isinstance(value, list):
+                    if not value:
+                        return ''
+                    try:
+                        return json.dumps(value, ensure_ascii=False)
+                    except Exception:
+                        return str(value)
+                if col['column_type'] == 'dropdown' and value:
+                    opts = get_dropdown_options_for_display('safe_workplace', col['column_key'])
+                    if opts:
+                        for opt in opts:
+                            if opt['code'] == value:
+                                return opt['value']
+                return value if value is not None else ''
+
+            for col in expanded_columns:
+                if col.get('_virtual') == 1:
+                    src = col.get('_source_scoring_key')
+                    iid = col.get('_source_item_id')
+                    group_obj = custom_data.get(src, {})
+                    if isinstance(group_obj, str):
+                        try:
+                            group_obj = _json.loads(group_obj)
+                        except Exception:
+                            group_obj = {}
+                    value = 0
+                    if isinstance(group_obj, dict):
+                        value = group_obj.get(iid, 0)
+                    ws.cell(row=row_idx, column=col_idx, value=value)
+                else:
+                    if col.get('column_type') == 'score_total':
+                        try:
+                            conf = col.get('scoring_config')
+                            if conf and isinstance(conf, str):
+                                conf = _json.loads(conf)
+                            base = (conf or {}).get('base_score', 100)
+                            include_keys = (conf or {}).get('include_keys') or []
+                            total = base
+                            if include_keys:
+                                for key in include_keys:
+                                    sc_col = next((c for c in scoring_cols if c.get('column_key') == key), None)
+                                    if not sc_col:
+                                        continue
+                                    sconf = sc_col.get('scoring_config')
+                                    if sconf and isinstance(sconf, str):
+                                        try:
+                                            sconf = _json.loads(sconf)
+                                        except Exception:
+                                            sconf = {}
+                                    items_cfg = (sconf or {}).get('items') or []
+                                    group_obj = custom_data.get(key, {})
+                                    if isinstance(group_obj, str):
+                                        try:
+                                            group_obj = _json.loads(group_obj)
+                                        except Exception:
+                                            group_obj = {}
+                                    for it in items_cfg:
+                                        iid = it.get('id')
+                                        delta = float(it.get('per_unit_delta') or 0)
+                                        cnt = 0
+                                        if isinstance(group_obj, dict) and iid in group_obj:
+                                            try:
+                                                cnt = int(group_obj.get(iid) or 0)
+                                            except Exception:
+                                                cnt = 0
+                                        total += cnt * delta
+                            ws.cell(row=row_idx, column=col_idx, value=total)
+                        except Exception:
+                            ws.cell(row=row_idx, column=col_idx, value='')
+                    else:
+                        ws.cell(row=row_idx, column=col_idx, value=_map_value(col, custom_data.get(col['column_key'], '')))
+                col_idx += 1
+
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except Exception:
+                    pass
+            adjusted_width = min((max_length + 2) * 1.2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        filename = f"safe_workplace_{get_korean_time().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+        conn.close()
+
+        return Response(
+            output.getvalue(),
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={
+                'Content-Disposition': f'attachment; filename={filename}',
+                'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            }
+        )
+
+    except Exception as e:
+        import traceback
+        logging.error(f"Safe Workplace 엑셀 다운로드 중 오류: {e}")
         logging.error(traceback.format_exc())
         if conn:
             conn.close()
@@ -11222,6 +11910,7 @@ def page_view(url):
         'safety-instruction': 'safety_instruction_route',
         'follow-sop': 'follow_sop_route',
         'full-process': 'full_process_route',
+        'safe-workplace': 'safe_workplace_route',
         'partner-standards': 'partner_standards_route',
         # 구 라우트 호환: /change-request -> /partner-change-request
         'change-request': 'partner_change_request_route',
