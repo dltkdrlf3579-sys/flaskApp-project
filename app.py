@@ -22,6 +22,9 @@ from db_connection import get_db_connection
 from db.upsert import safe_upsert
 from column_utils import normalize_column_types, determine_linked_type
 from upload_utils import validate_uploaded_files
+from add_page_routes import follow_sop_bp, full_process_bp, safe_workplace_bp
+from boards.safety_instruction import safety_instruction_bp
+from utils.sql_filters import sql_is_active_true, sql_is_deleted_false
 import schedule
 import threading
 import time
@@ -71,6 +74,10 @@ def generate_manual_accident_number(cursor):
     return f'ACC{date_part}{seq:02d}'
 
 app = Flask(__name__, static_folder='static')
+app.register_blueprint(follow_sop_bp)
+app.register_blueprint(full_process_bp)
+app.register_blueprint(safety_instruction_bp)
+app.register_blueprint(safe_workplace_bp)
 
 # Jinja2 템플릿 필터 정의
 @app.template_filter('date_only')
@@ -218,30 +225,6 @@ def convert_dropdown_code(column_key, code):
     if column_key in DROPDOWN_MAPPINGS:
         return DROPDOWN_MAPPINGS[column_key].get(code, code)
     return code
-
-# --- SQL boolean helpers for SQLite/Postgres portability ---
-def sql_is_active_true(field_expr: str, conn) -> str:
-    """Active=true condition portable for SQLite(int) and Postgres(bool/int).
-
-    Postgres: cast to text and accept true markers ('1','t','true').
-    SQLite: compare to 1 (integers are used for booleans).
-    """
-    if getattr(conn, 'is_postgres', False):
-        return (
-            f"(LOWER(COALESCE({field_expr}::text, '0')) IN ('1','t','true'))"
-        )
-    return f"(COALESCE({field_expr}, 0) = 1)"
-
-def sql_is_deleted_false(field_expr: str, conn) -> str:
-    """Deleted=false (or NULL) portable for SQLite(int) and Postgres(bool/int).
-
-    Treat NULL as false (not deleted).
-    """
-    if getattr(conn, 'is_postgres', False):
-        return (
-            f"(LOWER(COALESCE({field_expr}::text, '0')) NOT IN ('1','t','true'))"
-        )
-    return f"(COALESCE({field_expr}, 0) = 0)"
 
 # 로깅 설정
 logging.basicConfig(
@@ -1619,7 +1602,11 @@ def accident():
     
     # 정렬 컬럼(report_date)은 초기화 단계에서 보장되어야 함. 요청 중 DDL 금지.
 
-    query += " ORDER BY (report_date IS NULL) ASC, report_date DESC, created_at DESC, accident_number DESC"
+    # 최신 등록 건(created_at)이 가장 먼저 보이도록 정렬 (PostgreSQL 전용)
+    query += (
+        " ORDER BY COALESCE(created_at, report_date::timestamp, TIMESTAMP '1970-01-01') DESC, "
+        "        report_date DESC, accident_number DESC"
+    )
     
     # 전체 건수 조회 (ORDER BY 제거 후 COUNT)
     import re as _re
@@ -2005,8 +1992,7 @@ def partner_accident():
                          dynamic_columns=dynamic_columns,
                          menu=MENU_CONFIG)
 
-@app.route("/safety-instruction")
-def safety_instruction_route():
+def safety_instruction_route_logic():
     """환경안전 지시서 페이지 라우트"""
     from common_mapping import smart_apply_mappings
     import math
@@ -2240,8 +2226,7 @@ def safety_instruction_route():
                          pagination=pagination,
                          menu=MENU_CONFIG)
 
-@app.route("/safety-instruction-register")
-def safety_instruction_register():
+def safety_instruction_register_logic():
     """환경안전 지시서 등록 페이지"""
     logging.info("환경안전 지시서 등록 페이지 접근")
     
@@ -2344,8 +2329,7 @@ def safety_instruction_register():
                          menu=MENU_CONFIG,
                          is_popup=is_popup)
 
-@app.route("/safety-instruction-detail/<issue_number>")
-def safety_instruction_detail(issue_number):
+def safety_instruction_detail_logic(issue_number):
     """환경안전 지시서 상세정보 페이지"""
     # json already imported globally
     logging.info(f"환경안전 지시서 상세 정보 조회: {issue_number}")
@@ -2722,8 +2706,7 @@ def safety_instruction_detail(issue_number):
                          is_popup=is_popup)
 
 
-@app.route('/update-safety-instruction', methods=['POST'])
-def update_safety_instruction():
+def update_safety_instruction_logic():
     """환경안전 지시서 수정 API - 메인 테이블 사용 + 첨부 처리"""
     from section_service import SectionConfigService
     conn = None
@@ -5946,8 +5929,7 @@ def register_accident():
         if conn:
             conn.close()
 
-@app.route("/register-safety-instruction", methods=["POST"])
-def register_safety_instruction():
+def register_safety_instruction_logic():
     """새 환경안전 지시서 등록"""
     conn = None
     try:
@@ -12083,31 +12065,6 @@ def board_items_delete_api(board):
         logging.error(f"Board items delete API error: {e}")
         return jsonify({"error": str(e)}), 500
 
-
-# ============= Follow SOP & Full Process 페이지 라우트 =============
-"""
-리팩토링 이후 CWD가 달라질 때 exec로 라우트를 읽지 못해
-엔드포인트가 등록되지 않는 문제가 발생할 수 있음.
-add_page_routes.py는 app 모듈의 globals()를 필요로 하므로
-import 대신 안전한 절대 경로 exec로 로드한다.
-"""
-try:
-    routes_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'add_page_routes.py')
-    with open(routes_path, encoding='utf-8') as f:
-        code = compile(f.read(), routes_path, 'exec')
-        exec(code, globals())
-    print("추가 라우트 로드 완료: follow-sop, full-process 등", flush=True)
-except Exception as e:
-    # 콘솔과 로거 모두에 남겨 원인 파악을 돕는다
-    msg = f"추가 라우트 로드 실패: {e}"
-    print(msg, flush=True)
-    import traceback
-    traceback.print_exc()
-    try:
-        import logging as _logging
-        _logging.error(msg)
-    except Exception:
-        pass
 
 # ============= CMS Catch-all Route (모든 라우트 후에 배치) =============
 @app.route("/<path:url>")
