@@ -21,6 +21,7 @@ from column_sync_service import ColumnSyncService
 from db_connection import get_db_connection
 from db.upsert import safe_upsert
 from column_utils import normalize_column_types, determine_linked_type
+from upload_utils import validate_uploaded_files
 import schedule
 import threading
 import time
@@ -3023,9 +3024,16 @@ def update_follow_sop():
             attachment_data = []
 
         files = request.files.getlist('files')
+        valid_files, validation_errors = validate_uploaded_files(files)
+        if validation_errors:
+            return jsonify({
+                'success': False,
+                'message': validation_errors[0],
+                'errors': validation_errors
+            }), 400
 
         logging.info(f"[FS UPDATE] attachment_data 파싱 결과: {attachment_data}")
-        logging.info(f"[FS UPDATE] files 개수: {len(files)}")
+        logging.info(f"[FS UPDATE] files 개수: {len(valid_files)}")
 
         conn = get_db_connection(timeout=30.0)
         cursor = conn.cursor()
@@ -3255,9 +3263,8 @@ def update_follow_sop():
                 logging.info(f"[FS UPDATE] 스킵된 item - id: {item.get('id') if isinstance(item, dict) else 'N/A'}, isNew: {item.get('isNew') if isinstance(item, dict) else 'N/A'}")
 
         # 새 파일 업로드 처리
-        if files:
+        if valid_files:
             import os
-            from werkzeug.utils import secure_filename
             from timezone_config import get_korean_time
 
             upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'follow_sop')
@@ -3269,26 +3276,24 @@ def update_follow_sop():
                 if isinstance(item, dict) and item.get('isNew'):
                     new_file_descriptions.append(item.get('description', ''))
 
-            for idx, file in enumerate(files):
-                if file and file.filename:
-                    filename = secure_filename(file.filename)
-                    timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
-                    unique_filename = f"{work_req_no}_{timestamp}_{filename}".replace('-', '_')
-                    file_path = os.path.join(upload_folder, unique_filename)
+            for idx, file_info in enumerate(valid_files):
+                file = file_info['file']
+                filename = file_info['safe_filename']
+                timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
+                unique_filename = f"{work_req_no}_{timestamp}_{filename}".replace('-', '_')
+                file_path = os.path.join(upload_folder, unique_filename)
 
-                    file.save(file_path)
+                file.save(file_path)
 
-                    # 설명 가져오기
-                    description = ''
-                    if idx < len(new_file_descriptions):
-                        description = new_file_descriptions[idx]
+                description = ''
+                if idx < len(new_file_descriptions):
+                    description = new_file_descriptions[idx]
 
-                    # DB에 저장
-                    cursor.execute("""
-                        INSERT INTO follow_sop_attachments (work_req_no, file_name, file_path, file_size, description)
-                        VALUES (%s, %s, %s, %s, %s)
-                    """, (work_req_no, filename, file_path, os.path.getsize(file_path), description))
-                    logging.info(f"새 첨부파일 저장: {filename}, 설명: {description}")
+                cursor.execute("""
+                    INSERT INTO follow_sop_attachments (work_req_no, file_name, file_path, file_size, description)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (work_req_no, filename, file_path, os.path.getsize(file_path), description))
+                logging.info(f"새 첨부파일 저장: {filename}, 설명: {description}")
         
         conn.commit()
         logging.info(f"Follow SOP {work_req_no} 업데이트 성공")
@@ -3348,9 +3353,16 @@ def update_safe_workplace():
             attachment_data = []
 
         files = request.files.getlist('files')
+        valid_files, validation_errors = validate_uploaded_files(files)
+        if validation_errors:
+            return jsonify({
+                'success': False,
+                'message': validation_errors[0],
+                'errors': validation_errors
+            }), 400
 
         logging.info(f"[SW UPDATE] attachment_data: {attachment_data}")
-        logging.info(f"[SW UPDATE] files count: {len(files)}")
+        logging.info(f"[SW UPDATE] files count: {len(valid_files)}")
 
         conn = get_db_connection(timeout=30.0)
         cursor = conn.cursor()
@@ -3522,9 +3534,8 @@ def update_safe_workplace():
                     WHERE id = %s
                 """, (item.get('description', ''), item['id']))
 
-        if files:
+        if valid_files:
             import os
-            from werkzeug.utils import secure_filename
             from timezone_config import get_korean_time
 
             upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'safe_workplace')
@@ -3535,24 +3546,24 @@ def update_safe_workplace():
                 if isinstance(item, dict) and item.get('isNew'):
                     new_file_descriptions.append(item.get('description', ''))
 
-            for idx, file in enumerate(files):
-                if file and file.filename:
-                    filename = secure_filename(file.filename)
-                    timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
-                    unique_filename = f"{safeplace_no}_{timestamp}_{filename}".replace('-', '_')
-                    file_path = os.path.join(upload_folder, unique_filename)
+            for idx, file_info in enumerate(valid_files):
+                file = file_info['file']
+                filename = file_info['safe_filename']
+                timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
+                unique_filename = f"{safeplace_no}_{timestamp}_{filename}".replace('-', '_')
+                file_path = os.path.join(upload_folder, unique_filename)
 
-                    file.save(file_path)
+                file.save(file_path)
 
-                    description = ''
-                    if idx < len(new_file_descriptions):
-                        description = new_file_descriptions[idx]
+                description = ''
+                if idx < len(new_file_descriptions):
+                    description = new_file_descriptions[idx]
 
-                    cursor.execute("""
-                        INSERT INTO safe_workplace_attachments (safeplace_no, file_name, file_path, file_size, description)
-                        VALUES (%s, %s, %s, %s, %s)
-                    """, (safeplace_no, filename, file_path, os.path.getsize(file_path), description))
-                    logging.info(f"새 첨부파일 저장: {filename}, 설명: {description}")
+                cursor.execute("""
+                    INSERT INTO safe_workplace_attachments (safeplace_no, file_name, file_path, file_size, description)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (safeplace_no, filename, file_path, os.path.getsize(file_path), description))
+                logging.info(f"새 첨부파일 저장: {filename}, 설명: {description}")
 
         conn.commit()
         logging.info(f"Safe Workplace {safeplace_no} 업데이트 성공")
@@ -3604,6 +3615,13 @@ def update_full_process():
             attachment_data = []
         
         files = request.files.getlist('files')
+        valid_files, validation_errors = validate_uploaded_files(files)
+        if validation_errors:
+            return jsonify({
+                'success': False,
+                'message': validation_errors[0],
+                'errors': validation_errors
+            }), 400
 
         conn = get_db_connection(timeout=30.0)
         cursor = conn.cursor()
@@ -3857,7 +3875,7 @@ def update_full_process():
                 logging.info(f"[FP UPDATE] 스킵된 item: {item}")
         
         # 새 파일 업로드 처리
-        if files:
+        if valid_files:
             upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'full_process')
             os.makedirs(upload_folder, exist_ok=True)
             
@@ -3867,25 +3885,23 @@ def update_full_process():
                 if isinstance(item, dict) and item.get('isNew'):
                     new_file_descriptions.append(item.get('description', ''))
             
-            for idx, file in enumerate(files):
-                if file and file.filename:
-                    filename = secure_filename(file.filename)
-                    timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
-                    unique_filename = f"{fullprocess_number}_{timestamp}_{filename}".replace('-', '_')
-                    file_path = os.path.join(upload_folder, unique_filename)
-                    
-                    file.save(file_path)
-                    
-                    # 각 파일의 설명 찾기
-                    description = ''
-                    if idx < len(new_file_descriptions):
-                        description = new_file_descriptions[idx]
-                    
-                    # 첨부파일 정보 저장
-                    cursor.execute("""
-                        INSERT INTO full_process_attachments (fullprocess_number, file_name, file_path, file_size, description)
-                        VALUES (%s, %s, %s, %s, %s)
-                    """, (fullprocess_number, filename, file_path, os.path.getsize(file_path), description))
+            for idx, file_info in enumerate(valid_files):
+                file = file_info['file']
+                filename = file_info['safe_filename']
+                timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
+                unique_filename = f"{fullprocess_number}_{timestamp}_{filename}".replace('-', '_')
+                file_path = os.path.join(upload_folder, unique_filename)
+
+                file.save(file_path)
+
+                description = ''
+                if idx < len(new_file_descriptions):
+                    description = new_file_descriptions[idx]
+
+                cursor.execute("""
+                    INSERT INTO full_process_attachments (fullprocess_number, file_name, file_path, file_size, description)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (fullprocess_number, filename, file_path, os.path.getsize(file_path), description))
         
         conn.commit()
         logging.info(f"Full Process {fullprocess_number} 업데이트 성공")
@@ -4529,11 +4545,17 @@ def update_change_request():
                     new_file_descriptions.append(item.get('description', ''))
 
             actual_request_number = existing[1] if existing and existing[1] else request_number
-            uploaded_ids = attachment_service.bulk_add(
-                actual_request_number,
-                files,
-                {'uploaded_by': session.get('user_id', 'user')}
-            )
+            try:
+                uploaded_ids = attachment_service.bulk_add(
+                    actual_request_number,
+                    files,
+                    {'uploaded_by': session.get('user_id', 'user')}
+                )
+            except ValueError as ve:
+                return jsonify({
+                    'success': False,
+                    'message': str(ve)
+                }), 400
             logging.info(f"첨부파일 {len(uploaded_ids)}개 업로드: {uploaded_ids}")
 
             # 새로 업로드된 파일의 설명 업데이트
@@ -7522,6 +7544,122 @@ def reorder_follow_sop_sections():
         logging.error(f"Follow SOP 섹션 순서 변경 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
+# Safe Workplace API 엔드포인트
+@app.route("/api/safe-workplace-columns", methods=["GET"])
+def get_safe_workplace_columns():
+    """Safe Workplace 페이지 동적 컬럼 설정 조회"""
+    try:
+        column_service = ColumnConfigService('safe_workplace', DB_PATH)
+        columns = column_service.list_columns()
+        return jsonify(columns)
+    except Exception as e:
+        logging.error(f"Safe Workplace 컬럼 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/safe-workplace-columns", methods=["POST"])
+def add_safe_workplace_column():
+    """Safe Workplace 페이지 동적 컬럼 추가"""
+    try:
+        if not request.json:
+            return jsonify({"success": False, "message": "JSON data required"}), 400
+
+        column_service = ColumnConfigService('safe_workplace', DB_PATH)
+        result = column_service.add_column(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Safe Workplace 컬럼 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/safe-workplace-columns/<int:column_id>", methods=["PUT"])
+def update_safe_workplace_column(column_id):
+    """Safe Workplace 페이지 동적 컬럼 수정"""
+    try:
+        column_service = ColumnConfigService('safe_workplace', DB_PATH)
+        result = column_service.update_column(column_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Safe Workplace 컬럼 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/safe-workplace-columns/<int:column_id>", methods=["DELETE"])
+def delete_safe_workplace_column(column_id):
+    """Safe Workplace 페이지 동적 컬럼 삭제"""
+    try:
+        column_service = ColumnConfigService('safe_workplace', DB_PATH)
+        result = column_service.delete_column(column_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Safe Workplace 컬럼 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/safe-workplace-sections", methods=["GET"])
+def get_safe_workplace_sections():
+    """Safe Workplace 섹션 목록 조회"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('safe_workplace', DB_PATH)
+        sections = section_service.get_sections()
+        return jsonify({"success": True, "sections": sections})
+    except Exception as e:
+        logging.error(f"Safe Workplace 섹션 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/safe-workplace-sections", methods=["POST"])
+def add_safe_workplace_section():
+    """Safe Workplace 섹션 추가"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('safe_workplace', DB_PATH)
+        result = section_service.add_section(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Safe Workplace 섹션 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/safe-workplace-sections/<int:section_id>", methods=["PUT"])
+def update_safe_workplace_section(section_id):
+    """Safe Workplace 섹션 수정"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('safe_workplace', DB_PATH)
+        result = section_service.update_section(section_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Safe Workplace 섹션 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/safe-workplace-sections/<int:section_id>", methods=["DELETE"])
+def delete_safe_workplace_section(section_id):
+    """Safe Workplace 섹션 삭제"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('safe_workplace', DB_PATH)
+        result = section_service.delete_section(section_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Safe Workplace 섹션 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/safe-workplace-sections/reorder", methods=["POST"])
+def reorder_safe_workplace_sections():
+    """Safe Workplace 섹션 순서 변경"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('safe_workplace', DB_PATH)
+        result = section_service.reorder_sections(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Safe Workplace 섹션 순서 변경 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
 # Full Process API 엔드포인트
 @app.route("/api/full-process-columns", methods=["GET"])
 def get_full_process_columns():
@@ -7678,6 +7816,79 @@ def admin_full_process_columns():
                          menu=MENU_CONFIG,
                          section_columns=section_columns,
                          sections=section_columns)  # 하위 호환성
+
+
+@app.route("/admin/safe-workplace-columns")
+@require_admin_auth
+def admin_safe_workplace_columns():
+    """Safe Workplace 컬럼 관리 페이지"""
+    from section_service import SectionConfigService
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        default_sections = [
+            ('basic_info', '기본정보', 1),
+            ('workplace_info', '작업장정보', 2),
+            ('safety_info', '안전정보', 3)
+        ]
+
+        for key, name, order in default_sections:
+            cursor.execute(
+                """
+                INSERT INTO safe_workplace_sections (section_key, section_name, section_order, is_active, is_deleted)
+                VALUES (%s, %s, %s, 1, 0)
+                ON CONFLICT (section_key) DO UPDATE
+                SET section_name = EXCLUDED.section_name,
+                    section_order = EXCLUDED.section_order,
+                    is_active = 1,
+                    is_deleted = 0
+                """,
+                (key, name, order)
+            )
+
+        default_columns = [
+            ('safeplace_no', '점검번호', 'text', 1, 'basic_info', 2, 1),
+            ('created_at', '등록일', 'datetime', 2, 'basic_info', 2, 1)
+        ]
+
+        for col_key, col_name, col_type, order, tab, span, is_active in default_columns:
+            cursor.execute(
+                """
+                INSERT INTO safe_workplace_column_config
+                    (column_key, column_name, column_type, column_order, tab, column_span, is_active)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (column_key) DO UPDATE
+                SET column_name = EXCLUDED.column_name,
+                    column_type = EXCLUDED.column_type,
+                    column_order = EXCLUDED.column_order,
+                    tab = EXCLUDED.tab,
+                    column_span = EXCLUDED.column_span,
+                    is_active = EXCLUDED.is_active
+                """,
+                (col_key, col_name, col_type, order, tab, span, is_active)
+            )
+
+        conn.commit()
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logging.error(f"Safe Workplace 기본 섹션/컬럼 초기화 실패: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+    section_service = SectionConfigService('safe_workplace', DB_PATH)
+    section_columns = section_service.get_sections_with_columns()
+
+    return render_template(
+        'admin-safe-workplace-columns.html',
+        menu=MENU_CONFIG,
+        section_columns=section_columns,
+        sections=section_columns
+    )
 
 @app.route("/admin/safety-instruction-columns-simplified")
 @require_admin_auth

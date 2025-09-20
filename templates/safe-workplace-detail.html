@@ -332,7 +332,7 @@
                           class="editable-content"
                           data-ckeditor="true"
                           data-content="{{ workplace.detailed_content|default('')|tojson }}"
-                          placeholder="상세내용을 입력하세요."></textarea>
+                          placeholder="상세내용을 입력하세요.">{{ workplace.detailed_content|default('')|safe }}</textarea>
             </div>
         </div>
     </div>
@@ -341,7 +341,7 @@
     {{ render_attachment_section(attachments, 'safe_workplace') }}
 
     <div class="save-section">
-        <button class="btn-save" onclick="updateSafeWorkplace()">수정완료</button>
+        <button class="btn-save" onclick="triggerSafeWorkplaceUpdate()">수정완료</button>
     </div>
 </div>
 
@@ -411,7 +411,15 @@ function groupFieldsBySection(dynamicData) {
     return grouped;
 }
 
-function updateSafeWorkplace() {
+function triggerSafeWorkplaceUpdate() {
+    if (window.PwModal && typeof window.PwModal.show === 'function') {
+        PwModal.show(submitSafeWorkplaceUpdate);
+    } else {
+        submitSafeWorkplaceUpdate();
+    }
+}
+
+function submitSafeWorkplaceUpdate() {
     const formData = new FormData();
     formData.append('safeplace_no', safeplaceNo);
 
@@ -484,4 +492,5 @@ function updateSafeWorkplace() {
 </script>
 
 {{ attachment_scripts() }}
+{% include 'includes/password_modal.html' %}
 {% endblock %}

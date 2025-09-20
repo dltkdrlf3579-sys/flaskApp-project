@@ -187,3 +187,34 @@ def reload_upload_settings():
     global _upload_validator
     _upload_validator = UploadValidator()
     return _upload_validator
+
+
+def validate_uploaded_files(files):
+    """업로드된 파일 리스트를 검증하고 결과를 반환"""
+
+    validator = get_upload_validator()
+    valid_files = []
+    errors = []
+
+    for idx, file in enumerate(files):
+        if not file or not getattr(file, 'filename', ''):
+            continue
+
+        result = validator.validate_file(file)
+        safe_name = result.get('filename') or secure_filename(file.filename)
+
+        if not result.get('valid', False):
+            filename = file.filename or safe_name
+            for err in result.get('errors', []):
+                errors.append(f"{filename}: {err}")
+            continue
+
+        valid_files.append({
+            'file': file,
+            'safe_filename': safe_name,
+            'extension': result.get('extension'),
+            'size_mb': result.get('size_mb', 0),
+            'index': idx
+        })
+
+    return valid_files, errors

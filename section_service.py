@@ -45,7 +45,7 @@ class SectionConfigService:
 
         try:
             # follow_sop과 full_process는 별도 테이블 사용
-            if self.board_type in ('follow_sop', 'full_process'):
+            if self.board_type in ('follow_sop', 'full_process', 'safe_workplace'):
                 table = f"{self.board_type}_sections"
                 where = "is_active = 1"
                 if _col_exists(table, 'is_deleted'):

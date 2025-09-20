@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 from db_connection import get_db_connection
 from db.upsert import safe_upsert
+from upload_utils import validate_uploaded_files
 
 # 보드 설정
 BOARD_CONFIGS = {
@@ -736,13 +737,17 @@ class AttachmentService:
         """
         import os
         import time
-        from werkzeug.utils import secure_filename
-        
+
         if not file or not file.filename:
             raise ValueError("파일이 없습니다.")
-        
-        # 안전한 파일명 생성
-        original_filename = secure_filename(file.filename)
+
+        valid_files, validation_errors = validate_uploaded_files([file])
+        if validation_errors:
+            raise ValueError(validation_errors[0])
+
+        file_info = valid_files[0]
+
+        original_filename = file_info['safe_filename']
         timestamp = str(int(time.time()))
         safe_filename = f"{timestamp}_{original_filename}"
         
@@ -752,13 +757,14 @@ class AttachmentService:
         
         # 파일 저장
         file_path = os.path.join(upload_folder, safe_filename)
-        file.save(file_path)
+        file_info['file'].save(file_path)
         
         # 파일 크기 계산
         file_size = os.path.getsize(file_path)
         
         # MIME 타입 추출
-        mime_type = file.content_type if hasattr(file, 'content_type') else 'application/octet-stream'
+        file_obj = file_info['file']
+        mime_type = file_obj.content_type if hasattr(file_obj, 'content_type') else 'application/octet-stream'
         
         # DB에 저장
         # 기존 연결이 있으면 재사용, 없으면 새로 생성
@@ -993,54 +999,53 @@ class AttachmentService:
         
         cursor = conn.cursor()
         
-        for file in files:
-            if file and file.filename:
-                try:
-                    # 안전한 파일명 생성
-                    original_filename = secure_filename(file.filename)
-                    timestamp = str(int(time.time()))
-                    safe_filename = f"{timestamp}_{original_filename}"
-                    
-                    # 업로드 경로 생성
-                    upload_folder = self.config['upload_path']
-                    os.makedirs(upload_folder, exist_ok=True)
-                    
-                    # 파일 저장
-                    file_path = os.path.join(upload_folder, safe_filename)
-                    file.save(file_path)
-                    
-                    # 파일 크기 계산
-                    file_size = os.path.getsize(file_path)
-                    
-                    # MIME 타입 추출
-                    mime_type = file.content_type if hasattr(file, 'content_type') else 'application/octet-stream'
-                    
-                    # DB에 저장 - PostgreSQL RETURNING 사용
-                    sql = f"""
-                        INSERT INTO {self.attachment_table}
-                        ({self.id_column}, file_name, file_path, file_size, mime_type, description, uploaded_by)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        RETURNING id
-                    """
+        valid_files, validation_errors = validate_uploaded_files(files)
+        if validation_errors:
+            if should_close:
+                conn.close()
+            raise ValueError(validation_errors[0])
 
-                    cursor.execute(sql, (
-                        item_id,
-                        original_filename,
-                        file_path,
-                        file_size,
-                        mime_type,
-                        meta.get('description', '') if meta else '',
-                        meta.get('uploaded_by', 'system') if meta else 'system'
-                    ))
+        for file_info in valid_files:
+            try:
+                file = file_info['file']
+                original_filename = file_info['safe_filename']
+                timestamp = str(int(time.time()))
+                safe_filename = f"{timestamp}_{original_filename}"
 
-                    # PostgreSQL에서 RETURNING 결과 가져오기
-                    result = cursor.fetchone()
-                    attachment_id = result[0] if result else None
-                    attachment_ids.append(attachment_id)
-                    logging.info(f"[{self.board_type}] 첨부파일 추가: {original_filename} (ID: {attachment_id})")
-                    
-                except Exception as e:
-                    logging.error(f"파일 업로드 실패: {file.filename}, {e}")
+                upload_folder = self.config['upload_path']
+                os.makedirs(upload_folder, exist_ok=True)
+
+                file_path = os.path.join(upload_folder, safe_filename)
+                file.save(file_path)
+
+                file_size = os.path.getsize(file_path)
+                mime_type = file.content_type if hasattr(file, 'content_type') else 'application/octet-stream'
+
+                sql = f"""
+                    INSERT INTO {self.attachment_table}
+                    ({self.id_column}, file_name, file_path, file_size, mime_type, description, uploaded_by)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """
+
+                cursor.execute(sql, (
+                    item_id,
+                    original_filename,
+                    file_path,
+                    file_size,
+                    mime_type,
+                    meta.get('description', '') if meta else '',
+                    meta.get('uploaded_by', 'system') if meta else 'system'
+                ))
+
+                result = cursor.fetchone()
+                attachment_id = result[0] if result else None
+                attachment_ids.append(attachment_id)
+                logging.info(f"[{self.board_type}] 첨부파일 추가: {original_filename} (ID: {attachment_id})")
+
+            except Exception as e:
+                logging.error(f"파일 업로드 실패: {file_info['file'].filename}, {e}")
+                continue
         
         # 커밋
         conn.commit()

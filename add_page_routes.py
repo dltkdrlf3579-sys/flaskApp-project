@@ -7,6 +7,7 @@ from flask import request, render_template, jsonify, session, flash, redirect, u
 from db_connection import get_db_connection
 from column_utils import normalize_column_types, determine_linked_type
 from common_mapping import smart_apply_mappings
+from upload_utils import validate_uploaded_files
 
 # 공통: fetchone() 결과 첫 번째 값 안전 추출
 def _first(row, default=0):
@@ -53,6 +54,10 @@ def follow_sop_route():
     
     # 섹션 정보 가져오기
     sections = section_service.get_sections()
+    try:
+        logging.info("[SW REGISTER] sections fetched: %s", [s.get('section_key') for s in sections])
+    except Exception:
+        logging.info("[SW REGISTER] sections fetched (raw): %s", sections)
     
     # 동적 컬럼 정보 가져오기
     cursor.execute("""
@@ -1108,7 +1113,16 @@ def register_follow_sop():
         attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
 
         files = request.files.getlist('files')
-        logging.info(f"[FS REGISTER] 첨부파일 개수: {len(files)}")
+        valid_files, validation_errors = validate_uploaded_files(files)
+        if validation_errors:
+            if conn:
+                conn.rollback()
+            return jsonify({
+                'success': False,
+                'message': validation_errors[0],
+                'errors': validation_errors
+            }), 400
+        logging.info(f"[FS REGISTER] 첨부파일 개수: {len(valid_files)}")
 
         # custom_data를 JSON 문자열로 변환
         if isinstance(custom_data, dict):
@@ -1146,31 +1160,29 @@ def register_follow_sop():
             logging.warning(f"[FS REGISTER] details upsert warning: {_e_det}")
 
         # 첨부파일 처리 (Safety-Instruction 방식으로 변경)
-        if files:
-            # CREATE TABLE 제거 - 테이블은 이미 존재함
-
+        if valid_files:
             import os
-            from werkzeug.utils import secure_filename
-
             upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'follow_sop')
             os.makedirs(upload_folder, exist_ok=True)
 
-            for i, file in enumerate(files):
-                if file and file.filename:
-                    filename = secure_filename(file.filename)
-                    timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
-                    unique_filename = f"{work_req_no}_{timestamp}_{filename}".replace('-', '_')
-                    file_path = os.path.join(upload_folder, unique_filename)
+            for i, file_info in enumerate(valid_files):
+                file = file_info['file']
+                filename = file_info['safe_filename']
+                timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
+                unique_filename = f"{work_req_no}_{timestamp}_{filename}".replace('-', '_')
+                file_path = os.path.join(upload_folder, unique_filename)
 
-                    file.save(file_path)
+                file.save(file_path)
 
-                    # 첨부파일 정보 저장
-                    description = attachment_data[i]['description'] if i < len(attachment_data) else ''
-                    cursor.execute("""
-                        INSERT INTO follow_sop_attachments (work_req_no, file_name, file_path, file_size, description)
-                        VALUES (%s, %s, %s, %s, %s)
-                    """, (work_req_no, filename, file_path, os.path.getsize(file_path), description))
-                    logging.info(f"[FS REGISTER] 첨부파일 저장: {filename}")
+                description = ''
+                if i < len(attachment_data) and isinstance(attachment_data[i], dict):
+                    description = attachment_data[i].get('description', '')
+
+                cursor.execute("""
+                    INSERT INTO follow_sop_attachments (work_req_no, file_name, file_path, file_size, description)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (work_req_no, filename, file_path, os.path.getsize(file_path), description))
+                logging.info(f"[FS REGISTER] 첨부파일 저장: {filename}")
 
         conn.commit()
 
@@ -1643,6 +1655,31 @@ def safe_workplace_detail(safeplace_no):
     from section_service import SectionConfigService
     section_service = SectionConfigService('safe_workplace', DB_PATH)
     sections = section_service.get_sections()
+    if not sections:
+        try:
+            default_sections = [
+                ('basic_info', '기본정보', 1),
+                ('workplace_info', '작업장정보', 2),
+                ('safety_info', '안전정보', 3)
+            ]
+            for key, name, order in default_sections:
+                cursor.execute(
+                    """
+                    INSERT INTO safe_workplace_sections (section_key, section_name, section_order, is_active, is_deleted)
+                    VALUES (%s, %s, %s, 1, 0)
+                    ON CONFLICT (section_key) DO NOTHING
+                    """,
+                    (key, name, order)
+                )
+            conn.commit()
+            sections = section_service.get_sections()
+            logging.info("[SW DETAIL] default sections seeded")
+        except Exception as _e:
+            logging.error(f"[SW DETAIL] default section seed failed: {_e}")
+    try:
+        logging.info("[SW DETAIL] sections fetched: %s", [s.get('section_key') for s in sections])
+    except Exception:
+        logging.info("[SW DETAIL] sections fetched (raw): %s", sections)
 
     section_columns = {}
     for section in sections:
@@ -1713,6 +1750,14 @@ def safe_workplace_detail(safeplace_no):
     if mapped:
         workplace = mapped[0]
 
+    try:
+        dc = workplace.get('detailed_content')
+        logging.info('[SW DETAIL] detailed_content length=%s preview=%s',
+                     len(dc) if isinstance(dc, str) else type(dc),
+                     dc[:120] if isinstance(dc, str) else dc)
+    except Exception as _e:
+        logging.info('[SW DETAIL] detailed_content logging failed: %s', _e)
+
     return render_template(
         'safe-workplace-detail.html',
         workplace=workplace,
@@ -1778,6 +1823,16 @@ def register_safe_workplace():
 
         detailed_content = request.form.get('detailed_content', '')
         files = request.files.getlist('files')
+        valid_files, validation_errors = validate_uploaded_files(files)
+        if validation_errors:
+            if conn:
+                conn.rollback()
+            return jsonify({
+                'success': False,
+                'message': validation_errors[0],
+                'errors': validation_errors
+            }), 400
+
         try:
             attachment_data = json.loads(request.form.get('attachment_data', '[]'))
         except Exception:
@@ -1819,31 +1874,30 @@ def register_safe_workplace():
         except Exception as _e_det:
             logging.warning(f"[SW REGISTER] details upsert warning: {_e_det}")
 
-        if files:
+        if valid_files:
             import os
-            from werkzeug.utils import secure_filename
             upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'safe_workplace')
             os.makedirs(upload_folder, exist_ok=True)
 
-            for idx, file in enumerate(files):
-                if file and file.filename:
-                    filename = secure_filename(file.filename)
-                    timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
-                    unique_filename = f"{safeplace_no}_{timestamp}_{filename}".replace('-', '_')
-                    file_path = os.path.join(upload_folder, unique_filename)
-                    file.save(file_path)
+            for idx, file_info in enumerate(valid_files):
+                file = file_info['file']
+                filename = file_info['safe_filename']
+                timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
+                unique_filename = f"{safeplace_no}_{timestamp}_{filename}".replace('-', '_')
+                file_path = os.path.join(upload_folder, unique_filename)
+                file.save(file_path)
 
-                    description = ''
-                    if idx < len(attachment_data):
-                        description = attachment_data[idx].get('description', '')
+                description = ''
+                if idx < len(attachment_data) and isinstance(attachment_data[idx], dict):
+                    description = attachment_data[idx].get('description', '')
 
-                    cursor.execute(
-                        """
-                        INSERT INTO safe_workplace_attachments (safeplace_no, file_name, file_path, file_size, description)
-                        VALUES (%s, %s, %s, %s, %s)
-                        """,
-                        (safeplace_no, filename, file_path, os.path.getsize(file_path), description)
-                    )
+                cursor.execute(
+                    """
+                    INSERT INTO safe_workplace_attachments (safeplace_no, file_name, file_path, file_size, description)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (safeplace_no, filename, file_path, os.path.getsize(file_path), description)
+                )
 
         conn.commit()
 
@@ -2702,7 +2756,17 @@ def register_full_process():
         attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
 
         files = request.files.getlist('files')
-        logging.info(f"[FP REGISTER] 첨부파일 개수: {len(files)}")
+        valid_files, validation_errors = validate_uploaded_files(files)
+        if validation_errors:
+            if conn:
+                conn.rollback()
+                conn.close()
+            return jsonify({
+                'success': False,
+                'message': validation_errors[0],
+                'errors': validation_errors
+            }), 400
+        logging.info(f"[FP REGISTER] 첨부파일 개수: {len(valid_files)}")
 
         # custom_data를 JSON 문자열로 변환
         if isinstance(custom_data, dict):
@@ -2739,31 +2803,29 @@ def register_full_process():
             logging.warning(f"[FP REGISTER] details upsert warning: {_e_det}")
 
         # 첨부파일 처리 (Safety-Instruction 방식으로 변경)
-        if files:
-            # CREATE TABLE 제거 - 테이블은 이미 존재함
-
+        if valid_files:
             import os
-            from werkzeug.utils import secure_filename
-
             upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'full_process')
             os.makedirs(upload_folder, exist_ok=True)
 
-            for i, file in enumerate(files):
-                if file and file.filename:
-                    filename = secure_filename(file.filename)
-                    timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
-                    unique_filename = f"{fullprocess_number}_{timestamp}_{filename}".replace('-', '_')
-                    file_path = os.path.join(upload_folder, unique_filename)
+            for i, file_info in enumerate(valid_files):
+                file = file_info['file']
+                filename = file_info['safe_filename']
+                timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
+                unique_filename = f"{fullprocess_number}_{timestamp}_{filename}".replace('-', '_')
+                file_path = os.path.join(upload_folder, unique_filename)
 
-                    file.save(file_path)
+                file.save(file_path)
 
-                    # 첨부파일 정보 저장
-                    description = attachment_data[i]['description'] if i < len(attachment_data) else ''
-                    cursor.execute("""
-                        INSERT INTO full_process_attachments (fullprocess_number, file_name, file_path, file_size, description)
-                        VALUES (%s, %s, %s, %s, %s)
-                    """, (fullprocess_number, filename, file_path, os.path.getsize(file_path), description))
-                    logging.info(f"[FP REGISTER] 첨부파일 저장: {filename}")
+                description = ''
+                if i < len(attachment_data) and isinstance(attachment_data[i], dict):
+                    description = attachment_data[i].get('description', '')
+
+                cursor.execute("""
+                    INSERT INTO full_process_attachments (fullprocess_number, file_name, file_path, file_size, description)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (fullprocess_number, filename, file_path, os.path.getsize(file_path), description))
+                logging.info(f"[FP REGISTER] 첨부파일 저장: {filename}")
 
         conn.commit()
         
