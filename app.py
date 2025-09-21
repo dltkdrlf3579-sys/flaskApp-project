@@ -14,6 +14,8 @@ import re
 import base64
 import sqlite3
 import math
+from types import SimpleNamespace
+from typing import Any, Dict, List, Optional
 from board_services import ColumnService, CodeService, ItemService
 from column_service import ColumnConfigService
 from search_popup_service import SearchPopupService
@@ -24,6 +26,16 @@ from column_utils import normalize_column_types, determine_linked_type
 from upload_utils import validate_uploaded_files
 from add_page_routes import follow_sop_bp, full_process_bp, safe_workplace_bp
 from boards.safety_instruction import safety_instruction_bp
+from controllers.boards.accident_controller import (
+    AccidentController,
+    build_accident_config,
+)
+from repositories.boards.accident_repository import AccidentRepository
+from controllers.boards.safety_instruction_controller import (
+    SafetyInstructionController,
+    build_safety_instruction_config,
+)
+from repositories.boards.safety_instruction_repository import SafetyInstructionRepository
 from utils.sql_filters import sql_is_active_true, sql_is_deleted_false
 import schedule
 import threading
@@ -191,6 +203,19 @@ def list_summary_filter(value):
     return f"{first} 외 {others}명" if others > 0 else first
 
 DB_PATH = db_config.local_db_path
+
+_safety_instruction_controller = SafetyInstructionController(
+    build_safety_instruction_config(),
+    SafetyInstructionRepository(DB_PATH),
+    menu_config=MENU_CONFIG,
+)
+
+_accident_controller = AccidentController(
+    build_accident_config(),
+    AccidentRepository(DB_PATH),
+    menu_config=MENU_CONFIG,
+)
+
 PASSWORD = db_config.config.get('DEFAULT', 'EDIT_PASSWORD')
 ADMIN_PASSWORD = db_config.config.get('DEFAULT', 'ADMIN_PASSWORD')
 
@@ -1430,329 +1455,907 @@ def change_request_detail_route(request_id):
 @app.route("/accident")
 def accident_route():
     """사고 메인 페이지 라우트"""
-    return accident()
+    return _accident_controller.list_view(request)
 
-def accident():
-    """사고 목록 페이지 (메인)"""
-    from common_mapping import smart_apply_mappings
-    import math
-    
-    page = request.args.get('page', 1, type=int)
+
+def _table_has_column(conn, table_name: str, column_name: str) -> bool:
+    """Return True if the given column exists on the table for the active backend."""
+    cursor = conn.cursor()
+    try:
+        if getattr(conn, 'is_postgres', False):
+            cursor.execute(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_name = %s AND column_name = %s
+                """,
+                (table_name, column_name),
+            )
+            return cursor.fetchone() is not None
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        for row in cursor.fetchall():
+            try:
+                name = row['name']
+            except Exception:
+                name = row[1] if len(row) > 1 else None
+            if (name or '').lower() == column_name.lower():
+                return True
+        return False
+    finally:
+        try:
+            cursor.close()
+        except Exception:
+            pass
+
+
+def partner_standards():
+    """협력사 기준정보 페이지"""
+    page = max(1, request.args.get('page', 1, type=int))
     per_page = request.args.get('per_page', 10, type=int)
-    
-    # 검색 조건
+    per_page = max(1, min(per_page, 200))
+
     filters = {
-        'accident_date_start': request.args.get('accident_date_start'),
-        'accident_date_end': request.args.get('accident_date_end'),
-        'workplace': request.args.get('workplace', '').strip(),
-        'accident_grade': request.args.get('accident_grade', '').strip()
+        'company_name': (request.args.get('company_name') or '').strip(),
+        'business_number': (request.args.get('business_number') or '').strip(),
+        'business_type_major': (request.args.get('business_type_major') or '').strip(),
+        'business_type_minor': (request.args.get('business_type_minor') or '').strip(),
+        'workers_min': request.args.get('workers_min', type=int),
+        'workers_max': request.args.get('workers_max', type=int),
     }
-    
-    conn = get_db_connection()
-    
-    # 섹션 정보 가져오기 (단일 소스: section_config via SectionConfigService)
-    from section_service import SectionConfigService
-    section_service = SectionConfigService('accident', DB_PATH)
-    sections = section_service.get_sections() or []
-    
-    # 동적 컬럼 설정 가져오기
-    _wa3 = sql_is_active_true('is_active', conn)
-    _wd3 = sql_is_deleted_false('is_deleted', conn)
-    dynamic_columns_rows = conn.execute(
-        f"""
-        SELECT * FROM accident_column_config 
-        WHERE {_wa3} AND {_wd3}
-        ORDER BY column_order
-        """
-    ).fetchall()
-    dynamic_columns = [dict(row) for row in dynamic_columns_rows]
 
-    # 정렬 일관성 보장: 섹션 순서(section_order) → 섹션 내 column_order → id
     try:
-        sec_order_map = {s['section_key']: int(s.get('section_order') or 0) for s in sections}
-        def _to_int(v):
-            try:
-                return int(v)
-            except Exception:
-                return 0
-        def _sort_key(c):
-            so = sec_order_map.get(c.get('tab'), 999)
-            co = _to_int(c.get('column_order'))
-            cid = _to_int(c.get('id'))
-            return (so, co, cid)
-        dynamic_columns.sort(key=_sort_key)
-    except Exception:
-        pass
-
-    # 키 집합은 활성/비활성 모두 포함하여 그룹 추론에 사용 (렌더는 활성만)
-    try:
-        _wd4 = sql_is_deleted_false('is_deleted', conn)
-        all_keys_rows = conn.execute(
-            f"SELECT column_key FROM accident_column_config WHERE {_wd4}"
-        ).fetchall()
-        all_keys = {r[0] if isinstance(r, (list, tuple)) else (r['column_key'] if 'column_key' in r.keys() else None) for r in all_keys_rows}
-        all_keys = {k for k in all_keys if k}
-    except Exception:
-        all_keys = {c.get('column_key') for c in dynamic_columns if c.get('column_key')}
-
-    # Normalize table/popup types for base columns using sibling keys
-    try:
-        suffixes = ['_id', '_dept', '_bizno', '_business_number', '_code', '_company']
-        def base_key_of(key: str) -> str:
-            if not isinstance(key, str):
-                return ''
-            for s in suffixes:
-                if key.endswith(s):
-                    return key[:-len(s)]
-            return key
-        key_set = all_keys
-        # Determine group by presence of sibling suffix keys (across all sections)
-        def infer_group(bk: str) -> str:
-            if not bk:
-                return ''
-            # support irregular 'd' variant like incharge -> incharged_code
-            variants = [bk, bk + 'd']
-            if any(((v + '_bizno') in key_set) or ((v + '_business_number') in key_set) for v in variants):
-                return 'company'
-            if any((v + '_dept') in key_set for v in variants):
-                return 'person'
-            if any((v + '_code') in key_set for v in variants):
-                return 'department'
-            if any((v + '_company') in key_set for v in variants):
-                return 'contractor'
-            return ''
-        popup_map = {
-            'person': 'popup_person',
-            'company': 'popup_company',
-            'department': 'popup_department',
-            'contractor': 'popup_contractor',
-        }
-        for col in dynamic_columns:
-            ck = col.get('column_key')
-            ct = col.get('column_type')
-            bk = base_key_of(ck)
-            grp = infer_group(bk)
-            # Base column: exact base key and has a recognized group
-            if grp and ck == bk:
-                if not ct or ct in ('text', 'popup', 'table', 'table_select'):
-                    col['column_type'] = popup_map.get(grp, ct)
-                # Mark as table input for robust rendering
-                col['input_type'] = col.get('input_type') or 'table'
-    except Exception as _e:
-        logging.error(f"accident_detail: normalize popup types failed: {_e}")
-    
-    # 섹션 키 정규화: 잘못된/없음(tab) → 유효 섹션으로 귀속 (목록도 동일 기준)
-    try:
-        known_keys = {s.get('section_key') for s in sections if s.get('section_key')}
-        alias_map = {'violation_info': 'accident_info'}
-        fallback_key = (
-            ('additional' if 'additional' in known_keys else None)
-            or ('basic_info' if 'basic_info' in known_keys else None)
-            or (next(iter(known_keys)) if known_keys else None)
+        partner_rows, total_count = partner_manager.get_all_partners(
+            page=page,
+            per_page=per_page,
+            filters=filters,
         )
-        for col in dynamic_columns:
-            tab = col.get('tab')
-            if tab in alias_map and alias_map[tab] in known_keys:
-                col['tab'] = alias_map[tab]
-                tab = col['tab']
-            if not tab or tab not in known_keys:
-                if fallback_key:
-                    col['tab'] = fallback_key
-    except Exception as _e:
-        logging.warning(f"섹션 키 정규화(목록) 경고: {_e}")
+    except Exception as exc:
+        logging.error("partner_standards: partner fetch failed: %s", exc)
+        partner_rows = []
+        total_count = 0
 
-    # 섹션별로 컬럼 그룹핑
-    section_columns = {}
-    for section in sections:
-        section_columns[section['section_key']] = [
-            col for col in dynamic_columns 
-            if col.get('tab') == section['section_key'] 
-            and col['column_key'] not in ['detailed_content']
-        ]
-    
-    # 드롭다운 컬럼에 대해 코드-값 매핑 정보 추가
-    for col in dynamic_columns:
-        if col['column_type'] == 'dropdown':
-            col['code_mapping'] = get_dropdown_options_for_display('accident', col['column_key'])
-    
-    # 사고 목록 조회
-    _wd5 = sql_is_deleted_false('is_deleted', conn)
-    query = f"""
-        SELECT * FROM accidents_cache 
-        WHERE {_wd5}
-    """
-    params = []
-    
-    # 필터링 적용
-    if filters['accident_date_start']:
-        query += " AND accident_date >= %s"
-        params.append(filters['accident_date_start'])
-    
-    if filters['accident_date_end']:
-        query += " AND accident_date <= %s"
-        params.append(filters['accident_date_end'])
-    
-    if filters['workplace']:
-        query += " AND workplace LIKE %s"
-        params.append(f"%{filters['workplace']}%")
-    
-    if filters['accident_grade']:
-        query += " AND accident_grade LIKE %s"
-        params.append(f"%{filters['accident_grade']}%")
-    
-    # 정렬 컬럼(report_date)은 초기화 단계에서 보장되어야 함. 요청 중 DDL 금지.
-
-    # 최신 등록 건(created_at)이 가장 먼저 보이도록 정렬 (PostgreSQL 전용)
-    query += (
-        " ORDER BY COALESCE(created_at, report_date::timestamp, TIMESTAMP '1970-01-01') DESC, "
-        "        report_date DESC, accident_number DESC"
-    )
-    
-    # 전체 건수 조회 (ORDER BY 제거 후 COUNT)
-    import re as _re
-    count_query = _re.sub(r"ORDER BY[\s\S]*$", "", query, flags=_re.IGNORECASE)
-    count_query = count_query.replace("SELECT *", "SELECT COUNT(*)")
-    total_count = conn.execute(count_query, tuple(params)).fetchone()[0]
-    
-    # 페이징 적용
     offset = (page - 1) * per_page
-    query += f" LIMIT {per_page} OFFSET {offset}"
-    
-    accidents_rows = conn.execute(query, tuple(params)).fetchall()
-    accidents = []
-    
-    for idx, row in enumerate(accidents_rows):
-        accident = dict(row)
-        accident['no'] = total_count - offset - idx
-        
-        # 안전 병합: custom_data를 파싱하여 빈값 미덮어쓰기 + K사고 기본필드 보호
-        if accident.get('custom_data'):
-            try:
-                # PostgreSQL JSONB는 이미 dict로 반환됨
-                if isinstance(accident['custom_data'], dict):
-                    custom_data = accident['custom_data']
-                else:
-                    custom_data = json.loads(accident['custom_data']) if accident['custom_data'] else {}
-                # ensure dict form is available to templates and later fallbacks
-                accident['custom_data'] = custom_data
-                # Ensure fallback reads parsed dict, not raw string
-                accident['custom_data'] = custom_data
+    partners = []
+    for idx, row in enumerate(partner_rows):
+        row_dict = dict(row)
+        row_dict['no'] = total_count - offset - idx if total_count else len(partner_rows) - idx
+        partners.append(row_dict)
 
-                def _is_empty(v):
-                    try:
-                        if v is None:
-                            return True
-                        if isinstance(v, str) and v.strip() == '':
-                            return True
-                        return False
-                    except Exception:
-                        return False
-
-                protected_keys_for_k = {
-                    'accident_number','accident_name','workplace','accident_grade','major_category',
-                    'injury_form','injury_type','building','floor','location_category','location_detail',
-                    'accident_date','created_at','report_date','day_of_week',
-                    'responsible_company1','responsible_company1_no','responsible_company2','responsible_company2_no'
-                }
-
-                acc_no = str(accident.get('accident_number') or '')
-                is_direct = acc_no.startswith('ACC')
-
-                safe_updates = {}
-                for k, v in custom_data.items():
-                    if _is_empty(v):
-                        continue
-                    if k in protected_keys_for_k:
-                        if not is_direct:
-                            # K사고: 기본 필드 보호
-                            continue
-                        # ACC: 상위가 비어 있을 때만 보완
-                        if _is_empty(accident.get(k)):
-                            safe_updates[k] = v
-                    else:
-                        safe_updates[k] = v
-
-                if safe_updates:
-                    accident.update(safe_updates)
-            except Exception as e:
-                print(f"Error parsing/merging custom_data: {e}")
-        
-        # K사고와 A사고 구분해서 등록일 필드 설정
-        accident_number = accident.get('accident_number', '')
-        if accident_number.startswith('K'):
-            # K사고는 report_date를 등록일로 사용
-            accident['display_created_at'] = accident.get('report_date', accident.get('created_at', '-'))
-        else:
-            # ACC사고는 created_at을 등록일로 사용
-            accident['display_created_at'] = accident.get('created_at', '-')
-        
-        # accident_name 최종 폴백 (parsed custom_data 우선)
-        if not accident.get('accident_name'):
-            nm = None
-            try:
-                cd = accident.get('custom_data')
-                if isinstance(cd, dict):
-                    nm = cd.get('accident_name')
-            except Exception:
-                nm = None
-            accident['accident_name'] = (nm if (nm and str(nm).strip()) else '-')
-        
-        accidents.append(accident)
-    
-    # 드롭다운 매핑 (리스트 전체 기준) - 상단 분기에서도 동일하게 적용
+    dynamic_columns = []
+    conn = None
     try:
-        from common_mapping import smart_apply_mappings as _smart_map
-        accidents = _smart_map(accidents, 'accident', dynamic_columns, DB_PATH)
-    except Exception as _e:
-        logging.error(f"accident mapping error(top): {_e}")
-    conn.close()
-    
-    # 페이지네이션 객체 (다른 보드와 동일한 인터페이스)
+        conn = get_db_connection(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        config_rows = cursor.execute(
+            """
+            SELECT column_key, column_name, column_type, column_order, COALESCE(is_active, 1) AS is_active
+            FROM partner_standards_column_config
+            WHERE COALESCE(is_active, 1) = 1
+            ORDER BY column_order, column_name
+            """
+        ).fetchall()
+        dynamic_columns = [
+            {
+                'key': row['column_key'],
+                'name': row['column_name'],
+                'type': row.get('column_type') or 'text',
+                'table_display': True,
+            }
+            for row in config_rows
+            if row.get('column_key')
+        ]
+    except Exception as exc:
+        logging.debug("partner_standards: column config load skipped: %s", exc)
+    finally:
+        if conn:
+            conn.close()
+
+    if not dynamic_columns:
+        dynamic_columns = [
+            {'key': 'company_name', 'name': '협력사명', 'type': 'text', 'table_display': True},
+            {'key': 'business_number', 'name': '사업자번호', 'type': 'text', 'table_display': True},
+            {'key': 'partner_class', 'name': '구분', 'type': 'text', 'table_display': True},
+            {'key': 'business_type_major', 'name': '업종(대)', 'type': 'text', 'table_display': True},
+            {'key': 'business_type_minor', 'name': '업종(소)', 'type': 'text', 'table_display': True},
+            {'key': 'hazard_work_flag', 'name': '위험작업 여부', 'type': 'text', 'table_display': True},
+            {'key': 'permanent_workers', 'name': '상시근로자 수', 'type': 'number', 'table_display': True},
+        ]
+
     class Pagination:
-        def __init__(self, page, per_page, total_count):
-            import math as _math
-            self.page = page
-            self.per_page = per_page
-            self.total_count = total_count
-            self.pages = _math.ceil(total_count / per_page) if total_count > 0 else 1
-            self.has_prev = page > 1
-            self.prev_num = page - 1 if self.has_prev else None
-            self.has_next = page < self.pages
-            self.next_num = page + 1 if self.has_next else None
-        
-        def iter_pages(self, window_size=10):
+        def __init__(self, page_num: int, per_page_num: int, total: int) -> None:
+            self.page = page_num
+            self.per_page = per_page_num
+            self.total_count = total
+            self.pages = math.ceil(total / per_page_num) if total > 0 else 1
+            self.has_prev = page_num > 1
+            self.prev_num = page_num - 1 if self.has_prev else None
+            self.has_next = page_num < self.pages
+            self.next_num = page_num + 1 if self.has_next else None
+
+        def iter_pages(self, window_size: int = 10):
             start = ((self.page - 1) // window_size) * window_size + 1
             end = min(start + window_size - 1, self.pages)
             for num in range(start, end + 1):
                 yield num
-        
-        def get_window_info(self, window_size=10):
+
+        def get_window_info(self, window_size: int = 10):
             start = ((self.page - 1) // window_size) * window_size + 1
             end = min(start + window_size - 1, self.pages)
-            has_prev_window = start > 1
-            has_next_window = end < self.pages
-            prev_window_start = max(1, start - window_size)
-            next_window_start = min(end + 1, self.pages)
             return {
                 'start': start,
                 'end': end,
-                'has_prev_window': has_prev_window,
-                'has_next_window': has_next_window,
-                'prev_window_start': prev_window_start,
-                'next_window_start': next_window_start
+                'has_prev_window': start > 1,
+                'has_next_window': end < self.pages,
+                'prev_window_start': max(1, start - window_size),
+                'next_window_start': min(end + 1, self.pages),
             }
-    
+
     pagination = Pagination(page, per_page, total_count)
-    
-    return render_template('partner-accident.html',  # 동일한 템플릿 사용
-                         accidents=accidents,
-                         dynamic_columns=dynamic_columns,
-                         sections=sections,
-                         section_columns=section_columns,
-                         pagination=pagination,
-                         search_params=filters,
-                         total_count=total_count,
-                         menu=MENU_CONFIG)
+
+    return render_template(
+        'partner-standards.html',
+        partners=partners,
+        total_count=total_count,
+        pagination=pagination,
+        dynamic_columns=dynamic_columns,
+        menu=MENU_CONFIG,
+    )
+
+
+def partner_change_request():
+    """기준정보 변경요청 페이지"""
+    page = max(1, request.args.get('page', 1, type=int))
+    per_page = request.args.get('per_page', 10, type=int)
+    per_page = max(1, min(per_page, 200))
+
+    filters = {
+        'requester_name': (request.args.get('requester_name') or '').strip(),
+        'company_name': (request.args.get('company_name') or '').strip(),
+        'business_number': (request.args.get('business_number') or '').strip(),
+    }
+
+    change_requests: List[Dict[str, Any]] = []
+    total_count = 0
+
+    conn = None
+    try:
+        conn = get_db_connection(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        is_postgres = getattr(conn, 'is_postgres', False)
+
+        has_is_deleted = _table_has_column(conn, 'partner_change_requests', 'is_deleted')
+
+        where_clauses: List[str] = []
+        params: List[Any] = []
+
+        if has_is_deleted:
+            if is_postgres:
+                where_clauses.append("COALESCE(is_deleted::text, '0') NOT IN ('1','t','true')")
+            else:
+                where_clauses.append("COALESCE(is_deleted, 0) = 0")
+
+        if filters['requester_name']:
+            where_clauses.append("LOWER(COALESCE(requester_name, '')) LIKE LOWER(%s)")
+            params.append(f"%{filters['requester_name']}%")
+
+        if filters['company_name']:
+            where_clauses.append("LOWER(COALESCE(company_name, '')) LIKE LOWER(%s)")
+            params.append(f"%{filters['company_name']}%")
+
+        if filters['business_number']:
+            where_clauses.append("LOWER(COALESCE(business_number, '')) LIKE LOWER(%s)")
+            params.append(f"%{filters['business_number']}%")
+
+        where_clause = ''
+        if where_clauses:
+            where_clause = ' WHERE ' + ' AND '.join(where_clauses)
+
+        cursor = conn.cursor()
+        count_sql = f"SELECT COUNT(*) FROM partner_change_requests{where_clause}"
+        count_row = cursor.execute(count_sql, params).fetchone()
+        if count_row is not None:
+            try:
+                total_count = int(count_row[0])
+            except Exception:
+                try:
+                    total_count = int(next(iter(count_row.values())))
+                except Exception:
+                    total_count = 0
+
+        offset = (page - 1) * per_page
+        if is_postgres:
+            order_clause = " ORDER BY created_at DESC NULLS LAST, id DESC"
+        else:
+            order_clause = " ORDER BY (created_at IS NULL), created_at DESC, id DESC"
+
+        data_sql = (
+            "SELECT id, request_number, created_at, company_name, business_number, "
+            "change_type, current_value, new_value, change_reason, status, requester_name, requester_department, custom_data "
+            "FROM partner_change_requests"
+            f"{where_clause}{order_clause} LIMIT %s OFFSET %s"
+        )
+        rows = cursor.execute(data_sql, params + [per_page, offset]).fetchall()
+
+        type_codes: Dict[str, str] = {}
+        status_codes: Dict[str, str] = {}
+        try:
+            code_service = CodeService('change_request', DB_PATH)
+            for code in code_service.list('change_type') or []:
+                key = code.get('option_code') or code.get('code')
+                value = code.get('option_value') or code.get('value')
+                if key:
+                    type_codes[key] = value
+            for code in code_service.list('status') or []:
+                key = code.get('option_code') or code.get('code')
+                value = code.get('option_value') or code.get('value')
+                if key:
+                    status_codes[key] = value
+        except Exception as exc:
+            logging.debug("partner_change_request: code lookup failed: %s", exc)
+
+        for idx, row in enumerate(rows):
+            item = dict(row)
+            item['no'] = total_count - offset - idx if total_count else len(rows) - idx
+            change_type_key = item.get('change_type')
+            status_key = item.get('status')
+            item['change_type_label'] = type_codes.get(change_type_key, change_type_key)
+            item['status_label'] = status_codes.get(status_key, status_key)
+            change_requests.append(item)
+
+    except Exception as exc:
+        logging.error("partner_change_request: query failed: %s", exc)
+    finally:
+        if conn:
+            conn.close()
+
+    class Pagination:
+        def __init__(self, page_num: int, per_page_num: int, total: int) -> None:
+            self.page = page_num
+            self.per_page = per_page_num
+            self.total_count = total
+            self.pages = math.ceil(total / per_page_num) if total > 0 else 1
+            self.has_prev = page_num > 1
+            self.prev_num = page_num - 1 if self.has_prev else None
+            self.has_next = page_num < self.pages
+            self.next_num = page_num + 1 if self.has_next else None
+
+        def iter_pages(self, window_size: int = 10):
+            start = ((self.page - 1) // window_size) * window_size + 1
+            end = min(start + window_size - 1, self.pages)
+            for num in range(start, end + 1):
+                yield num
+
+        def get_window_info(self, window_size: int = 10):
+            start = ((self.page - 1) // window_size) * window_size + 1
+            end = min(start + window_size - 1, self.pages)
+            return {
+                'start': start,
+                'end': end,
+                'has_prev_window': start > 1,
+                'has_next_window': end < self.pages,
+                'prev_window_start': max(1, start - window_size),
+                'next_window_start': min(end + 1, self.pages),
+            }
+
+    pagination = Pagination(page, per_page, total_count)
+
+    return render_template(
+        'partner-change-request.html',
+        change_requests=change_requests,
+        total_count=total_count,
+        pagination=pagination,
+        menu=MENU_CONFIG,
+    )
+
+
+def get_dropdown_options_for_display(board_type: str, column_key: str) -> List[Dict[str, Any]]:
+    """Return dropdown options for a board/column using v2 option codes."""
+    if not board_type or not column_key:
+        return []
+
+    try:
+        conn = get_db_connection(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT option_code, option_value
+            FROM dropdown_option_codes_v2
+            WHERE board_type = %s AND column_key = %s AND COALESCE(is_active, 1) = 1
+            ORDER BY display_order, option_value
+            """,
+            (board_type, column_key),
+        )
+        rows = cursor.fetchall()
+    except Exception as exc:
+        logging.debug(
+            "get_dropdown_options_for_display: lookup failed for %s.%s: %s",
+            board_type,
+            column_key,
+            exc,
+        )
+        return []
+    finally:
+        try:
+            cursor.close()
+            conn.close()
+        except Exception:
+            pass
+
+    if not rows:
+        return []
+
+    if len(rows) == 1:
+        value = rows[0]['option_value']
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped.startswith('[') and stripped.endswith(']'):
+                try:
+                    parsed = pyjson.loads(stripped)
+                    if isinstance(parsed, list):
+                        return [
+                            {
+                                'code': f"{column_key.upper()}_{index + 1:03d}",
+                                'value': str(item),
+                            }
+                            for index, item in enumerate(parsed)
+                        ]
+                except Exception:
+                    logging.debug(
+                        "get_dropdown_options_for_display: array parse failed for %s.%s",
+                        board_type,
+                        column_key,
+                    )
+
+    options = []
+    for row in rows:
+        code = row['option_code']
+        value = row['option_value']
+        if code is None and value is None:
+            continue
+        options.append({'code': code, 'value': value})
+    return options
+
+
+@app.route("/partner/<business_number>")
+@app.route("/partner-detail/<business_number>")
+def partner_detail(business_number: str):
+    """협력사 상세정보 페이지."""
+    partner = partner_manager.get_partner_by_business_number(business_number)
+    if not partner:
+        logging.warning("partner_detail: partner not found for %s", business_number)
+        return "협력사 정보를 찾을 수 없습니다.", 404
+
+    attachments: List[Dict[str, Any]] = []
+    try:
+        conn = partner_manager.db_config.get_sqlite_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT *
+            FROM partner_attachments
+            WHERE business_number = %s
+            ORDER BY upload_date DESC
+            """,
+            (business_number,),
+        )
+        attachments = [dict(row) for row in cursor.fetchall()]
+    except Exception as exc:
+        logging.debug("partner_detail: attachment lookup failed: %s", exc)
+    finally:
+        try:
+            cursor.close()
+            conn.close()
+        except Exception:
+            pass
+
+    is_popup = request.args.get('popup') == '1'
+    return render_template(
+        'partner-detail.html',
+        partner=partner,
+        attachments=attachments,
+        menu=MENU_CONFIG,
+        is_popup=is_popup,
+        board_type='partner',
+    )
+
+
+def change_request_detail(request_id: int):
+    """변경요청 상세정보 페이지."""
+    record: Dict[str, Any] | None = None
+    conn = None
+    try:
+        conn = get_db_connection(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT *
+            FROM partner_change_requests
+            WHERE id = %s
+            """,
+            (request_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            cursor.execute(
+                """
+                SELECT *
+                FROM change_requests
+                WHERE id = %s
+                """,
+                (request_id,),
+            )
+            row = cursor.fetchone()
+        if row:
+            record = dict(row)
+    except Exception as exc:
+        logging.error("change_request_detail: primary lookup failed: %s", exc)
+    finally:
+        try:
+            cursor.close()
+            conn.close()
+        except Exception:
+            pass
+
+    if not record:
+        return "변경요청 정보를 찾을 수 없습니다.", 404
+
+    detail_text = ''
+    try:
+        conn = get_db_connection(DB_PATH)
+        cursor = conn.cursor()
+        request_number = record.get('request_number')
+        if request_number:
+            cursor.execute(
+                """
+                SELECT detailed_content
+                FROM change_request_details
+                WHERE request_number = %s
+                """,
+                (request_number,),
+            )
+            detail_row = cursor.fetchone()
+            if detail_row and 'detailed_content' in detail_row:
+                detail_text = detail_row['detailed_content']
+    except Exception as exc:
+        logging.debug("change_request_detail: detail lookup failed: %s", exc)
+    finally:
+        try:
+            cursor.close()
+            conn.close()
+        except Exception:
+            pass
+
+    dynamic_columns: List[Dict[str, Any]] = []
+    try:
+        conn = get_db_connection(DB_PATH)
+        cursor = conn.cursor()
+        rows = cursor.execute(
+            """
+            SELECT column_key, column_name, column_type, column_order,
+                   dropdown_options, tab, column_span, linked_columns,
+                   is_active, is_deleted
+            FROM change_request_column_config
+            ORDER BY column_order
+            """
+        ).fetchall()
+        for row in rows:
+            is_active_val = str(row['is_active'] if 'is_active' in row else '1').lower()
+            is_deleted_val = str(row['is_deleted'] if 'is_deleted' in row else '0').lower()
+            if is_active_val not in ('1', 'true', 't', 'y'):
+                continue
+            if is_deleted_val in ('1', 'true', 't', 'y'):
+                continue
+
+            column_key = row['column_key']
+            column_name = row['column_name']
+            column_type = (row.get('column_type') or 'text') if isinstance(row, dict) else row['column_type']
+            tab_key = row.get('tab') or 'additional' if isinstance(row, dict) else row['tab'] or 'additional'
+
+            col = {
+                'column_key': column_key,
+                'column_name': column_name,
+                'column_type': column_type,
+                'tab': tab_key,
+                'column_span': row.get('column_span') if isinstance(row, dict) else row['column_span'],
+                'linked_columns': row.get('linked_columns') if isinstance(row, dict) else row['linked_columns'],
+                'table_display': True,
+                'dropdown_options_mapped': get_dropdown_options_for_display('change_request', column_key)
+                if column_type == 'dropdown'
+                else [],
+            }
+            dynamic_columns.append(col)
+    except Exception as exc:
+        logging.debug("change_request_detail: dynamic column load failed: %s", exc)
+    finally:
+        try:
+            cursor.close()
+            conn.close()
+        except Exception:
+            pass
+
+    custom_data = {}
+    raw_custom = record.get('custom_data')
+    if raw_custom:
+        try:
+            custom_data = raw_custom if isinstance(raw_custom, dict) else pyjson.loads(raw_custom)
+        except Exception as exc:
+            logging.debug("change_request_detail: custom_data parse failed: %s", exc)
+            custom_data = {}
+
+    if not detail_text:
+        detail_text = custom_data.get('detailed_content', '')
+
+    request_dict = dict(record)
+    fallback_detail = detail_text or custom_data.get('detailed_content', '')
+    request_dict['detailed_content'] = fallback_detail
+    request_data = SimpleNamespace(**request_dict)
+
+    section_columns: Dict[str, List[Dict[str, Any]]] = {}
+    for col in dynamic_columns:
+        section_columns.setdefault(col.get('tab') or 'additional', []).append(col)
+
+    attachments: List[Dict[str, Any]] = []
+    try:
+        from board_services import AttachmentService
+
+        request_number = request_data.request_number or f"CR-{request_id}"
+        attachment_service = AttachmentService('change_request', DB_PATH)
+        attachments = [dict(item) for item in attachment_service.list(request_number)]
+    except Exception as exc:
+        logging.debug("change_request_detail: attachment lookup failed: %s", exc)
+
+    is_popup = request.args.get('popup') == '1'
+
+    return render_template(
+        'change-request-detail.html',
+        request_data=request_data,
+        dynamic_columns=dynamic_columns,
+        custom_data=custom_data,
+        attachments=attachments,
+        section_columns=section_columns,
+        is_popup=is_popup,
+        menu=MENU_CONFIG,
+    )
+
+
+@app.route("/register-change-request", methods=["POST"])
+def register_change_request():
+    """새 변경요청 등록."""
+    conn = None
+    try:
+        from board_services import AttachmentService
+        from timezone_config import get_korean_time, get_korean_time_str
+
+        data = pyjson.loads(request.form.get('data', '{}'))
+        attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
+        files = request.files.getlist('files')
+        detailed_content = data.get('detailed_content', '')
+
+        today = get_korean_time()
+        year_month = today.strftime('%Y%m')
+        prefix = f"CR-{year_month}-"
+
+        conn = get_db_connection(DB_PATH, timeout=30.0)
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """
+            SELECT request_number
+            FROM partner_change_requests
+            WHERE request_number LIKE %s
+            ORDER BY request_number DESC
+            LIMIT 1
+            """,
+            (f"{prefix}%",),
+        )
+        last_row = cursor.fetchone()
+        if last_row:
+            try:
+                last_seq = int(last_row[0][-2:])
+            except Exception:
+                last_seq = 0
+        else:
+            last_seq = 0
+        request_number = f"{prefix}{last_seq + 1:02d}"
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS partner_change_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_number TEXT UNIQUE,
+                requester_name TEXT,
+                requester_department TEXT,
+                company_name TEXT,
+                business_number TEXT,
+                change_type TEXT,
+                current_value TEXT,
+                new_value TEXT,
+                change_reason TEXT,
+                status TEXT DEFAULT 'requested',
+                created_at TIMESTAMP,
+                updated_at TIMESTAMP,
+                custom_data TEXT,
+                is_deleted INTEGER DEFAULT 0
+            )
+            """
+        )
+
+        data['status'] = 'requested'
+        cursor.execute(
+            """
+            INSERT INTO partner_change_requests (
+                request_number,
+                requester_name,
+                requester_department,
+                company_name,
+                business_number,
+                change_reason,
+                status,
+                created_at,
+                updated_at,
+                custom_data,
+                change_type,
+                current_value,
+                new_value
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (
+                request_number,
+                data.get('requester_name', data.get('req_name', '')),
+                data.get('requester_department', data.get('req_name_dept', '')),
+                data.get('company_name', data.get('compname', '')),
+                data.get('business_number', data.get('compname_bizno', '')),
+                data.get('change_reason', ''),
+                'requested',
+                get_korean_time_str(),
+                get_korean_time_str(),
+                pyjson.dumps(data, ensure_ascii=False),
+                data.get('change_type', ''),
+                data.get('current_value', ''),
+                data.get('new_value', ''),
+            ),
+        )
+        request_id = cursor.fetchone()[0]
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS change_request_details (
+                request_number TEXT PRIMARY KEY,
+                detailed_content TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            INSERT INTO change_request_details (request_number, detailed_content)
+            VALUES (%s, %s)
+            ON CONFLICT (request_number)
+            DO UPDATE SET detailed_content = EXCLUDED.detailed_content,
+                          updated_at = CURRENT_TIMESTAMP
+            """,
+            (request_number, detailed_content),
+        )
+
+        if files:
+            attachment_service = AttachmentService('change_request', DB_PATH, conn)
+            descriptions = [
+                item.get('description', '')
+                for item in attachment_data
+                if isinstance(item, dict)
+            ]
+        for index, file in enumerate(files):
+            desc = descriptions[index] if index < len(descriptions) else ''
+            attachment_service.add(
+                request_number,
+                file,
+                {
+                    'description': desc,
+                    'uploaded_by': session.get('user_id', 'user'),
+                },
+            )
+
+        conn.commit()
+        return jsonify(
+            {
+                'success': True,
+                'request_id': request_id,
+                'request_number': request_number,
+                'message': '변경요청이 성공적으로 등록되었습니다.',
+            }
+        )
+    except Exception as exc:
+        logging.error("register_change_request failed: %s", exc)
+        if conn:
+            conn.rollback()
+        return jsonify({'success': False, 'message': str(exc)}), 500
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.route('/update-change-request', methods=['POST'])
+def update_change_request():
+    """변경요청 수정."""
+    from board_services import AttachmentService
+
+    conn = None
+    try:
+        request_id = request.form.get('request_id')
+        request_number = request.form.get('request_number')
+        change_reason = request.form.get('change_reason', '')
+        detailed_content = request.form.get('detailed_content', '')
+        custom_data_raw = request.form.get('custom_data', '{}')
+        deleted_raw = request.form.get('deleted_attachments', '[]')
+        attachment_data_raw = request.form.get('attachment_data', '[]')
+        files = request.files.getlist('files')
+
+        if not request_id or not request_number:
+            return jsonify({'success': False, 'message': '요청번호가 필요합니다.'}), 400
+
+        try:
+            custom_data = (
+                custom_data_raw
+                if isinstance(custom_data_raw, dict)
+                else pyjson.loads(custom_data_raw)
+            )
+        except Exception:
+            return jsonify({'success': False, 'message': '잘못된 데이터 형식입니다.'}), 400
+
+        try:
+            deleted_attachments = (
+                deleted_raw if isinstance(deleted_raw, list) else pyjson.loads(deleted_raw)
+            )
+        except Exception:
+            deleted_attachments = []
+
+        try:
+            attachment_meta = (
+                attachment_data_raw
+                if isinstance(attachment_data_raw, list)
+                else pyjson.loads(attachment_data_raw)
+            )
+        except Exception:
+            attachment_meta = []
+
+        conn = get_db_connection(DB_PATH, timeout=30.0)
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT id, request_number, status FROM partner_change_requests WHERE id = %s",
+            (request_id,),
+        )
+        existing = cursor.fetchone()
+        if not existing:
+            return jsonify({'success': False, 'message': '변경요청을 찾을 수 없습니다.'}), 404
+
+        actual_request_number = existing[1] or request_number
+        status_current = existing[2]
+
+        status_value = custom_data.get('status', status_current)
+        if status_value not in ('requested', 'approved', 'rejected'):
+            status_value = 'requested'
+
+        custom_data['detailed_content'] = detailed_content
+
+        update_sql = [
+            'status = %s',
+            'change_reason = %s',
+            'custom_data = %s',
+            'updated_at = CURRENT_TIMESTAMP',
+        ]
+        params: List[Any] = [
+            status_value,
+            change_reason,
+            pyjson.dumps(custom_data, ensure_ascii=False),
+        ]
+
+        for key, value in custom_data.items():
+            if key in ('status', 'custom_data', 'detailed_content'):
+                continue
+            cursor.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'partner_change_requests' AND column_name = %s
+                """,
+                (key,),
+            )
+            if cursor.fetchone():
+                update_sql.append(f"{key} = %s")
+                params.append(value)
+
+        params.append(request_id)
+        cursor.execute(
+            f"UPDATE partner_change_requests SET {', '.join(update_sql)} WHERE id = %s",
+            params,
+        )
+
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS change_request_details (
+                request_number TEXT PRIMARY KEY,
+                detailed_content TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        cursor.execute(
+            """
+            INSERT INTO change_request_details (request_number, detailed_content, updated_at)
+            VALUES (%s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (request_number)
+            DO UPDATE SET detailed_content = EXCLUDED.detailed_content,
+                          updated_at = CURRENT_TIMESTAMP
+            """,
+            (actual_request_number, detailed_content),
+        )
+
+        attachment_service = AttachmentService('change_request', DB_PATH, conn)
+        if deleted_attachments:
+            attachment_service.delete(deleted_attachments)
+
+        for item in attachment_meta:
+            attachment_id = item.get('id')
+            if attachment_id and not item.get('isNew'):
+                attachment_service.update_meta(
+                    int(attachment_id),
+                    {
+                        'description': item.get('description', ''),
+                        'uploaded_by': session.get('user_id', 'user'),
+                    },
+                )
+
+        if files:
+            new_descriptions = [
+                item.get('description', '')
+                for item in attachment_meta
+                if item.get('isNew')
+            ]
+            for index, file in enumerate(files):
+                desc = new_descriptions[index] if index < len(new_descriptions) else ''
+                attachment_service.add(
+                    actual_request_number,
+                    file,
+                    {
+                        'description': desc,
+                        'uploaded_by': session.get('user_id', 'user'),
+                    },
+                )
+
+        conn.commit()
+        return jsonify({'success': True, 'message': '수정이 완료되었습니다.'})
+    except Exception as exc:
+        logging.error('update_change_request failed: %s', exc)
+        if conn:
+            conn.rollback()
+        return jsonify({'success': False, 'message': str(exc)}), 500
+    finally:
+        if conn:
+            conn.close()
+@app.route("/accident-register")
+def accident_register():
+    """사고 등록 페이지 (컨트롤러 위임)"""
+    return _accident_controller.register_view(request)
+
+
+@app.route("/accident-detail/<accident_id>")
+def accident_detail(accident_id):
+    """사고 상세 페이지 (컨트롤러 위임)"""
+    return _accident_controller.detail_view(request, accident_id)
+
+
+@app.route("/register-accident", methods=["POST"])
+def register_accident():
+    """사고 신규 등록 처리"""
+    return _accident_controller.save(request)
+
 
 @app.route("/partner-accident")
 def partner_accident_route():
@@ -1994,4152 +2597,24 @@ def partner_accident():
 
 def safety_instruction_route_logic():
     """환경안전 지시서 페이지 라우트"""
-    from common_mapping import smart_apply_mappings
-    import math
-    
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 10, type=int)
-    
-    # 검색 조건
-    filters = {
-        'company_name': request.args.get('company_name', '').strip(),
-        'business_number': request.args.get('business_number', '').strip(),
-        'violation_date_from': request.args.get('violation_date_from'),
-        'violation_date_to': request.args.get('violation_date_to')
-    }
-    
-    conn = get_db_connection()
-    
-    # 섹션 정보 가져오기 (safety_instruction 전용, 삭제되지 않은 것만)
-    # 먼저 safety_instruction_sections 테이블 사용 시도, 없으면 section_config 사용
-    try:
-        _wa = sql_is_active_true('is_active', conn)
-        _wd = sql_is_deleted_false('is_deleted', conn)
-        sections = conn.execute(f"""
-            SELECT * FROM safety_instruction_sections 
-            WHERE {_wa}
-              AND {_wd}
-            ORDER BY section_order
-        """).fetchall()
-        sections = [dict(row) for row in sections]
-    except Exception as e:
-        # PostgreSQL 트랜잭션 오류 처리
-        conn.close()
-        conn = get_db_connection()
-        
-        try:
-            # safety_instruction_sections 테이블이 없으면 section_config 사용
-            _wa2 = sql_is_active_true('is_active', conn)
-            _wd2 = sql_is_deleted_false('is_deleted', conn)
-            sections = conn.execute(f"""
-                SELECT * FROM section_config 
-                WHERE board_type = 'safety_instruction' AND {_wa2}
-                  AND {_wd2}
-                ORDER BY section_order
-            """).fetchall()
-            sections = [dict(row) for row in sections]
-        except:
-            # 둘 다 실패하면 빈 리스트
-            sections = []
-    
-    # 동적 컬럼 설정 가져오기 (활성화되고 삭제되지 않은 것만)
-    _wa3 = sql_is_active_true('is_active', conn)
-    _wd3 = sql_is_deleted_false('is_deleted', conn)
-    dynamic_columns_rows = conn.execute(f"""
-        SELECT * FROM safety_instruction_column_config 
-        WHERE {_wa3} AND {_wd3}
-        ORDER BY column_order
-    """).fetchall()
-    dynamic_columns = [dict(row) for row in dynamic_columns_rows]
-    
-    # 섹션별로 컬럼 그룹핑 (detailed_content와 violation_content 제외)
-    section_columns = {}
-    for section in sections:
-        section_columns[section['section_key']] = [
-            col for col in dynamic_columns 
-            if col.get('tab') == section['section_key'] 
-            and col['column_key'] not in ['detailed_content']
-        ]
-    
-    # tab이 None인 컬럼들은 추가하지 않음 (관리자가 섹션을 지정하지 않은 컬럼은 표시하지 않음)
-    
-    
-    # 드롭다운 컬럼에 대해 코드-값 매핑 정보 추가
-    for col in dynamic_columns:
-        if col['column_type'] == 'dropdown':
-            col['code_mapping'] = get_dropdown_options_for_display('safety_instruction', col['column_key'])
-    
-    # 메인 테이블에서 직접 조회 (삭제되지 않은 것만)
-    base_query = f"SELECT * FROM safety_instructions WHERE {sql_is_deleted_false('is_deleted', conn)}"
-    query = base_query
-    params = []
-    
-    # 필터링 적용
-    if filters['company_name']:
-        query += " AND (primary_company LIKE %s OR subcontractor LIKE %s)"
-        params.extend([f"%{filters['company_name']}%", f"%{filters['company_name']}%"])
-    
-    if filters['business_number']:
-        query += " AND (primary_business_number LIKE %s OR subcontractor_business_number LIKE %s)"
-        params.extend([f"%{filters['business_number']}%", f"%{filters['business_number']}%"])
-    
-    if filters['violation_date_from']:
-        # JSON 필드에서 날짜 검색 (Postgres/SQLite 분기)
-        if hasattr(conn, 'is_postgres') and conn.is_postgres:
-            query += " AND (custom_data->>'violation_date') >= %s"
-        else:
-            query += " AND json_extract(custom_data, '$.violation_date') >= %s"
-        params.append(filters['violation_date_from'])
-    
-    if filters['violation_date_to']:
-        # JSON 필드에서 날짜 검색 (Postgres/SQLite 분기)
-        if hasattr(conn, 'is_postgres') and conn.is_postgres:
-            query += " AND (custom_data->>'violation_date') <= %s"
-        else:
-            query += " AND json_extract(custom_data, '$.violation_date') <= %s"
-        params.append(filters['violation_date_to'])
-    
-    # 전체 개수 조회 (ORDER BY 전에 실행)
-    # SELECT 절을 COUNT(*)로 교체 (컬럼 리스트가 있는 경우도 처리)
-    count_query = query
-    if "SELECT" in count_query.upper():
-        # FROM 앞까지의 SELECT 절을 COUNT(*)로 교체
-        from_index = count_query.upper().find("FROM")
-        if from_index > 0:
-            count_query = "SELECT COUNT(*) " + count_query[from_index:]
-    
-    result = conn.execute(count_query, params).fetchone()
-    total_count = int(result[0]) if result and result[0] is not None else 0
-    
-    # 정렬 (최신순) - NULL을 마지막으로
-    query += " ORDER BY created_at DESC NULLS LAST, issue_number DESC"
-    
-    # 페이지네이션 적용
-    query += f" LIMIT {per_page} OFFSET {(page - 1) * per_page}"
-    
-    # 데이터 조회
-    safety_instructions = conn.execute(query, params).fetchall()
-    safety_instructions = [dict(row) for row in safety_instructions]
-    
-    # No 컬럼 추가 (역순 번호)
-    offset = (page - 1) * per_page
-    for i, instruction in enumerate(safety_instructions):
-        instruction['no'] = total_count - offset - i
-        
-        # custom_data 파싱 및 플래튼
-        if instruction.get('custom_data'):
-            try:
-                import json as pyjson
-                raw = instruction.get('custom_data')
-                
-                # dict/str 분기 처리
-                # PostgreSQL JSONB는 이미 dict로 반환됨
-                if isinstance(raw, dict):
-                    custom_data = raw
-                else:
-                    custom_data = pyjson.loads(raw) if raw else {}
-                    
-                # 기본 필드를 보호하면서 custom_data 병합
-                BASE_FIELDS = {'issue_number', 'created_at', 'updated_at', 'is_deleted', 'synced_at', 'no'}
-                for k, v in custom_data.items():
-                    if k not in BASE_FIELDS:
-                        instruction[k] = v
-            except Exception as e:
-                logging.error(f"Custom data parsing error: {e}")
-                pass
-
-        # 키 호환 레이어 적용 (구/신 키 양방향 보완)
-        try:
-            def _alias_fill_row(d, pairs):
-                for old, new in pairs:
-                    if old in d and (new not in d or d.get(new) in (None, '')):
-                        d[new] = d[old]
-                    if new in d and (old not in d or d.get(old) in (None, '')):
-                        d[old] = d[new]
-
-            _alias_fill_row(instruction, [
-                ('issuer_department', 'issuer_dept'),
-                ('discipline_department', 'issuer_incharge_dept'),
-                ('primary_business_number', 'primary_company_bizno'),
-                ('primary_company_business_number', 'primary_company_bizno'),
-                ('primary_business_number', 'primary_bizno'),
-                ('primary_company_bizno', 'primary_bizno'),
-                ('secondary_company_business_number', 'secondary_company_bizno'),
-                ('subcontractor_business_number', 'subcontractor_bizno'),
-            ])
-        except Exception:
-            pass
-    
-    # smart_apply_mappings 적용 (드롭다운 코드를 라벨로 변환)
-    if safety_instructions:
-        safety_instructions = smart_apply_mappings(
-            safety_instructions, 
-            'safety_instruction', 
-            dynamic_columns,
-            DB_PATH
-        )
-    
-    # 페이지네이션 객체 생성
-    class Pagination:
-        def __init__(self, page, per_page, total_count):
-            self.page = page
-            self.per_page = per_page
-            self.total_count = total_count
-            self.pages = math.ceil(total_count / per_page) if total_count > 0 else 1
-            self.has_prev = page > 1
-            self.prev_num = page - 1 if self.has_prev else None
-            self.has_next = page < self.pages
-            self.next_num = page + 1 if self.has_next else None
-        
-        def iter_pages(self, window_size=10):
-            start = ((self.page - 1) // window_size) * window_size + 1
-            end = min(start + window_size - 1, self.pages)
-            for num in range(start, end + 1):
-                yield num
-        
-        def get_window_info(self, window_size=10):
-            start = ((self.page - 1) // window_size) * window_size + 1
-            end = min(start + window_size - 1, self.pages)
-            has_prev_window = start > 1
-            has_next_window = end < self.pages
-            prev_window_start = max(1, start - window_size)
-            next_window_start = min(end + 1, self.pages)
-            return {
-                'start': start,
-                'end': end,
-                'has_prev_window': has_prev_window,
-                'has_next_window': has_next_window,
-                'prev_window_start': prev_window_start,
-                'next_window_start': next_window_start
-            }
-    
-    pagination = Pagination(page, per_page, total_count)
-    conn.close()
-    
-    return render_template('safety-instruction.html',
-                         safety_instructions=safety_instructions,
-                         total_count=total_count,
-                         sections=sections,
-                         section_columns=section_columns,
-                         dynamic_columns=dynamic_columns,
-                         filters=filters,
-                         pagination=pagination,
-                         menu=MENU_CONFIG)
+    return _safety_instruction_controller.list_view(request)
 
 def safety_instruction_register_logic():
     """환경안전 지시서 등록 페이지"""
-    logging.info("환경안전 지시서 등록 페이지 접근")
-    
-    conn = get_db_connection()
-    
-    # 동적 컬럼 설정 가져오기 (safety_instruction 전용 테이블 사용)
-    _wa = sql_is_active_true('is_active', conn)
-    _wd = sql_is_deleted_false('is_deleted', conn)
-    dynamic_columns_rows = conn.execute(f"""
-        SELECT * FROM safety_instruction_column_config 
-        WHERE {_wa} AND {_wd}
-        ORDER BY column_order
-    """).fetchall()
-    
-    # Row 객체를 딕셔너리로 변환
-    dynamic_columns = [dict(row) for row in dynamic_columns_rows]
-    
-    # column_span을 정수로 변환
-    for col in dynamic_columns:
-        if col.get('column_span'):
-            col['column_span'] = int(col['column_span'])
-    
-    # 드롭다운 컬럼에 대해 코드-값 매핑 적용
-    for col in dynamic_columns:
-        if col['column_type'] == 'dropdown':
-            # 코드-값 매핑 방식으로 옵션 가져오기
-            code_options = get_dropdown_options_for_display('safety_instruction', col['column_key'])
-            # 코드-값 매핑 방식 사용 (DB dropdown_option_codes_v2 테이블)
-            col['dropdown_options_mapped'] = code_options if code_options else []
-    
-    # 기본정보 드롭다운 옵션 로드 (accident-register와 동일한 패턴)
-    basic_options = {}
-    from board_services import CodeService
-    code_service = CodeService('safety_instruction', DB_PATH)
-    
-    # 기본정보 필드들의 드롭다운 옵션 로드
-    basic_fields = [
-        'classification',           # 분류
-        'employment_type',          # 고용형태
-        'discipline_type',          # 징계유형
-        'accident_type',            # 사고유형
-        'accident_grade',           # 사고등급
-        'safety_violation_grade',   # 환경안전수칙 위반등급
-        'violation_type',           # 위반유형
-        'work_grade'                # 작업등급
-    ]
-    
-    for field in basic_fields:
-        codes = code_service.list(field)
-        # 템플릿이 기대하는 형식으로 변환 (option_code -> code, option_value -> value)
-        if codes and len(codes) > 0 and 'option_code' in codes[0]:
-            codes = [{'code': c['option_code'], 'value': c['option_value']} for c in codes]
-        basic_options[field] = codes
-        logging.info(f"드롭다운 옵션 로드: {field} -> {len(codes)}개")
-    
-    conn.close()
-    
-    logging.info(f"동적 컬럼 {len(dynamic_columns)}개 로드됨")
-    logging.info(f"기본 옵션 {len(basic_options)}개 필드 로드됨")
-    
-    # 컬럼 타입 정규화 - 공통 함수 사용
-    dynamic_columns = normalize_column_types(dynamic_columns)
-
-    # 섹션 정보 로드
-    from section_service import SectionConfigService
-    section_service = SectionConfigService('safety_instruction', DB_PATH)
-    sections = section_service.get_sections()
-    logging.info(f"섹션 {len(sections)}개 로드됨")
-    
-    # 섹션별로 컬럼 분류 (동적)
-    section_columns = {}
-    for section in sections:
-        section_columns[section['section_key']] = [
-            col for col in dynamic_columns if col.get('tab') == section['section_key']
-        ]
-        logging.info(f"섹션 '{section['section_name']}': {len(section_columns[section['section_key']])}개 컬럼")
-    
-    # 하위 호환성을 위한 변수 유지 (템플릿이 아직 하드코딩된 경우)
-    basic_info_columns = section_columns.get('basic_info', [])
-    violation_info_columns = section_columns.get('violation_info', [])
-    additional_columns = section_columns.get('additional', [])
-    
-    # 팝업 모드인지 확인
-    is_popup = request.args.get('popup') == '1'
-    
-    # 현재 날짜 추가 (한국 시간)
-    # 상단에서 이미 get_korean_time을 임포트함. 함수 내부 재임포트로 인한
-    # UnboundLocalError를 방지하기 위해 재임포트를 제거한다.
-    today_date = get_korean_time().strftime('%Y-%m-%d')
-    
-    return render_template('safety-instruction-register.html',
-                         dynamic_columns=dynamic_columns,
-                         sections=sections,  # 섹션 정보 추가
-                         section_columns=section_columns,  # 섹션별 컬럼 추가
-                         basic_info_columns=basic_info_columns,  # 하위 호환성
-                         violation_info_columns=violation_info_columns,  # 하위 호환성
-                         additional_columns=additional_columns,  # 하위 호환성
-                         basic_options=basic_options,  # basic_options 추가
-                         today_date=today_date,  # 오늘 날짜 추가
-                         menu=MENU_CONFIG,
-                         is_popup=is_popup)
+    return _safety_instruction_controller.register_view(request)
 
 def safety_instruction_detail_logic(issue_number):
     """환경안전 지시서 상세정보 페이지"""
-    # json already imported globally
-    logging.info(f"환경안전 지시서 상세 정보 조회: {issue_number}")
-    
-    conn = get_db_connection()
-    
-    # 실제 데이터베이스에서 조회 시도 (메인 테이블 우선)
-    instruction = None
-    try:
-        _wd = sql_is_deleted_false('is_deleted', conn)
-        instruction = conn.execute(f"""
-            SELECT * FROM safety_instructions 
-            WHERE issue_number = %s AND {_wd}
-        """, (issue_number,)).fetchone()
-    except sqlite3.OperationalError:
-        # 테이블이 없는 경우 더미 데이터 사용
-        logging.info("safety_instructions 테이블이 없음 - 더미 데이터 사용")
-        instruction = None
-    
-    # if not instruction:
-    #     # 더미 데이터에서 찾기 (개발 중이므로)
-    #     # safety-instruction 라우트와 동일한 더미 데이터 사용
-    #     month_counters = {}
-    #     all_instructions = []
-        
-    #     for i in range(30):
-    #         year = 2024
-    #         month = (i % 12) + 1
-    #         year_month = f'{year}-{month:02d}'
-            
-    #         if year_month not in month_counters:
-    #             month_counters[year_month] = 0
-    #         month_counters[year_month] += 1
-            
-    #         dummy_issue_number = f'{year_month}-{month_counters[year_month]:02d}'
-            
-    #         if dummy_issue_number == issue_number:
-    #             classifications = ['환경', '안전', '보건', '품질']
-    #             employment_types = ['정규직', '계약직', '파견직', '임시직']
-    #             discipline_types = ['경고', '견책', '정직', '출입정지']
-    #             violation_types = ['작업절차위반', '안전장비미착용', '무단작업', '환경오염']
-    #             accident_types = ['추락', '협착', '절단', '화재', '누출']
-    #             grades = ['경미', '일반', '중대', '치명']
-                
-    #             instruction_data = {
-    #                 'id': i + 1,
-    #                 'issue_number': dummy_issue_number,
-    #                 'issuer': f'발행인{i+1}',
-    #                 'issuer_department': f'안전관리팀{(i % 3) + 1}',
-    #                 'classification': classifications[i % 4],
-    #                 'employment_type': employment_types[i % 4],
-    #                 'primary_company': f'협력사{(i % 20) + 1}',
-    #                 'primary_business_number': f'{1000000000 + i * 11111}',
-    #                 'subcontractor': f'하도급사{(i % 10) + 1}' if i % 3 == 0 else '-',
-    #                 'subcontractor_business_number': f'{2000000000 + i * 22222}' if i % 3 == 0 else '-',
-    #                 'disciplined_person': f'징계자{i+1}',
-    #                 'gbm': f'GBM{(i % 5) + 1}',
-    #                 'business_division': f'사업부{(i % 4) + 1}',
-    #                 'team': f'팀{(i % 8) + 1}',
-    #                 'department': f'부서{(i % 6) + 1}',
-    #                 'violation_date': f'2024-{(i % 12) + 1:02d}-{(i % 28) + 1:02d}',
-    #                 'discipline_date': f'2024-{(i % 12) + 1:02d}-{((i % 28) + 2):02d}',
-    #                 'discipline_department': f'징계발의부서{(i % 3) + 1}',
-    #                 'discipline_type': discipline_types[i % 4],
-    #                 'accident_type': accident_types[i % 5],
-    #                 'accident_grade': grades[i % 4],
-    #                 'safety_violation_grade': grades[i % 4],
-    #                 'violation_type': violation_types[i % 4],
-    #                 'violation_content': f'위반내용 상세설명 {i+1}번 항목',
-    #                 'access_ban_start_date': f'2024-{(i % 12) + 1:02d}-{((i % 28) + 3):02d}' if i % 4 == 0 else '-',
-    #                 'access_ban_end_date': f'2024-{(i % 12) + 1:02d}-{((i % 28) + 10):02d}' if i % 4 == 0 else '-',
-    #                 'period': f'{(i % 30) + 1}일' if i % 4 == 0 else '-',
-    #                 'work_grade': f'등급{(i % 5) + 1}',
-    #                 'penalty_points': (i % 10) + 1,
-    #                 'disciplined_person_id': f'EMP{1000 + i}',
-    #                 'custom_data': '{}',
-    #                 'created_at': f'2024-{(i % 12) + 1:02d}-{(i % 28) + 1:02d} 09:00:00'
-    #             }
-    #             instruction = instruction_data
-    #             break
-    
-    if not instruction:
-        # 메인 테이블에 없으면 캐시에서 폴백
-        try:
-            cache_row = conn.execute(
-                "SELECT * FROM safety_instructions WHERE issue_number = %s",
-                (issue_number,)
-            ).fetchone()
-            if cache_row:
-                logging.info("[SI detail] 메인 없음 → 캐시 폴백 사용")
-                # 캐시의 모든 컬럼을 dict로 반영하여 동적 컬럼 키가 바로 매칭되도록 함
-                instruction = dict(cache_row)
-                # 메인 스키마와의 최소 호환 필드 보정
-                instruction.setdefault('detailed_content', instruction.get('detailed_content'))
-                instruction.setdefault('is_deleted', 0)
-            else:
-                logging.warning(f"환경안전 지시서를 찾을 수 없습니다: {issue_number}")
-                conn.close()
-                return "환경안전 지시서 정보를 찾을 수 없습니다.", 404
-        except Exception as _e:
-            logging.error(f"SI 캐시 폴백 실패: {_e}")
-            conn.close()
-            return "환경안전 지시서 정보를 찾을 수 없습니다.", 404
-    
-    # 동적 컬럼 설정 가져오기 (활성+미삭제)
-    _wa = sql_is_active_true('is_active', conn)
-    _wd = sql_is_deleted_false('is_deleted', conn)
-    dynamic_columns_rows = conn.execute(f"""
-        SELECT * FROM safety_instruction_column_config 
-        WHERE {_wa} AND {_wd}
-        ORDER BY column_order
-    """).fetchall()
-    dynamic_columns = [dict(row) for row in dynamic_columns_rows]
-    
-    # column_span을 정수로 변환
-    for col in dynamic_columns:
-        if col.get('column_span'):
-            col['column_span'] = int(col['column_span'])
-    
-    # 드롭다운 컬럼에 대해 코드-값 매핑 적용
-    for col in dynamic_columns:
-        if col['column_type'] == 'dropdown':
-            # 코드-값 매핑 방식으로 옵션 가져오기
-            code_options = get_dropdown_options_for_display('safety_instruction', col['column_key'])
-            # 코드-값 매핑 방식 사용 (DB dropdown_option_codes_v2 테이블)
-            col['dropdown_options_mapped'] = code_options if code_options else []
-    
-    # 섹션 정보 로드
-    from section_service import SectionConfigService
-    section_service = SectionConfigService('safety_instruction', DB_PATH)
-    sections = section_service.get_sections()
-    logging.info(f"섹션 {len(sections)}개 로드됨")
-    
-    # 섹션별로 컬럼 분류 (동적)
-    section_columns = {}
-    for section in sections:
-        section_columns[section['section_key']] = [
-            col for col in dynamic_columns if col.get('tab') == section['section_key']
-        ]
-        logging.info(f"섹션 '{section['section_name']}': {len(section_columns[section['section_key']])}개 컬럼")
-    
-    # 하위 호환성을 위한 변수 유지 (템플릿이 아직 하드코딩된 경우)
-    basic_info_columns = section_columns.get('basic_info', [])
-    violation_info_columns = section_columns.get('violation_info', [])
-    additional_columns = section_columns.get('additional', [])
-    
-    # 첨부파일 조회 - AttachmentService 사용 (공통 모듈)
-    from board_services import AttachmentService
-    attachment_service = AttachmentService('safety_instruction', DB_PATH, conn)
-    attachments = attachment_service.list(issue_number)
-    logging.info(f"Safety instruction {issue_number}: {len(attachments)} attachments found")
-    
-    # instruction을 항상 dict로 변환하여 템플릿에서 일관되게 처리
-    if isinstance(instruction, dict):
-        instruction_dict = instruction
-    else:
-        # SQLite Row 객체를 dict로 변환
-        instruction_dict = dict(instruction)
-
-    # custom_data 파싱 및 병합
-    custom_data = {}
-    # detailed_content는 컬럼 값을 우선시하기 위해 별도 보관
-    _col_detailed_content = instruction_dict.get('detailed_content')
-    def _parse_json_maybe(v):
-        if v is None:
-            return {}
-        if isinstance(v, dict):
-            return v
-        if isinstance(v, str):
-            s = v.strip()
-            if not s or s in ('{}', 'null', 'None'):
-                return {}
-            try:
-                return pyjson.loads(s)
-            except Exception:
-                return {}
-        return {}
-
-    if 'custom_data' in instruction_dict:
-        custom_data = _parse_json_maybe(instruction_dict.get('custom_data'))
-        if isinstance(custom_data, dict):
-            # 상세내용은 custom_data에 있더라도 컬럼 값으로 표시해야 함
-            # (등록 시 custom_data에 저장된 오래된 값이 표시를 덮어쓰지 않도록 방지)
-            try:
-                custom_data.pop('detailed_content', None)
-            except Exception:
-                pass
-            instruction_dict.update(custom_data)
-    # details 테이블에서 상세내용을 단일 소스로 읽기
-    try:
-        detail_row = None
-        try:
-            detail_row = conn.execute(
-                "SELECT detailed_content FROM safety_instruction_details WHERE issue_number = %s",
-                (issue_number,)
-            ).fetchone()
-        except Exception:
-            detail_row = None
-        if detail_row and (isinstance(detail_row, dict) or hasattr(detail_row, 'keys')):
-            dc_val = detail_row['detailed_content'] if isinstance(detail_row, dict) else detail_row[0]
-            instruction_dict['detailed_content'] = dc_val or ''
-        else:
-            # 폴백: 컬럼 detailed_content가 있으면 사용
-            instruction_dict['detailed_content'] = _col_detailed_content or ''
-    except Exception as _e_det:
-        logging.debug(f"SI details fetch skip: {_e_det}")
-        instruction_dict['detailed_content'] = _col_detailed_content or ''
-
-    # 캐시에서 항상 보강: 메인에 키가 있어도 비어있으면 캐시로 채움
-    try:
-        cache_row = conn.execute(
-            "SELECT * FROM safety_instructions WHERE issue_number = %s",
-            (issue_number,)
-        ).fetchone()
-        if cache_row:
-            cache_map = dict(cache_row)
-            cache_cd = _parse_json_maybe(cache_map.get('custom_data'))
-            # 캐시의 명시 컬럼값으로 먼저 보강 (custom_data보다 우선)
-            for k, v in cache_map.items():
-                if k == 'custom_data':
-                    continue
-                if k not in instruction_dict or instruction_dict.get(k) in (None, ''):
-                    instruction_dict[k] = v
-            # custom_data 병합: 메인에 없거나 빈 값만 채움
-            if isinstance(cache_cd, dict) and cache_cd:
-                merged_cd = dict(custom_data) if isinstance(custom_data, dict) else {}
-                for k, v in cache_cd.items():
-                    if k not in merged_cd or merged_cd.get(k) in (None, '', []):
-                        merged_cd[k] = v
-                    # instruction_dict에도 없으면 채움
-                    if k not in instruction_dict or instruction_dict.get(k) in (None, ''):
-                        instruction_dict[k] = v
-                custom_data = merged_cd
-    except Exception as _e:
-        logging.debug(f"SI cache merge skip: {_e}")
-    
-    # DB 연결 종료
-    conn.close()
-
-    # 키 호환 레이어: 구/신 키를 양방향으로 보완하여 UI가 둘 다 찾을 수 있도록 함
-    try:
-        def _alias_fill(d, pairs):
-            for old, new in pairs:
-                if old in d and (new not in d or d.get(new) in (None, '')):
-                    d[new] = d[old]
-                if new in d and (old not in d or d.get(old) in (None, '')):
-                    d[old] = d[new]
-
-        alias_pairs = [
-            # 부서/담당
-            ('issuer_department', 'issuer_dept'),
-            ('discipline_department', 'issuer_incharge_dept'),
-            # 사업자번호 계열 (다양한 키 보정)
-            ('primary_business_number', 'primary_company_bizno'),
-            ('primary_company_business_number', 'primary_company_bizno'),
-            ('primary_business_number', 'primary_bizno'),
-            ('primary_company_bizno', 'primary_bizno'),
-            ('secondary_company_business_number', 'secondary_company_bizno'),
-            ('subcontractor_business_number', 'subcontractor_bizno'),
-        ]
-        _alias_fill(instruction_dict, alias_pairs)
-        if isinstance(custom_data, dict) and custom_data:
-            _alias_fill(custom_data, alias_pairs)
-    except Exception:
-        pass
-    
-    # person_name 추출
-    person_name = instruction_dict.get('disciplined_person', '알 수 없음')
-    
-    logging.info(f"환경안전 지시서 {issue_number} ({person_name}) 상세 페이지 로드")
-    
-    # 동적 컬럼 타입 보정: 링크드/팝업 추론 (discipline(d)_person* 등)
-    try:
-        all_keys = {c.get('column_key') for c in dynamic_columns if c.get('column_key')}
-        suffixes = ['_id','_dept','_department','_department_code','_bizno','_company_bizno','_business_number','_code','_company']
-        def base_key_of(key: str) -> str:
-            if not isinstance(key, str):
-                return ''
-            for s in suffixes:
-                if key.endswith(s):
-                    return key[:-len(s)]
-            return key
-        def infer_group(bk: str) -> str:
-            if not bk:
-                return ''
-            variants = [bk, bk + 'd']
-            # 특수 규칙: 징계대상자 기본 contractor
-            if bk in {'disciplined_person'}:
-                return 'contractor'
-            # contractor 우선
-            if any(((v + '_company') in all_keys) for v in variants):
-                return 'contractor'
-            # person 다음
-            if any(((v + '_id') in all_keys) for v in variants):
-                return 'person'
-            # company 다음
-            if any(((v + '_company_bizno') in all_keys) or ((v + '_bizno') in all_keys) or ((v + '_business_number') in all_keys) for v in variants):
-                return 'company'
-            # department 마지막
-            if any(((v + '_dept') in all_keys) or ((v + '_department') in all_keys) or ((v + '_department_code') in all_keys) for v in variants):
-                return 'department'
-            return ''
-        popup_map = {
-            'person': 'popup_person',
-            'company': 'popup_company',
-            'department': 'popup_department',
-            'contractor': 'popup_contractor',
-        }
-        for col in dynamic_columns:
-            ck = col.get('column_key') or ''
-            bk = base_key_of(ck)
-            grp = infer_group(bk)
-            # dept 관련은 별도 처리 유지
-            if ck.endswith(('_dept', '_department', '_department_code')):
-                col['column_type'] = 'linked_dept'
-                continue
-            # 나머지 linked 필드는 determine_linked_type 사용
-            if (ck.endswith('_id') or ck.endswith('_bizno') or
-                ck.endswith('_business_number') or ck.endswith('_company') or
-                ck.endswith('_company_bizno')):
-                col['column_type'] = determine_linked_type(col)
-                continue
-            if grp and ck == bk:
-                ct = col.get('column_type')
-                if not ct or ct in ('text','popup','table','table_select'):
-                    col['column_type'] = popup_map.get(grp, ct)
-                col['input_type'] = col.get('input_type') or 'table'
-    except Exception as _e:
-        logging.warning(f"safety_instruction detail: normalize types failed: {_e}")
-
-    # 컬럼 타입 정규화 - 공통 함수 사용 (DB의 잘못된 타입도 자동 수정)
-    dynamic_columns = normalize_column_types(dynamic_columns)
-
-    # 기본정보 드롭다운 옵션 로드
-    basic_options = {}
-    from board_services import CodeService
-    code_service = CodeService('safety_instruction', DB_PATH)
-    
-    # 기본정보 필드들의 드롭다운 옵션 로드
-    basic_fields = [
-        'classification',           # 분류
-        'employment_type',          # 고용형태
-        'discipline_type',          # 징계유형
-        'accident_type',            # 사고유형
-        'accident_grade',           # 사고등급
-        'safety_violation_grade',   # 환경안전수칙 위반등급
-        'violation_type',           # 위반유형
-        'work_grade'                # 작업등급
-    ]
-    
-    for field in basic_fields:
-        codes = code_service.list(field)
-        # 템플릿이 기대하는 형식으로 변환 (option_code -> code, option_value -> value)
-        if codes and len(codes) > 0 and 'option_code' in codes[0]:
-            codes = [{'code': c['option_code'], 'value': c['option_value']} for c in codes]
-        basic_options[field] = codes
-        logging.info(f"드롭다운 옵션 로드: {field} -> {len(codes)}개")
-    
-    # 팝업 모드인지 확인
-    is_popup = request.args.get('popup') == '1'
-    
-    return render_template('safety-instruction-detail.html',
-                         instruction=instruction_dict,
-                         attachments=[dict(att) for att in attachments],
-                         dynamic_columns=dynamic_columns,
-                         sections=sections,  # 섹션 정보 추가
-                         section_columns=section_columns,  # 섹션별 컬럼 추가
-                         basic_info_columns=basic_info_columns,  # 하위 호환성
-                         violation_info_columns=violation_info_columns,  # 하위 호환성
-                         additional_columns=additional_columns,  # 하위 호환성
-                         custom_data=custom_data,
-                         basic_options=basic_options,  # basic_options 추가
-                         menu=MENU_CONFIG,
-                         is_popup=is_popup)
-
-
-def update_safety_instruction_logic():
-    """환경안전 지시서 수정 API - 메인 테이블 사용 + 첨부 처리"""
-    from section_service import SectionConfigService
-    conn = None
-
-    try:
-        issue_number = request.form.get('issue_number')
-        detailed_content = request.form.get('detailed_content', '')
-
-        if not issue_number:
-            return jsonify({"success": False, "message": "발부번호가 필요합니다."}), 400
-
-        # deleted_attachments 파싱
-        try:
-            deleted_attachments = pyjson.loads(request.form.get('deleted_attachments', '[]'))
-        except Exception:
-            deleted_attachments = []
-
-        # attachment_data 파싱 (Accident 패턴과 동일하게)
-        try:
-            attachment_data_raw = request.form.get('attachment_data', '[]')
-            if isinstance(attachment_data_raw, str):
-                attachment_data = pyjson.loads(attachment_data_raw)
-            else:
-                attachment_data = attachment_data_raw
-            if not isinstance(attachment_data, list):
-                attachment_data = []
-        except Exception as e:
-            logging.warning(f"attachment_data 파싱 실패: {e}")
-            attachment_data = []
-
-        files = request.files.getlist('files')
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # 섹션 정보 동적으로 가져오기
-        section_service = SectionConfigService('safety_instruction', DB_PATH)
-        sections = section_service.get_sections()
-
-        # 섹션이 없으면 기본값 사용 (하위 호환성)
-        if not sections:
-            sections = [
-                {'section_key': 'basic_info'},
-                {'section_key': 'violation_info'},
-                {'section_key': 'additional'}
-            ]
-
-        # 모든 필드를 모을 딕셔너리
-        all_fields = {}
-
-        # 각 섹션별로 데이터 수집
-        for section in sections:
-            section_key = section['section_key']
-            section_data_str = request.form.get(section_key, '{}')
-            try:
-                section_data = pyjson.loads(section_data_str)
-                all_fields.update(section_data)
-                logging.info(f"[UPDATE] 섹션 {section_key} 데이터: {section_data}")
-            except Exception as e:
-                logging.warning(f"[UPDATE] 섹션 {section_key} 파싱 실패: {e}")
-
-        # 하위 호환성: custom_data가 있으면 병합
-        custom_data_raw = request.form.get('custom_data', '{}')
-        try:
-            custom_data_compat = pyjson.loads(custom_data_raw) if isinstance(custom_data_raw, str) else (custom_data_raw or {})
-            if custom_data_compat:
-                all_fields.update(custom_data_compat)
-                logging.info(f"[UPDATE] custom_data 병합: {custom_data_compat}")
-        except Exception:
-            pass
-
-        # 최종 custom_data
-        custom_data = all_fields
-
-        # 리스트 필드 문자열을 배열로 정규화
-        for key, value in list(custom_data.items()):
-            if isinstance(value, str) and value.strip().startswith('[') and value.strip().endswith(']'):
-                try:
-                    custom_data[key] = pyjson.loads(value)
-                except Exception:
-                    pass
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # 기존 custom_data 로드 (리스트 필드 병합 시 필요)
-        cursor.execute(
-            "SELECT custom_data FROM safety_instructions WHERE issue_number = %s",
-            (issue_number,)
-        )
-        existing_row = cursor.fetchone()
-
-        existing_custom = {}
-        if existing_row and existing_row[0]:
-            if isinstance(existing_row[0], dict):
-                existing_custom = pyjson.loads(pyjson.dumps(existing_row[0]))
-            elif isinstance(existing_row[0], str):
-                try:
-                    existing_custom = pyjson.loads(existing_row[0])
-                except Exception:
-                    existing_custom = {}
-
-        # 리스트 병합 유틸
-        def is_list_field(val):
-            if isinstance(val, list):
-                return True
-            if isinstance(val, str) and val.strip():
-                return val.startswith('[') and val.endswith(']')
-            return False
-
-        for k, v in list(custom_data.items()):
-            if is_list_field(v) or is_list_field(existing_custom.get(k, [])):
-                old = existing_custom.get(k, [])
-                if isinstance(old, str):
-                    try:
-                        old = pyjson.loads(old)
-                    except Exception:
-                        old = []
-                if not isinstance(old, list):
-                    old = []
-
-                new_list = []
-                if isinstance(v, list):
-                    new_list = v
-                elif isinstance(v, str) and v.strip().startswith('['):
-                    try:
-                        parsed = pyjson.loads(v)
-                        if isinstance(parsed, list):
-                            new_list = parsed
-                    except Exception:
-                        new_list = []
-
-                # 단순 대체(프론트에서 전체 전달) 우선, 아니면 병합
-                if new_list and old:
-                    existing_custom[k] = new_list
-                else:
-                    existing_custom[k] = new_list if new_list else old
-
-        # 리스트 병합 반영 + 상세내용은 별도 컬럼
-        final_custom = dict(existing_custom)
-        def _is_empty(val):
-            try:
-                if val is None:
-                    return True
-                if isinstance(val, str) and val.strip() == '':
-                    return True
-                return False
-            except Exception:
-                return False
-        for k, v in custom_data.items():
-            if not is_list_field(v):
-                # 빈값은 기존값 보존 (일반 동적 컬럼 보호)
-                if _is_empty(v):
-                    continue
-                final_custom[k] = v
-
-        from db.upsert import safe_upsert
-        upsert_data = {
-            'issue_number': issue_number,
-            'custom_data': pyjson.dumps(final_custom),
-            'detailed_content': detailed_content,
-            'updated_at': None  # UPSERT 유틸이 타임스탬프 처리
-        }
-        safe_upsert(
-            conn,
-            'safety_instructions',
-            upsert_data,
-            conflict_cols=['issue_number'],
-            update_cols=['custom_data', 'detailed_content', 'updated_at']
-        )
-        
-        # Details 테이블에 단일 경로 저장 (빈 문자열 포함)
-        try:
-            from db.upsert import safe_upsert as _su
-            _su(conn, 'safety_instruction_details', {
-                'issue_number': issue_number,
-                'detailed_content': detailed_content,
-                'updated_at': None
-            })
-            logging.info("[SI] details upsert applied")
-        except Exception as _e_det:
-            logging.warning(f"[SI] details upsert warning: {_e_det}")
-
-        # 첨부파일 처리 - Accident 패턴 적용 (직접 SQL)
-        
-        # 1. 삭제된 첨부파일 처리
-        for attachment_id in deleted_attachments:
-            # 파일 경로 조회
-            cursor.execute("""
-                SELECT file_path FROM safety_instruction_attachments WHERE id = %s
-            """, (attachment_id,))
-            row = cursor.fetchone()
-            if row:
-                file_path = row[0]
-                # 파일 삭제
-                if os.path.exists(file_path):
-                    try:
-                        os.remove(file_path)
-                    except Exception as e:
-                        logging.error(f"파일 삭제 실패: {e}")
-                # DB에서 삭제
-                cursor.execute("""
-                    DELETE FROM safety_instruction_attachments WHERE id = %s
-                """, (attachment_id,))
-            logging.info(f"첨부파일 {attachment_id} 삭제")
-
-        # 2. 기존 첨부파일 설명 업데이트
-        for attachment in attachment_data:
-            if isinstance(attachment, dict):
-                if attachment.get('id') and not attachment.get('isNew'):
-                    cursor.execute("""
-                        UPDATE safety_instruction_attachments
-                        SET description = %s
-                        WHERE id = %s
-                    """, (attachment.get('description', ''), attachment['id']))
-                    logging.info(f"첨부파일 {attachment['id']} 설명 업데이트")
-
-        # 3. 새 파일 업로드 처리
-        if files:
-            upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'safety_instructions')
-            os.makedirs(upload_folder, exist_ok=True)
-            
-            # 새 파일에 대한 attachment_data 필터링
-            new_attachments = [a for a in attachment_data if isinstance(a, dict) and a.get('isNew')]
-            
-            for i, file in enumerate(files):
-                if file and file.filename:
-                    filename = secure_filename(file.filename)
-                    timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
-                    unique_filename = f"{issue_number}_{timestamp}_{filename}".replace('-', '_')
-                    file_path = os.path.join(upload_folder, unique_filename)
-                    
-                    file.save(file_path)
-                    
-                    # description 가져오기
-                    description = ''
-                    if i < len(new_attachments):
-                        description = new_attachments[i].get('description', '')
-                    
-                    # 첨부파일 정보 저장
-                    cursor.execute("""
-                        INSERT INTO safety_instruction_attachments (issue_number, file_name, file_path, file_size, description)
-                        VALUES (%s, %s, %s, %s, %s)
-                    """, (issue_number, filename, file_path, os.path.getsize(file_path), description))
-                    logging.info(f"새 첨부파일 추가: {filename} - {description}")
-
-        conn.commit()
-        logging.info(f"Safety Instruction 업데이트 완료: {issue_number}")
-        return jsonify({"success": True, "message": "수정이 완료되었습니다."})
-
-    except Exception as e:
-        import traceback
-        logging.error(f"Safety Instruction 업데이트 오류: {e}")
-        logging.error(f"Traceback: {traceback.format_exc()}")
-        if conn:
-            conn.rollback()
-        return jsonify({"success": False, "message": str(e)}), 500
-    finally:
-        if conn:
-            conn.close()
-
-@app.route('/update-follow-sop', methods=['POST'])
-def update_follow_sop():
-    """Follow SOP 정보 업데이트"""
-    from board_services import AttachmentService
-    from section_service import SectionConfigService
-    conn = None
-
-    try:
-        work_req_no = request.form.get('work_req_no')
-        detailed_content = request.form.get('detailed_content', '')
-
-        # 디버그: 받은 모든 폼 데이터 출력
-        print(f"\n[FS UPDATE DEBUG] work_req_no: {work_req_no}")
-        print(f"[FS UPDATE DEBUG] FormData keys: {list(request.form.keys())}")
-        print(f"[FS UPDATE DEBUG] detailed_content received: {detailed_content[:100] if detailed_content else 'EMPTY'}")  # 중요: detailed_content 확인
-        for key in request.form.keys():
-            if key not in ['detailed_content', 'attachment_data', 'deleted_attachments']:
-                value = request.form.get(key)
-                print(f"[FS UPDATE DEBUG] {key}: {value[:200] if value else 'None'}")
-
-        # 안전하게 JSON 파싱 (pyjson 사용)
-        try:
-            deleted_attachments = pyjson.loads(request.form.get('deleted_attachments', '[]'))
-        except:
-            deleted_attachments = []
-
-        try:
-            attachment_data_raw = request.form.get('attachment_data', '[]')
-            if isinstance(attachment_data_raw, str):
-                attachment_data = pyjson.loads(attachment_data_raw)
-            else:
-                attachment_data = attachment_data_raw
-            if not isinstance(attachment_data, list):
-                attachment_data = []
-        except Exception as e:
-            logging.warning(f"attachment_data 파싱 실패: {e}")
-            attachment_data = []
-
-        files = request.files.getlist('files')
-        valid_files, validation_errors = validate_uploaded_files(files)
-        if validation_errors:
-            return jsonify({
-                'success': False,
-                'message': validation_errors[0],
-                'errors': validation_errors
-            }), 400
-
-        logging.info(f"[FS UPDATE] attachment_data 파싱 결과: {attachment_data}")
-        logging.info(f"[FS UPDATE] files 개수: {len(valid_files)}")
-
-        conn = get_db_connection(timeout=30.0)
-        cursor = conn.cursor()
-
-        # 섹션 정보 동적으로 가져오기
-        section_service = SectionConfigService('follow_sop', DB_PATH)
-        sections = section_service.get_sections()
-
-        # 섹션이 없으면 기본값 사용 (하위 호환성)
-        if not sections:
-            sections = [
-                {'section_key': 'basic_info'},
-                {'section_key': 'work_info'},
-                {'section_key': 'additional'}
-            ]
-
-        # 모든 필드를 모을 딕셔너리
-        all_fields = {}
-
-        # 각 섹션별로 데이터 수집
-        for section in sections:
-            section_key = section['section_key']
-            section_data_str = request.form.get(section_key, '{}')
-            logging.info(f"[FS UPDATE DEBUG] 섹션 {section_key} raw: {section_data_str[:500]}")  # 디버그 추가
-            try:
-                section_data = pyjson.loads(section_data_str)
-                all_fields.update(section_data)
-                logging.info(f"[FS UPDATE] 섹션 {section_key} 데이터: {section_data}")
-                # 실제 값 확인
-                for k, v in section_data.items():
-                    if v and v not in ('', [], None):
-                        logging.info(f"  -> {k}: {str(v)[:100]}")
-            except Exception as e:
-                logging.warning(f"[FS UPDATE] 섹션 {section_key} 파싱 실패: {e}")
-
-        # 하위 호환성: custom_data가 있으면 병합
-        custom_data_raw = request.form.get('custom_data', '{}')
-        try:
-            custom_data_compat = pyjson.loads(custom_data_raw) if isinstance(custom_data_raw, str) else (custom_data_raw or {})
-            if custom_data_compat:
-                all_fields.update(custom_data_compat)
-                logging.info(f"[FS UPDATE] custom_data 병합: {custom_data_compat}")
-        except Exception:
-            pass
-
-        # 최종 custom_data
-        custom_data = all_fields
-
-        # 리스트 필드 정규화
-        for key, value in list(custom_data.items()):
-            if isinstance(value, str) and value.startswith('[') and value.endswith(']'):
-                try:
-                    custom_data[key] = pyjson.loads(value)
-                    logging.info(f"List field {key} normalized from string to array")
-                except:
-                    pass
-        
-        # 기존 데이터 조회 (리스트 필드 병합을 위해) - 메인 테이블에서 조회
-        cursor.execute("""
-            SELECT custom_data 
-            FROM follow_sop 
-            WHERE work_req_no = %s
-        """, (work_req_no,))
-        
-        existing_row = cursor.fetchone()
-        existing_custom_data = {}
-        
-        if existing_row and existing_row[0]:
-            if isinstance(existing_row[0], dict):
-                # PostgreSQL JSONB - 깊은 복사로 안전하게 처리
-                existing_custom_data = pyjson.loads(pyjson.dumps(existing_row[0]))
-            elif isinstance(existing_row[0], str):
-                # SQLite JSON 문자열
-                try:
-                    existing_custom_data = pyjson.loads(existing_row[0])
-                except:
-                    existing_custom_data = {}
-        
-        # 리스트 필드 병합 처리
-        def is_list_field(field_value):
-            """필드가 리스트 타입인지 확인"""
-            if isinstance(field_value, list):
-                return True
-            if isinstance(field_value, str) and field_value.strip():
-                return field_value.startswith('[') and field_value.endswith(']')
-            return False
-        
-        for key, value in custom_data.items():
-            # 기존 값이 없을 때는 None을 기본값으로 사용 (빈 배열 [] 대신)
-            existing_value = existing_custom_data.get(key, None)
-            if is_list_field(value) or (existing_value is not None and is_list_field(existing_value)):
-                logging.info(f"[MERGE DEBUG] {key} 리스트 필드로 감지, 병합 처리 시작")
-                
-                # 기존 데이터 파싱
-                existing_list = existing_custom_data.get(key, [])
-                if isinstance(existing_list, str) and existing_list.strip():
-                    try:
-                        existing_list = pyjson.loads(existing_list)
-                    except:
-                        existing_list = []
-                if not isinstance(existing_list, list):
-                    existing_list = []
-                
-                # 새 데이터 파싱
-                new_list = []
-                if isinstance(value, list):
-                    new_list = value
-                elif isinstance(value, str) and value.strip():
-                    if value.startswith('[') and value.endswith(']'):
-                        try:
-                            new_list = pyjson.loads(value)
-                            if not isinstance(new_list, list):
-                                new_list = []
-                        except:
-                            new_list = []
-                
-                logging.info(f"[MERGE DEBUG] {key} - 기존: {len(existing_list)}개, 새로: {len(new_list)}개")
-                
-                # 프론트에서 전체 배열을 보냈다면 그대로 사용, 아니면 병합
-                if len(new_list) > 0 and len(existing_list) > 0:
-                    # 새로운 데이터에 기존 데이터의 첫 번째 항목이 포함되어 있다면 전체 교체로 간주
-                    first_existing_id = existing_list[0].get('id', '') if existing_list and isinstance(existing_list[0], dict) else ''
-                    has_existing_data = any(
-                        isinstance(item, dict) and item.get('id') == first_existing_id
-                        for item in new_list
-                    ) if first_existing_id else False
-                    
-                    if has_existing_data:
-                        # 전체 데이터를 보냈으므로 그대로 사용
-                        existing_custom_data[key] = new_list
-                        logging.info(f"[MERGE DEBUG] {key} 전체 교체: {len(new_list)}개 항목")
-                    else:
-                        # 새 항목만 추가하므로 병합 처리
-                        merged_list = list(existing_list)
-                        existing_ids = {item.get('id', '') for item in existing_list if isinstance(item, dict)}
-                        
-                        for new_item in new_list:
-                            if isinstance(new_item, dict) and new_item.get('id') not in existing_ids:
-                                merged_list.append(new_item)
-                                existing_ids.add(new_item.get('id'))
-                        
-                        existing_custom_data[key] = merged_list
-                        logging.info(f"[MERGE DEBUG] {key} 병합 완료: 기존 {len(existing_list)}개 + 새로 {len(new_list)}개 = 최종 {len(merged_list)}개 항목")
-                else:
-                    # 하나가 비어있으면 비어있지 않은 것을 사용
-                    # 빈 배열이 들어왔으면 기존 값 유지
-                    if len(new_list) > 0:
-                        existing_custom_data[key] = new_list
-                    elif len(existing_list) > 0:
-                        existing_custom_data[key] = existing_list
-                    # 둘 다 비어있으면 업데이트하지 않음 (기존 값 유지)
-                    logging.info(f"[MERGE DEBUG] {key} 단순 대체: {len(existing_custom_data.get(key, []))}개 항목")
-            else:
-                # 일반 필드: None이 아니면 모두 업데이트 (빈 문자열도 유효한 값)
-                if value is not None:
-                    existing_custom_data[key] = value
-        
-        # detailed_content는 custom_data에 포함하지 않음 (별도 컬럼/테이블 사용)
-        # existing_custom_data['detailed_content'] = detailed_content  # 제거!
-        logging.info("detailed_content는 별도 컬럼과 details 테이블에만 저장")
-
-        # Details 테이블에 단일 경로 저장
-        try:
-            from db.upsert import safe_upsert as _su
-            logging.info(f"[FS] Attempting to upsert to follow_sop_details - work_req_no: {work_req_no}, detailed_content length: {len(detailed_content)}")
-            _su(conn, 'follow_sop_details', {
-                'work_req_no': work_req_no,
-                'detailed_content': detailed_content,
-                'updated_at': None
-            }, conflict_cols=['work_req_no'], update_cols=['detailed_content', 'updated_at'])
-            logging.info("[FS] details upsert applied successfully")
-        except Exception as _e_det:
-            logging.error(f"[FS] details upsert FAILED: {_e_det}")
-            import traceback
-            logging.error(f"[FS] Traceback: {traceback.format_exc()}")
-        
-        # 메인 테이블에 UPSERT (issue_number와 동일한 방식)
-        # custom_data를 JSON 문자열로 변환
-        import json
-        custom_data_json = json.dumps(existing_custom_data, ensure_ascii=False)
-
-        logging.info(f"[FS UPDATE] safe_upsert 호출 전 - work_req_no: {work_req_no}")
-        from db.upsert import safe_upsert
-        safe_upsert(
-            conn,
-            'follow_sop',
-            {
-                'work_req_no': work_req_no,
-                'custom_data': custom_data_json,
-                'updated_at': None
-            },
-            conflict_cols=['work_req_no'],
-            update_cols=['custom_data', 'updated_at']
-        )
-        logging.info(f"[FS UPDATE] safe_upsert 완료")
-
-        # 2. followsop_details 테이블 관련 코드 제거 (더 이상 사용하지 않음)
-
-        # 3. 첨부파일 처리 (직접 처리 방식으로 변경)
-        logging.info(f"[FS UPDATE] 첨부파일 처리 시작 - deleted: {deleted_attachments}, attachment_data type: {type(attachment_data)}, len: {len(attachment_data) if attachment_data else 0}")
-
-        # 삭제된 첨부파일 처리
-        if deleted_attachments:
-            placeholders = ','.join(['%s'] * len(deleted_attachments))
-            cursor.execute(f"""
-                DELETE FROM follow_sop_attachments
-                WHERE id IN ({placeholders})
-            """, deleted_attachments)
-            logging.info(f"첨부파일 {len(deleted_attachments)}개 삭제")
-
-        # 기존 첨부파일 설명 업데이트
-        logging.info(f"[FS UPDATE] attachment_data 받음: {attachment_data}")
-        for item in attachment_data:
-            logging.info(f"[FS UPDATE] item 확인: {item}, type: {type(item)}")
-            if isinstance(item, dict) and item.get('id') and not item.get('isNew'):
-                logging.info(f"[FS UPDATE] 첨부파일 ID {item['id']} description 업데이트 시도: '{item.get('description', '')}'")
-                cursor.execute("""
-                    UPDATE follow_sop_attachments
-                    SET description = %s
-                    WHERE id = %s
-                """, (item.get('description', ''), item['id']))
-                # 실제 DB 확인
-                cursor.execute("SELECT description FROM follow_sop_attachments WHERE id = %s", (item['id'],))
-                result = cursor.fetchone()
-                logging.info(f"[FS UPDATE] DB 확인 - ID {item['id']}: description = '{result[0] if result else 'NOT FOUND'}'")
-            else:
-                logging.info(f"[FS UPDATE] 스킵된 item - id: {item.get('id') if isinstance(item, dict) else 'N/A'}, isNew: {item.get('isNew') if isinstance(item, dict) else 'N/A'}")
-
-        # 새 파일 업로드 처리
-        if valid_files:
-            import os
-            from timezone_config import get_korean_time
-
-            upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'follow_sop')
-            os.makedirs(upload_folder, exist_ok=True)
-
-            # 새 파일에 대한 설명 준비
-            new_file_descriptions = []
-            for item in attachment_data:
-                if isinstance(item, dict) and item.get('isNew'):
-                    new_file_descriptions.append(item.get('description', ''))
-
-            for idx, file_info in enumerate(valid_files):
-                file = file_info['file']
-                filename = file_info['safe_filename']
-                timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
-                unique_filename = f"{work_req_no}_{timestamp}_{filename}".replace('-', '_')
-                file_path = os.path.join(upload_folder, unique_filename)
-
-                file.save(file_path)
-
-                description = ''
-                if idx < len(new_file_descriptions):
-                    description = new_file_descriptions[idx]
-
-                cursor.execute("""
-                    INSERT INTO follow_sop_attachments (work_req_no, file_name, file_path, file_size, description)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (work_req_no, filename, file_path, os.path.getsize(file_path), description))
-                logging.info(f"새 첨부파일 저장: {filename}, 설명: {description}")
-        
-        conn.commit()
-        logging.info(f"Follow SOP {work_req_no} 업데이트 성공")
-        
-        return jsonify({
-            "success": True,
-            "message": "Follow SOP가 성공적으로 수정되었습니다.",
-            "work_req_no": work_req_no
-        })
-        
-    except Exception as e:
-        import traceback
-        logging.error(f"Follow SOP 업데이트 오류: {e}")
-        logging.error(f"Traceback: {traceback.format_exc()}")
-        if conn:
-            conn.rollback()
-        return jsonify({"success": False, "message": str(e)}), 500
-    finally:
-        if conn:
-            conn.close()
-
-
-@app.route('/update-safe-workplace', methods=['POST'])
-def update_safe_workplace():
-    """Safe Workplace 정보 업데이트"""
-    from board_services import AttachmentService
-    from section_service import SectionConfigService
-    conn = None
-
-    try:
-        safeplace_no = request.form.get('safeplace_no')
-        detailed_content = request.form.get('detailed_content', '')
-
-        print(f"\n[SW UPDATE DEBUG] safeplace_no: {safeplace_no}")
-        print(f"[SW UPDATE DEBUG] FormData keys: {list(request.form.keys())}")
-        print(f"[SW UPDATE DEBUG] detailed_content received: {detailed_content[:100] if detailed_content else 'EMPTY'}")
-        for key in request.form.keys():
-            if key not in ['detailed_content', 'attachment_data', 'deleted_attachments']:
-                value = request.form.get(key)
-                print(f"[SW UPDATE DEBUG] {key}: {value[:200] if value else 'None'}")
-
-        try:
-            deleted_attachments = pyjson.loads(request.form.get('deleted_attachments', '[]'))
-        except Exception:
-            deleted_attachments = []
-
-        try:
-            attachment_data_raw = request.form.get('attachment_data', '[]')
-            if isinstance(attachment_data_raw, str):
-                attachment_data = pyjson.loads(attachment_data_raw)
-            else:
-                attachment_data = attachment_data_raw
-            if not isinstance(attachment_data, list):
-                attachment_data = []
-        except Exception as e:
-            logging.warning(f"attachment_data 파싱 실패: {e}")
-            attachment_data = []
-
-        files = request.files.getlist('files')
-        valid_files, validation_errors = validate_uploaded_files(files)
-        if validation_errors:
-            return jsonify({
-                'success': False,
-                'message': validation_errors[0],
-                'errors': validation_errors
-            }), 400
-
-        logging.info(f"[SW UPDATE] attachment_data: {attachment_data}")
-        logging.info(f"[SW UPDATE] files count: {len(valid_files)}")
-
-        conn = get_db_connection(timeout=30.0)
-        cursor = conn.cursor()
-
-        section_service = SectionConfigService('safe_workplace', DB_PATH)
-        sections = section_service.get_sections()
-        if not sections:
-            sections = [
-                {'section_key': 'basic_info'},
-                {'section_key': 'workplace_info'},
-                {'section_key': 'safety_info'}
-            ]
-
-        all_fields = {}
-        for section in sections:
-            section_key = section['section_key']
-            section_data_str = request.form.get(section_key, '{}')
-            logging.info(f"[SW UPDATE DEBUG] 섹션 {section_key} raw: {section_data_str[:500]}")
-            try:
-                section_data = pyjson.loads(section_data_str)
-                all_fields.update(section_data)
-                logging.info(f"[SW UPDATE] 섹션 {section_key} 데이터: {section_data}")
-                for k, v in section_data.items():
-                    if v and v not in ('', [], None):
-                        logging.info(f"  -> {k}: {str(v)[:100]}")
-            except Exception as e:
-                logging.warning(f"[SW UPDATE] 섹션 {section_key} 파싱 실패: {e}")
-
-        custom_data_raw = request.form.get('custom_data', '{}')
-        try:
-            custom_data_compat = pyjson.loads(custom_data_raw) if isinstance(custom_data_raw, str) else (custom_data_raw or {})
-            if custom_data_compat:
-                all_fields.update(custom_data_compat)
-                logging.info(f"[SW UPDATE] custom_data 병합: {custom_data_compat}")
-        except Exception:
-            pass
-
-        custom_data = all_fields
-
-        for key, value in list(custom_data.items()):
-            if isinstance(value, str) and value.startswith('[') and value.endswith(']'):
-                try:
-                    custom_data[key] = pyjson.loads(value)
-                    logging.info(f"List field {key} normalized from string")
-                except Exception:
-                    pass
-
-        cursor.execute("""
-            SELECT custom_data
-            FROM safe_workplace
-            WHERE safeplace_no = %s
-        """, (safeplace_no,))
-
-        existing_row = cursor.fetchone()
-        existing_custom_data = {}
-        if existing_row and existing_row[0]:
-            if isinstance(existing_row[0], dict):
-                existing_custom_data = pyjson.loads(pyjson.dumps(existing_row[0]))
-            elif isinstance(existing_row[0], str):
-                try:
-                    existing_custom_data = pyjson.loads(existing_row[0])
-                except Exception:
-                    existing_custom_data = {}
-
-        def is_list_field(field_value):
-            if isinstance(field_value, list):
-                return True
-            if isinstance(field_value, str) and field_value.strip():
-                return field_value.startswith('[') and field_value.endswith(']')
-            return False
-
-        for key, value in custom_data.items():
-            existing_value = existing_custom_data.get(key, None)
-            if is_list_field(value) or (existing_value is not None and is_list_field(existing_value)):
-                logging.info(f"[SW MERGE] {key} 리스트 필드 병합")
-                if isinstance(existing_value, str) and existing_value.strip():
-                    try:
-                        existing_value = pyjson.loads(existing_value)
-                    except Exception:
-                        existing_value = []
-                if not isinstance(existing_value, list):
-                    existing_value = []
-
-                if isinstance(value, str) and value.strip():
-                    if value.startswith('[') and value.endswith(']'):
-                        try:
-                            value = pyjson.loads(value)
-                        except Exception:
-                            value = []
-                if not isinstance(value, list):
-                    value = []
-
-                if len(value) > 0 and len(existing_value) > 0:
-                    first_existing_id = existing_value[0].get('id', '') if existing_value and isinstance(existing_value[0], dict) else ''
-                    has_existing_data = any(
-                        isinstance(item, dict) and item.get('id') == first_existing_id
-                        for item in value
-                    ) if first_existing_id else False
-
-                    if has_existing_data:
-                        existing_custom_data[key] = value
-                        logging.info(f"[SW MERGE] {key} 전체 교체 {len(value)}개")
-                    else:
-                        merged_list = list(existing_value)
-                        existing_ids = {item.get('id', '') for item in existing_value if isinstance(item, dict)}
-                        for new_item in value:
-                            if isinstance(new_item, dict) and new_item.get('id') not in existing_ids:
-                                merged_list.append(new_item)
-                                existing_ids.add(new_item.get('id'))
-                        existing_custom_data[key] = merged_list
-                        logging.info(f"[SW MERGE] {key} 병합 완료 -> {len(merged_list)}개")
-                else:
-                    if len(value) > 0:
-                        existing_custom_data[key] = value
-                    elif len(existing_value) > 0:
-                        existing_custom_data[key] = existing_value
-            else:
-                if value is not None:
-                    existing_custom_data[key] = value
-
-        logging.info("detailed_content는 별도 details 테이블에 저장")
-
-        try:
-            from db.upsert import safe_upsert as _su
-            logging.info(f"[SW] Attempting to upsert safe_workplace_details - safeplace_no: {safeplace_no}, detailed_content length: {len(detailed_content)}")
-            _su(conn, 'safe_workplace_details', {
-                'safeplace_no': safeplace_no,
-                'detailed_content': detailed_content,
-                'updated_at': None
-            }, conflict_cols=['safeplace_no'], update_cols=['detailed_content', 'updated_at'])
-            logging.info("[SW] details upsert applied successfully")
-        except Exception as _e_det:
-            logging.error(f"[SW] details upsert FAILED: {_e_det}")
-            import traceback
-            logging.error(f"[SW] Traceback: {traceback.format_exc()}")
-
-        import json
-        custom_data_json = json.dumps(existing_custom_data, ensure_ascii=False)
-
-        logging.info(f"[SW UPDATE] safe_upsert 호출 전 - safeplace_no: {safeplace_no}")
-        from db.upsert import safe_upsert
-        safe_upsert(
-            conn,
-            'safe_workplace',
-            {
-                'safeplace_no': safeplace_no,
-                'custom_data': custom_data_json,
-                'updated_at': None
-            },
-            conflict_cols=['safeplace_no'],
-            update_cols=['custom_data', 'updated_at']
-        )
-        logging.info(f"[SW UPDATE] safe_upsert 완료")
-
-        logging.info(f"[SW UPDATE] 첨부파일 처리 시작 - deleted: {deleted_attachments}")
-        if deleted_attachments:
-            placeholders = ','.join(['%s'] * len(deleted_attachments))
-            cursor.execute(f"""
-                DELETE FROM safe_workplace_attachments
-                WHERE id IN ({placeholders})
-            """, deleted_attachments)
-            logging.info(f"첨부파일 {len(deleted_attachments)}개 삭제")
-
-        for item in attachment_data:
-            if isinstance(item, dict) and item.get('id') and not item.get('isNew'):
-                cursor.execute("""
-                    UPDATE safe_workplace_attachments
-                    SET description = %s
-                    WHERE id = %s
-                """, (item.get('description', ''), item['id']))
-
-        if valid_files:
-            import os
-            from timezone_config import get_korean_time
-
-            upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'safe_workplace')
-            os.makedirs(upload_folder, exist_ok=True)
-
-            new_file_descriptions = []
-            for item in attachment_data:
-                if isinstance(item, dict) and item.get('isNew'):
-                    new_file_descriptions.append(item.get('description', ''))
-
-            for idx, file_info in enumerate(valid_files):
-                file = file_info['file']
-                filename = file_info['safe_filename']
-                timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
-                unique_filename = f"{safeplace_no}_{timestamp}_{filename}".replace('-', '_')
-                file_path = os.path.join(upload_folder, unique_filename)
-
-                file.save(file_path)
-
-                description = ''
-                if idx < len(new_file_descriptions):
-                    description = new_file_descriptions[idx]
-
-                cursor.execute("""
-                    INSERT INTO safe_workplace_attachments (safeplace_no, file_name, file_path, file_size, description)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (safeplace_no, filename, file_path, os.path.getsize(file_path), description))
-                logging.info(f"새 첨부파일 저장: {filename}, 설명: {description}")
-
-        conn.commit()
-        logging.info(f"Safe Workplace {safeplace_no} 업데이트 성공")
-
-        return jsonify({
-            "success": True,
-            "message": "안전한 일터가 성공적으로 수정되었습니다.",
-            "safeplace_no": safeplace_no
-        })
-
-    except Exception as e:
-        import traceback
-        logging.error(f"Safe Workplace 업데이트 오류: {e}")
-        logging.error(f"Traceback: {traceback.format_exc()}")
-        if conn:
-            conn.rollback()
-        return jsonify({"success": False, "message": str(e)}), 500
-    finally:
-        if conn:
-            conn.close()
-
-
-@app.route('/update-full-process', methods=['POST'])
-def update_full_process():
-    """Full Process 정보 업데이트"""
-    from section_service import SectionConfigService
-    conn = None
-
-    try:
-        fullprocess_number = request.form.get('fullprocess_number')
-        detailed_content = request.form.get('detailed_content', '')
-        
-        # 안전하게 JSON 파싱 (pyjson 사용)
-        try:
-            deleted_attachments = pyjson.loads(request.form.get('deleted_attachments', '[]'))
-        except:
-            deleted_attachments = []
-        
-        try:
-            attachment_data_raw = request.form.get('attachment_data', '[]')
-            if isinstance(attachment_data_raw, str):
-                attachment_data = pyjson.loads(attachment_data_raw)
-            else:
-                attachment_data = attachment_data_raw
-            if not isinstance(attachment_data, list):
-                attachment_data = []
-        except Exception as e:
-            logging.warning(f"attachment_data 파싱 실패: {e}")
-            attachment_data = []
-        
-        files = request.files.getlist('files')
-        valid_files, validation_errors = validate_uploaded_files(files)
-        if validation_errors:
-            return jsonify({
-                'success': False,
-                'message': validation_errors[0],
-                'errors': validation_errors
-            }), 400
-
-        conn = get_db_connection(timeout=30.0)
-        cursor = conn.cursor()
-
-        # 섹션 정보 동적으로 가져오기
-        section_service = SectionConfigService('full_process', DB_PATH)
-        sections = section_service.get_sections()
-
-        # 섹션이 없으면 기본값 사용 (하위 호환성)
-        if not sections:
-            sections = [
-                {'section_key': 'basic_info'},
-                {'section_key': 'process_info'},
-                {'section_key': 'additional'}
-            ]
-
-        # 모든 필드를 모을 딕셔너리
-        all_fields = {}
-
-        # 각 섹션별로 데이터 수집
-        for section in sections:
-            section_key = section['section_key']
-            section_data_str = request.form.get(section_key, '{}')
-            logging.info(f"[FP UPDATE DEBUG] 섹션 {section_key} raw: {section_data_str[:500]}")
-            try:
-                section_data = pyjson.loads(section_data_str)
-                all_fields.update(section_data)
-                logging.info(f"[FP UPDATE] 섹션 {section_key} 데이터: {section_data}")
-                # 실제 값 확인
-                for k, v in section_data.items():
-                    if v and v not in ('', [], None):
-                        logging.info(f"  -> {k}: {str(v)[:100]}")
-            except Exception as e:
-                logging.warning(f"[FP UPDATE] 섹션 {section_key} 파싱 실패: {e}")
-
-        # 하위 호환성: custom_data나 base_fields가 있으면 병합
-        custom_data_raw = request.form.get('custom_data', '{}')
-        try:
-            custom_data_compat = pyjson.loads(custom_data_raw) if isinstance(custom_data_raw, str) else (custom_data_raw or {})
-            if custom_data_compat:
-                all_fields.update(custom_data_compat)
-                logging.info(f"[FP UPDATE] custom_data 병합: {custom_data_compat}")
-        except Exception:
-            pass
-
-        base_fields_raw = request.form.get('base_fields', '{}')
-        try:
-            base_fields_compat = pyjson.loads(base_fields_raw) if isinstance(base_fields_raw, str) else (base_fields_compat or {})
-            if base_fields_compat:
-                all_fields.update(base_fields_compat)
-                logging.info(f"[FP UPDATE] base_fields 병합: {base_fields_compat}")
-        except Exception:
-            pass
-
-        # 최종 custom_data
-        custom_data = all_fields
-
-        # 리스트 필드 정규화
-        for key, value in list(custom_data.items()):
-            if isinstance(value, str) and value.startswith('[') and value.endswith(']'):
-                try:
-                    custom_data[key] = pyjson.loads(value)
-                    logging.info(f"List field {key} normalized from string to array")
-                except:
-                    pass
-
-        # 기존 데이터 조회 (리스트 필드 병합을 위해) - 메인 테이블
-        cursor.execute("""
-            SELECT custom_data 
-            FROM full_process 
-            WHERE fullprocess_number = %s
-        """, (fullprocess_number,))
-        
-        existing_row = cursor.fetchone()
-        existing_custom_data = {}
-        
-        if existing_row and existing_row[0]:
-            if isinstance(existing_row[0], dict):
-                # PostgreSQL JSONB - 깊은 복사로 안전하게 처리
-                existing_custom_data = pyjson.loads(pyjson.dumps(existing_row[0]))
-            elif isinstance(existing_row[0], str):
-                # SQLite JSON 문자열
-                try:
-                    existing_custom_data = pyjson.loads(existing_row[0])
-                except:
-                    existing_custom_data = {}
-        
-        # 리스트 필드 병합 처리
-        def is_list_field(field_value):
-            """필드가 리스트 타입인지 확인"""
-            if isinstance(field_value, list):
-                return True
-            if isinstance(field_value, str) and field_value.strip():
-                return field_value.startswith('[') and field_value.endswith(']')
-            return False
-        
-        for key, value in custom_data.items():
-            # 기존 값이 없을 때는 None을 기본값으로 사용 (빈 배열 [] 대신)
-            existing_value = existing_custom_data.get(key, None)
-            if is_list_field(value) or (existing_value is not None and is_list_field(existing_value)):
-                logging.info(f"[MERGE DEBUG] {key} 리스트 필드로 감지, 병합 처리 시작")
-                
-                # 기존 데이터 파싱
-                existing_list = existing_custom_data.get(key, [])
-                if isinstance(existing_list, str) and existing_list.strip():
-                    try:
-                        existing_list = pyjson.loads(existing_list)
-                    except:
-                        existing_list = []
-                if not isinstance(existing_list, list):
-                    existing_list = []
-                
-                # 새 데이터 파싱
-                new_list = []
-                if isinstance(value, list):
-                    new_list = value
-                elif isinstance(value, str) and value.strip():
-                    if value.startswith('[') and value.endswith(']'):
-                        try:
-                            new_list = pyjson.loads(value)
-                            if not isinstance(new_list, list):
-                                new_list = []
-                        except:
-                            new_list = []
-                
-                logging.info(f"[MERGE DEBUG] {key} - 기존: {len(existing_list)}개, 새로: {len(new_list)}개")
-                
-                # 프론트에서 전체 배열을 보냈다면 그대로 사용, 아니면 병합
-                if len(new_list) > 0 and len(existing_list) > 0:
-                    # 새로운 데이터에 기존 데이터의 첫 번째 항목이 포함되어 있다면 전체 교체로 간주
-                    first_existing_id = existing_list[0].get('id', '') if existing_list and isinstance(existing_list[0], dict) else ''
-                    has_existing_data = any(
-                        isinstance(item, dict) and item.get('id') == first_existing_id
-                        for item in new_list
-                    ) if first_existing_id else False
-                    
-                    if has_existing_data:
-                        # 전체 데이터를 보냈으므로 그대로 사용
-                        existing_custom_data[key] = new_list
-                        logging.info(f"[MERGE DEBUG] {key} 전체 교체: {len(new_list)}개 항목")
-                    else:
-                        # 새 항목만 추가하므로 병합 처리
-                        merged_list = list(existing_list)
-                        existing_ids = {item.get('id', '') for item in existing_list if isinstance(item, dict)}
-                        
-                        for new_item in new_list:
-                            if isinstance(new_item, dict) and new_item.get('id') not in existing_ids:
-                                merged_list.append(new_item)
-                                existing_ids.add(new_item.get('id'))
-                        
-                        existing_custom_data[key] = merged_list
-                        logging.info(f"[MERGE DEBUG] {key} 병합 완료: 기존 {len(existing_list)}개 + 새로 {len(new_list)}개 = 최종 {len(merged_list)}개 항목")
-                else:
-                    # 하나가 비어있으면 비어있지 않은 것을 사용
-                    # 빈 배열이 들어왔으면 기존 값 유지
-                    if len(new_list) > 0:
-                        existing_custom_data[key] = new_list
-                    elif len(existing_list) > 0:
-                        existing_custom_data[key] = existing_list
-                    # 둘 다 비어있으면 업데이트하지 않음 (기존 값 유지)
-                    logging.info(f"[MERGE DEBUG] {key} 단순 대체: {len(existing_custom_data.get(key, []))}개 항목")
-            else:
-                # 일반 필드는 정상 업데이트
-                existing_custom_data[key] = value
-        
-        # detailed_content는 custom_data에 포함하지 않음 (별도 컬럼/테이블 사용)
-        # existing_custom_data['detailed_content'] = detailed_content  # 제거!
-        logging.info("detailed_content는 별도 컬럼과 details 테이블에만 저장")
-
-        # Details 테이블에 단일 경로 저장
-        try:
-            from db.upsert import safe_upsert as _su
-            _su(conn, 'full_process_details', {
-                'fullprocess_number': fullprocess_number,
-                'detailed_content': detailed_content,
-                'updated_at': None
-            }, conflict_cols=['fullprocess_number'], update_cols=['detailed_content', 'updated_at'])
-            logging.info("[FP] details upsert applied")
-        except Exception as _e_det:
-            logging.warning(f"[FP] details upsert warning: {_e_det}")
-        
-        # 메인 테이블 UPSERT
-        # custom_data를 JSON 문자열로 변환
-        import json
-        custom_data_json = json.dumps(existing_custom_data, ensure_ascii=False)
-        
-        from db.upsert import safe_upsert
-        safe_upsert(
-            conn,
-            'full_process',
-            {
-                'fullprocess_number': fullprocess_number,
-                'custom_data': custom_data_json,
-                'updated_at': None
-            },
-            conflict_cols=['fullprocess_number'],
-            update_cols=['custom_data', 'updated_at']
-        )
-        
-        # 3. 첨부파일 처리 - AttachmentService 대신 직접 처리
-        # 첨부파일 테이블 생성 (PostgreSQL 문법)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS full_process_attachments (
-                id SERIAL PRIMARY KEY,
-                fullprocess_number TEXT NOT NULL,
-                file_name TEXT NOT NULL,
-                file_path TEXT NOT NULL,
-                file_size INTEGER,
-                description TEXT,
-                upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (fullprocess_number) REFERENCES full_process (fullprocess_number)
-            )
-        """)
-        
-        # 삭제된 첨부파일 처리
-        if deleted_attachments:
-            for attachment_id in deleted_attachments:
-                # 파일 경로 조회
-                cursor.execute("""
-                    SELECT file_path FROM full_process_attachments WHERE id = %s
-                """, (attachment_id,))
-                row = cursor.fetchone()
-                if row:
-                    file_path = row[0]
-                    # 파일 삭제
-                    if os.path.exists(file_path):
-                        try:
-                            os.remove(file_path)
-                        except Exception as e:
-                            logging.error(f"파일 삭제 실패: {e}")
-                    # DB에서 삭제
-                    cursor.execute("""
-                        DELETE FROM full_process_attachments WHERE id = %s
-                    """, (attachment_id,))
-        
-        # 기존 첨부파일 설명 업데이트
-        logging.info(f"[FP UPDATE] attachment_data 받음: {attachment_data}")
-        for item in attachment_data:
-            if isinstance(item, dict) and item.get('id') and not item.get('isNew'):
-                logging.info(f"[FP UPDATE] 첨부파일 ID {item['id']} description 업데이트: '{item.get('description', '')}'")
-                cursor.execute("""
-                    UPDATE full_process_attachments
-                    SET description = %s
-                    WHERE id = %s
-                """, (item.get('description', ''), item['id']))
-                # 업데이트 확인
-                cursor.execute("SELECT description FROM full_process_attachments WHERE id = %s", (item['id'],))
-                result = cursor.fetchone()
-                logging.info(f"[FP UPDATE] DB 확인 - ID {item['id']}: description = '{result[0] if result else 'NOT FOUND'}'")
-            else:
-                logging.info(f"[FP UPDATE] 스킵된 item: {item}")
-        
-        # 새 파일 업로드 처리
-        if valid_files:
-            upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'full_process')
-            os.makedirs(upload_folder, exist_ok=True)
-            
-            # 새 파일에 대한 설명 준비
-            new_file_descriptions = []
-            for item in attachment_data:
-                if isinstance(item, dict) and item.get('isNew'):
-                    new_file_descriptions.append(item.get('description', ''))
-            
-            for idx, file_info in enumerate(valid_files):
-                file = file_info['file']
-                filename = file_info['safe_filename']
-                timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
-                unique_filename = f"{fullprocess_number}_{timestamp}_{filename}".replace('-', '_')
-                file_path = os.path.join(upload_folder, unique_filename)
-
-                file.save(file_path)
-
-                description = ''
-                if idx < len(new_file_descriptions):
-                    description = new_file_descriptions[idx]
-
-                cursor.execute("""
-                    INSERT INTO full_process_attachments (fullprocess_number, file_name, file_path, file_size, description)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (fullprocess_number, filename, file_path, os.path.getsize(file_path), description))
-        
-        conn.commit()
-        logging.info(f"Full Process {fullprocess_number} 업데이트 성공")
-        
-        return jsonify({
-            "success": True,
-            "message": "Full Process가 성공적으로 수정되었습니다.",
-            "fullprocess_number": fullprocess_number
-        })
-        
-    except Exception as e:
-        import traceback
-        logging.error(f"Full Process 업데이트 오류: {e}")
-        logging.error(f"Traceback: {traceback.format_exc()}")
-        if conn:
-            conn.rollback()
-        return jsonify({"success": False, "message": str(e)}), 500
-    finally:
-        if conn:
-            conn.close()
-
-
-@app.route("/data-recovery")
-def data_recovery():
-    """데이터 복구 페이지"""
-    conn = get_db_connection()
-    
-    # 삭제된 사고 조회
-    deleted_accidents_rows = conn.execute("""
-        SELECT * FROM accidents_cache 
-        WHERE is_deleted = 1
-        ORDER BY accident_date DESC, accident_number DESC
-    """).fetchall()
-    
-    deleted_accidents = [dict(row) for row in deleted_accidents_rows]
-    
-    # 삭제된 협력사 조회
-    deleted_partners_rows = conn.execute("""
-        SELECT * FROM partners_cache 
-        WHERE is_deleted = 1
-        ORDER BY company_name
-    """).fetchall()
-    
-    deleted_partners = [dict(row) for row in deleted_partners_rows]
-    conn.close()
-    
-    return render_template('data-recovery.html', 
-                         deleted_accidents=deleted_accidents,
-                         deleted_partners=deleted_partners,
-                         menu=MENU_CONFIG,
-                         active_slug='data-recovery')
-
-def partner_standards():
-    """협력사 기준정보 페이지"""
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 10, type=int)
-    
-    # 검색 조건
-    filters = {
-        'company_name': request.args.get('company_name', '').strip(),
-        'business_number': request.args.get('business_number', '').strip(),
-        'business_type_major': request.args.get('business_type_major', '').strip(),
-        'business_type_minor': request.args.get('business_type_minor', '').strip(),
-        'workers_min': request.args.get('workers_min', type=int),
-        'workers_max': request.args.get('workers_max', type=int)
-    }
-    
-    # 컬럼 설정 가져오기
-    conn = get_db_connection()
-    
-    dynamic_columns_rows = conn.execute("""
-        SELECT * FROM partner_standards_column_config 
-        WHERE is_active = 1 
-        ORDER BY column_order
-    """).fetchall()
-    
-    dynamic_columns = []
-    for row in dynamic_columns_rows:
-        dynamic_columns.append({
-            'key': row['column_key'],
-            'name': row['column_name'],
-            'type': row['column_type'],
-            'order': row['column_order'],
-            'table_display': True  # partner_standards는 모든 컬럼 표시
-        })
-    
-    # 새로운 데이터 매니저를 통해 협력사 목록 조회
-    partners_rows, total_count = partner_manager.get_all_partners(
-        page=page, 
-        per_page=per_page, 
-        filters=filters
-    )
-    
-    # Row 객체를 딕셔너리로 변환하고 No 컬럼 추가 (역순 번호)
-    offset = (page - 1) * per_page
-    partners = []
-    for i, row in enumerate(partners_rows):
-        partner = dict(row)
-        partner['no'] = total_count - offset - i
-        partners.append(partner)
-    
-    # 페이지네이션 정보
-    class Pagination:
-        def __init__(self, page, per_page, total_count):
-            self.page = page
-            self.per_page = per_page
-            self.total_count = total_count
-            self.pages = math.ceil(total_count / per_page)
-            self.has_prev = page > 1
-            self.prev_num = page - 1 if self.has_prev else None
-            self.has_next = page < self.pages
-            self.next_num = page + 1 if self.has_next else None
-        
-        def iter_pages(self, window_size=10):
-            # 현재 페이지를 기준으로 10개 페이지 윈도우 생성
-            start = ((self.page - 1) // window_size) * window_size + 1
-            end = min(start + window_size - 1, self.pages)
-            for num in range(start, end + 1):
-                yield num
-        
-        def get_window_info(self, window_size=10):
-            # 현재 윈도우의 시작과 끝 페이지
-            start = ((self.page - 1) // window_size) * window_size + 1
-            end = min(start + window_size - 1, self.pages)
-            has_prev_window = start > 1
-            has_next_window = end < self.pages
-            prev_window_start = max(1, start - window_size)
-            next_window_start = min(end + 1, self.pages)
-            return {
-                'start': start,
-                'end': end,
-                'has_prev_window': has_prev_window,
-                'has_next_window': has_next_window,
-                'prev_window_start': prev_window_start,
-                'next_window_start': next_window_start
-            }
-    
-    pagination = Pagination(page, per_page, total_count)
-    
-    conn.close()
-    
-    return render_template('partner-standards.html',
-                         partners=partners,
-                         total_count=total_count,
-                         pagination=pagination,
-                         dynamic_columns=dynamic_columns,
-                         menu=MENU_CONFIG)
-
-
-def partner_change_request():
-    """기준정보 변경요청 페이지"""
-    from common_search import DynamicSearchBuilder, get_static_columns
-    
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 10, type=int)
-    
-    # 검색 조건
-    filters = {
-        'requester_name': request.args.get('requester_name', '').strip(),
-        'company_name': request.args.get('company_name', '').strip(),
-        'business_number': request.args.get('business_number', '').strip()
-    }
-    
-    # 실제 데이터베이스에서 조회
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # DynamicSearchBuilder로 검색 조건 생성
-        base_query = "FROM partner_change_requests"
-        where_clause = ""
-        params = []
-        
-        search_builder = DynamicSearchBuilder('sqlite')
-        static_cols = ['id', 'requester_name', 'requester_department', 'company_name', 
-                      'business_number', 'change_type', 'current_value', 'new_value', 
-                      'change_reason', 'created_at', 'status', 'request_number']
-        
-        # is_deleted 컬럼 존재 여부 확인
-        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
-        cursor.execute("""
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'partner_change_requests'
-        """)
-        columns = [col[0] for col in cursor.fetchall()]
-        
-        # 각 필터 적용
-        where_conditions = []
-        
-        # is_deleted 컬럼이 있으면 필터 적용
-        if 'is_deleted' in columns:
-            where_conditions.append("(is_deleted::integer = 0 OR is_deleted IS NULL)")
-        # is_deleted 컬럼이 없으면 추가
-        else:
-            cursor.execute("""
-                ALTER TABLE partner_change_requests 
-                ADD COLUMN is_deleted INTEGER DEFAULT 0
-            """)
-            conn.commit()
-            # 컬럼 추가 후에도 필터 적용
-            where_conditions.append("(is_deleted::integer = 0 OR is_deleted IS NULL)")
-        
-        for field_name, field_value in filters.items():
-            if not field_value:
-                continue
-            
-            # 동적 컬럼 여부 판단 (현재는 모두 정적 컬럼)
-            is_dynamic = field_name not in static_cols
-            
-            if is_dynamic:
-                # JSON 필드 검색 (Postgres/SQLite 분기)
-                if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                    where_conditions.append(f"(custom_data->>'{field_name}') ILIKE %s")
-                else:
-                    where_conditions.append(f"json_extract(custom_data, '$.{field_name}') LIKE %s")
-                params.append(f"%{field_value}%")
-            else:
-                # 일반 컬럼 검색
-                where_conditions.append(f"{field_name} LIKE %s")
-                params.append(f"%{field_value}%")
-        
-        if where_conditions:
-            where_clause = "WHERE " + " AND ".join(where_conditions)
-        
-        # 총 개수 조회
-        count_query = f"SELECT COUNT(*) as total FROM partner_change_requests {where_clause}"
-        cursor.execute(count_query, params)
-        total_count = cursor.fetchone()['total']
-        
-        # 페이지네이션 적용하여 데이터 조회
-        offset = (page - 1) * per_page
-        data_query = f"""
-            SELECT id, requester_name, requester_department, company_name, business_number,
-                   change_type, current_value, new_value, change_reason,
-                   created_at, status, request_number, custom_data,
-                   other_info, final_check_date
-            FROM partner_change_requests
-            {where_clause}
-            ORDER BY created_at DESC
-            LIMIT %s OFFSET %s
-        """
-        cursor.execute(data_query, params + [per_page, offset])
-        rows = cursor.fetchall()
-        
-        # 드롭다운 옵션 로드 (change_type 등을 위해)
-        from board_services import CodeService
-        code_service = CodeService('change_request', DB_PATH)
-        
-        # change_type 드롭다운 옵션 조회
-        change_type_codes = code_service.list('change_type')
-        change_type_map = {code['option_code']: code['option_value'] for code in change_type_codes}
-        
-        # status 드롭다운 옵션 조회
-        status_codes = code_service.list('status')
-        status_map = {code['option_code']: code['option_value'] for code in status_codes}
-        
-        # 데이터 변환
-        change_requests = []
-        for i, row in enumerate(rows):
-            # Row를 dict로 변환
-            row_dict = dict(row)
-
-            # status 필드 안전하게 처리
-            status = row_dict.get('status', 'pending')
-
-            # custom_data 파싱 (PostgreSQL JSONB는 이미 dict)
-            custom_data = {}
-            if row_dict.get('custom_data'):
-                try:
-                    if isinstance(row_dict['custom_data'], dict):
-                        custom_data = row_dict['custom_data']  # PostgreSQL JSONB
-                    else:
-                        custom_data = pyjson.loads(row_dict['custom_data'])  # SQLite TEXT
-                except:
-                    custom_data = {}
-
-            # 드롭다운 값을 라벨로 변환
-            change_type_value = row_dict.get('change_type')
-            change_type_label = change_type_map.get(change_type_value, change_type_value) if change_type_value else ''
-
-            status_label = status_map.get(status, status) if status else 'pending'
-
-            change_request = type('obj', (object,), {
-                'id': row_dict['id'],
-                'no': total_count - offset - i,  # No 컬럼 (역순)
-                'request_number': row_dict.get('request_number'),  # request_number 추가
-                'requester_name': row_dict.get('requester_name'),
-                'requester_department': row_dict.get('requester_department'),
-                'company_name': row_dict.get('company_name'),
-                'business_number': row_dict.get('business_number'),
-                'change_type': change_type_value,
-                'change_type_label': change_type_label,  # 라벨 추가
-                'current_value': row_dict.get('current_value'),
-                'new_value': row_dict.get('new_value'),
-                'change_reason': row_dict.get('change_reason'),
-                'created_at': row_dict.get('created_at'),
-                'status': status,
-                'status_label': status_label,  # 라벨 추가
-                'custom_data': custom_data,  # custom_data 추가
-                'other_info': row_dict.get('other_info', ''),  # other_info 추가
-                'final_check_date': row_dict.get('final_check_date', '')  # final_check_date 추가
-            })()
-            change_requests.append(change_request)
-            
-        conn.close()
-        
-    except Exception as e:
-        logging.error(f"변경요청 목록 조회 중 오류: {e}")
-        change_requests = []
-        total_count = 0
-    
-    # 페이지네이션 객체 생성
-    class DummyPagination:
-        def __init__(self, page, per_page, total):
-            self.page = page
-            self.per_page = per_page
-            self.total = total
-            self.pages = (total + per_page - 1) // per_page
-            
-        def iter_pages(self):
-            for i in range(max(1, self.page - 5), min(self.pages + 1, self.page + 6)):
-                yield i
-                
-        def get_window_info(self):
-            return type('obj', (object,), {
-                'has_prev_window': self.page > 10,
-                'has_next_window': self.page + 10 <= self.pages,
-                'prev_window_start': max(1, self.page - 10),
-                'next_window_start': min(self.pages, self.page + 10)
-            })()
-    
-    pagination = DummyPagination(page, per_page, total_count)
-    return render_template('partner-change-request.html', 
-                         menu=MENU_CONFIG, 
-                         pagination=pagination, 
-                         total_count=total_count,
-                         change_requests=change_requests)
-
-
-def change_request_detail(request_id):
-    """변경요청 상세정보 페이지"""
-    logging.info(f"변경요청 상세 정보 조회: {request_id}")
-    
-    # 실제 데이터베이스에서 조회
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # 먼저 partner_change_requests 테이블에서 조회 (주 테이블)
-    cursor.execute("""
-        SELECT * FROM partner_change_requests 
-        WHERE id = %s
-    """, (request_id,))
-    
-    request_row = cursor.fetchone()
-    
-    # partner_change_requests에 없으면 change_requests 테이블에서 조회 (호환성)
-    if not request_row:
-        cursor.execute("""
-            SELECT * FROM change_requests 
-            WHERE id = %s
-        """, (request_id,))
-        request_row = cursor.fetchone()
-    
-    if request_row:
-        # 실제 DB 데이터 사용
-        request_dict = dict(request_row)
-        
-        # change_request_details 테이블에서 detailed_content 조회
-        cursor.execute("""
-            SELECT detailed_content FROM change_request_details 
-            WHERE request_number = %s
-        """, (request_dict.get('request_number', ''),))
-        detail_row = cursor.fetchone()
-        
-        if detail_row:
-            request_dict['detailed_content'] = detail_row['detailed_content']
-            logging.info(f"detailed_content 로드 완료: 길이={len(detail_row['detailed_content']) if detail_row['detailed_content'] else 0}")
-        else:
-            request_dict['detailed_content'] = ''
-            logging.info("detailed_content가 없음")
-        
-        request_data = type('obj', (object,), request_dict)()
-        logging.info(f"DB에서 변경요청 데이터 로드: ID={request_id}")
-    else:
-        # DB에 없으면 기본값
-        request_data = type('obj', (object,), {
-            'id': request_id,
-            'change_reason': '',
-            'approval_comments': '',
-            'custom_data': '{}',
-            'detailed_content': ''
-        })()
-        logging.info(f"변경요청 데이터 없음, 기본값 사용: ID={request_id}")
-    
-    conn.close()
-    
-    # Phase 1: 동적 컬럼 설정 가져오기  
-    conn = get_db_connection()
-    
-    # change_request_column_config 테이블 사용
-    try:
-        cursor = conn.cursor()
-        _wa = sql_is_active_true('is_active', conn)
-        _wd = sql_is_deleted_false('is_deleted', conn)
-        dynamic_columns_rows = conn.execute(f"""
-            SELECT * FROM change_request_column_config 
-            WHERE {_wa} AND {_wd}
-            ORDER BY column_order
-        """).fetchall()
-        
-        conn.close()
-        
-    except Exception as e:
-        logging.error(f"동적 컬럼 로딩 중 오류: {e}")
-        dynamic_columns_rows = []
-        conn.close()
-    
-    # Phase 2: 동적 컬럼 처리 - 코드 테이블 기반으로 옵션 구성(등록 화면과 동일)
-    dynamic_columns = []
-    for row in dynamic_columns_rows:
-        col_dict = dict(row)
-        if col_dict.get('column_type') == 'dropdown':
-            try:
-                code_options = get_dropdown_options_for_display('change_request', col_dict['column_key'])
-                col_dict['dropdown_options_mapped'] = (
-                    [{"code": opt["code"], "value": opt["value"]} for opt in code_options]
-                    if code_options else []
-                )
-            except Exception:
-                col_dict['dropdown_options_mapped'] = []
-        dynamic_columns.append(type('Column', (), col_dict)())
-    
-    # custom_data를 DB에서 가져온 데이터에서 파싱 (PostgreSQL JSONB는 이미 dict)
-    custom_data = {}
-    if hasattr(request_data, 'custom_data') and request_data.custom_data:
-        try:
-            if isinstance(request_data.custom_data, dict):
-                custom_data = request_data.custom_data  # PostgreSQL JSONB
-            else:
-                custom_data = pyjson.loads(request_data.custom_data)  # SQLite TEXT
-            logging.info(f"custom_data 파싱 성공: {len(custom_data)}개 필드")
-        except Exception as e:
-            logging.error(f"custom_data 파싱 실패: {e}")
-            custom_data = {}
-    
-    logging.info(f"변경요청 동적 컬럼 {len(dynamic_columns)}개 로드됨, custom_data {len(custom_data)}개 필드")
-
-    # 첨부파일 조회 추가 - 새 연결 생성
-    conn = get_db_connection()
-    from board_services import AttachmentService
-    attachment_service = AttachmentService('change_request', DB_PATH, conn)
-    # 실제 request_number 사용 (DB에서 가져온 값)
-    actual_request_number = request_data.request_number if hasattr(request_data, 'request_number') and request_data.request_number else f"CR-{request_id}"
-    # custom_data가 비어있다면(초기 등록이 컬럼 단위 저장인 경우) 컬럼 값에서 복원
-    if not custom_data:
-        try:
-            rebuilt = {}
-            for row in dynamic_columns_rows:
-                key = row.get('column_key') if hasattr(row, 'get') else row['column_key']
-                if key and hasattr(request_data, key):
-                    rebuilt[key] = getattr(request_data, key)
-            if rebuilt:
-                custom_data = rebuilt
-                logging.info(f"custom_data 재구성: {len(custom_data)}개 필드")
-        except Exception as e:
-            logging.error(f"custom_data 재구성 실패: {e}")
-
-    attachments = attachment_service.list(actual_request_number)
-    logging.info(f"변경요청 첨부파일 조회: {actual_request_number} → {len(attachments)}개 로드됨")
-
-    conn.close()  # 첨부파일 조회 후 연결 닫기
-
-    # popup 파라미터 확인
-    is_popup = request.args.get('popup', '0') == '1'
-    
-    return render_template('change-request-detail.html', 
-                         request_data=request_data,
-                         dynamic_columns=dynamic_columns,
-                         custom_data=custom_data,
-                         attachments=attachments,
-                         is_popup=is_popup,
-                         menu=MENU_CONFIG)
-
-
-@app.route('/update-change-request', methods=['POST'])
-def update_change_request():
-    """변경요청 수정 API - AttachmentService 사용"""
-    from board_services import AttachmentService
-    conn = None
-    
-    try:
-        request_id = request.form.get('request_id')  # ID 받기
-        request_number = request.form.get('request_number')  # 실제 request_number도 받기
-        change_reason = request.form.get('change_reason', '')  # change_content 대신 change_reason
-        detailed_content = request.form.get('detailed_content', '')  # 추가
-        custom_data = request.form.get('custom_data', '{}')
-        
-        # 상세내용 처리
-        final_content = detailed_content
-        logging.info(f"변경요청 업데이트: ID={request_id}, 내용 길이={len(final_content) if final_content else 0}자")
-        
-        # deleted_attachments 파싱
-        deleted_attachments_str = request.form.get('deleted_attachments', '[]')
-        try:
-            deleted_attachments = pyjson.loads(deleted_attachments_str) if deleted_attachments_str else []
-        except:
-            deleted_attachments = []
-            
-        files = request.files.getlist('files')
-        print(f"[CHANGE_REQUEST DEBUG] files count: {len(files)}")
-        
-        if not request_number:
-            return jsonify({"success": False, "message": "요청번호가 필요합니다."}), 400
-        
-        # JSON 파싱
-        try:
-            custom_data_dict = pyjson.loads(custom_data) if custom_data != '{}' else {}
-        except ValueError:  # JSONDecodeError is a subclass of ValueError
-            return jsonify({"success": False, "message": "잘못된 데이터 형식입니다."}), 400
-        
-        # 상태 값 검증 (수정 시에만 변경 허용)
-        if 'status' in custom_data_dict:
-            allowed_statuses = ['requested', 'approved', 'rejected']  # applied -> approved로 수정
-            if custom_data_dict['status'] not in allowed_statuses:
-                custom_data_dict['status'] = 'requested'  # 잘못된 값은 기본값으로
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # partner_change_requests 테이블 업데이트 (올바른 테이블)
-        # change_request_details 테이블 생성 (상세내용용) - 필요한 경우
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS change_request_details (
-                request_number TEXT PRIMARY KEY,
-                detailed_content TEXT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # 기존 변경요청이 있는지 확인 - ID로 확인
-        cursor.execute("SELECT id, request_number, status FROM partner_change_requests WHERE id = %s", (request_id,))
-        existing = cursor.fetchone()
-        
-        if existing:
-            # 실제 request_number 사용
-            actual_request_number = existing[1] if existing[1] else request_number
-            
-            # 업데이트 - ID 기준
-            # custom_data에서 status 추출
-            status_value = custom_data_dict.get('status', existing[2])  # 기존 상태 유지
-            
-            # custom_data에서 각 컬럼 값 추출
-            update_query = """
-                UPDATE partner_change_requests 
-                SET status = %s, 
-                    custom_data = %s, 
-                    updated_at = CURRENT_TIMESTAMP
-            """
-            
-            params = [status_value, pyjson.dumps(custom_data_dict)]
-            
-            # 동적으로 컬럼 업데이트 추가
-            for key, value in custom_data_dict.items():
-                if key != 'status':  # status는 이미 처리됨
-                    # PostgreSQL용 컬럼 존재 확인
-                    cursor.execute("""
-                        SELECT column_name FROM information_schema.columns 
-                        WHERE table_name='partner_change_requests' AND column_name=%s
-                    """, (key,))
-                    if cursor.fetchone():
-                        update_query += f", {key} = %s"
-                        params.append(value)
-            
-            update_query += " WHERE id = %s"
-            params.append(request_id)
-            
-            cursor.execute(update_query, params)
-            
-            logging.info(f"partner_change_requests 업데이트: ID={request_id}, status={status_value}")
-        else:
-            logging.error(f"변경요청을 찾을 수 없습니다: ID={request_id}")
-            return jsonify({"success": False, "message": "변경요청을 찾을 수 없습니다."}), 404
-        
-        # 상세내용을 custom_data와 details 테이블 모두에 저장
-        if final_content:
-            custom_data_dict['detailed_content'] = final_content
-            # custom_data 업데이트
-            cursor.execute("""
-                UPDATE partner_change_requests 
-                SET custom_data = %s
-                WHERE id = %s
-            """, (pyjson.dumps(custom_data_dict), request_id))
-            
-            # change_request_details 테이블에도 저장 (읽기와 일치시키기 위해)
-            actual_request_number = existing[1] if existing and existing[1] else request_number
-            from db.upsert import safe_upsert
-            safe_upsert(conn, 'change_request_details', {
-                'request_number': actual_request_number,
-                'detailed_content': final_content,
-                'updated_at': None
-            })
-            logging.info(f"상세내용 업데이트 완료: custom_data와 details 테이블에 {len(final_content)}자")
-        
-        # 첨부파일 데이터 파싱 (update_follow_sop와 동일한 방식)
-        try:
-            attachment_data_raw = request.form.get('attachment_data', '[]')
-            if isinstance(attachment_data_raw, str):
-                attachment_data = pyjson.loads(attachment_data_raw)
-            else:
-                attachment_data = attachment_data_raw
-            if not isinstance(attachment_data, list):
-                attachment_data = []
-        except Exception as e:
-            logging.warning(f"attachment_data 파싱 실패: {e}")
-            attachment_data = []
-
-        # AttachmentService 사용하여 첨부파일 처리 (기존 연결 전달)
-        attachment_service = AttachmentService('change_request', DB_PATH, conn)
-
-        # 기존 첨부파일 설명 업데이트 (update_follow_sop와 동일한 방식)
-        for item in attachment_data:
-            if isinstance(item, dict) and item.get('id') and not item.get('isNew'):
-                attachment_service.update_meta(
-                    item['id'],
-                    {'description': item.get('description', '')}
-                )
-                logging.info(f"첨부파일 {item['id']} 설명 업데이트")
-
-        # 삭제할 첨부파일 처리
-        if deleted_attachments:
-            attachment_service.delete(deleted_attachments)
-            logging.info(f"첨부파일 {len(deleted_attachments)}개 삭제")
-
-        # 새 파일 업로드 및 설명 추가
-        if files:
-            # 새 파일에 대한 설명 준비
-            new_file_descriptions = []
-            for item in attachment_data:
-                if isinstance(item, dict) and item.get('isNew'):
-                    new_file_descriptions.append(item.get('description', ''))
-
-            actual_request_number = existing[1] if existing and existing[1] else request_number
-            try:
-                uploaded_ids = attachment_service.bulk_add(
-                    actual_request_number,
-                    files,
-                    {'uploaded_by': session.get('user_id', 'user')}
-                )
-            except ValueError as ve:
-                return jsonify({
-                    'success': False,
-                    'message': str(ve)
-                }), 400
-            logging.info(f"첨부파일 {len(uploaded_ids)}개 업로드: {uploaded_ids}")
-
-            # 새로 업로드된 파일의 설명 업데이트
-            for i, attachment_id in enumerate(uploaded_ids):
-                if i < len(new_file_descriptions) and new_file_descriptions[i]:
-                    attachment_service.update_meta(
-                        attachment_id,
-                        {'description': new_file_descriptions[i]}
-                    )
-                    logging.info(f"새 첨부파일 {attachment_id} 설명 추가: {new_file_descriptions[i]}")
-        
-        conn.commit()
-        logging.info(f"Change Request 업데이트 완료: {request_number}")
-        
-        return jsonify({"success": True, "message": "수정이 완료되었습니다."})
-        
-    except Exception as e:
-        logging.error(f"Change Request 업데이트 오류: {e}")
-        if conn:
-            conn.rollback()
-        return jsonify({"success": False, "message": str(e)}), 500
-    finally:
-        if conn:
-            conn.close()
-
-
-
-@app.route("/partner/<business_number>")
-@app.route("/partner-detail/<business_number>")
-def partner_detail(business_number):
-    """협력사 상세정보 페이지"""
-    logging.info(f"협력사 상세 정보 조회: {business_number}")
-    
-    # 새로운 데이터 매니저를 통해 협력사 정보 조회
-    partner = partner_manager.get_partner_by_business_number(business_number)
-    
-    if not partner:
-        logging.warning(f"협력사를 찾을 수 없습니다: {business_number}")
-        return "협력사 정보를 찾을 수 없습니다.", 404
-    
-    # 첨부파일 정보 가져오기
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT * FROM partner_attachments
-        WHERE business_number = %s
-        ORDER BY upload_date DESC
-    """, (business_number,))
-    attachments = cursor.fetchall()
-    conn.close()
-    
-    logging.info(f"협력사 {business_number} ({partner['company_name']}) 상세 페이지 로드 - 첨부파일 {len(attachments)}개")
-    
-    # 팝업 모드인지 확인
-    is_popup = request.args.get('popup') == '1'
-    
-    return render_template('partner-detail.html', 
-                         partner=partner, 
-                         attachments=attachments,
-                         menu=MENU_CONFIG, 
-                         is_popup=is_popup,
-                         board_type='partner')  # 게시판 타입 전달
-
-@app.route("/accident-detail/<accident_id>")
-def accident_detail(accident_id):
-    """사고 상세정보 페이지"""
-    print(f"[DEBUG] accident_detail 함수 호출됨: ID={accident_id}", flush=True)
-    logging.info(f"사고 상세 정보 조회: {accident_id}")
-    
-    conn = get_db_connection()
-    
-    # 섹션 정보 가져오기
-    # 먼저 accident_sections 테이블 사용 시도, 없으면 section_config 사용
-    try:
-        _wa = sql_is_active_true('is_active', conn)
-        _wd = sql_is_deleted_false('is_deleted', conn)
-        sections = conn.execute(f"""
-            SELECT * FROM accident_sections 
-            WHERE {_wa}
-              AND {_wd}
-            ORDER BY section_order
-        """).fetchall()
-        sections = [dict(row) for row in sections]
-    except:
-        # accident_sections 테이블이 없으면 section_config 사용
-        _wa2 = sql_is_active_true('is_active', conn)
-        sections = conn.execute(f"""
-            SELECT * FROM section_config 
-            WHERE board_type = 'accident' AND {_wa2}
-            ORDER BY section_order
-        """).fetchall()
-        sections = [dict(row) for row in sections]
-    # 섹션이 비어 있으면 안전한 기본값 제공 (DB 상태 불완전 시 UI 보호)
-    if not sections:
-        sections = [
-            {'section_key': 'basic_info', 'section_name': '기본정보', 'section_order': 1},
-            {'section_key': 'accident_info', 'section_name': '사고정보', 'section_order': 2},
-            {'section_key': 'location_info', 'section_name': '장소정보', 'section_order': 3},
-            {'section_key': 'additional', 'section_name': '추가정보', 'section_order': 4},
-        ]
-    
-    # 실제 DB에서 사고 데이터 조회 (id 우선, 실패 시 accident_number로 폴백)
-    accident = None
-    custom_data = {}
-    
-    # accidents_cache 테이블에서 조회 (id가 숫자일 때만 id로, 아니면 번호로)
-    try:
-        _wd_acc = sql_is_deleted_false('is_deleted', conn)
-        accident_row = None
-        acc_id_str = str(accident_id)
-        # id 조회는 숫자인 경우에만 시도하여 캐스팅 오류 방지
-        if acc_id_str.isdigit():
-            try:
-                accident_row = conn.execute(
-                    f"SELECT * FROM accidents_cache WHERE id = %s AND {_wd_acc}",
-                    (accident_id,)
-                ).fetchone()
-            except Exception as _e_id:
-                # 안전 회복
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-                accident_row = None
-        # 번호로 조회
-        if not accident_row:
-            accident_row = conn.execute(
-                f"SELECT * FROM accidents_cache WHERE accident_number = %s AND {_wd_acc}",
-                (accident_id,)
-            ).fetchone()
-        
-        if accident_row:
-            accident = dict(accident_row)
-            # custom_data JSON 파싱 (PostgreSQL JSONB vs SQLite JSON 호환)
-            if accident.get('custom_data'):
-                try:
-                    # PostgreSQL JSONB는 이미 dict로 반환됨, SQLite는 JSON 문자열
-                    # PostgreSQL JSONB는 이미 dict로 반환됨
-                    if isinstance(accident['custom_data'], dict):
-                        custom_data = accident['custom_data']
-                    else:
-                        custom_data = json.loads(accident['custom_data']) if accident['custom_data'] else {}
-                    
-                    print(f"[DEBUG] accident_detail custom_data keys: {list(custom_data.keys())}")
-                    if 'injured_person' in custom_data:
-                        injured_data = custom_data['injured_person']
-                        print(f"[DEBUG] injured_person type: {type(injured_data)}, length: {len(injured_data) if hasattr(injured_data, '__len__') else 'No length'}")
-                        print(f"[DEBUG] injured_person content: {injured_data}")
-                    else:
-                        print("[DEBUG] injured_person NOT FOUND in custom_data")
-                    # 주의: 여기서는 accident에 custom_data를 즉시 병합하지 않는다.
-                    # 실제 병합은 아래의 안전 병합 로직에서 수행된다.
-                    # 다만 화면 표시 품질을 위해 created_at 같은 표시용 기본 필드는
-                    # 상위에 값이 비어 있을 경우에 한해 폴백으로 보강한다.
-                    try:
-                        if (not accident.get('created_at')) and isinstance(custom_data, dict) and custom_data.get('created_at'):
-                            accident['created_at'] = custom_data.get('created_at')
-                    except Exception:
-                        pass
-                except:
-                    custom_data = {}
-            # details 테이블에서 상세내용을 단일 소스로 보강
-            try:
-                acc_number = accident.get('accident_number') or accident.get('id')
-                if acc_number:
-                    try:
-                        drow = conn.execute(
-                            "SELECT detailed_content FROM accident_details WHERE accident_number = %s",
-                            (acc_number,)
-                        ).fetchone()
-                    except Exception:
-                        drow = None
-                    if drow is not None:
-                        # Row or tuple/dict 대응
-                        if isinstance(drow, dict):
-                            accident['detailed_content'] = drow.get('detailed_content') or ''
-                        else:
-                            accident['detailed_content'] = drow[0] if len(drow) > 0 else ''
-            except Exception as _e_det:
-                logging.debug(f"accident details fetch skip: {_e_det}")
-        else:
-            # DB에 없으면 더미 데이터 사용
-            dummy_accidents = []
-    except Exception as e:
-        logging.error(f"DB 조회 오류: {e}")
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-        dummy_accidents = []
-        
-    # 더미 데이터 생성 (DB에 없는 경우)
-    # if not accident:
-    #     dummy_accidents = []
-    #     for i in range(50):
-    #         # 사고번호 생성: K + 연월일 + 순서(3자리) - 고정된 값
-    #         months = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-    #         days = [1, 5, 10, 15, 20, 25]
-    #         accident_date_fixed = f'2024-{months[i % 12]:02d}-{days[i % 6]:02d}'
-    #         accident_number = f'K{accident_date_fixed.replace("-", "")}{i+1:03d}'
-        
-    #     # 고정된 값들로 변경
-    #     grades = ['경미', '중대', '치명']
-    #     types = ['추락', '협착', '절단', '화재']
-    #     disaster_types = ['안전사고', '보건사고']
-    #     disaster_forms = ['낙하', '충돌', '전도']
-    #     days_of_week = ['월', '화', '수', '목', '금', '토', '일']
-        
-    #     # 새로운 필드 추가
-    #     major_categories = ['제조업', '건설업', 'IT업', '서비스업', '운수업']
-    #     location_categories = ['사무실', '생산현장', '창고', '야외', '기타']
-        
-    #     dummy_accidents.append({
-    #         'id': i + 1,
-    #         'accident_number': accident_number,
-    #         'accident_name': f'사고사례{i+1:03d}',
-    #         'accident_date': accident_date_fixed,
-    #         'accident_grade': grades[i % 3],
-    #         'major_category': major_categories[i % 5],  # 대분류 추가
-    #         'accident_type': types[i % 4],
-    #         'disaster_type': disaster_types[i % 2],
-    #         'disaster_form': disaster_forms[i % 3],
-    #         'injury_form': disaster_forms[i % 3],  # 재해형태
-    #         'injury_type': disaster_types[i % 2],  # 재해유형
-    #         'workplace': f'사업장{(i % 5) + 1}',
-    #         'building': f'건물{(i % 10) + 1}',
-    #         'floor': f'{(i % 20) + 1}층',
-    #         'location_category': location_categories[i % 5],  # 장소구분 추가
-    #         'location_detail': f'상세위치{i+1:03d}',  # 세부장소
-    #         'created_at': accident_date_fixed,  # 등록일 추가
-    #         'day_of_week': days_of_week[i % 7],
-    #         'accident_content': f'사고내용{i+1}에 대한 상세 설명입니다.'
-    #     })
-    
-    # DB에서 실제 사고 데이터 가져오기
-    conn = get_db_connection(timeout=30.0, row_factory=True)
-    cursor = conn.cursor()
-    
-    # accidents_cache에서 먼저 찾기
-    # accident_id가 숫자인지 문자열인지 확인
-    if str(accident_id).isdigit():
-        cursor.execute("""
-            SELECT * FROM accidents_cache 
-            WHERE id = %s
-            LIMIT 1
-        """, (accident_id,))
-    else:
-        # 문자열 ID인 경우 (ACC로 시작하는 경우 등)
-        cursor.execute("""
-            SELECT * FROM accidents_cache 
-            WHERE accident_number = %s
-            LIMIT 1
-        """, (accident_id,))
-    
-    accident = cursor.fetchone()
-    
-    # 없으면 더미 데이터에서 찾기
-    if not accident:
-        for acc in dummy_accidents:
-            if acc['id'] == accident_id:
-                accident = dict(acc)
-                break
-    else:
-        accident = dict(accident)  # Row를 dict로 변환
-        
-        # ACC 사고의 경우 created_at가 없으면 오늘 날짜로 설정
-        if accident.get('accident_number', '').startswith('ACC'):
-            if not accident.get('created_at'):
-                accident['created_at'] = get_korean_time().strftime('%Y-%m-%d')
-    
-    if not accident:
-        logging.warning(f"사고를 찾을 수 없습니다: {accident_id}")
-        conn.close()
-        return "사고 정보를 찾을 수 없습니다.", 404
-    
-    # detailed_content를 custom_data에서 가져오기
-    print(f"[DEBUG] accident type before detail query: {type(accident)}")
-    if isinstance(accident, dict):
-        accident_number = accident['accident_number']
-        # custom_data에서 detailed_content 가져오기
-        # PostgreSQL JSONB는 이미 dict로 반환됨
-        custom_data = accident.get('custom_data', {})
-        if isinstance(custom_data, dict):
-            pass  # Already a dict
-        else:
-            try:
-                custom_data = pyjson.loads(custom_data) if custom_data else {}
-            except:
-                custom_data = {}
-        
-        # detailed_content 추출
-        accident['detailed_content'] = custom_data.get('detailed_content', '')
-    else:
-        accident_number = getattr(accident, 'accident_number', str(accident))
-    
-    # accident_attachments 테이블도 생성
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS accident_attachments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            accident_number TEXT,
-            file_name TEXT NOT NULL,
-            file_path TEXT NOT NULL,
-            file_size INTEGER,
-            description TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    # 첨부파일 정보 가져오기 - AttachmentService 사용 (공통 모듈)
-    from board_services import AttachmentService
-    attachment_service = AttachmentService('accident', DB_PATH, conn)
-    attachments = attachment_service.list(accident['accident_number'])
-    logging.info(f"Accident {accident['accident_number']}: {len(attachments)} attachments found")
-    
-    # 동적 컬럼 설정 가져오기 (활성+미삭제)
-    _wa3 = sql_is_active_true('is_active', conn)
-    _wd3 = sql_is_deleted_false('is_deleted', conn)
-    dynamic_columns_rows = conn.execute(
-        f"""
-        SELECT * FROM accident_column_config 
-        WHERE {_wa3} AND {_wd3}
-        ORDER BY column_order
-        """
-    ).fetchall()
-    dynamic_columns = [dict(row) for row in dynamic_columns_rows]
-    # 컬럼 설정이 하나도 없으면 최소 표시 컬럼 세트로 폴백 (DB 시드 누락 보호)
-    if not dynamic_columns:
-        fallback_cols = [
-            # (key, name, type, tab, order)
-            ('accident_number','사고번호','text','basic_info',1),
-            ('accident_name','사고명','text','basic_info',2),
-            ('accident_date','사고일자','date','basic_info',3),
-            ('workplace','사업장','text','basic_info',4),
-            ('accident_grade','사고등급','dropdown','basic_info',5),
-            ('major_category','대분류','dropdown','accident_info',6),
-            ('injury_form','상해형태','dropdown','accident_info',7),
-            ('injury_type','상해유형','dropdown','accident_info',8),
-            ('building','건물','text','location_info',9),
-            ('floor','층','text','location_info',10),
-            ('location_category','장소분류','text','location_info',11),
-            ('location_detail','상세위치','text','location_info',12),
-            ('detailed_content','상세내용','textarea','additional',99),
-        ]
-        dynamic_columns = [
-            {
-                'column_key': k,
-                'column_name': n,
-                'column_type': t,
-                'tab': tab,
-                'column_order': order,
-                'is_active': 1,
-                'is_deleted': 0,
-                'column_span': 1,
-            }
-            for (k,n,t,tab,order) in fallback_cols
-        ]
-
-    # 전역 컬럼 키(활성/비활성 포함) 수집 - 상세 렌더 보정에 사용
-    try:
-        _wd4 = sql_is_deleted_false('is_deleted', conn)
-        _ak_rows = conn.execute(
-            f"SELECT column_key FROM accident_column_config WHERE {_wd4}"
-        ).fetchall()
-        all_keys = set()
-        for r in _ak_rows:
-            try:
-                all_keys.add(r['column_key'])
-            except Exception:
-                try:
-                    all_keys.add(r[0])
-                except Exception:
-                    pass
-        all_keys = {k for k in all_keys if k}
-    except Exception:
-        all_keys = {c.get('column_key') for c in dynamic_columns if c.get('column_key')}
-    
-    # column_span을 정수로 변환
-    for col in dynamic_columns:
-        if col.get('column_span'):
-            try:
-                col['column_span'] = int(col['column_span'])
-            except Exception:
-                pass
-
-    # 전역 키 기반으로 베이스 컬럼의 popup_* 타입 보정
-    try:
-        suffixes = ['_id', '_dept', '_bizno', '_code', '_company']
-        def base_key_of(key: str) -> str:
-            if not isinstance(key, str):
-                return ''
-            for s in suffixes:
-                if key.endswith(s):
-                    return key[:-len(s)]
-            return key
-        key_set = all_keys
-        def infer_group(bk: str) -> str:
-            if not bk:
-                return ''
-            variants = [bk, bk + 'd']
-            if any((v + '_bizno') in key_set for v in variants):
-                return 'company'
-            if any((v + '_dept') in key_set for v in variants):
-                return 'person'
-            if any((v + '_code') in key_set for v in variants):
-                return 'department'
-            if any((v + '_company') in key_set for v in variants):
-                return 'contractor'
-            return ''
-        popup_map = {
-            'person': 'popup_person',
-            'company': 'popup_company',
-            'department': 'popup_department',
-            'contractor': 'popup_contractor',
-        }
-        for col in dynamic_columns:
-            ck = col.get('column_key')
-            ct = col.get('column_type')
-            bk = base_key_of(ck)
-            grp = infer_group(bk)
-            if grp and ck == bk:
-                if not ct or ct in ('text', 'popup', 'table', 'table_select'):
-                    col['column_type'] = popup_map.get(grp, ct)
-                col['input_type'] = col.get('input_type') or 'table'
-    except Exception as _e:
-        logging.error(f"accident_detail normalize failed: {_e}")
-
-    # 드롭다운 컬럼에 대해 코드-값 매핑 적용
-    for col in dynamic_columns:
-        if col.get('column_type') == 'dropdown':
-            code_options = get_dropdown_options_for_display('accident', col.get('column_key'))
-            col['dropdown_options_mapped'] = code_options if code_options else []
-    
-    # 섹션 키 정규화: 잘못된/없음(tab) → 유효 섹션으로 귀속
-    try:
-        from section_service import SectionConfigService
-        section_service = SectionConfigService('accident', DB_PATH)
-        sections = section_service.get_sections() or []
-        known_keys = {s.get('section_key') for s in sections if s.get('section_key')}
-        # 과거 키 호환
-        alias_map = {'violation_info': 'accident_info'}
-        # 기본 귀속 섹션 선택 우선순위: additional → basic_info → 첫 섹션
-        fallback_key = (
-            ('additional' if 'additional' in known_keys else None)
-            or ('basic_info' if 'basic_info' in known_keys else None)
-            or (next(iter(known_keys)) if known_keys else None)
-        )
-        for col in dynamic_columns:
-            tab = col.get('tab')
-            # alias 보정
-            if tab in alias_map and alias_map[tab] in known_keys:
-                col['tab'] = alias_map[tab]
-                tab = col['tab']
-            # 유효하지 않으면 fallback으로 귀속
-            if not tab or tab not in known_keys:
-                if fallback_key:
-                    col['tab'] = fallback_key
-    except Exception as _e:
-        logging.warning(f"섹션 키 정규화 중 경고: {_e}")
-
-    # 섹션별로 컬럼 그룹핑 + 섹션 내 정렬(column_order, id)
-    section_columns = {}
-    for section in sections:
-        cols = [col for col in dynamic_columns if col.get('tab') == section['section_key']]
-        # 안정적인 정렬: column_order -> id
-        def _order_key(c):
-            try:
-                return (int(c.get('column_order') or 0), int(c.get('id') or 0))
-            except Exception:
-                return (c.get('column_order') or 0, c.get('id') or 0)
-        cols.sort(key=_order_key)
-        
-        # 첫 번째 섹션(basic_info)에 사고번호와 등록일을 강제로 맨 앞에 추가
-        if section['section_key'] == 'basic_info':
-            # 기존 컬럼에서 사고번호와 등록일 제거
-            cols = [c for c in cols if c.get('column_key') not in ['accident_number', 'created_at', 'report_date']]
-            
-            # 사고번호와 등록일을 강제로 첫 번째 줄에 추가
-            mandatory_cols = []
-            
-            # 사고번호 - 항상 첫 번째
-            mandatory_cols.append({
-                'column_key': 'accident_number',
-                'column_name': '사고번호',
-                'column_type': 'text',
-                'tab': 'basic_info',
-                'column_order': -2,
-                'is_active': 1,
-                'is_readonly': 1,
-                'column_span': 1
-            })
-            
-            # 등록일 - 항상 두 번째 (K사고는 report_date, A사고는 created_at)
-            mandatory_cols.append({
-                'column_key': 'created_at',  # 템플릿에서 K/A 구분 처리
-                'column_name': '등록일',
-                'column_type': 'date',
-                'tab': 'basic_info',
-                'column_order': -1,
-                'is_active': 1,
-                'is_readonly': 1,
-                'column_span': 1
-            })
-            
-            # 강제 컬럼을 앞에 추가
-            cols = mandatory_cols + cols
-        
-        section_columns[section['section_key']] = cols
-        logging.info(f"섹션 '{section['section_name']}': {len(section_columns[section['section_key']])}개 컬럼")
-    
-    # 하위 호환성을 위한 변수 유지 (템플릿이 아직 하드코딩된 경우)
-    basic_info_columns = section_columns.get('basic_info', [])
-    violation_info_columns = section_columns.get('accident_info', [])  # accident_info로 수정
-    additional_columns = section_columns.get('additional', [])
-    
-    conn.close()
-    
-    # 딕셔너리를 객체처럼 사용할 수 있도록 변환 (None 값 처리 개선)
-    class DictAsAttr:
-        def __init__(self, d):
-            self._data = d
-            for k, v in d.items():
-                setattr(self, k, v if v is not None else '')
-        
-        def __getattr__(self, name):
-            # 속성이 없으면 빈 문자열 반환
-            return self._data.get(name, '')
-    
-    # custom_data 파싱 (PostgreSQL JSONB는 이미 dict로 반환됨)
-    # json already imported globally
-    custom_data = {}
-    if 'custom_data' in accident and accident['custom_data']:
-        try:
-            # PostgreSQL JSONB는 이미 dict, SQLite는 JSON 문자열
-            # PostgreSQL JSONB는 이미 dict로 반환됨
-            if isinstance(accident['custom_data'], dict):
-                custom_data = accident['custom_data']
-            else:
-                custom_data = pyjson.loads(accident['custom_data']) if accident['custom_data'] else {}
-            
-            # 리스트 필드 추가 처리 (이중 인코딩 문제 해결)
-            for key, value in custom_data.items():
-                if isinstance(value, str) and value.startswith('['):
-                    try:
-                        parsed = pyjson.loads(value)
-                        if isinstance(parsed, list):
-                            custom_data[key] = parsed
-                            logging.info(f"Converted string to list for {key}: {len(parsed)} items")
-                    except:
-                        pass
-            
-            # custom_data 병합 시 안전 규칙 적용
-            # - K사고: 기본(원본) 필드는 보호
-            # - 공통: 빈값('' 또는 None)은 상위 필드를 덮지 않음
-            # - ACC사고: 기본 필드도 상위가 비어있을 때만 보완적으로 채움
-            base_protected_keys = {
-                'accident_number','accident_name','workplace','accident_grade','major_category',
-                'injury_form','injury_type','building','floor','location_category','location_detail',
-                'accident_date','created_at','report_date','day_of_week',
-                'responsible_company1','responsible_company1_no','responsible_company2','responsible_company2_no'
-            }
-
-            def _is_empty(v):
-                try:
-                    if v is None:
-                        return True
-                    if isinstance(v, str) and v.strip() == '':
-                        return True
-                    return False
-                except Exception:
-                    return False
-
-            safe_updates = {}
-            # 사고번호 기준으로 ACC/K 구분
-            acc_no = str(accident.get('accident_number') or '')
-            is_direct = acc_no.startswith('ACC')
-
-            for k, v in custom_data.items():
-                # 빈값은 덮어쓰지 않음
-                if _is_empty(v):
-                    continue
-                if k in base_protected_keys:
-                    if not is_direct:
-                        # K사고: 기본키 보호
-                        continue
-                    # ACC사고: 상위가 비어 있으면 보완 채움
-                    top = accident.get(k)
-                    if _is_empty(top):
-                        safe_updates[k] = v
-                else:
-                    # 비기본 키는 항상 병합 (값이 비어있지 않을 때)
-                    safe_updates[k] = v
-
-            if safe_updates:
-                accident.update(safe_updates)
-            
-            logging.info(f"Loaded and merged custom_data: {custom_data}")
-        except Exception as e:
-            logging.error(f"Error parsing custom_data: {e}")
-            custom_data = {}
-    
-    # 디버깅: 사고 데이터 확인
-    logging.info(f"사고 데이터: {accident}")
-    logging.info(f"accident_number: {accident.get('accident_number')}")
-    logging.info(f"accident_name: {accident.get('accident_name')}")
-    logging.info(f"accident_grade: {accident.get('accident_grade')}")
-    logging.info(f"major_category: {accident.get('major_category')}")
-    logging.info(f"injury_form: {accident.get('injury_form')}")
-    logging.info(f"injury_type: {accident.get('injury_type')}")
-    
-    accident = DictAsAttr(accident)
-    
-    logging.info(f"사고 {accident_id} ({accident.accident_name}) 상세 페이지 로드")
-    
-    # 팝업 모드인지 확인
-    is_popup = request.args.get('popup') == '1'
-    
-    # ACC로 시작하는 사고번호인지 확인 (직접 등록한 데이터)
-    accident_number = accident.accident_number if hasattr(accident, 'accident_number') else accident.get('accident_number', '')
-    is_direct_entry = str(accident_number).startswith('ACC')
-    logging.info(f"사고번호: {accident_number}, 직접등록여부: {is_direct_entry}")
-    
-    # 기본정보 드롭다운 옵션 로드 (ACC 사고용)
-    basic_options = {}
-    if is_direct_entry:
-        from board_services import CodeService
-        code_service = CodeService('accident', DB_PATH)
-        
-        # 기본정보 필드들의 드롭다운 옵션 로드
-        # injury_form, injury_type이 실제 사용되는 필드명
-        basic_fields = ['workplace', 'accident_grade', 'major_category', 
-                       'injury_form', 'injury_type', 'floor', 
-                       'location_category', 'building']
-        
-        for field in basic_fields:
-            codes = code_service.list(field)
-            # 템플릿이 기대하는 형식으로 변환 (option_code -> code, option_value -> value)
-            if codes and len(codes) > 0 and 'option_code' in codes[0]:
-                codes = [{'code': c['option_code'], 'value': c['option_value']} for c in codes]
-            basic_options[field] = codes
-            logging.info(f"드롭다운 옵션 로드: {field} -> {len(codes)}개")
-        
-        # 건물은 마스터 DB에서 우선 로드 (있다면)
-        try:
-            cursor.execute("""
-                SELECT DISTINCT building_code as option_code, 
-                       building_name as option_value
-                FROM buildings_cache 
-                ORDER BY building_name
-            """)
-            building_rows = cursor.fetchall()
-            if building_rows:
-                basic_options['building'] = [dict(row) for row in building_rows]
-                logging.info(f"건물 마스터에서 {len(building_rows)}개 로드")
-        except:
-            # 건물 마스터 테이블이 없으면 드롭다운 코드 사용
-            pass
-    
-    # 템플릿 파일 경로 확인 (디버깅)
-    import os
-    template_path = os.path.join(app.template_folder, 'accident-detail.html')
-    print(f"[DEBUG] 렌더링할 템플릿 경로: {template_path}", flush=True)
-    print(f"[DEBUG] 템플릿 파일 존재: {os.path.exists(template_path)}", flush=True)
-    if os.path.exists(template_path):
-        with open(template_path, 'r', encoding='utf-8') as f:
-            first_100_lines = f.readlines()[:100]
-            for i, line in enumerate(first_100_lines):
-                if '기본정보' in line or '사고번호' in line or '대분류' in line:
-                    print(f"[DEBUG] 템플릿 라인 {i+1}: {line.strip()}", flush=True)
-    
-    # 템플릿으로 전달되는 데이터 디버그
-    logging.debug(f"accident_detail: accident type {type(accident)}, custom_data type {type(custom_data)}")
-    
-    return render_template('accident-detail.html', 
-                         instruction=accident,  # accident를 instruction으로도 전달 (템플릿 호환성)
-                         accident=accident,
-                         attachments=attachments,
-                         sections=sections,
-                         section_columns=section_columns,
-                         dynamic_columns=dynamic_columns,  # 동적 컬럼 정보
-                         all_column_keys=list(all_keys),  # 전역 컬럼 키 (활성/비활성 포함)
-                         basic_info_columns=basic_info_columns,  # 하위 호환성
-                         violation_info_columns=violation_info_columns,  # 하위 호환성
-                         additional_columns=additional_columns,  # 하위 호환성
-                         custom_data=custom_data,  # 기존 데이터
-                         basic_options=basic_options,  # 기본정보 드롭다운 옵션
-                         menu=MENU_CONFIG, 
-                         is_popup=is_popup,
-                         is_direct_entry=is_direct_entry,  # ACC 여부 전달
-                         board_type='accident')  # 게시판 타입 전달  # 게시판 타입 전달  # 게시판 타입 전달
-
-def get_dropdown_options_for_display(board_type, column_key):
-    """보드별 드롭다운 옵션을 코드-값 매핑 방식으로 가져오기
-    
-    Args:
-        board_type: 보드 타입 ('accident', 'safety_instruction', 'change_request' 등)
-        column_key: 컬럼 키
-    """
-    try:
-        conn = get_db_connection()
-        
-        # v2 테이블 우선 확인 (board_type 포함)
-        codes = conn.execute("""
-            SELECT option_code, option_value 
-            FROM dropdown_option_codes_v2
-            WHERE board_type = %s AND column_key = %s AND is_active = 1
-            ORDER BY display_order
-        """, (board_type, column_key)).fetchall()
-        
-        # v2에서만 조회 (v1 폴백 제거)
-        
-        conn.close()
-        
-        if codes:
-            # 🔐 방탄: 만약 '단 1행'이고 그 값이 JSON 배열 문자열이면 바로 분해해서 반환
-            if len(codes) == 1:
-                v = codes[0]['option_value']
-                if isinstance(v, str):
-                    s = v.strip()
-                    if s.startswith('[') and s.endswith(']'):
-                        try:
-                            arr = pyjson.loads(s)
-                            if isinstance(arr, list):
-                                # 경고를 디버그 레벨로 변경 (운영 환경에서는 표시되지 않음)
-                                logging.debug(
-                                    f"[{column_key}] option_value가 배열 문자열로 저장됨. 런타임 분해 처리. "
-                                    f"원본={v} (len={len(arr)})"
-                                )
-                                return [
-                                    {'code': f"{column_key.upper()}_{i+1:03d}", 'value': str(item)}
-                                    for i, item in enumerate(arr)
-                                ]
-                        except Exception as e:
-                            logging.error(f"[{column_key}] 배열 문자열 파싱 실패: {e}")
-            
-            # 정상 케이스
-            return [{'code': row['option_code'], 'value': row['option_value']} for row in codes]
-        else:
-            return None
-    except:
-        return None
-
-def convert_code_to_value_scoped(board_type, column_key, code):
-    """보드 스코프에서 코드값을 표시값으로 변환 (v2 우선, v1 폴백)"""
-    if not code:
-        return code
-    if column_key in DROPDOWN_MAPPINGS:
-        return DROPDOWN_MAPPINGS[column_key].get(code, code)
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        # v2: board_type 포함 조회
-        result = cursor.execute(
-            """
-            SELECT option_value
-            FROM dropdown_option_codes_v2
-            WHERE board_type = %s AND column_key = %s AND option_code = %s
-            """,
-            (board_type, column_key, code),
-        ).fetchone()
-        if result:
-            conn.close()
-            return result[0]
-        # v1 폴백 제거
-        conn.close()
-        return code
-    except Exception:
-        return code
-
-# REMOVED: convert_code_to_value 레거시 함수 제거됨
-# 대신 convert_code_to_value_scoped(board_type, column_key, code) 사용
-
-def convert_accident_codes_to_values(accident_data, dynamic_columns):
-    """사고 데이터의 코드를 표시 값으로 일괄 변환"""
-    if not accident_data or not accident_data.get('custom_data'):
-        return accident_data
-    
-    try:
-        custom_data = pyjson.loads(accident_data['custom_data'])
-        
-        for col in dynamic_columns:
-            if col['column_type'] == 'dropdown' and col['column_key'] in custom_data:
-                code = custom_data[col['column_key']]
-                if code:
-                    # 코드를 값으로 변환
-                    custom_data[col['column_key']] = convert_code_to_value_scoped('accident', col['column_key'], code)
-        
-        accident_data['custom_data'] = pyjson.dumps(custom_data, ensure_ascii=False)
-    except:
-        pass
-    
-    return accident_data
-
-@app.route("/accident-register")
-def accident_register():
-    """사고 등록 페이지"""
-    logging.info("사고 등록 페이지 접근")
-    
-    conn = get_db_connection()
-    
-    # 동적 컬럼 설정 가져오기 - is_deleted 체크 추가
-    _wa = sql_is_active_true('is_active', conn)
-    _wd = sql_is_deleted_false('is_deleted', conn)
-    dynamic_columns_rows = conn.execute(f"""
-        SELECT * FROM accident_column_config 
-        WHERE {_wa} AND {_wd}
-        ORDER BY column_order
-    """).fetchall()
-    
-    # Row 객체를 딕셔너리로 변환
-    dynamic_columns = [dict(row) for row in dynamic_columns_rows]
-    
-    # column_span을 정수로 변환
-    for col in dynamic_columns:
-        if col.get('column_span'):
-            col['column_span'] = int(col['column_span'])
-    
-    # 드롭다운 컬럼에 대해 코드-값 매핑 적용
-    for col in dynamic_columns:
-        if col['column_type'] == 'dropdown':
-            # 코드-값 매핑 방식으로 옵션 가져오기
-            code_options = get_dropdown_options_for_display('accident', col['column_key'])
-            # 코드-값 매핑 방식 사용 (DB dropdown_option_codes_v2 테이블)
-            col['dropdown_options_mapped'] = code_options if code_options else []
-    
-    # 기본정보 드롭다운 옵션 로드 (safety-instruction과 동일한 패턴)
-    basic_options = {}
-    from board_services import CodeService
-    code_service = CodeService('accident', DB_PATH)
-    
-    # 기본정보 필드들의 드롭다운 옵션 로드
-    basic_fields = [
-        'workplace',            # 사업장
-        'accident_grade',       # 사고등급
-        'major_category',       # 대분류
-        'injury_form',          # 재해형태
-        'injury_type',          # 재해유형
-        'floor',                # 층수
-        'location_category',    # 장소구분
-        'building'              # 건물
-    ]
-    
-    for field in basic_fields:
-        codes = code_service.list(field)
-        # 템플릿이 기대하는 형식으로 변환 (option_code -> code, option_value -> value)
-        if codes and len(codes) > 0 and 'option_code' in codes[0]:
-            codes = [{'code': c['option_code'], 'value': c['option_value']} for c in codes]
-        basic_options[field] = codes
-        logging.info(f"드롭다운 옵션 로드: {field} -> {len(codes)}개")
-    
-    # 건물은 마스터 DB에서 우선 로드 (있다면)
-    try:
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT DISTINCT building_code as option_code, 
-                   building_name as option_value
-            FROM buildings_cache 
-            WHERE is_active = 1
-            ORDER BY building_name
-        """)
-        building_rows = cursor.fetchall()
-        if building_rows:
-            basic_options['building'] = [dict(row) for row in building_rows]
-            logging.info(f"건물 마스터에서 {len(building_rows)}개 로드")
-    except:
-        # 건물 마스터 테이블이 없으면 드롭다운 코드 사용
-        pass
-    
-    conn.close()
-    
-    logging.info(f"동적 컬럼 {len(dynamic_columns)}개 로드됨")
-    logging.info(f"기본 옵션 {len(basic_options)}개 필드 로드됨")
-
-    # 컬럼 타입 정규화 - 공통 함수 사용
-    dynamic_columns = normalize_column_types(dynamic_columns)
-
-    # 섹션 정보 로드 - safety-instruction과 동일한 방식
-    from section_service import SectionConfigService
-    section_service = SectionConfigService('accident', DB_PATH)
-    sections = section_service.get_sections()
-    logging.info(f"섹션 {len(sections)}개 로드됨")
-
-    # 섹션 키 정규화: 잘못된/없음(tab) → 유효 섹션으로 귀속
-    try:
-        known_keys = {s.get('section_key') for s in sections if s.get('section_key')}
-        alias_map = {'violation_info': 'accident_info'}
-        fallback_key = (
-            ('additional' if 'additional' in known_keys else None)
-            or ('basic_info' if 'basic_info' in known_keys else None)
-            or (next(iter(known_keys)) if known_keys else None)
-        )
-        for col in dynamic_columns:
-            tab = col.get('tab')
-            if tab in alias_map and alias_map[tab] in known_keys:
-                col['tab'] = alias_map[tab]
-                tab = col['tab']
-            if not tab or tab not in known_keys:
-                if fallback_key:
-                    col['tab'] = fallback_key
-    except Exception as _e:
-        logging.warning(f"섹션 키 정규화(등록화면) 경고: {_e}")
-
-    # 섹션별로 컬럼 분류 (동적) + 섹션 내 정렬(column_order, id)
-    section_columns = {}
-    for section in sections:
-        cols = [col for col in dynamic_columns if col.get('tab') == section['section_key']]
-        def _order_key(c):
-            try:
-                return (int(c.get('column_order') or 0), int(c.get('id') or 0))
-            except Exception:
-                return (c.get('column_order') or 0, c.get('id') or 0)
-        cols.sort(key=_order_key)
-        
-        # 첫 번째 섹션(basic_info)에 사고번호와 등록일을 강제로 맨 앞에 추가
-        if section['section_key'] == 'basic_info':
-            # 기존 컬럼에서 사고번호와 등록일 제거
-            cols = [c for c in cols if c.get('column_key') not in ['accident_number', 'created_at', 'report_date']]
-            
-            # 사고번호와 등록일을 강제로 첫 번째 줄에 추가
-            mandatory_cols = []
-            
-            # 사고번호 - 항상 첫 번째 (등록 시 자동 생성)
-            mandatory_cols.append({
-                'column_key': 'accident_number',
-                'column_name': '사고번호',
-                'column_type': 'text',
-                'tab': 'basic_info',
-                'column_order': -2,
-                'is_active': 1,
-                'is_readonly': 1,
-                'column_span': 1,
-                'default_value': 'ACC' + get_korean_time().strftime('%y%m%d%H%M')  # 자동 생성
-            })
-            
-            # 등록일 - 항상 두 번째
-            mandatory_cols.append({
-                'column_key': 'created_at',
-                'column_name': '등록일',
-                'column_type': 'date',
-                'tab': 'basic_info',
-                'column_order': -1,
-                'is_active': 1,
-                'is_readonly': 1,
-                'column_span': 1,
-                'default_value': get_korean_time().strftime('%Y-%m-%d')
-            })
-            
-            # 강제 컬럼을 앞에 추가
-            cols = mandatory_cols + cols
-        
-        section_columns[section['section_key']] = cols
-        logging.info(f"섹션 '{section['section_name']}': {len(section_columns[section['section_key']])}개 컬럼")
-    
-    # 하위 호환성을 위한 변수 유지 (템플릿이 아직 하드코딩된 경우)
-    basic_info_columns = section_columns.get('basic_info', [])
-    violation_info_columns = section_columns.get('accident_info', [])  # accident_info로 수정
-    additional_columns = section_columns.get('additional', [])
-    
-    # 팝업 모드인지 확인
-    is_popup = request.args.get('popup') == '1'
-    
-    # 현재 날짜 추가 (한국 시간)
-    today_date = get_korean_time().strftime('%Y-%m-%d')
-    
-    return render_template('accident-register.html',
-                         dynamic_columns=dynamic_columns,
-                         sections=sections,  # 섹션 정보 추가
-                         section_columns=section_columns,  # 섹션별 컬럼 추가
-                         basic_info_columns=basic_info_columns,  # 하위 호환성
-                         violation_info_columns=violation_info_columns,  # 하위 호환성
-                         additional_columns=additional_columns,  # 하위 호환성
-                         basic_options=basic_options,  # basic_options 추가
-                         today_date=today_date,  # 오늘 날짜 추가
-                         menu=MENU_CONFIG,
-                         is_popup=is_popup)
-
-@app.route("/register-change-request", methods=["POST"])
-def register_change_request():
-    """새 변경요청 등록"""
-    conn = None
-    try:
-        from board_services import AttachmentService
-        from timezone_config import get_korean_time, get_korean_time_str
-        
-        # FormData로 전송된 데이터 파싱
-        data = pyjson.loads(request.form.get('data', '{}'))
-        attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
-        files = request.files.getlist('files')
-        
-        logging.info(f"변경요청 등록 요청 받음 - 데이터: {data}")
-        logging.info(f"첨부파일 개수: {len(files)}")
-        
-        # 변경요청 번호 생성 (CR-YYYYMM-NN 형식으로 통일)
-        today = get_korean_time()
-        year_month = today.strftime('%Y%m')
-        request_number_prefix = f"CR-{year_month}-"
-        
-        conn = get_db_connection(timeout=30.0)
-        cursor = conn.cursor()
-        
-        # request_id 초기화
-        request_id = None
-        
-        # 오늘 날짜의 마지막 요청번호 찾기 - partner_change_requests 테이블에서
-        cursor.execute("""
-            SELECT request_number FROM partner_change_requests
-            WHERE request_number LIKE %s
-            ORDER BY request_number DESC
-            LIMIT 1
-        """, (f"{request_number_prefix}%",))
-        
-        last_request = cursor.fetchone()
-        if last_request:
-            last_num = int(last_request[0][-2:])
-            new_num = str(last_num + 1).zfill(2)
-        else:
-            new_num = "01"
-        
-        request_number = f"{request_number_prefix}{new_num}"
-        
-        # partner_change_requests 테이블에 저장 (메인 테이블)
-        try:
-            # 운영환경에서는 테이블이 이미 생성되어 있어야 함
-            
-            # 상태를 강제로 'requested' (요청)으로 설정
-            data['status'] = 'requested'
-            
-            cursor.execute("""
-                INSERT INTO partner_change_requests 
-                (request_number, requester_name, requester_department, company_name, 
-                 business_number, change_reason, status, created_at, updated_at, custom_data,
-                 change_type, current_value, new_value)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-            """, (
-                request_number,
-                data.get('requester_name', data.get('req_name', '')),
-                data.get('requester_department', data.get('req_name_dept', '')),
-                data.get('company_name', data.get('compname', '')),
-                data.get('business_number', data.get('compname_bizno', '')),
-                data.get('change_reason', ''),
-                'requested',
-                get_korean_time_str(),
-                get_korean_time_str(),
-                pyjson.dumps(data),
-                data.get('change_type', ''),
-                data.get('current_value', ''),
-                data.get('new_value', '')
-            ))
-            request_id = cursor.fetchone()[0]  # RETURNING id 결과 가져오기
-            logging.info(f"partner_change_requests 테이블에 저장 완료: ID={request_id}")
-        except Exception as e:
-            logging.error(f"partner_change_requests 테이블 저장 실패: {e}")
-
-        # details 테이블에 상세내용 저장 (단일 경로)
-        try:
-            from db.upsert import safe_upsert as _su
-            detailed_content = ''
-            try:
-                detailed_content = data.get('detailed_content', '')
-            except Exception:
-                detailed_content = ''
-            _su(conn, 'change_request_details', {
-                'request_number': request_number,
-                'detailed_content': detailed_content,
-                'updated_at': None
-            })
-            logging.info("[CR REGISTER] details upsert applied")
-        except Exception as _e_det:
-            logging.warning(f"[CR REGISTER] details upsert warning: {_e_det}")
-
-        # 첨부파일 저장: request_number 를 item_id로 사용
-        try:
-            if files:
-                from board_services import AttachmentService as _AS
-                _asvc = _AS('change_request', DB_PATH, conn)
-                for idx, _f in enumerate(files):
-                    _desc = ''
-                    if idx < len(attachment_data) and isinstance(attachment_data[idx], dict):
-                        _desc = attachment_data[idx].get('description', '')
-                    _asvc.add(request_number, _f, {'description': _desc, 'uploaded_by': session.get('user_id', 'user')})
-        except Exception as _e:
-            logging.error(f"첨부파일 저장 실패: {_e}")
-        
-        # 첨부파일 처리 (AttachmentService 사용)
-        # 첨부파일 처리 (현재 비활성화)
-        if False and (files or attachment_data):
-            # AttachmentService 사용시 올바른 패턴
-            # attachment_service = AttachmentService('change_request', DB_PATH, conn)
-            # for file in files:
-            #     attachment_service.add(request_number, file, {'uploaded_by': 'user'})
-            pass
-        
-        conn.commit()
-        conn.close()
-        
-        logging.info(f"변경요청 등록 완료 - 번호: {request_number}, ID: {request_id if request_id else 'N/A'}")
-        
-        return jsonify({
-            "success": True,
-            "request_id": request_id,
-            "request_number": request_number,
-            "message": "변경요청이 성공적으로 등록되었습니다."
-        })
-        
-    except Exception as e:
-        logging.error(f"변경요청 등록 중 오류: {e}")
-        if conn:
-            conn.rollback()
-            conn.close()
-        return jsonify({"success": False, "message": str(e)}), 500
-
-@app.route("/register-accident", methods=["POST"])
-def register_accident():
-    """새 사고 등록"""
-    conn = None
-    try:
-        # json already imported globally
-        import datetime
-        
-        # 기본정보 필드들 받기 (ACCIDENTS_QUERY와 동일한 14개 필드 + α)
-        accident_number = ''  # 자동생성
-        accident_name = request.form.get('accident_name', '')
-        print(f"[DEBUG] accident_name received: '{accident_name}'")  # 디버깅
-        workplace = request.form.get('workplace', '')
-        accident_grade = request.form.get('accident_grade', '')
-        major_category = request.form.get('major_category', '')
-        injury_form = request.form.get('injury_form', '')
-        injury_type = request.form.get('injury_type', '')
-        accident_date = request.form.get('accident_date', '')
-        day_of_week = request.form.get('day_of_week', '')
-        # 등록일은 항상 오늘 날짜(한국 시간)로 설정
-        created_at = get_korean_time().strftime('%Y-%m-%d')
-        building = request.form.get('building', '')
-        floor = request.form.get('floor', '')
-        location_category = request.form.get('location_category', '')
-        location_detail = request.form.get('location_detail', '')
-        
-        detailed_content = request.form.get('detailed_content')
-        # PostgreSQL JSONB는 이미 dict로 반환됨
-        custom_data_raw = request.form.get('custom_data', '{}')
-        if isinstance(custom_data_raw, dict):
-            custom_data = custom_data_raw
-        else:
-            custom_data = pyjson.loads(custom_data_raw) if custom_data_raw else {}  # 동적 컬럼
-        attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
-        files = request.files.getlist('files')
-
-        # 디버깅: attachment_data 구조 확인
-        print(f"[ACC DEBUG] attachment_data 전체: {attachment_data}")
-        print(f"[ACC DEBUG] attachment_data 타입: {type(attachment_data)}")
-        for idx, item in enumerate(attachment_data):
-            print(f"[ACC DEBUG] attachment_data[{idx}]: {item}, 타입: {type(item)}")
-
-        print(f"=== 등록 요청 받음 ===")
-        print(f"사고명: {accident_name}")
-        print(f"사고 날짜: {accident_date}")
-        print(f"받은 모든 form 데이터:")
-        for key in request.form.keys():
-            print(f"  {key}: {request.form.get(key)}")
-        
-        print(f"custom_data 원본: {request.form.get('custom_data', 'None')}")
-        print(f"custom_data 파싱 후: {custom_data}")
-        print(f"custom_data 키: {list(custom_data.keys())}")
-        print(f"첨부파일 개수: {len(files)}")
-        
-        # 리스트 타입 필드 확인 및 처리
-        list_fields = []
-        for key, value in custom_data.items():
-            # 이미 리스트인 경우 (클라이언트에서 제대로 파싱한 경우)
-            if isinstance(value, list):
-                list_fields.append(key)
-                print(f"✅ 리스트 필드 정상 - {key}: {len(value)}개 항목")
-            # 문자열로 저장된 리스트 (이중 인코딩 문제)
-            elif isinstance(value, str) and value.startswith('['):
-                list_fields.append(key)
-                print(f"⚠️ 문자열로 된 리스트 필드 발견 - {key}: {value}")
-                try:
-                    # 문자열을 실제 리스트로 변환
-                    parsed_value = pyjson.loads(value)
-                    custom_data[key] = parsed_value
-                    print(f"   → 리스트로 변환 성공: {len(parsed_value)}개 항목")
-                except:
-                    print(f"   → 리스트로 변환 실패, 빈 배열로 설정")
-                    custom_data[key] = []
-        print(f"발견된 리스트 필드: {list_fields}")
-        
-        logging.info(f"등록 요청 받음 - 사고명: {accident_name}")
-        logging.info(f"동적 컬럼 데이터: {custom_data}")
-        logging.info(f"리스트 필드: {list_fields}")
-        
-        # 새 사고번호 생성 (수기입력: ACCYYMMDD00 형식)
-        # 한국 시간 기준으로 생성
-        korean_now = get_korean_time()
-        date_part = korean_now.strftime('%y%m%d')  # YYMMDD 형식
-        accident_number_prefix = f"ACC{date_part}"
-        
-        conn = get_db_connection(timeout=30.0)
-        cursor = conn.cursor()
-        
-        # 오늘 날짜의 마지막 사고번호 찾기
-        cursor.execute("""
-            SELECT accident_number FROM accidents_cache 
-            WHERE accident_number LIKE %s 
-            ORDER BY accident_number DESC 
-            LIMIT 1
-        """, (f"{accident_number_prefix}%",))
-        
-        last_accident = cursor.fetchone()
-        if last_accident:
-            # 마지막 번호에서 1 증가 (뒤 2자리)
-            last_num = int(last_accident[0][-2:])
-            accident_number = f"{accident_number_prefix}{str(last_num + 1).zfill(2)}"
-        else:
-            accident_number = f"{accident_number_prefix}01"
-        
-        logging.info(f"새 사고 등록: {accident_number}")
-        
-        # 1. 기본 사고 정보 등록 (기본정보 + 동적 컬럼)
-        # 필요한 컬럼들이 없는 경우 추가
-        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
-        cursor.execute("""
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'accidents_cache'
-        """)
-        columns = [col[0] for col in cursor.fetchall()]
-        
-        # 필수 컬럼들 체크 및 추가
-        required_columns = [
-            ('accident_number', 'TEXT'),
-            ('accident_name', 'TEXT'),
-            ('accident_date', 'TEXT'),
-            ('accident_datetime', 'TEXT'),
-            ('accident_grade', 'TEXT'),
-            ('accident_type', 'TEXT'),
-            ('injury_type', 'TEXT'),
-            ('injury_form', 'TEXT'),
-            ('workplace', 'TEXT'),
-            ('report_date', 'TEXT'),
-            ('building', 'TEXT'),
-            ('floor', 'TEXT'),
-            ('location_detail', 'TEXT'),
-            ('day_of_week', 'TEXT'),
-            ('major_category', 'TEXT'),
-            ('location_category', 'TEXT'),
-            ('created_at', 'TEXT'),
-            ('custom_data', 'TEXT')
-        ]
-        
-        for col_name, col_type in required_columns:
-            if col_name not in columns:
-                cursor.execute(f"ALTER TABLE accidents_cache ADD COLUMN {col_name} {col_type}")
-                logging.info(f"컬럼 추가: {col_name}")
-        
-        # Details 테이블 저장 (단일 경로)
-        try:
-            from db.upsert import safe_upsert as _su
-            _su(conn, 'accident_details', {
-                'accident_number': accident_number,
-                'detailed_content': detailed_content or '',
-                'updated_at': None
-            })
-            logging.info("[ACC REGISTER] details upsert applied")
-        except Exception as _e_det:
-            logging.warning(f"[ACC REGISTER] details upsert warning: {_e_det}")
-
-        # datetime 조합 (정렬용)
-        if accident_date:
-            accident_datetime = f"{accident_date} 00:00"
-        else:
-            accident_datetime = get_korean_time().strftime('%Y-%m-%d %H:%M')
-        
-        print(f"[DEBUG] Inserting accident with name: '{accident_name or f'사고_{accident_number}'}'")  # 디버깅
-        # report_date: 사고일자 있으면 그것, 없으면 오늘 날짜
-        report_date_value = (accident_date or created_at)
-        cursor.execute("""
-            INSERT INTO accidents_cache (
-                accident_number,
-                accident_name,
-                workplace,
-                accident_grade,
-                major_category,
-                injury_form,
-                injury_type,
-                accident_date,
-                day_of_week,
-                report_date,
-                created_at,
-                building,
-                floor,
-                location_category,
-                location_detail,
-                custom_data
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (
-            accident_number,
-            accident_name or f"사고_{accident_number}",
-            workplace or '',
-            accident_grade or '',
-            major_category or '',
-            injury_form or '',
-            injury_type or '',
-            accident_date or korean_now.strftime('%Y-%m-%d'),
-            day_of_week or '',
-            report_date_value,
-            created_at or korean_now.strftime('%Y-%m-%d'),
-            building or '',
-            floor or '',
-            location_category or '',
-            location_detail or '',
-            pyjson.dumps(custom_data)
-        ))
-        
-        # 2. 상세내용을 custom_data에 저장
-        if detailed_content:
-            # 기존 custom_data 가져오기
-            cursor.execute("SELECT custom_data FROM accidents_cache WHERE accident_number = %s", (accident_number,))
-            row = cursor.fetchone()
-            existing_custom_data = {}
-            if row and row[0]:
-                if isinstance(row[0], str):
-                    try:
-                        existing_custom_data = pyjson.loads(row[0])
-                    except:
-                        existing_custom_data = {}
-                elif isinstance(row[0], dict):
-                    existing_custom_data = row[0]
-            
-            # detailed_content 추가
-            existing_custom_data['detailed_content'] = detailed_content
-            
-            # custom_data 업데이트
-            cursor.execute("""
-                UPDATE accidents_cache 
-                SET custom_data = %s
-                WHERE accident_number = %s
-            """, (pyjson.dumps(existing_custom_data), accident_number))
-        
-        # 3. 첨부파일 처리
-        if files:
-            upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'accidents')
-            os.makedirs(upload_folder, exist_ok=True)
-            
-            for i, file in enumerate(files):
-                if file and file.filename:
-                    filename = secure_filename(file.filename)
-                    timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
-                    unique_filename = f"{accident_number}_{timestamp}_{filename}"
-                    file_path = os.path.join(upload_folder, unique_filename)
-                    
-                    file.save(file_path)
-                    
-                    # 첨부파일 정보 저장
-                    description = attachment_data[i]['description'] if i < len(attachment_data) else ''
-                    cursor.execute("""
-                        INSERT INTO accident_attachments (accident_number, file_name, file_path, file_size, description)
-                        VALUES (%s, %s, %s, %s, %s)
-                    """, (accident_number, filename, file_path, os.path.getsize(file_path), description))
-        
-        conn.commit()
-        
-        # 저장 확인
-        cursor.execute("SELECT custom_data FROM accidents_cache WHERE accident_number = %s", (accident_number,))
-        saved_data = cursor.fetchone()
-        if saved_data:
-            print(f"DB에 저장된 custom_data 타입: {type(saved_data[0])}")
-            try:
-                # PostgreSQL JSONB는 이미 dict로 반환됨
-                if isinstance(saved_data[0], dict):
-                    parsed_saved = saved_data[0]
-                else:
-                    parsed_saved = pyjson.loads(saved_data[0]) if saved_data[0] else {}
-                print(f"DB에서 파싱된 데이터 키: {list(parsed_saved.keys())[:5]}")
-            except Exception as e:
-                print(f"DB 데이터 확인 중 경고 (무시 가능): {e}")
-        
-        logging.info(f"사고 {accident_number} 등록 완료")
-        print(f"=== 등록 완료: {accident_number} ===")
-        
-        return jsonify({"success": True, "accident_number": accident_number})
-        
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        logging.error(f"사고 등록 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)})
-    finally:
-        if conn:
-            conn.close()
+    return _safety_instruction_controller.detail_view(request, issue_number)
 
 def register_safety_instruction_logic():
     """새 환경안전 지시서 등록"""
-    conn = None
-    try:
-        # json already imported globally
-        import datetime
+    return _safety_instruction_controller.save(request)
 
-        conn = get_db_connection(timeout=30.0)
-        cursor = conn.cursor()
+def update_safety_instruction_logic():
+    """환경안전 지시서 수정"""
+    return _safety_instruction_controller.update(request)
 
-        # 섹션 정보 동적으로 가져오기
-        try:
-            cursor.execute("""
-                SELECT DISTINCT section_key, section_order
-                FROM safety_instruction_sections
-                WHERE is_active = 1
-                ORDER BY section_order
-            """)
-            sections = cursor.fetchall()
-            section_keys = [row[0] for row in sections] if sections else []
-        except Exception as e:
-            logging.warning(f"섹션 정보 조회 실패: {e}")
-            # 트랜잭션 롤백
-            conn.rollback()
-            # 테이블이 없거나 오류 시 기본값 사용
-            section_keys = ['basic_info', 'violation_info', 'additional']
-
-        logging.info(f"활성 섹션 목록: {section_keys}")
-
-        # 모든 필드를 모을 딕셔너리
-        all_fields = {}
-
-        # 각 섹션별로 데이터 수집
-        for section_key in section_keys:
-            section_data_str = request.form.get(section_key, '{}')
-            logging.info(f"[DEBUG] 섹션 {section_key} raw data: {section_data_str[:200]}")  # 디버깅 추가
-            try:
-                section_data = pyjson.loads(section_data_str)
-                all_fields.update(section_data)
-                logging.info(f"섹션 {section_key}: {len(section_data)} 필드")
-                # 실제 값이 있는지 확인
-                non_empty = {k: v for k, v in section_data.items() if v and v not in ('', [])}
-                logging.info(f"섹션 {section_key} 비어있지 않은 필드: {list(non_empty.keys())}")
-            except Exception as e:
-                logging.warning(f"섹션 {section_key} 파싱 실패: {e}")
-
-        # 하위 호환성: 섹션 데이터가 없으면 custom_data 사용
-        if not all_fields:
-            custom_data_str = request.form.get('custom_data', '{}')
-            all_fields = pyjson.loads(custom_data_str)
-            logging.info(f"섹션 데이터 없음, custom_data 사용: {len(all_fields)} 필드")
-
-        # 개별 필드 추출 (기존 코드와 호환)
-        issue_number = all_fields.get('issue_number', '')  # 발부번호 (자동생성)
-        issuer = all_fields.get('issuer', '')  # 발행인
-        issuer_department = all_fields.get('issuer_department', '')  # 발행부서
-        classification = all_fields.get('classification', '')  # 분류
-        employment_type = all_fields.get('employment_type', '')  # 고용형태
-        primary_company = all_fields.get('primary_company', '')  # 1차사명
-        primary_business_number = all_fields.get('primary_business_number', '')  # 1차사_사업자번호
-        subcontractor = all_fields.get('subcontractor', '')  # 하도사명
-        subcontractor_business_number = all_fields.get('subcontractor_business_number', '')  # 하도사_사업자번호
-        disciplined_person = all_fields.get('disciplined_person', '')  # 징계자
-        gbm = all_fields.get('gbm', '')  # GBM
-        business_division = all_fields.get('business_division', '')  # 사업부
-        team = all_fields.get('team', '')  # 팀
-        department = all_fields.get('department', '')  # 소속부서
-        violation_date = all_fields.get('violation_date', '')  # 위반일자
-        discipline_date = all_fields.get('discipline_date', '')  # 징계일자
-        discipline_department = all_fields.get('discipline_department', '')  # 징계발의부서
-        discipline_type = all_fields.get('discipline_type', '')  # 징계유형
-        accident_type = all_fields.get('accident_type', '')  # 사고유형
-        accident_grade = all_fields.get('accident_grade', '')  # 사고등급
-        safety_violation_grade = all_fields.get('safety_violation_grade', '')  # 환경안전수칙 위반등급
-        violation_type = all_fields.get('violation_type', '')  # 위반유형
-        access_ban_start_date = all_fields.get('access_ban_start_date', '')  # 출입정지 시작일
-        access_ban_end_date = all_fields.get('access_ban_end_date', '')  # 출입정지 종료일
-        period = all_fields.get('period', '')  # 기간
-        work_grade = all_fields.get('work_grade', '')  # 작업등급
-        penalty_points = all_fields.get('penalty_points', '')  # 감점
-        disciplined_person_id = all_fields.get('disciplined_person_id', '')  # 징계자ID
-        
-        # 상세내용
-        detailed_content = request.form.get('detailed_content', '')  # 상세내용
-        
-        # 첨부파일 데이터
-        attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
-        files = request.files.getlist('files')
-
-        # 디버깅: attachment_data 구조 확인
-        logging.info(f"[SI DEBUG] attachment_data 전체: {attachment_data}")
-        logging.info(f"[SI DEBUG] attachment_data 타입: {type(attachment_data)}")
-        for idx, item in enumerate(attachment_data):
-            logging.info(f"[SI DEBUG] attachment_data[{idx}]: {item}, 타입: {type(item)}")
-
-        logging.info(f"환경안전 지시서 등록 요청 받음 - 징계자: {disciplined_person}")
-        logging.info(f"위반일자: {violation_date}, 징계일자: {discipline_date}")
-        logging.info(f"전체 필드 수: {len(all_fields)}")
-        logging.info(f"첨부파일 개수: {len(files)}")
-        
-        # 발부번호 자동 생성 (YYYY-MM-00 형식)
-        if violation_date:
-            # 위반일자를 기준으로 년월 추출
-            try:
-                date_obj = datetime.datetime.strptime(violation_date, '%Y-%m-%d')
-                year_month = f"{date_obj.year}-{date_obj.month:02d}"
-            except ValueError:
-                # 파싱 실패시 한국 시간 기준 현재 날짜 사용
-                korean_now = get_korean_time()
-                year_month = f"{korean_now.year}-{korean_now.month:02d}"
-        else:
-            # 위반일자가 없으면 한국 시간 기준 현재 날짜 사용
-            korean_now = get_korean_time()
-            year_month = f"{korean_now.year}-{korean_now.month:02d}"
-        
-        # 해당 년월의 마지막 발부번호 찾기 (메인 테이블에서)
-        cursor.execute("""
-            SELECT issue_number FROM safety_instructions
-            WHERE issue_number LIKE %s
-            ORDER BY issue_number DESC
-            LIMIT 1
-        """, (f"{year_month}-%",))
-        
-        last_instruction = cursor.fetchone()
-        if last_instruction:
-            # 마지막 번호에서 1 증가 (뒤 2자리)
-            last_num = int(last_instruction[0].split('-')[2])
-            generated_issue_number = f"{year_month}-{str(last_num + 1).zfill(2)}"
-        else:
-            generated_issue_number = f"{year_month}-01"
-        
-        logging.info(f"새 환경안전 지시서 발부번호 생성: {generated_issue_number}")
-        
-        # all_fields에 이미 모든 필드가 있으므로 그대로 사용
-        all_custom_data = all_fields.copy()
-
-        # detailed_content는 별도 필드이므로 custom_data에도 포함
-        all_custom_data['detailed_content'] = detailed_content
-        
-        # 메인 테이블에 등록 - created_at은 DEFAULT 사용
-        from db.upsert import safe_upsert
-        main_data = {
-            'issue_number': generated_issue_number,
-            'custom_data': pyjson.dumps(all_custom_data),
-            'detailed_content': detailed_content,
-            'is_deleted': 0,
-            'created_at': None,   # DEFAULT CURRENT_TIMESTAMP
-            'updated_at': None    # 자동 처리
-        }
-        # 안전한 UPSERT (issue_number 기준)
-        safe_upsert(
-            conn,
-            'safety_instructions',
-            main_data,
-            conflict_cols=['issue_number'],
-            update_cols=['custom_data', 'detailed_content', 'updated_at', 'is_deleted']
-        )
-
-        # Details 테이블에도 저장 (단일 경로)
-        try:
-            safe_upsert(conn, 'safety_instruction_details', {
-                'issue_number': generated_issue_number,
-                'detailed_content': detailed_content,
-                'updated_at': None
-            })
-            logging.info("[SI REGISTER] details upsert applied")
-        except Exception as _e_det:
-            logging.warning(f"[SI REGISTER] details upsert warning: {_e_det}")
-        
-        # 첨부파일 처리
-        if files:
-            upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'safety_instructions')
-            os.makedirs(upload_folder, exist_ok=True)
-            
-            for i, file in enumerate(files):
-                if file and file.filename:
-                    filename = secure_filename(file.filename)
-                    timestamp = get_korean_time().strftime('%Y%m%d_%H%M%S')
-                    unique_filename = f"{generated_issue_number}_{timestamp}_{filename}".replace('-', '_')
-                    file_path = os.path.join(upload_folder, unique_filename)
-                    
-                    file.save(file_path)
-
-                    # 첨부파일 정보 저장 (accident와 동일한 방식)
-                    description = attachment_data[i]['description'] if i < len(attachment_data) else ''
-
-                    logging.info(f"[SI DEBUG] INSERT 시도: issue_number={generated_issue_number}, file={filename}, desc='{description}'")
-                    cursor.execute("""
-                        INSERT INTO safety_instruction_attachments (issue_number, file_name, file_path, file_size, description)
-                        VALUES (%s, %s, %s, %s, %s)
-                    """, (generated_issue_number, filename, file_path, os.path.getsize(file_path), description))
-        
-        conn.commit()
-        logging.info(f"환경안전 지시서 {generated_issue_number} 등록 완료")
-        
-        return jsonify({"success": True, "issue_number": generated_issue_number})
-        
-    except Exception as e:
-        if conn:
-            try:
-                conn.rollback()
-            except:
-                pass  # rollback 실패도 무시
-        logging.error(f"환경안전 지시서 등록 중 오류: {e}")
-        logging.error(f"오류 타입: {type(e).__name__}")
-        import traceback
-        logging.error(f"스택 트레이스:\n{traceback.format_exc()}")
-        return jsonify({"success": False, "message": str(e)})
-    finally:
-        if conn:
-            conn.close()
 
 @app.route("/verify-password", methods=["POST"])
 def verify_password():
@@ -6340,8 +2815,8 @@ def update_partner():
         logging.error(f"업데이트 중 오류 발생: {str(e)}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-@app.route("/update-accident", methods=["POST"])
-def update_accident():
+# Legacy update function retained for reference (no longer routed)
+def _legacy_update_accident():
     """사고 정보 업데이트"""
     conn = None
     try:
@@ -6835,6 +3310,11 @@ def update_accident():
         logging.error(f"사고 업데이트 중 오류 발생: {str(e)}")
         return jsonify({"success": False, "message": str(e)}), 500
 
+
+
+@app.route("/update-accident", methods=["POST"])
+def update_accident():
+    return _accident_controller.update(request)
 
 
 @app.route("/download/<int:attachment_id>")
@@ -12075,10 +8555,10 @@ def page_view(url):
         'accident': 'accident_route',
         # 구경로 호환: partner-accident는 accident로 리다이렉트
         'partner-accident': 'accident_route',
-        'safety-instruction': 'safety_instruction_route',
-        'follow-sop': 'follow_sop_route',
-        'full-process': 'full_process_route',
-        'safe-workplace': 'safe_workplace_route',
+        'safety-instruction': 'safety_instruction.safety_instruction_route',
+        'follow-sop': 'follow_sop.follow_sop_route',
+        'full-process': 'full_process.full_process_route',
+        'safe-workplace': 'safe_workplace.safe_workplace_route',
         'partner-standards': 'partner_standards_route',
         # 구 라우트 호환: /change-request -> /partner-change-request
         'change-request': 'partner_change_request_route',
@@ -12493,13 +8973,30 @@ def auto_sso_redirect():
         '/admin/sync-now', '/admin/sync-now/', '/admin/cache-counts'
     ]
 
-    # 동기화 토큰이 있는 요청은 항상 통과 (자동화/스크립트 호출용)
+    cfg = configparser.ConfigParser()
     try:
-        cfg = configparser.ConfigParser()
         cfg.read('config.ini', encoding='utf-8')
-        expected = cfg.get('ADMIN', 'SYNC_TOKEN', fallback='')
     except Exception:
-        expected = ''
+        cfg = None
+
+    # SSO 비활성화 설정이면 자동 리다이렉트 스킵
+    if cfg:
+        try:
+            enabled_flag = cfg.getboolean('SSO', 'enabled', fallback=True)
+            sso_enabled_flag = cfg.getboolean('SSO', 'sso_enabled', fallback=True)
+            if not (enabled_flag and sso_enabled_flag):
+                return None
+        except Exception:
+            # 설정 파싱 실패 시 기존 동작 유지
+            pass
+
+    # 동기화 토큰이 있는 요청은 항상 통과 (자동화/스크립트 호출용)
+    expected = ''
+    if cfg:
+        try:
+            expected = cfg.get('ADMIN', 'SYNC_TOKEN', fallback='')
+        except Exception:
+            expected = ''
     if expected and request.headers.get('X-Sync-Token') == expected:
         return None
 

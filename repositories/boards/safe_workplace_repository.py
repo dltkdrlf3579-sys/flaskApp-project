@@ -1,4 +1,4 @@
-"""Repository implementation for the Full Process board."""
+"""Repository implementation for the Safe Workplace board."""
 
 from __future__ import annotations
 
@@ -15,12 +15,12 @@ from db_connection import get_db_connection
 from db.upsert import safe_upsert
 from utils.board_layout import order_value, sort_columns, sort_sections
 from upload_utils import validate_uploaded_files
-from id_generator import generate_fullprocess_number
+from id_generator import generate_safeplace_number
 from timezone_config import get_korean_time
 
 
-class FullProcessRepository:
-    """Encapsulates database operations used by the Full Process controller."""
+class SafeWorkplaceRepository:
+    """Encapsulates database operations used by the Safe Workplace controller."""
 
     def __init__(self, db_path: str) -> None:
         self._db_path = db_path
@@ -88,13 +88,12 @@ class FullProcessRepository:
         if self._resolved_table:
             return self._resolved_table
 
-        for candidate in ("full_process", "full_process_cache", "fullprocess_cache"):
+        for candidate in ("safe_workplace", "safe_workplace_cache"):
             if self._table_exists(conn, candidate):
                 self._resolved_table = candidate
                 return candidate
 
-        # Fallback to the modern table name
-        self._resolved_table = "full_process"
+        self._resolved_table = "safe_workplace"
         return self._resolved_table
 
     def _first_value(self, row, default=None):
@@ -140,29 +139,17 @@ class FullProcessRepository:
                     ("public", table_key),
                 )
                 for row in cursor.fetchall():
-                    value = None
                     if isinstance(row, dict):
-                        value = row.get("column_name")
+                        columns.append(str(row.get("column_name")))
                     else:
-                        try:
-                            value = row[0]
-                        except Exception:
-                            value = None
-                    if value:
-                        columns.append(str(value))
+                        columns.append(str(row[0]))
             else:
                 cursor.execute(f"PRAGMA table_info({table_key})")
                 for row in cursor.fetchall():
-                    value = None
                     try:
-                        value = row["name"]  # sqlite3.Row / SqliteRowCompat supports key access
+                        columns.append(str(row["name"]))
                     except Exception:
-                        try:
-                            value = row[1]
-                        except Exception:
-                            value = None
-                    if value:
-                        columns.append(str(value))
+                        columns.append(str(row[1]))
         except Exception:
             columns = []
 
@@ -179,7 +166,7 @@ class FullProcessRepository:
                 WHERE board_type = %s AND column_key = %s AND is_active = 1
                 ORDER BY display_order
                 """,
-                ('full_process', column_key),
+                ('safe_workplace', column_key),
             )
             rows = cursor.fetchall()
 
@@ -203,7 +190,7 @@ class FullProcessRepository:
                             ]
                     except Exception:
                         logging.debug(
-                            "[FULL_PROCESS] dropdown array parse failed for %s",
+                            "[SAFE_WORKPLACE] dropdown array parse failed for %s",
                             column_key,
                         )
 
@@ -240,24 +227,23 @@ class FullProcessRepository:
     # Section / column metadata
 
     def ensure_default_sections(self) -> None:
-        """Guarantee that 기본정보/프로세스 정보 섹션이 존재."""
-
         defaults = [
             ("basic_info", "기본정보", 1),
-            ("process_info", "프로세스 정보", 2),
+            ("workplace_info", "작업장정보", 2),
+            ("safety_info", "안전정보", 3),
         ]
 
         with self.connection() as conn:
             cursor = conn.cursor()
             for key, name, order in defaults:
                 cursor.execute(
-                    "SELECT COUNT(*) FROM full_process_sections WHERE section_key = %s",
+                    "SELECT COUNT(*) FROM safe_workplace_sections WHERE section_key = %s",
                     (key,),
                 )
-                if (cursor.fetchone() or [0])[0] == 0:
+                if self._first_value(cursor.fetchone(), 0) == 0:
                     cursor.execute(
                         """
-                        INSERT INTO full_process_sections
+                        INSERT INTO safe_workplace_sections
                             (section_key, section_name, section_order, is_active, is_deleted)
                         VALUES
                             (%s, %s, %s, 1, 0)
@@ -273,7 +259,7 @@ class FullProcessRepository:
             cursor.execute(
                 """
                 SELECT *
-                FROM full_process_sections
+                FROM safe_workplace_sections
                 WHERE COALESCE(is_active, 1) = 1
                   AND COALESCE(is_deleted, 0) = 0
                 ORDER BY section_order
@@ -290,7 +276,7 @@ class FullProcessRepository:
             cursor.execute(
                 """
                 SELECT *
-                FROM full_process_column_config
+                FROM safe_workplace_column_config
                 WHERE COALESCE(is_active, 1) = 1
                   AND COALESCE(is_deleted, 0) = 0
                 ORDER BY column_order
@@ -317,7 +303,7 @@ class FullProcessRepository:
             table_columns = set(self._get_columns(conn, table))
             is_postgres = getattr(conn, "is_postgres", False)
 
-            where_clauses = ["COALESCE(p.is_deleted, 0) = 0"]
+            where_clauses = ["COALESCE(sw.is_deleted, 0) = 0"]
             params: List[Any] = []
 
             company_name = (filters.get("company_name") or "").strip()
@@ -325,7 +311,7 @@ class FullProcessRepository:
 
             if company_name:
                 like_value = f"%{company_name}%"
-                json_keys = ["company_name", "company_1cha"]
+                json_keys = ["company_name", "company_name_1cha"]
                 direct_columns = [
                     col
                     for col in ("company_name", "primary_company")
@@ -334,19 +320,19 @@ class FullProcessRepository:
 
                 if is_postgres:
                     company_filters = [
-                        f"(p.custom_data->>'{key}') ILIKE %s"
+                        f"(sw.custom_data->>'{key}') ILIKE %s"
                         for key in json_keys
                     ]
                     company_filters.extend(
-                        [f"COALESCE(p.{col}, '') ILIKE %s" for col in direct_columns]
+                        [f"COALESCE(sw.{col}, '') ILIKE %s" for col in direct_columns]
                     )
                 else:
                     company_filters = [
-                        f"LOWER(COALESCE(JSON_EXTRACT(p.custom_data, '$.{key}'), '')) LIKE LOWER(%s)"
+                        f"LOWER(COALESCE(JSON_EXTRACT(sw.custom_data, '$.{key}'), '')) LIKE LOWER(%s)"
                         for key in json_keys
                     ]
                     company_filters.extend(
-                        [f"LOWER(COALESCE(p.{col}, '')) LIKE LOWER(%s)" for col in direct_columns]
+                        [f"LOWER(COALESCE(sw.{col}, '')) LIKE LOWER(%s)" for col in direct_columns]
                     )
 
                 company_filters = [f for f in company_filters if f]
@@ -356,7 +342,7 @@ class FullProcessRepository:
 
             if business_number:
                 like_value = f"%{business_number}%"
-                json_keys = ["business_number", "company_1cha_bizno"]
+                json_keys = ["business_number", "company_name_1cha_bizno"]
                 direct_columns = [
                     col
                     for col in ("business_number", "primary_business_number")
@@ -365,19 +351,19 @@ class FullProcessRepository:
 
                 if is_postgres:
                     biz_filters = [
-                        f"(p.custom_data->>'{key}') ILIKE %s"
+                        f"(sw.custom_data->>'{key}') ILIKE %s"
                         for key in json_keys
                     ]
                     biz_filters.extend(
-                        [f"COALESCE(p.{col}, '') ILIKE %s" for col in direct_columns]
+                        [f"COALESCE(sw.{col}, '') ILIKE %s" for col in direct_columns]
                     )
                 else:
                     biz_filters = [
-                        f"LOWER(COALESCE(JSON_EXTRACT(p.custom_data, '$.{key}'), '')) LIKE LOWER(%s)"
+                        f"LOWER(COALESCE(JSON_EXTRACT(sw.custom_data, '$.{key}'), '')) LIKE LOWER(%s)"
                         for key in json_keys
                     ]
                     biz_filters.extend(
-                        [f"LOWER(COALESCE(p.{col}, '')) LIKE LOWER(%s)" for col in direct_columns]
+                        [f"LOWER(COALESCE(sw.{col}, '')) LIKE LOWER(%s)" for col in direct_columns]
                     )
 
                 biz_filters = [f for f in biz_filters if f]
@@ -388,14 +374,28 @@ class FullProcessRepository:
             where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
 
             cursor = conn.cursor()
-            count_query = f"SELECT COUNT(*) FROM {table} p WHERE {where_sql}"
+            count_query = f"SELECT COUNT(*) FROM {table} sw WHERE {where_sql}"
             cursor.execute(count_query, params)
-            total_count = int(self._first_value(cursor.fetchone(), 0) or 0)
+            count_row = cursor.fetchone()
+            if count_row is None:
+                total_count = 0
+            elif isinstance(count_row, dict):
+                total_count = int(next(iter(count_row.values()), 0) or 0)
+            else:
+                try:
+                    total_count = int(count_row[0])
+                except Exception:
+                    try:
+                        values = list(getattr(count_row, 'values')())
+                        total_count = int(values[0] if values else 0)
+                    except Exception:
+                        total_count = 0
 
+            order_pk = "safeplace_no" if "safeplace_no" in table_columns else "id"
             query = (
-                f"SELECT p.* FROM {table} p "
+                f"SELECT sw.* FROM {table} sw "
                 f"WHERE {where_sql} "
-                "ORDER BY p.created_at DESC "
+                f"ORDER BY sw.created_at DESC, sw.{order_pk} DESC "
                 "LIMIT %s OFFSET %s"
             )
             cursor.execute(query, [*params, per_page, offset])
@@ -404,14 +404,14 @@ class FullProcessRepository:
         return total_count, items
 
     # ------------------------------------------------------------------
-    # Placeholder detail/save operations (to be implemented in later steps)
+    # Detail / register context
 
-    def fetch_detail_context(self, fullprocess_number: str, is_popup: bool) -> Dict[str, Any]:
+    def fetch_detail_context(self, safeplace_no: str, is_popup: bool) -> Dict[str, Any]:
         base_context = self.fetch_register_context(is_popup=False)
         sections = base_context['sections']
         dynamic_columns = base_context['dynamic_columns']
 
-        process: Dict[str, Any] = {}
+        workplace: Dict[str, Any] = {}
         attachments: List[Dict[str, Any]] = []
 
         with self.connection() as conn:
@@ -423,70 +423,79 @@ class FullProcessRepository:
                     f"""
                     SELECT *
                     FROM {table}
-                    WHERE fullprocess_number = %s
+                    WHERE safeplace_no = %s
                       AND COALESCE(is_deleted, 0) = 0
                     """,
-                    (fullprocess_number,),
+                    (safeplace_no,),
                 )
             except Exception as exc:
-                logging.error("[FULL_PROCESS] detail query failed: %s", exc)
+                logging.error("[SAFE_WORKPLACE] detail query failed: %s", exc)
                 return {}
 
             row = cursor.fetchone()
             if not row:
                 return {}
-            process = dict(row)
+            workplace = dict(row)
 
             try:
                 cursor.execute(
                     """
                     SELECT detailed_content
-                    FROM full_process_details
-                    WHERE fullprocess_number = %s
+                    FROM safe_workplace_details
+                    WHERE safeplace_no = %s
                     """,
-                    (fullprocess_number,),
+                    (safeplace_no,),
                 )
                 detail_row = cursor.fetchone()
-                detail_value = self._extract_detail_row_value(detail_row)
-
+                detail_value = None
+                if detail_row is not None:
+                    if isinstance(detail_row, dict):
+                        detail_value = detail_row.get('detailed_content')
+                    elif isinstance(detail_row, (list, tuple)):
+                        detail_value = detail_row[0] if detail_row else None
+                    elif hasattr(detail_row, 'keys'):
+                        try:
+                            detail_value = detail_row['detailed_content']
+                        except Exception:
+                            values = list(detail_row.values()) if hasattr(detail_row, 'values') else []
+                            detail_value = values[0] if values else None
+                    else:
+                        detail_value = detail_row
                 if detail_value is not None:
                     if isinstance(detail_value, (dict, list)):
                         try:
-                            process['detailed_content'] = json.dumps(detail_value, ensure_ascii=False)
+                            workplace['detailed_content'] = json.dumps(detail_value, ensure_ascii=False)
                         except Exception:
-                            process['detailed_content'] = str(detail_value)
+                            workplace['detailed_content'] = str(detail_value)
                     else:
-                        process['detailed_content'] = str(detail_value)
+                        workplace['detailed_content'] = str(detail_value)
             except Exception:
-                logging.debug("[FULL_PROCESS] detail content lookup skipped", exc_info=True)
+                logging.debug("[SAFE_WORKPLACE] detail content lookup skipped", exc_info=True)
 
             try:
                 from board_services import AttachmentService
 
-                attachment_service = AttachmentService('full_process', self._db_path, conn)
-                attachments = attachment_service.list(fullprocess_number)
+                attachment_service = AttachmentService('safe_workplace', self._db_path, conn)
+                attachments = attachment_service.list(safeplace_no)
             except Exception:
-                logging.debug("[FULL_PROCESS] attachment lookup skipped", exc_info=True)
+                logging.debug("[SAFE_WORKPLACE] attachment lookup skipped", exc_info=True)
 
-        custom_data = self._normalise_custom_data(process.get('custom_data'))
+        custom_data = self._normalise_custom_data(workplace.get('custom_data'))
         if custom_data:
-            process.update(custom_data)
-        process['custom_data'] = custom_data
+            workplace.update(custom_data)
+        workplace['custom_data'] = custom_data
 
         detail_context = dict(base_context)
         detail_context.update({
-            'process': process,
-            'instruction': process,
+            'workplace': workplace,
             'custom_data': custom_data,
-            'section_data': {},
             'attachments': attachments,
-            'fullprocess_number': fullprocess_number,
+            'safeplace_no': safeplace_no,
             'all_column_keys': [
                 column.get('column_key')
                 for column in dynamic_columns
                 if column.get('column_key')
             ],
-            'external_scoring_data': None,
             'is_popup': is_popup,
         })
         return detail_context
@@ -500,27 +509,31 @@ class FullProcessRepository:
         }
         dynamic_columns = self.fetch_dynamic_columns(section_order_map)
 
-        from timezone_config import get_korean_time
-
         created_at_dt = get_korean_time()
         created_at = created_at_dt.strftime('%Y-%m-%d %H:%M:%S')
-        fullprocess_number = generate_fullprocess_number(self.db_path, created_at_dt)
+        safeplace_no = generate_safeplace_number(self.db_path, created_at_dt)
+
+        filtered_columns = [
+            col
+            for col in dynamic_columns
+            if col.get('column_key') not in ['safeplace_no', 'created_at']
+        ]
 
         basic_fields = [
             {
-                'column_key': 'fullprocess_number',
-                'column_name': '평가번호',
+                'column_key': 'safeplace_no',
+                'column_name': '점검번호',
                 'column_type': 'text',
                 'is_required': 1,
                 'is_readonly': 1,
                 'tab': 'basic_info',
-                'default_value': fullprocess_number,
+                'default_value': safeplace_no,
             },
             {
                 'column_key': 'created_at',
                 'column_name': '등록일',
                 'column_type': 'datetime',
-                'is_required': 1,
+                'is_required': 0,
                 'is_readonly': 1,
                 'tab': 'basic_info',
                 'default_value': created_at,
@@ -528,9 +541,9 @@ class FullProcessRepository:
         ]
 
         basic_info_dynamic = [
-            col for col in dynamic_columns
+            col
+            for col in filtered_columns
             if col.get('tab') == 'basic_info'
-            and col.get('column_key') not in ['fullprocess_number', 'created_at']
         ]
         basic_fields.extend(basic_info_dynamic)
 
@@ -538,11 +551,11 @@ class FullProcessRepository:
         for section in sections:
             if section['section_key'] != 'basic_info':
                 section_columns[section['section_key']] = [
-                    col for col in dynamic_columns if col.get('tab') == section['section_key']
+                    col for col in filtered_columns if col.get('tab') == section['section_key']
                 ]
 
         basic_options: Dict[str, Any] = {}
-        for col in dynamic_columns:
+        for col in filtered_columns:
             if col.get('column_type') == 'dropdown':
                 col_key = col.get('column_key')
                 if col_key:
@@ -554,74 +567,25 @@ class FullProcessRepository:
         today_date = get_korean_time().strftime('%Y-%m-%d')
 
         return {
-            'dynamic_columns': dynamic_columns,
+            'dynamic_columns': filtered_columns,
             'sections': sections,
             'section_columns': section_columns,
             'basic_options': basic_options,
+            'safeplace_no': safeplace_no,
+            'created_at': created_at,
             'today_date': today_date,
             'is_popup': is_popup,
         }
 
     # ------------------------------------------------------------------
-    # Detail content helpers
-
-    def _fetch_current_detail(self, conn, fullprocess_number: str) -> Optional[str]:
-        try:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT detailed_content FROM full_process_details WHERE fullprocess_number = %s",
-                (fullprocess_number,),
-            )
-            row = cursor.fetchone()
-        except Exception:
-            logging.debug('[FULL_PROCESS] current detail lookup skipped', exc_info=True)
-            return None
-
-        return self._extract_detail_row_value(row)
-
-    def _extract_detail_row_value(self, row) -> Optional[str]:
-        if row is None:
-            return None
-        if isinstance(row, dict):
-            return row.get('detailed_content')
-        try:
-            return row['detailed_content']
-        except (TypeError, KeyError):
-            try:
-                return row[0]
-            except Exception:
-                return None
-
-    def _extract_detailed_content(self, data: Mapping[str, Any], existing: Optional[str] = None) -> str:
-        value = data.get('detailed_content')
-
-        if value is None:
-            for key in ('detail_content', 'detailedContent', 'content'):
-                alt = data.get(key)
-                if alt not in (None, ''):
-                    value = alt
-                    break
-
-        if value is None:
-            return existing or ''
-
-        if isinstance(value, (list, tuple)):
-            value = value[0] if value else ''
-
-        try:
-            text = str(value)
-        except Exception:
-            text = ''
-
-        return text
+    # Save operations
 
     def save_from_request(self, request) -> Any:
         data = request.form
         files: List[FileStorage] = request.files.getlist('files')
-        detailed_content = self._extract_detailed_content(data)
+        detailed_content = data.get('detailed_content', '')
 
         if not data.get('sections'):
-            # Legacy form posts use per-section JSON payloads
             sections_json: Dict[str, Any] = {}
             for key in data.keys():
                 if key in {'custom_data', 'attachment_data', 'detailed_content'}:
@@ -649,20 +613,12 @@ class FullProcessRepository:
         except Exception:
             pass
 
-        try:
-            logging.info(
-                "[FULL_PROCESS] incoming detailed_content length=%s",
-                len(detailed_content or "")
-            )
-        except Exception:
-            logging.debug("[FULL_PROCESS] detailed_content logging skipped", exc_info=True)
-
         valid_files, validation_errors = validate_uploaded_files(files)
         if validation_errors:
             return {'success': False, 'message': validation_errors[0], 'errors': validation_errors}, 400
 
         created_at_dt = get_korean_time()
-        fullprocess_number = data.get('fullprocess_number') or generate_fullprocess_number(self.db_path, created_at_dt)
+        safeplace_no = data.get('safeplace_no') or generate_safeplace_number(self.db_path, created_at_dt)
 
         custom_data_json = json.dumps(custom_data, ensure_ascii=False)
 
@@ -671,7 +627,7 @@ class FullProcessRepository:
             table_columns = set(self._get_columns(conn, table))
 
             upsert_data: Dict[str, Any] = {
-                'fullprocess_number': fullprocess_number,
+                'safeplace_no': safeplace_no,
                 'custom_data': custom_data_json,
             }
 
@@ -687,17 +643,17 @@ class FullProcessRepository:
             try:
                 safe_upsert(
                     conn,
-                    'full_process_details',
+                    'safe_workplace_details',
                     {
-                        'fullprocess_number': fullprocess_number,
+                        'safeplace_no': safeplace_no,
                         'detailed_content': detailed_content,
                         'updated_at': None,
                     },
-                    conflict_cols=['fullprocess_number'],
+                    conflict_cols=['safeplace_no'],
                     update_cols=['detailed_content', 'updated_at'],
                 )
             except Exception:
-                logging.debug('[FULL_PROCESS] details upsert failed', exc_info=True)
+                logging.debug('[SAFE_WORKPLACE] details upsert failed', exc_info=True)
 
             attachment_data_raw = data.get('attachment_data', '[]')
             if isinstance(attachment_data_raw, list):
@@ -712,7 +668,7 @@ class FullProcessRepository:
                 try:
                     from board_services import AttachmentService
 
-                    attachment_service = AttachmentService('full_process', self._db_path, conn)
+                    attachment_service = AttachmentService('safe_workplace', self._db_path, conn)
                     uploaded_by = data.get('created_by') or data.get('user_id', 'system')
 
                     for index, file_info in enumerate(valid_files):
@@ -721,180 +677,14 @@ class FullProcessRepository:
                         if index < len(attachment_meta) and isinstance(attachment_meta[index], dict):
                             meta['description'] = attachment_meta[index].get('description', '')
                         meta.setdefault('uploaded_by', uploaded_by)
-                        attachment_service.add(fullprocess_number, file_obj, meta)
+                        attachment_service.add(safeplace_no, file_obj, meta)
                 except Exception:
-                    logging.error('[FULL_PROCESS] attachment save failed', exc_info=True)
+                    logging.error('[SAFE_WORKPLACE] attachment save failed', exc_info=True)
 
             conn.commit()
 
-            try:
-                detail_row = conn.execute(
-                    "SELECT detailed_content FROM full_process_details WHERE fullprocess_number = %s",
-                    (fullprocess_number,)
-                ).fetchone()
-                logging.info(
-                    "[FULL_PROCESS] detail length=%s",
-                    len(detail_row[0]) if detail_row and detail_row[0] else 0
-                )
-            except Exception:
-                logging.debug("[FULL_PROCESS] post-save detail check skipped", exc_info=True)
-
         return {
             'success': True,
-            'message': 'Full Process가 등록되었습니다.',
-            'fullprocess_number': fullprocess_number,
-        }, 200
-
-    def update_from_request(self, request) -> Any:
-        data = request.form
-        files: List[FileStorage] = request.files.getlist('files')
-
-        fullprocess_number = (data.get('fullprocess_number') or '').strip()
-        if not fullprocess_number:
-            return {'success': False, 'message': '평가번호가 필요합니다.'}, 400
-
-        valid_files, validation_errors = validate_uploaded_files(files)
-        if validation_errors:
-            return {'success': False, 'message': validation_errors[0], 'errors': validation_errors}, 400
-
-        if not data.get('sections'):
-            sections_json: Dict[str, Any] = {}
-            for key in data.keys():
-                if key in {'custom_data', 'attachment_data', 'detailed_content', 'deleted_attachments'}:
-                    continue
-                try:
-                    sections_json[key] = json.loads(data.get(key) or '{}')
-                except Exception:
-                    sections_json[key] = {}
-            custom_data = {}
-            for payload in sections_json.values():
-                if isinstance(payload, dict):
-                    custom_data.update(payload)
-        else:
-            try:
-                custom_data = json.loads(data.get('sections') or '{}')
-            except Exception:
-                custom_data = {}
-
-        custom_data_raw = data.get('custom_data', '{}')
-        try:
-            if isinstance(custom_data_raw, dict):
-                custom_data.update(custom_data_raw)
-            else:
-                custom_data.update(json.loads(custom_data_raw) or {})
-        except Exception:
-            pass
-
-        custom_data_json = json.dumps(custom_data, ensure_ascii=False)
-
-        deleted_raw = data.get('deleted_attachments', '[]')
-        try:
-            deleted_ids = [int(item) for item in json.loads(deleted_raw or '[]')]
-        except Exception:
-            deleted_ids = []
-
-        attachment_data_raw = data.get('attachment_data', '[]')
-        try:
-            attachment_meta = (
-                json.loads(attachment_data_raw or '[]')
-                if not isinstance(attachment_data_raw, list)
-                else attachment_data_raw
-            )
-        except Exception:
-            attachment_meta = []
-        if not isinstance(attachment_meta, list):
-            attachment_meta = []
-
-        with self.connection() as conn:
-            existing_detail = self._fetch_current_detail(conn, fullprocess_number)
-            detailed_content = self._extract_detailed_content(data, existing_detail)
-            try:
-                logging.info(
-                    "[FULL_PROCESS] update detail incoming length=%s",
-                    len(detailed_content or "")
-                )
-            except Exception:
-                logging.debug("[FULL_PROCESS] update detail logging skipped", exc_info=True)
-
-            table = self._resolve_table_name(conn)
-
-            safe_upsert(
-                conn,
-                table,
-                {
-                    'fullprocess_number': fullprocess_number,
-                    'custom_data': custom_data_json,
-                },
-                conflict_cols=['fullprocess_number'],
-                update_cols=['custom_data'],
-            )
-
-            safe_upsert(
-                conn,
-                'full_process_details',
-                {
-                    'fullprocess_number': fullprocess_number,
-                    'detailed_content': detailed_content,
-                    'updated_at': None,
-                },
-                conflict_cols=['fullprocess_number'],
-                update_cols=['detailed_content', 'updated_at'],
-            )
-
-            from board_services import AttachmentService
-
-            attachment_service = AttachmentService('full_process', self._db_path, conn)
-
-            if deleted_ids:
-                attachment_service.delete(deleted_ids)
-
-            for meta in attachment_meta:
-                attachment_id = None
-                if isinstance(meta, dict) and meta.get('id') and not meta.get('isNew'):
-                    try:
-                        attachment_id = int(meta['id'])
-                    except Exception:
-                        attachment_id = None
-                if attachment_id:
-                    fields: Dict[str, Any] = {}
-                    if 'description' in meta:
-                        fields['description'] = meta.get('description', '')
-                    if fields:
-                        attachment_service.update_meta(attachment_id, fields)
-
-            new_meta_iter = iter([
-                meta for meta in attachment_meta
-                if isinstance(meta, dict) and (not meta.get('id') or meta.get('isNew'))
-            ])
-            uploaded_by = data.get('updated_by') or data.get('user_id', 'system')
-            for file_info in valid_files:
-                file_obj: FileStorage = file_info['file']
-                meta: Dict[str, Any] = {}
-                try:
-                    candidate = next(new_meta_iter)
-                except StopIteration:
-                    candidate = None
-                if isinstance(candidate, dict):
-                    meta['description'] = candidate.get('description', '')
-                meta.setdefault('uploaded_by', uploaded_by)
-                attachment_service.add(fullprocess_number, file_obj, meta)
-
-            conn.commit()
-
-            try:
-                detail_row = conn.execute(
-                    "SELECT detailed_content FROM full_process_details WHERE fullprocess_number = %s",
-                    (fullprocess_number,)
-                ).fetchone()
-                logging.info(
-                    "[FULL_PROCESS] update detail length=%s",
-                    len(detail_row[0]) if detail_row and detail_row[0] else 0
-                )
-            except Exception:
-                logging.debug("[FULL_PROCESS] update detail check skipped", exc_info=True)
-
-        return {
-            'success': True,
-            'message': 'Full Process가 수정되었습니다.',
-            'fullprocess_number': fullprocess_number,
+            'message': '안전한 일터가 등록되었습니다.',
+            'safeplace_no': safeplace_no,
         }, 200

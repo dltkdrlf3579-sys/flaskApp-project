@@ -5,10 +5,12 @@
 {% endif %}
 
 {% block head %}
+    {{ super() }}
+    {% include 'includes/board_form_scripts.html' %}
 {% endblock %}
 
 {% block title %}사고 상세정보{% endblock %}
-{% block popup_title %}{{ instruction.accident_number }} - 사고 상세정보{% endblock %}
+{% block popup_title %}{{ accident.accident_number }} - 사고 상세정보{% endblock %}
 {% block content %}
 
 {% if not is_popup %}
@@ -17,7 +19,7 @@
     <div class="breadcrumb">
         <a href="{{ url_for('page_view', url='accident') }}">사고</a>
         <span class="separator">></span>
-        <span class="current">{{ instruction.accident_number }}</span>
+        <span class="current">{{ accident.accident_number }}</span>
     </div>
 </div>
 {% endif %}
@@ -41,26 +43,26 @@
                 <div class="info-row">
                     <div class="info-cell span-1">
                         <label>사고번호</label>
-                        <input type="text" value="{{ instruction.accident_number or '-' }}" readonly style="background-color: #f3f4f6;">
+                        <input type="text" value="{{ accident.accident_number or '-' }}" readonly style="background-color: #f3f4f6;">
                     </div>
                     <div class="info-cell span-1">
                         <label>등록일</label>
                         {# K사고도 report_date가 비어있으면 created_at/accident_date로 폴백 #}
-                        {% if instruction.accident_number and instruction.accident_number.startswith('K') %}
-                            {% if instruction.report_date %}
-                                {% set reg_date = instruction.report_date|date_only %}
-                            {% elif instruction.created_at %}
-                                {% set reg_date = instruction.created_at|date_only %}
-                            {% elif instruction.accident_date %}
-                                {% set reg_date = instruction.accident_date|date_only %}
+                        {% if accident.accident_number and accident.accident_number.startswith('K') %}
+                            {% if accident.report_date %}
+                                {% set reg_date = accident.report_date|date_only %}
+                            {% elif accident.created_at %}
+                                {% set reg_date = accident.created_at|date_only %}
+                            {% elif accident.accident_date %}
+                                {% set reg_date = accident.accident_date|date_only %}
                             {% else %}
                                 {% set reg_date = '-' %}
                             {% endif %}
                         {% else %}
-                            {% if instruction.created_at %}
-                                {% set reg_date = instruction.created_at|date_only %}
-                            {% elif instruction.accident_date %}
-                                {% set reg_date = instruction.accident_date|date_only %}
+                            {% if accident.created_at %}
+                                {% set reg_date = accident.created_at|date_only %}
+                            {% elif accident.accident_date %}
+                                {% set reg_date = accident.accident_date|date_only %}
                             {% else %}
                                 {% set reg_date = '-' %}
                             {% endif %}
@@ -96,7 +98,10 @@
                                 {% set base_key = col.column_key %}
                                 {% for s in suffixes %}
                                     {% if base_key.endswith(s) %}
-                                        {% set base_key = base_key[:-s|length] %}
+                                        {% set suffix_len = s|length %}
+                                        {% if suffix_len > 0 %}
+                                            {% set base_key = base_key[:-suffix_len] %}
+                                        {% endif %}
                                     {% endif %}
                                 {% endfor %}
                                 {% set group = '' %}
@@ -143,7 +148,8 @@
                                     <!-- 리스트 필드는 항상 custom_data에서 가져오기 -->
                                     {% set col_value = custom_data.get(col.column_key, '[]') if custom_data else '[]' %}
                                 {% else %}
-                                    {% set col_value = instruction[col.column_key] | default('', true) %}
+                                    {% set acc_val = accident.get(col.column_key) if accident else None %}
+                                    {% set col_value = (acc_val if acc_val not in (None, '') else (custom_data.get(col.column_key) if custom_data else '')) %}
                                 {% endif %}
                             
                             {% if col.column_key == 'accident_number' %}
@@ -430,23 +436,21 @@
 <!-- 스타일 제거 - 인라인 스타일로 대체 -->
 
 <script>
-// 섹션 정보
 const sections = {{ sections | tojson | safe }};
 const sectionColumns = {{ section_columns | tojson | safe }};
-const issueNumber = "{{ instruction.accident_number }}";
+const issueNumber = "{{ accident.accident_number }}";
 const isDirectEntry = {{ 'true' if is_direct_entry else 'false' }};
-// 외부 연동 컬럼 키(읽기 전용)
+
 const externalManagedKeys = [
   'accident_number','accident_name','workplace','accident_grade','major_category',
   'injury_form','injury_type','accident_date','day_of_week','report_date',
   'building','floor','location_category','location_detail'
 ];
 
-// 섹션 토글
 function toggleSection(sectionId) {
     const content = document.getElementById(sectionId + '-content');
     const icon = event.target;
-    
+
     if (content.style.display === 'none') {
         content.style.display = 'block';
         icon.textContent = '▲';
@@ -456,129 +460,33 @@ function toggleSection(sectionId) {
     }
 }
 
-// 첨부파일 관련 변수와 함수는 공통 컴포넌트에서 제공됨
-
-// 동적 필드 수집 함수
-function collectDynamicFields() {
-    const data = {};
-    
-    // 모든 섹션 순회
-    sections.forEach(section => {
-        const sectionInputs = document.querySelectorAll(`[data-section="${section.section_key}"]`);
-        
-        sectionInputs.forEach(input => {
-            const fieldKey = input.dataset.field;
-            let value = '';
-            
-            if (input.tagName === 'SELECT') {
-                value = input.value;
-            } else if (input.type === 'checkbox') {
-                value = input.checked ? '1' : '0';
-            } else if (input.tagName === 'TEXTAREA') {
-                value = input.value;
-            } else if (input.classList.contains('value')) {
-                // 읽기 전용 div
-                return;
-            } else {
-                value = input.value;
-            }
-            
-    // 리스트 필드 처리: data-field-type 또는 JSON 배열 문자열 판별
-            if ((input.getAttribute('data-field-type') === 'list' || 
-                 (typeof value === 'string' && value.trim().startsWith('['))) && value) {
-                try {
-                    const parsed = JSON.parse(value);
-                    data[fieldKey] = Array.isArray(parsed) ? parsed : value;
-                } catch(e) {
-                    data[fieldKey] = value;
-                }
-            } else {
-                data[fieldKey] = value;
-            }
-        });
-    });
-    
-    return data;
-}
-
-// 수정 함수
-function updateSafetyInstruction() {
+function updateAccident() {
     const formData = new FormData();
-    
-    // 발부번호
     formData.append('accident_number', issueNumber);
-    
-    // 상세내용 처리 - CKEditor 또는 textarea에서 값 가져오기
-    const contentTextarea = document.getElementById('detailed-content');
-    let detailedContent = '';
-    
-    // CKEditor가 있다면 CKEditor에서 값 가져오기
-    if (window.RichText && typeof window.RichText.getData === 'function') {
-        detailedContent = window.RichText.getData();
-    } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
-        detailedContent = window.editorInstance.getData();
-    } else if (contentTextarea) {
-        detailedContent = contentTextarea.value || '';
-    }
-    
+
+    const detailedContent = BoardForm.getEditorContent('detailed-content');
     formData.append('detailed_content', detailedContent);
-    
-    // 동적 필드 수집
-    const dynamicData = collectDynamicFields();
-    
-    // 각 필드를 FormData에 추가 (서버에서 필요한 경우 사용)
-    for (const [key, value] of Object.entries(dynamicData)) {
-        formData.append(key, value);
-    }
-    
-    // 사고번호 확인 (K사고 vs ACC사고)
-    const isAccidentEditable = issueNumber && issueNumber.startsWith('ACC');
-    // K사고도 편집 가능: base_fields도 항상 전송 (서버에서 안전하게 처리)
-    // base_fields: 기본 컬럼들 (화이트리스트)
-    const baseFields = {};
-    const baseFieldsList = [
+
+    const dynamicData = BoardForm.collectDynamicFields({ sections });
+    const grouped = BoardForm.groupFieldsBySection(dynamicData, sectionColumns);
+    BoardForm.appendSectionGroups(formData, grouped);
+
+    const baseFields = BoardForm.buildBaseFields(dynamicData, [
         'accident_name', 'accident_date', 'workplace', 'accident_grade',
         'major_category', 'injury_form', 'injury_type', 'building', 'floor',
-        'location_category', 'location_detail', 'created_at', 'day_of_week'
-    ];
-    
-    baseFieldsList.forEach(field => {
-        if (dynamicData[field] !== undefined) {
-            baseFields[field] = dynamicData[field];
-        }
-    });
-    
+        'location_category', 'location_detail', 'created_at', 'day_of_week', 'report_date'
+    ]);
     formData.append('base_fields', JSON.stringify(baseFields));
-    
-    // custom_data: 모든 동적 필드 포함 (GPT 권장: 전체 포함)
-    const customData = { ...dynamicData };
-    formData.append('custom_data', JSON.stringify(customData));
-    
-    // 새 첨부파일 처리 (공통 컴포넌트 변수 사용)
-    if (typeof pendingFiles !== 'undefined') {
-        pendingFiles.forEach((file, index) => {
-            formData.append('files', file);
-        });
-    }
-    
-    // 삭제된 첨부파일 정보
-    if (typeof deletedAttachments !== 'undefined') {
-        formData.append('deleted_attachments', JSON.stringify(deletedAttachments));
-    }
-    
-    // 첨부파일 설명 정보 (행의 data-* 속성 기반으로 정확히 수집)
-    const attachmentDescriptions = [];
-    document.querySelectorAll('#attachments-tbody .table-row').forEach((row) => {
-        const descInput = row.querySelector('.attachment-desc');
-        attachmentDescriptions.push({
-            id: row.dataset.id ? parseInt(row.dataset.id) : null,
-            description: descInput ? (descInput.value || '') : '',
-            isNew: row.dataset.isNew === 'true'
-        });
+
+    BoardForm.appendCustomData(formData, dynamicData);
+    BoardForm.appendPendingFiles(formData, (typeof pendingFiles !== 'undefined') ? pendingFiles : []);
+    BoardForm.appendDeletedAttachments(formData, (typeof deletedAttachments !== 'undefined') ? deletedAttachments : []);
+
+    const attachmentMeta = BoardForm.buildAttachmentMeta({
+        rowSelector: '#attachments-tbody .table-row'
     });
-    formData.append('attachment_data', JSON.stringify(attachmentDescriptions));
-    
-    // 서버로 전송
+    formData.append('attachment_data', JSON.stringify(attachmentMeta));
+
     fetch('/update-accident', {
         method: 'POST',
         body: formData
@@ -587,25 +495,27 @@ function updateSafetyInstruction() {
     .then(data => {
         if (data.success) {
             alert('사고가 성공적으로 수정되었습니다.');
-            
-            // 팝업 모드인 경우 부모 창 새로고침
+
             {% if is_popup %}
             if (window.opener && !window.opener.closed) {
                 window.opener.location.reload();
             }
             {% endif %}
-            
-            // 현재 창 새로고침 (캐시 무시)
-            window.location.href = window.location.href + '&t=' + new Date().getTime();
+
+            const url = new URL(window.location.href);
+            url.searchParams.set('t', Date.now());
+            window.location.href = url.toString();
         } else {
             alert('수정 실패: ' + (data.message || '알 수 없는 오류'));
         }
     })
     .catch(error => {
-        console.error('Error:', error);
+        console.error('수정 오류:', error);
         alert('수정 중 오류가 발생했습니다.');
     });
 }
+
+window.updateAccident = updateAccident;
 
 // 외부 연동 컬럼은 '음영' 표시만, 편집은 허용
 document.addEventListener('DOMContentLoaded', () => {
@@ -615,22 +525,11 @@ document.addEventListener('DOMContentLoaded', () => {
   inputs.forEach(el => {
     const key = el.getAttribute('data-field');
     if (externalManagedKeys.includes(key)) {
-      // 편집 가능 상태 유지: disabled/readOnly 설정하지 않음
-      // 시각적 힌트만 제공 (음영 처리)
       el.style.backgroundColor = '#f3f4f6';
-      // 검색/팝업 버튼 등도 사용 가능해야 하므로 비활성화하지 않음
     }
   });
 });
 
-// 모든 팝업 함수는 popup-handler.js에서 제공됨
-
-// K사고도 수정 허용(프론트 차단 제거)
-document.addEventListener('DOMContentLoaded', function() {
-    // no-op: 편집 제한 제거
-});
-
-// 비밀번호 모달 관련 함수들
 function showEditPasswordModal() {
     document.getElementById('edit-password-modal').style.display = 'block';
     document.getElementById('edit-password-input').focus();
@@ -642,241 +541,34 @@ function closeEditPasswordModal() {
 }
 
 function verifyPasswordAndSave() {
-    const password = document.getElementById('edit-password-input').value;
-    
+    const input = document.getElementById('edit-password-input');
+    const password = input ? input.value : '';
+
     if (!password) {
         alert('비밀번호를 입력해주세요.');
+        if (input) {
+            input.focus();
+        }
         return;
     }
-    
-    // 비밀번호가 admin123인지 확인
-    if (password === 'admin123') {
-        closeEditPasswordModal();
-        updateSafetyInstruction();
-    } else {
-        alert('비밀번호가 올바르지 않습니다.');
-        document.getElementById('edit-password-input').value = '';
-        document.getElementById('edit-password-input').focus();
-    }
-}
 
-// 페이지 로드 시 엔터 키 이벤트 추가
-document.addEventListener('DOMContentLoaded', function() {
-    // 비밀번호 입력 엔터 키 이벤트
-    const passwordInput = document.getElementById('edit-password-input');
-    if (passwordInput) {
-        passwordInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                verifyPasswordAndSave();
+    BoardDetail.verifyPassword({ boardType: 'accident', password })
+        .then(() => {
+            closeEditPasswordModal();
+            updateAccident();
+        })
+        .catch((error) => {
+            alert(error && error.message ? error.message : '비밀번호가 올바르지 않습니다.');
+            if (input) {
+                input.value = '';
+                input.focus();
             }
         });
-    }
-});
-
-// 기본 스크립트 끝
-// 모든 팝업 함수는 popup-handler.js에서 제공됨
-
-/*
-function openPersonSearch(fieldKey) {
-    const width = 1000;
-    const height = 600;
-    const left = (screen.width - width) / 2;
-    const top = (screen.height - height) / 2;
-    
-    const popupOptions = [
-        `width=${width}`,
-        `height=${height}`,
-        `left=${left}`,
-        `top=${top}`,
-        'scrollbars=yes',
-        'resizable=yes'
-    ].join(',');
-    
-    const popupUrl = `/search-popup?type=person&field=${fieldKey}`;
-    const popup = window.open(popupUrl, 'personSearch', popupOptions);
-    
-    if (!popup || popup.closed) {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
-        return;
-    }
-    
-    // receivePersonSelection 함수는 popup-handler.js에서 통합 처리됨
-    
-    popup.focus();
 }
 
-// 업체 검색 팝업 열기 함수
-function openCompanySearch(fieldKey) {
-    const width = 1000;
-    const height = 600;
-    const left = (screen.width - width) / 2;
-    const top = (screen.height - height) / 2;
-    
-    const popupOptions = [
-        `width=${width}`,
-        `height=${height}`,
-        `left=${left}`,
-        `top=${top}`,
-        'scrollbars=yes',
-        'resizable=yes'
-    ].join(',');
-    
-    const popupUrl = `/search-popup?type=company&field=${fieldKey}`;
-    const popup = window.open(popupUrl, 'companySearch', popupOptions);
-    
-    if (!popup || popup.closed) {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
-        return;
-    }
-    
-    // receiveCompanySelection 함수는 popup-handler.js에서 통합 처리됨
-    
-    popup.focus();
-}
-
-// 부서 검색 팝업 열기 함수  
-function openDepartmentSearch(fieldKey) {
-    const width = 1000;
-    const height = 600;
-    const left = (screen.width - width) / 2;
-    const top = (screen.height - height) / 2;
-    
-    const popupOptions = [
-        `width=${width}`,
-        `height=${height}`,
-        `left=${left}`,
-        `top=${top}`,
-        'scrollbars=yes',
-        'resizable=yes',
-        'toolbar=no',
-        'menubar=no',
-        'location=no',
-        'status=no'
-    ].join(',');
-    
-    const popupUrl = `/search-popup?type=department&field=${fieldKey}`;
-    const popup = window.open(popupUrl, 'departmentSearch', popupOptions);
-    
-    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
-        return;
-    }
-    
-    popup.focus();
-}
-
-// 협력사 검색 팝업 열기 함수
-function openContractorSearch(fieldKey) {
-    const width = 1000;
-    const height = 600;
-    const left = (screen.width - width) / 2;
-    const top = (screen.height - height) / 2;
-    
-    const popupOptions = [
-        `width=${width}`,
-        `height=${height}`,
-        `left=${left}`,
-        `top=${top}`,
-        'scrollbars=yes',
-        'resizable=yes',
-        'toolbar=no',
-        'menubar=no',
-        'location=no',
-        'status=no'
-    ].join(',');
-    
-    const popupUrl = `/search-popup?type=contractor&field=${fieldKey}`;
-    const popup = window.open(popupUrl, 'contractorSearch', popupOptions);
-    
-    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
-        return;
-    }
-    
-    popup.focus();
-}
-
-// 건물 검색 팝업 열기 함수
-function openBuildingSearch(fieldKey) {
-    const width = 1000;
-    const height = 600;
-    const left = (screen.width - width) / 2;
-    const top = (screen.height - height) / 2;
-    
-    const popupOptions = [
-        `width=${width}`,
-        `height=${height}`,
-        `left=${left}`,
-        `top=${top}`,
-        'scrollbars=yes',
-        'resizable=yes'
-    ].join(',');
-    
-    const popupUrl = `/search-popup?type=building&field=${fieldKey}`;
-    const popup = window.open(popupUrl, 'buildingSearch', popupOptions);
-    
-    if (!popup || popup.closed) {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
-        return;
-    }
-    
-    // receiveBuildingSelection 함수는 popup-handler.js에서 통합 처리됨
-    
-    popup.focus();
-}
-
-// receive*Selection 함수들은 popup-handler.js에서 통합 처리됨
-
-// receiveContractorSelection 함수는 popup-handler.js에서 통합 처리됨
-*/
-
-// 숫자 입력 유효성 검사 함수들
-function isNumberKey(evt, inputEl) {
-    var charCode = (evt.which) ? evt.which : evt.keyCode;
-    var t = (inputEl && inputEl.getAttribute('data-number-type')) || 'float';
-    if (charCode > 31 && (charCode < 48 || charCode > 57)) {
-        if (t === 'float' && charCode === 46) return true; // '.' 허용 (실수)
-        return false;
-    }
-    return true;
-}
-
-function validateNumberInput(input) {
-    const t = input.getAttribute('data-number-type') || 'float';
-    const value = input.value;
-    const numericValue = t === 'integer' ? value.replace(/[^0-9]/g, '') : value.replace(/[^0-9.]/g, '');
-    
-    if (value !== numericValue) {
-        input.value = numericValue;
-        // 경고 메시지 표시
-        showValidationMessage(input, t === 'integer' ? '정수만 입력할 수 있습니다.' : '숫자만 입력할 수 있습니다.');
-    }
-}
-
-function showValidationMessage(input, message) {
-    // 기존 메시지 제거
-    const existingMessage = input.parentNode.querySelector('.validation-message');
-    if (existingMessage) {
-        existingMessage.remove();
-    }
-    
-    // 새 메시지 생성
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'validation-message';
-    messageDiv.style.color = '#dc3545';
-    messageDiv.style.fontSize = '12px';
-    messageDiv.style.marginTop = '5px';
-    messageDiv.textContent = message;
-    
-    input.parentNode.appendChild(messageDiv);
-    
-    // 3초 후 메시지 제거
-    setTimeout(() => {
-        if (messageDiv.parentNode) {
-            messageDiv.remove();
-        }
-    }, 3000);
-}
+window.verifyPasswordAndSave = verifyPasswordAndSave;
+window.showEditPasswordModal = showEditPasswordModal;
+window.closeEditPasswordModal = closeEditPasswordModal;
 </script>
 
 <style>

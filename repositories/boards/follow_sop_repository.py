@@ -1,4 +1,4 @@
-"""Repository implementation for the Full Process board."""
+"""Repository implementation for the Follow SOP board."""
 
 from __future__ import annotations
 
@@ -15,12 +15,12 @@ from db_connection import get_db_connection
 from db.upsert import safe_upsert
 from utils.board_layout import order_value, sort_columns, sort_sections
 from upload_utils import validate_uploaded_files
-from id_generator import generate_fullprocess_number
+from id_generator import generate_followsop_number
 from timezone_config import get_korean_time
 
 
-class FullProcessRepository:
-    """Encapsulates database operations used by the Full Process controller."""
+class FollowSopRepository:
+    """Encapsulates database operations used by the Follow SOP controller."""
 
     def __init__(self, db_path: str) -> None:
         self._db_path = db_path
@@ -88,13 +88,13 @@ class FullProcessRepository:
         if self._resolved_table:
             return self._resolved_table
 
-        for candidate in ("full_process", "full_process_cache", "fullprocess_cache"):
+        for candidate in ("follow_sop", "follow_sop_cache", "followsop_cache"):
             if self._table_exists(conn, candidate):
                 self._resolved_table = candidate
                 return candidate
 
-        # Fallback to the modern table name
-        self._resolved_table = "full_process"
+        # Fallback to the primary table name
+        self._resolved_table = "follow_sop"
         return self._resolved_table
 
     def _first_value(self, row, default=None):
@@ -140,29 +140,17 @@ class FullProcessRepository:
                     ("public", table_key),
                 )
                 for row in cursor.fetchall():
-                    value = None
                     if isinstance(row, dict):
-                        value = row.get("column_name")
+                        columns.append(str(row.get("column_name")))
                     else:
-                        try:
-                            value = row[0]
-                        except Exception:
-                            value = None
-                    if value:
-                        columns.append(str(value))
+                        columns.append(str(row[0]))
             else:
                 cursor.execute(f"PRAGMA table_info({table_key})")
                 for row in cursor.fetchall():
-                    value = None
                     try:
-                        value = row["name"]  # sqlite3.Row / SqliteRowCompat supports key access
+                        columns.append(str(row["name"]))
                     except Exception:
-                        try:
-                            value = row[1]
-                        except Exception:
-                            value = None
-                    if value:
-                        columns.append(str(value))
+                        columns.append(str(row[1]))
         except Exception:
             columns = []
 
@@ -179,7 +167,7 @@ class FullProcessRepository:
                 WHERE board_type = %s AND column_key = %s AND is_active = 1
                 ORDER BY display_order
                 """,
-                ('full_process', column_key),
+                ('follow_sop', column_key),
             )
             rows = cursor.fetchall()
 
@@ -203,7 +191,7 @@ class FullProcessRepository:
                             ]
                     except Exception:
                         logging.debug(
-                            "[FULL_PROCESS] dropdown array parse failed for %s",
+                            "[FOLLOW_SOP] dropdown array parse failed for %s",
                             column_key,
                         )
 
@@ -240,24 +228,25 @@ class FullProcessRepository:
     # Section / column metadata
 
     def ensure_default_sections(self) -> None:
-        """Guarantee that 기본정보/프로세스 정보 섹션이 존재."""
+        """Ensure 기본 섹션이 존재하도록 보강."""
 
         defaults = [
             ("basic_info", "기본정보", 1),
-            ("process_info", "프로세스 정보", 2),
+            ("work_info", "작업정보", 2),
+            ("additional", "추가기입정보", 3),
         ]
 
         with self.connection() as conn:
             cursor = conn.cursor()
             for key, name, order in defaults:
                 cursor.execute(
-                    "SELECT COUNT(*) FROM full_process_sections WHERE section_key = %s",
+                    "SELECT COUNT(*) FROM follow_sop_sections WHERE section_key = %s",
                     (key,),
                 )
-                if (cursor.fetchone() or [0])[0] == 0:
+                if self._first_value(cursor.fetchone(), 0) == 0:
                     cursor.execute(
                         """
-                        INSERT INTO full_process_sections
+                        INSERT INTO follow_sop_sections
                             (section_key, section_name, section_order, is_active, is_deleted)
                         VALUES
                             (%s, %s, %s, 1, 0)
@@ -273,7 +262,7 @@ class FullProcessRepository:
             cursor.execute(
                 """
                 SELECT *
-                FROM full_process_sections
+                FROM follow_sop_sections
                 WHERE COALESCE(is_active, 1) = 1
                   AND COALESCE(is_deleted, 0) = 0
                 ORDER BY section_order
@@ -290,7 +279,7 @@ class FullProcessRepository:
             cursor.execute(
                 """
                 SELECT *
-                FROM full_process_column_config
+                FROM follow_sop_column_config
                 WHERE COALESCE(is_active, 1) = 1
                   AND COALESCE(is_deleted, 0) = 0
                 ORDER BY column_order
@@ -317,7 +306,7 @@ class FullProcessRepository:
             table_columns = set(self._get_columns(conn, table))
             is_postgres = getattr(conn, "is_postgres", False)
 
-            where_clauses = ["COALESCE(p.is_deleted, 0) = 0"]
+            where_clauses = ["COALESCE(s.is_deleted, 0) = 0"]
             params: List[Any] = []
 
             company_name = (filters.get("company_name") or "").strip()
@@ -325,7 +314,7 @@ class FullProcessRepository:
 
             if company_name:
                 like_value = f"%{company_name}%"
-                json_keys = ["company_name", "company_1cha"]
+                json_keys = ["company_name", "company_name_1cha"]
                 direct_columns = [
                     col
                     for col in ("company_name", "primary_company")
@@ -334,19 +323,19 @@ class FullProcessRepository:
 
                 if is_postgres:
                     company_filters = [
-                        f"(p.custom_data->>'{key}') ILIKE %s"
+                        f"(s.custom_data->>'{key}') ILIKE %s"
                         for key in json_keys
                     ]
                     company_filters.extend(
-                        [f"COALESCE(p.{col}, '') ILIKE %s" for col in direct_columns]
+                        [f"COALESCE(s.{col}, '') ILIKE %s" for col in direct_columns]
                     )
                 else:
                     company_filters = [
-                        f"LOWER(COALESCE(JSON_EXTRACT(p.custom_data, '$.{key}'), '')) LIKE LOWER(%s)"
+                        f"LOWER(COALESCE(JSON_EXTRACT(s.custom_data, '$.{key}'), '')) LIKE LOWER(%s)"
                         for key in json_keys
                     ]
                     company_filters.extend(
-                        [f"LOWER(COALESCE(p.{col}, '')) LIKE LOWER(%s)" for col in direct_columns]
+                        [f"LOWER(COALESCE(s.{col}, '')) LIKE LOWER(%s)" for col in direct_columns]
                     )
 
                 company_filters = [f for f in company_filters if f]
@@ -356,7 +345,7 @@ class FullProcessRepository:
 
             if business_number:
                 like_value = f"%{business_number}%"
-                json_keys = ["business_number", "company_1cha_bizno"]
+                json_keys = ["business_number", "company_name_1cha_bizno"]
                 direct_columns = [
                     col
                     for col in ("business_number", "primary_business_number")
@@ -365,19 +354,19 @@ class FullProcessRepository:
 
                 if is_postgres:
                     biz_filters = [
-                        f"(p.custom_data->>'{key}') ILIKE %s"
+                        f"(s.custom_data->>'{key}') ILIKE %s"
                         for key in json_keys
                     ]
                     biz_filters.extend(
-                        [f"COALESCE(p.{col}, '') ILIKE %s" for col in direct_columns]
+                        [f"COALESCE(s.{col}, '') ILIKE %s" for col in direct_columns]
                     )
                 else:
                     biz_filters = [
-                        f"LOWER(COALESCE(JSON_EXTRACT(p.custom_data, '$.{key}'), '')) LIKE LOWER(%s)"
+                        f"LOWER(COALESCE(JSON_EXTRACT(s.custom_data, '$.{key}'), '')) LIKE LOWER(%s)"
                         for key in json_keys
                     ]
                     biz_filters.extend(
-                        [f"LOWER(COALESCE(p.{col}, '')) LIKE LOWER(%s)" for col in direct_columns]
+                        [f"LOWER(COALESCE(s.{col}, '')) LIKE LOWER(%s)" for col in direct_columns]
                     )
 
                 biz_filters = [f for f in biz_filters if f]
@@ -388,14 +377,27 @@ class FullProcessRepository:
             where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
 
             cursor = conn.cursor()
-            count_query = f"SELECT COUNT(*) FROM {table} p WHERE {where_sql}"
+            count_query = f"SELECT COUNT(*) FROM {table} s WHERE {where_sql}"
             cursor.execute(count_query, params)
-            total_count = int(self._first_value(cursor.fetchone(), 0) or 0)
+            count_row = cursor.fetchone()
+            if count_row is None:
+                total_count = 0
+            elif isinstance(count_row, dict):
+                total_count = int(next(iter(count_row.values()), 0) or 0)
+            else:
+                try:
+                    total_count = int(count_row[0])
+                except Exception:
+                    try:
+                        values = list(getattr(count_row, 'values')())
+                        total_count = int(values[0] if values else 0)
+                    except Exception:
+                        total_count = 0
 
             query = (
-                f"SELECT p.* FROM {table} p "
+                f"SELECT s.* FROM {table} s "
                 f"WHERE {where_sql} "
-                "ORDER BY p.created_at DESC "
+                "ORDER BY s.created_at DESC, s.work_req_no DESC "
                 "LIMIT %s OFFSET %s"
             )
             cursor.execute(query, [*params, per_page, offset])
@@ -404,14 +406,14 @@ class FullProcessRepository:
         return total_count, items
 
     # ------------------------------------------------------------------
-    # Placeholder detail/save operations (to be implemented in later steps)
+    # Detail / register context
 
-    def fetch_detail_context(self, fullprocess_number: str, is_popup: bool) -> Dict[str, Any]:
+    def fetch_detail_context(self, work_req_no: str, is_popup: bool) -> Dict[str, Any]:
         base_context = self.fetch_register_context(is_popup=False)
         sections = base_context['sections']
         dynamic_columns = base_context['dynamic_columns']
 
-        process: Dict[str, Any] = {}
+        sop: Dict[str, Any] = {}
         attachments: List[Dict[str, Any]] = []
 
         with self.connection() as conn:
@@ -423,28 +425,28 @@ class FullProcessRepository:
                     f"""
                     SELECT *
                     FROM {table}
-                    WHERE fullprocess_number = %s
+                    WHERE work_req_no = %s
                       AND COALESCE(is_deleted, 0) = 0
                     """,
-                    (fullprocess_number,),
+                    (work_req_no,),
                 )
             except Exception as exc:
-                logging.error("[FULL_PROCESS] detail query failed: %s", exc)
+                logging.error("[FOLLOW_SOP] detail query failed: %s", exc)
                 return {}
 
             row = cursor.fetchone()
             if not row:
                 return {}
-            process = dict(row)
+            sop = dict(row)
 
             try:
                 cursor.execute(
                     """
                     SELECT detailed_content
-                    FROM full_process_details
-                    WHERE fullprocess_number = %s
+                    FROM follow_sop_details
+                    WHERE work_req_no = %s
                     """,
-                    (fullprocess_number,),
+                    (work_req_no,),
                 )
                 detail_row = cursor.fetchone()
                 detail_value = self._extract_detail_row_value(detail_row)
@@ -452,41 +454,39 @@ class FullProcessRepository:
                 if detail_value is not None:
                     if isinstance(detail_value, (dict, list)):
                         try:
-                            process['detailed_content'] = json.dumps(detail_value, ensure_ascii=False)
+                            sop['detailed_content'] = json.dumps(detail_value, ensure_ascii=False)
                         except Exception:
-                            process['detailed_content'] = str(detail_value)
+                            sop['detailed_content'] = str(detail_value)
                     else:
-                        process['detailed_content'] = str(detail_value)
+                        sop['detailed_content'] = str(detail_value)
             except Exception:
-                logging.debug("[FULL_PROCESS] detail content lookup skipped", exc_info=True)
+                logging.debug("[FOLLOW_SOP] detail content lookup skipped", exc_info=True)
 
             try:
                 from board_services import AttachmentService
 
-                attachment_service = AttachmentService('full_process', self._db_path, conn)
-                attachments = attachment_service.list(fullprocess_number)
+                attachment_service = AttachmentService('follow_sop', self._db_path, conn)
+                attachments = attachment_service.list(work_req_no)
             except Exception:
-                logging.debug("[FULL_PROCESS] attachment lookup skipped", exc_info=True)
+                logging.debug("[FOLLOW_SOP] attachment lookup skipped", exc_info=True)
 
-        custom_data = self._normalise_custom_data(process.get('custom_data'))
+        custom_data = self._normalise_custom_data(sop.get('custom_data'))
         if custom_data:
-            process.update(custom_data)
-        process['custom_data'] = custom_data
+            sop.update(custom_data)
+        sop['custom_data'] = custom_data
 
         detail_context = dict(base_context)
         detail_context.update({
-            'process': process,
-            'instruction': process,
+            'sop': sop,
             'custom_data': custom_data,
             'section_data': {},
             'attachments': attachments,
-            'fullprocess_number': fullprocess_number,
+            'work_req_no': work_req_no,
             'all_column_keys': [
                 column.get('column_key')
                 for column in dynamic_columns
                 if column.get('column_key')
             ],
-            'external_scoring_data': None,
             'is_popup': is_popup,
         })
         return detail_context
@@ -500,21 +500,19 @@ class FullProcessRepository:
         }
         dynamic_columns = self.fetch_dynamic_columns(section_order_map)
 
-        from timezone_config import get_korean_time
-
         created_at_dt = get_korean_time()
         created_at = created_at_dt.strftime('%Y-%m-%d %H:%M:%S')
-        fullprocess_number = generate_fullprocess_number(self.db_path, created_at_dt)
+        work_req_no = generate_followsop_number(self.db_path, created_at_dt)
 
         basic_fields = [
             {
-                'column_key': 'fullprocess_number',
-                'column_name': '평가번호',
+                'column_key': 'work_req_no',
+                'column_name': '점검번호',
                 'column_type': 'text',
                 'is_required': 1,
                 'is_readonly': 1,
                 'tab': 'basic_info',
-                'default_value': fullprocess_number,
+                'default_value': work_req_no,
             },
             {
                 'column_key': 'created_at',
@@ -528,9 +526,10 @@ class FullProcessRepository:
         ]
 
         basic_info_dynamic = [
-            col for col in dynamic_columns
+            col
+            for col in dynamic_columns
             if col.get('tab') == 'basic_info'
-            and col.get('column_key') not in ['fullprocess_number', 'created_at']
+            and col.get('column_key') not in ['work_req_no', 'created_at']
         ]
         basic_fields.extend(basic_info_dynamic)
 
@@ -565,16 +564,16 @@ class FullProcessRepository:
     # ------------------------------------------------------------------
     # Detail content helpers
 
-    def _fetch_current_detail(self, conn, fullprocess_number: str) -> Optional[str]:
+    def _fetch_current_detail(self, conn, work_req_no: str) -> Optional[str]:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT detailed_content FROM full_process_details WHERE fullprocess_number = %s",
-                (fullprocess_number,),
+                "SELECT detailed_content FROM follow_sop_details WHERE work_req_no = %s",
+                (work_req_no,),
             )
             row = cursor.fetchone()
         except Exception:
-            logging.debug('[FULL_PROCESS] current detail lookup skipped', exc_info=True)
+            logging.debug('[FOLLOW_SOP] current detail lookup skipped', exc_info=True)
             return None
 
         return self._extract_detail_row_value(row)
@@ -615,13 +614,15 @@ class FullProcessRepository:
 
         return text
 
+    # ------------------------------------------------------------------
+    # Save operations
+
     def save_from_request(self, request) -> Any:
         data = request.form
         files: List[FileStorage] = request.files.getlist('files')
         detailed_content = self._extract_detailed_content(data)
 
         if not data.get('sections'):
-            # Legacy form posts use per-section JSON payloads
             sections_json: Dict[str, Any] = {}
             for key in data.keys():
                 if key in {'custom_data', 'attachment_data', 'detailed_content'}:
@@ -651,18 +652,18 @@ class FullProcessRepository:
 
         try:
             logging.info(
-                "[FULL_PROCESS] incoming detailed_content length=%s",
+                "[FOLLOW_SOP] incoming detailed_content length=%s",
                 len(detailed_content or "")
             )
         except Exception:
-            logging.debug("[FULL_PROCESS] detailed_content logging skipped", exc_info=True)
+            logging.debug("[FOLLOW_SOP] detailed_content logging skipped", exc_info=True)
 
         valid_files, validation_errors = validate_uploaded_files(files)
         if validation_errors:
             return {'success': False, 'message': validation_errors[0], 'errors': validation_errors}, 400
 
         created_at_dt = get_korean_time()
-        fullprocess_number = data.get('fullprocess_number') or generate_fullprocess_number(self.db_path, created_at_dt)
+        work_req_no = data.get('work_req_no') or generate_followsop_number(self.db_path, created_at_dt)
 
         custom_data_json = json.dumps(custom_data, ensure_ascii=False)
 
@@ -671,7 +672,7 @@ class FullProcessRepository:
             table_columns = set(self._get_columns(conn, table))
 
             upsert_data: Dict[str, Any] = {
-                'fullprocess_number': fullprocess_number,
+                'work_req_no': work_req_no,
                 'custom_data': custom_data_json,
             }
 
@@ -687,17 +688,17 @@ class FullProcessRepository:
             try:
                 safe_upsert(
                     conn,
-                    'full_process_details',
+                    'follow_sop_details',
                     {
-                        'fullprocess_number': fullprocess_number,
+                        'work_req_no': work_req_no,
                         'detailed_content': detailed_content,
                         'updated_at': None,
                     },
-                    conflict_cols=['fullprocess_number'],
+                    conflict_cols=['work_req_no'],
                     update_cols=['detailed_content', 'updated_at'],
                 )
             except Exception:
-                logging.debug('[FULL_PROCESS] details upsert failed', exc_info=True)
+                logging.debug('[FOLLOW_SOP] details upsert failed', exc_info=True)
 
             attachment_data_raw = data.get('attachment_data', '[]')
             if isinstance(attachment_data_raw, list):
@@ -712,7 +713,7 @@ class FullProcessRepository:
                 try:
                     from board_services import AttachmentService
 
-                    attachment_service = AttachmentService('full_process', self._db_path, conn)
+                    attachment_service = AttachmentService('follow_sop', self._db_path, conn)
                     uploaded_by = data.get('created_by') or data.get('user_id', 'system')
 
                     for index, file_info in enumerate(valid_files):
@@ -721,37 +722,37 @@ class FullProcessRepository:
                         if index < len(attachment_meta) and isinstance(attachment_meta[index], dict):
                             meta['description'] = attachment_meta[index].get('description', '')
                         meta.setdefault('uploaded_by', uploaded_by)
-                        attachment_service.add(fullprocess_number, file_obj, meta)
+                        attachment_service.add(work_req_no, file_obj, meta)
                 except Exception:
-                    logging.error('[FULL_PROCESS] attachment save failed', exc_info=True)
+                    logging.error('[FOLLOW_SOP] attachment save failed', exc_info=True)
 
             conn.commit()
 
             try:
                 detail_row = conn.execute(
-                    "SELECT detailed_content FROM full_process_details WHERE fullprocess_number = %s",
-                    (fullprocess_number,)
+                    "SELECT detailed_content FROM follow_sop_details WHERE work_req_no = %s",
+                    (work_req_no,)
                 ).fetchone()
                 logging.info(
-                    "[FULL_PROCESS] detail length=%s",
+                    "[FOLLOW_SOP] detail length=%s",
                     len(detail_row[0]) if detail_row and detail_row[0] else 0
                 )
             except Exception:
-                logging.debug("[FULL_PROCESS] post-save detail check skipped", exc_info=True)
+                logging.debug("[FOLLOW_SOP] post-save detail check skipped", exc_info=True)
 
         return {
             'success': True,
-            'message': 'Full Process가 등록되었습니다.',
-            'fullprocess_number': fullprocess_number,
+            'message': 'Follow SOP가 등록되었습니다.',
+            'work_req_no': work_req_no,
         }, 200
 
     def update_from_request(self, request) -> Any:
         data = request.form
         files: List[FileStorage] = request.files.getlist('files')
 
-        fullprocess_number = (data.get('fullprocess_number') or '').strip()
-        if not fullprocess_number:
-            return {'success': False, 'message': '평가번호가 필요합니다.'}, 400
+        work_req_no = (data.get('work_req_no') or '').strip()
+        if not work_req_no:
+            return {'success': False, 'message': '점검번호가 필요합니다.'}, 400
 
         valid_files, validation_errors = validate_uploaded_files(files)
         if validation_errors:
@@ -806,44 +807,52 @@ class FullProcessRepository:
             attachment_meta = []
 
         with self.connection() as conn:
-            existing_detail = self._fetch_current_detail(conn, fullprocess_number)
+            existing_detail = self._fetch_current_detail(conn, work_req_no)
             detailed_content = self._extract_detailed_content(data, existing_detail)
             try:
                 logging.info(
-                    "[FULL_PROCESS] update detail incoming length=%s",
+                    "[FOLLOW_SOP] update detail incoming length=%s",
                     len(detailed_content or "")
                 )
             except Exception:
-                logging.debug("[FULL_PROCESS] update detail logging skipped", exc_info=True)
+                logging.debug("[FOLLOW_SOP] update detail logging skipped", exc_info=True)
 
             table = self._resolve_table_name(conn)
+            table_columns = set(self._get_columns(conn, table))
+
+            upsert_data: Dict[str, Any] = {
+                'work_req_no': work_req_no,
+                'custom_data': custom_data_json,
+            }
+
+            if 'created_by' in table_columns and data.get('updated_by'):
+                upsert_data['created_by'] = data.get('updated_by')
+            if 'updated_at' in table_columns:
+                upsert_data['updated_at'] = get_korean_time().strftime('%Y-%m-%d %H:%M:%S')
 
             safe_upsert(
                 conn,
                 table,
-                {
-                    'fullprocess_number': fullprocess_number,
-                    'custom_data': custom_data_json,
-                },
-                conflict_cols=['fullprocess_number'],
-                update_cols=['custom_data'],
+                upsert_data,
+                conflict_cols=['work_req_no'],
+                update_cols=['custom_data'] + ([col for col in ('created_by', 'updated_at') if col in upsert_data]),
             )
 
             safe_upsert(
                 conn,
-                'full_process_details',
+                'follow_sop_details',
                 {
-                    'fullprocess_number': fullprocess_number,
+                    'work_req_no': work_req_no,
                     'detailed_content': detailed_content,
                     'updated_at': None,
                 },
-                conflict_cols=['fullprocess_number'],
+                conflict_cols=['work_req_no'],
                 update_cols=['detailed_content', 'updated_at'],
             )
 
             from board_services import AttachmentService
 
-            attachment_service = AttachmentService('full_process', self._db_path, conn)
+            attachment_service = AttachmentService('follow_sop', self._db_path, conn)
 
             if deleted_ids:
                 attachment_service.delete(deleted_ids)
@@ -877,24 +886,24 @@ class FullProcessRepository:
                 if isinstance(candidate, dict):
                     meta['description'] = candidate.get('description', '')
                 meta.setdefault('uploaded_by', uploaded_by)
-                attachment_service.add(fullprocess_number, file_obj, meta)
+                attachment_service.add(work_req_no, file_obj, meta)
 
             conn.commit()
 
             try:
                 detail_row = conn.execute(
-                    "SELECT detailed_content FROM full_process_details WHERE fullprocess_number = %s",
-                    (fullprocess_number,)
+                    "SELECT detailed_content FROM follow_sop_details WHERE work_req_no = %s",
+                    (work_req_no,)
                 ).fetchone()
                 logging.info(
-                    "[FULL_PROCESS] update detail length=%s",
+                    "[FOLLOW_SOP] update detail length=%s",
                     len(detail_row[0]) if detail_row and detail_row[0] else 0
                 )
             except Exception:
-                logging.debug("[FULL_PROCESS] update detail check skipped", exc_info=True)
+                logging.debug("[FOLLOW_SOP] update detail check skipped", exc_info=True)
 
         return {
             'success': True,
-            'message': 'Full Process가 수정되었습니다.',
-            'fullprocess_number': fullprocess_number,
+            'message': 'Follow SOP가 수정되었습니다.',
+            'work_req_no': work_req_no,
         }, 200

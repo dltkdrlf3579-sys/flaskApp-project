@@ -1,4 +1,4 @@
-"""Full Process board controller for Phase 2 refactor."""
+"""Safe Workplace board controller for Phase 2 refactor."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from controllers import BoardController, BoardControllerConfig
 from utils.board_layout import order_value
 
 
-class FullProcessController(BoardController):
-    """Controller that encapsulates Full Process board behaviour."""
+class SafeWorkplaceController(BoardController):
+    """Controller that encapsulates Safe Workplace board behaviour."""
 
     def list_view(self, request) -> Any:
         filters = self._extract_filters(request)
@@ -58,7 +58,7 @@ class FullProcessController(BoardController):
         if items:
             items = smart_apply_mappings(
                 items,
-                "full_process",
+                "safe_workplace",
                 dynamic_columns,
                 self.repository.db_path,
             )
@@ -66,7 +66,7 @@ class FullProcessController(BoardController):
         pagination = self._build_pagination(page, per_page, total_count)
 
         context = self._build_template_context(
-            fullprocesses=items,
+            workplaces=items,
             dynamic_columns=dynamic_columns,
             sections=sections,
             display_columns=display_columns,
@@ -77,13 +77,13 @@ class FullProcessController(BoardController):
         )
         return render_template(self.config.list_template, **context)
 
-    def detail_view(self, request, fullprocess_number: str) -> Any:
+    def detail_view(self, request, safeplace_no: str) -> Any:
         context_data = self.repository.fetch_detail_context(
-            fullprocess_number,
+            safeplace_no,
             request.args.get('popup') == '1',
         )
         if not context_data:
-            return "Full Process를 찾을 수 없습니다.", 404
+            return "Safe Workplace를 찾을 수 없습니다.", 404
         context = self._build_template_context(**context_data)
         return render_template(self.config.detail_template, **context)
 
@@ -189,7 +189,7 @@ class FullProcessController(BoardController):
                         column["column_type"] = popup_map.get("person", column.get("column_type"))
                         column.setdefault("input_type", "table")
         except Exception as exc:
-            logging.warning("[FULL_PROCESS] normalize column types failed: %s", exc)
+            logging.warning("[SAFE_WORKPLACE] normalize column types failed: %s", exc)
 
         normalize_column_types(dynamic_columns)
 
@@ -218,7 +218,7 @@ class FullProcessController(BoardController):
         scoring_cols: list[Dict[str, Any]] = []
         score_total_cols: list[Dict[str, Any]] = []
 
-        excluded = {"detailed_content", "fullprocess_number", "created_at"}
+        excluded = {"detailed_content", "safeplace_no", "created_at"}
 
         for column in dynamic_columns:
             column_key = column.get("column_key")
@@ -306,7 +306,7 @@ class FullProcessController(BoardController):
             try:
                 return json.loads(raw)
             except Exception:
-                logging.error("[FULL_PROCESS] custom_data parse error", exc_info=True)
+                logging.error("[SAFE_WORKPLACE] custom_data parse error", exc_info=True)
         return {}
 
     def _flatten_scoring_fields(
@@ -363,23 +363,18 @@ class FullProcessController(BoardController):
                         except Exception:
                             sconf = {}
                     sconf = sconf or {}
-                    items_cfg = sconf.get("items") or []
                     group_obj = custom_data.get(key, {})
                     if isinstance(group_obj, str):
                         try:
                             group_obj = json.loads(group_obj)
                         except Exception:
                             group_obj = {}
-                    for cfg in items_cfg:
-                        iid = cfg.get("id")
-                        delta = float(cfg.get("per_unit_delta") or 0)
-                        count = 0
-                        if isinstance(group_obj, dict) and iid in group_obj:
+                    if isinstance(group_obj, dict):
+                        for value in group_obj.values():
                             try:
-                                count = int(group_obj.get(iid) or 0)
+                                total += float(value or 0)
                             except Exception:
-                                count = 0
-                        total += count * delta
+                                pass
             else:
                 total_key = conf.get("total_key") or "default"
                 for s_column in scoring_cols:
@@ -392,23 +387,18 @@ class FullProcessController(BoardController):
                     sconf = sconf or {}
                     if (sconf.get("total_key") or "default") != total_key:
                         continue
-                    items_cfg = sconf.get("items") or []
                     group_obj = custom_data.get(s_column.get("column_key"), {})
                     if isinstance(group_obj, str):
                         try:
                             group_obj = json.loads(group_obj)
                         except Exception:
                             group_obj = {}
-                    for cfg in items_cfg:
-                        iid = cfg.get("id")
-                        delta = float(cfg.get("per_unit_delta") or 0)
-                        count = 0
-                        if isinstance(group_obj, dict) and iid in group_obj:
+                    if isinstance(group_obj, dict):
+                        for value in group_obj.values():
                             try:
-                                count = int(group_obj.get(iid) or 0)
+                                total += float(value or 0)
                             except Exception:
-                                count = 0
-                        total += count * delta
+                                pass
 
             item[total_col.get("column_key")] = total
 
@@ -445,16 +435,16 @@ class FullProcessController(BoardController):
         return Pagination(page, per_page, total_count)
 
 
-def build_full_process_config() -> BoardControllerConfig:
+def build_safe_workplace_config() -> BoardControllerConfig:
     return BoardControllerConfig(
-        board_type="full_process",
-        list_template="full-process.html",
-        detail_template="full-process-detail.html",
-        register_template="full-process-register.html",
+        board_type="safe_workplace",
+        list_template="safe-workplace.html",
+        detail_template="safe-workplace-detail.html",
+        register_template="safe-workplace-register.html",
         attachments_enabled=True,
         scoring_enabled=True,
         per_page_default=20,
         extra_context={
-            "menu_section": "full_process",
+            "menu_section": "safe_workplace",
         },
     )

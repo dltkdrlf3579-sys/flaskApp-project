@@ -1,0 +1,17 @@
+{% macro render_detail_content(section_title='상세내용', textarea_id='detailed-content', textarea_name='detailed_content', value='', placeholder='상세내용을 입력하세요.', data_content=None, use_data_content=False) %}
+<div class="section detail-content-section">
+    <div class="section-header">
+        <h3 class="section-title">{{ section_title }}</h3>
+    </div>
+    <div class="section-content">
+        <div class="content-editor">
+            <textarea id="{{ textarea_id }}"
+                      name="{{ textarea_name }}"
+                      class="editable-content"
+                      data-ckeditor="true"
+                      {% if use_data_content %}data-content="{{ data_content | default('') | tojson | safe }}"{% endif %}
+                      placeholder="{{ placeholder }}">{{ value | default('') | safe }}</textarea>
+        </div>
+    </div>
+</div>
+{% endmacro %}

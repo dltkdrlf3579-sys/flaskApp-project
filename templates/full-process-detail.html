@@ -4,10 +4,15 @@
 {% extends "base.html" %}
 {% endif %}
 
+{% from 'includes/board_form/detail_content.html' import render_detail_content %}
+{% from 'includes/board_form/save_controls.html' import render_save_button, render_password_modal %}
+
 {% block head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/scoring-system.css') }}">
-<script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
-<script src="{{ url_for('static', filename='js/scoring-external.js') }}"></script>
+    {{ super() }}
+    {% include 'includes/board_form_scripts.html' %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/scoring-system.css') }}">
+    <script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/scoring-external.js') }}"></script>
 {% endblock %}
 
 {% block title %}Full Process 상세정보{% endblock %}
@@ -31,7 +36,7 @@
     <div class="section {{ section.section_key }}-section">
         <div class="section-header">
             <h3 class="section-title">{{ section.section_name }}</h3>
-            <button class="collapse-btn" onclick="toggleSection('{{ section.section_key }}')">
+            <button class="collapse-btn" onclick="BoardDetail.toggleSection('{{ section.section_key }}', this)">
                 <span class="collapse-icon">▲</span>
             </button>
         </div>
@@ -106,7 +111,10 @@
                                 {% set base_key = col.column_key %}
                                 {% for s in suffixes %}
                                     {% if base_key.endswith(s) %}
-                                        {% set base_key = base_key[:-s|length] %}
+                                        {% set suffix_len = s|length %}
+                                        {% if suffix_len > 0 %}
+                                            {% set base_key = base_key[:-suffix_len] %}
+                                        {% endif %}
                                     {% endif %}
                                 {% endfor %}
                                 {% set all_keys = (all_column_keys if all_column_keys is defined else (section_columns[section.section_key] | map(attribute='column_key') | list)) + ((custom_data.keys() | list) if custom_data else []) %}
@@ -142,7 +150,8 @@
                                     <!-- 리스트 필드는 항상 custom_data에서 가져오기 -->
                                     {% set col_value = custom_data.get(col.column_key, '[]') if custom_data else '[]' %}
                                 {% else %}
-                                    {% set col_value = process[col.column_key] | default('', true) %}
+                                    {% set proc_val = process.get(col.column_key) if process else None %}
+                                    {% set col_value = (proc_val if proc_val not in (None, '') else (custom_data.get(col.column_key) if custom_data else '')) %}
                                 {% endif %}
 
                                 {% if col.column_type == 'dropdown' %}
@@ -525,1073 +534,112 @@
     </div>
     {% endfor %}
 
-    <!-- 3. 상세내용 영역 -->
-    <div class="section detail-content-section">
-        <div class="section-header">
-            <h3 class="section-title">상세내용</h3>
-        </div>
-        <div class="section-content">
-            <div class="content-editor">
-                <!-- textarea로 변경하여 CKEditor가 직접 처리하도록 함 -->
-                <textarea id="detailed-content"
-                     name="detailed_content"
-                     class="editable-content"
-                     data-ckeditor="true">{{ process.detailed_content if process.detailed_content else '' }}</textarea>
-            </div>
-        </div>
-    </div>
+    {{ render_detail_content(
+        value=process.detailed_content if process.detailed_content else '',
+        textarea_name='detailed_content',
+        textarea_id='detailed-content'
+    ) }}
 
     <!-- 4. 첨부파일 영역 (공통 컴포넌트) -->
-    {% from 'includes/attachment_section.html' import render_attachment_section %}
-    {{ render_attachment_section(attachments, 'fullprocess') }}
+{% from 'includes/attachment_section.html' import render_attachment_section %}
+{{ render_attachment_section(attachments, 'full_process') }}
 
-    <!-- 저장 버튼 영역 -->
-    <div class="save-section">
-        <button class="btn-save" onclick="showEditPasswordModal()">수정완료</button>
-    </div>
+    {{ render_save_button('showEditPasswordModal()') }}
 
-    <!-- 비밀번호 입력 모달 -->
-    <div id="edit-password-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>편집 권한 확인</h3>
-                <span class="close" onclick="closeEditPasswordModal()">&times;</span>
-            </div>
-            <div class="modal-body">
-                <p>편집을 위해 비밀번호를 입력해주세요.</p>
-                <input type="password" id="edit-password-input" placeholder="비밀번호" class="password-field">
-                <div class="modal-buttons">
-                    <button class="btn-confirm" onclick="verifyPasswordAndSave()">확인</button>
-                    <button class="btn-cancel" onclick="closeEditPasswordModal()">취소</button>
-                </div>
-            </div>
-        </div>
-    </div>
+    {{ render_password_modal(
+        modal_id='edit-password-modal',
+        input_id='edit-password-input',
+        confirm_onclick='verifyPasswordAndSave()',
+        cancel_onclick='closeEditPasswordModal()'
+    ) }}
 </div>
 
 <script>
-// 섹션 정보
 const sections = {{ sections | tojson | safe }};
 const sectionColumns = {{ section_columns | tojson | safe }};
-const issueNumber = "{{ process.fullprocess_number }}";
+const issueNumber = {{ process.fullprocess_number|default('')|tojson }};
 
-// 섹션 토글
-function toggleSection(sectionId) {
-    const content = document.getElementById(sectionId + '-content');
-    const icon = event.target;
-    
-    if (content.style.display === 'none') {
-        content.style.display = 'block';
-        icon.textContent = '▲';
-    } else {
-        content.style.display = 'none';
-        icon.textContent = '▼';
-    }
-}
+const updateFullProcess = BoardDetail.createUpdater({
 
-// 첨부파일 관련 변수는 attachment_scripts에서 초기화됨
-// pendingFiles와 deletedAttachments는 전역으로 관리
+    endpoint: '/update-full-process',
 
-// 동적 필드 수집 함수
-function collectDynamicFields() {
-    const data = {};
+    idField: 'fullprocess_number',
 
-    // 모든 섹션 순회
-    sections.forEach(section => {
-        const sectionInputs = document.querySelectorAll(`[data-section="${section.section_key}"]`);
-        console.log(`섹션 ${section.section_key}: ${sectionInputs.length}개 필드 발견`);
+    idValue: issueNumber,
 
-        sectionInputs.forEach(input => {
-            const fieldKey = input.dataset.field;
-            let value = '';
+    sections: sections,
 
-            if (input.tagName === 'SELECT') {
-                value = input.value;
-            } else if (input.type === 'checkbox') {
-                value = input.checked ? '1' : '0';
-            } else if (input.tagName === 'TEXTAREA') {
-                value = input.value;
-            } else if (input.classList.contains('value')) {
-                // 읽기 전용 div
-                return;
-            } else {
-                value = input.value;
-            }
+    sectionColumns: sectionColumns,
 
-            // 리스트 필드 처리: data-field-type 또는 JSON 배열 문자열 판별
-            if ((input.getAttribute('data-field-type') === 'list' ||
-                 (typeof value === 'string' && value.trim().startsWith('['))) && value) {
-                try {
-                    const parsed = JSON.parse(value);
-                    data[fieldKey] = Array.isArray(parsed) ? parsed : value;
-                } catch(e) {
-                    data[fieldKey] = value;
-                }
-            } else {
-                data[fieldKey] = value;
-            }
+    attachmentsSelector: '#attachments-tbody .table-row',
 
-            // process_info 섹션의 필드 디버깅
-            if (section.section_key === 'process_info' && (fieldKey === 'process_duration' || fieldKey === 'process_output')) {
-                console.log(`${fieldKey}: "${value}"`);
-            }
-        });
-    });
+    popupReload: {{ 'true' if is_popup else 'false' }},
 
-    console.log('=== 수집된 전체 데이터 ===');
-    console.log(data);
+    successMessage: 'Full Process가 성공적으로 수정되었습니다.',
 
-    return data;
-}
+    failurePrefix: '수정 실패',
 
-// 섹션별로 필드를 그룹화하는 함수 (follow-sop 방식)
-function groupFieldsBySection(dynamicData) {
-    const sectionGroups = {};
+    includeDeletedAttachments: true
 
-    // 모든 섹션의 컬럼을 순회하면서 그룹화
-    Object.keys(sectionColumns).forEach(sectionKey => {
-        const columns = sectionColumns[sectionKey] || [];
-        columns.forEach(col => {
-            // 해당 섹션의 그룹이 없으면 생성
-            if (!sectionGroups[sectionKey]) {
-                sectionGroups[sectionKey] = {};
-            }
-            const fieldKey = col.column_key;
-            // dynamicData에 해당 필드가 있으면 섹션 그룹에 추가
-            if (dynamicData[fieldKey] !== undefined) {
-                sectionGroups[sectionKey][fieldKey] = dynamicData[fieldKey];
-            }
-        });
-    });
+});
 
-    console.log('=== 섹션별 그룹화 결과 ===');
-    Object.keys(sectionGroups).forEach(sectionKey => {
-        console.log(`${sectionKey}:`, sectionGroups[sectionKey]);
-    });
 
-    return sectionGroups;
-}
 
-// 수정 함수
-function updateFullProcess() {
-    const formData = new FormData();
+window.updateFullProcess = updateFullProcess;
 
-    // 발부번호 (중요: fullprocess_number를 식별자로 사용)
-    formData.append('fullprocess_number', issueNumber);
-
-    // 상세내용 처리 - textarea에서 값 가져오기
-    const contentElement = document.getElementById('detailed-content');
-    let detailedContent = '';
-
-    // CKEditor가 있다면 CKEditor에서 값 가져오기
-    if (window.RichText && typeof window.RichText.getData === 'function') {
-        detailedContent = window.RichText.getData();
-    } else if (window['editor_detailed-content'] && typeof window['editor_detailed-content'].getData === 'function') {
-        detailedContent = window['editor_detailed-content'].getData();
-    } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
-        detailedContent = window.editorInstance.getData();
-    } else if (contentElement) {
-        // textarea 또는 div 모두 지원
-        if (contentElement.tagName === 'TEXTAREA') {
-            detailedContent = contentElement.value || '';
-        } else if (contentElement.tagName === 'DIV') {
-            detailedContent = contentElement.innerHTML || '';
-        } else {
-            detailedContent = contentElement.value || contentElement.innerHTML || '';
-        }
-    }
-
-    formData.append('detailed_content', detailedContent);
-
-    // 동적 필드 수집
-    const dynamicData = collectDynamicFields();
-
-    // 섹션별로 그룹화해서 전송 (follow-sop 방식)
-    const sectionGroups = groupFieldsBySection(dynamicData);
-
-    // 각 섹션 데이터를 FormData에 추가
-    Object.keys(sectionGroups).forEach(sectionKey => {
-        formData.append(sectionKey, JSON.stringify(sectionGroups[sectionKey]));
-    });
-
-    // 하위 호환성을 위해 custom_data도 전송 (전체 데이터)
-    formData.append('custom_data', JSON.stringify(dynamicData));
-    
-    // 새 첨부파일 처리 (공통 컴포넌트 변수 사용)
-    if (typeof pendingFiles !== 'undefined') {
-        pendingFiles.forEach((file, index) => {
-            formData.append('files', file);
-        });
-    }
-    
-    // 삭제된 첨부파일 정보
-    if (typeof deletedAttachments !== 'undefined') {
-        formData.append('deleted_attachments', JSON.stringify(deletedAttachments));
-    }
-    
-    // 첨부파일 설명 정보 (accident와 동일하게 + 강화된 처리)
-    const attachmentDescriptions = [];
-    document.querySelectorAll('#attachments-tbody .table-row').forEach((row) => {
-        const descEl = row.querySelector('.attachment-desc, .file-desc-input'); // 양쪽 다 지원
-        const rawIsNew = String(row.dataset.isNew || '').toLowerCase();
-        attachmentDescriptions.push({
-            id: row.dataset.id ? parseInt(row.dataset.id, 10) :
-                (row.dataset.attachmentId ? parseInt(row.dataset.attachmentId, 10) : null),
-            description: descEl ? (descEl.value ?? descEl.textContent ?? '') : '',
-            isNew: rawIsNew === 'true' || rawIsNew === '1' || row.classList.contains('new-file-row')
-        });
-    });
-    formData.append('attachment_data', JSON.stringify(attachmentDescriptions));
-    
-    // 서버로 전송
-    fetch('/update-full-process', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            alert('Full Process가 성공적으로 수정되었습니다.');
-            
-            // 팝업 모드인 경우 부모 창 새로고침
-            {% if is_popup %}
-            if (window.opener && !window.opener.closed) {
-                window.opener.location.reload();
-            }
-            {% endif %}
-            
-            // 현재 창 새로고침 (캐시 무시)
-            window.location.href = window.location.href + '&t=' + new Date().getTime();
-        } else {
-            alert('수정 실패: ' + (data.message || '알 수 없는 오류'));
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('수정 중 오류가 발생했습니다.');
-    });
-}
-
-// 팝업 열기 함수는 popup-handler.js에서 처리됨
-// openPersonSearch, openCompanySearch, openBuildingSearch,
-// openDepartmentSearch, openContractorSearch 등을 사용
-
-// 담당자 검색 팝업 열기 함수
-function openPersonSearch(fieldKey) {
-    const width = 1000;
-    const height = 600;
-    const left = (screen.width - width) / 2;
-    const top = (screen.height - height) / 2;
-    
-    const popupOptions = [
-        `width=${width}`,
-        `height=${height}`,
-        `left=${left}`,
-        `top=${top}`,
-        'scrollbars=yes',
-        'resizable=yes'
-    ].join(',');
-    
-    const popupUrl = `/search-popup?type=person&field=${fieldKey}`;
-    const popup = window.open(popupUrl, 'personSearch', popupOptions);
-    
-    if (!popup || popup.closed) {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
-        return;
-    }
-    
-    popup.focus();
-}
-
-// 업체 검색 팝업 열기 함수
-function openCompanySearch(fieldKey) {
-    const width = 1000;
-    const height = 600;
-    const left = (screen.width - width) / 2;
-    const top = (screen.height - height) / 2;
-    
-    const popupOptions = [
-        `width=${width}`,
-        `height=${height}`,
-        `left=${left}`,
-        `top=${top}`,
-        'scrollbars=yes',
-        'resizable=yes'
-    ].join(',');
-    
-    const popupUrl = `/search-popup?type=company&field=${fieldKey}`;
-    const popup = window.open(popupUrl, 'companySearch', popupOptions);
-    
-    if (!popup || popup.closed) {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
-        return;
-    }
-    
-    popup.focus();
-}
-
-// 부서 검색 팝업 열기 함수  
-function openDepartmentSearch(fieldKey) {
-    const width = 1000;
-    const height = 600;
-    const left = (screen.width - width) / 2;
-    const top = (screen.height - height) / 2;
-    
-    const popupOptions = [
-        `width=${width}`,
-        `height=${height}`,
-        `left=${left}`,
-        `top=${top}`,
-        'scrollbars=yes',
-        'resizable=yes'
-    ].join(',');
-    
-    const popupUrl = `/search-popup?type=department&field=${fieldKey}`;
-    const popup = window.open(popupUrl, 'departmentSearch', popupOptions);
-    
-    if (!popup || popup.closed) {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
-        return;
-    }
-    
-    popup.focus();
-}
-
-// 협력사 검색 팝업 열기 함수
-function openContractorSearch(fieldKey) {
-    const width = 1000;
-    const height = 600;
-    const left = (screen.width - width) / 2;
-    const top = (screen.height - height) / 2;
-    
-    const popupOptions = [
-        `width=${width}`,
-        `height=${height}`,
-        `left=${left}`,
-        `top=${top}`,
-        'scrollbars=yes',
-        'resizable=yes'
-    ].join(',');
-    
-    const popupUrl = `/search-popup?type=contractor&field=${fieldKey}`;
-    const popup = window.open(popupUrl, 'contractorSearch', popupOptions);
-    
-    if (!popup || popup.closed) {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
-        return;
-    }
-    
-    popup.focus();
-}
-
-// 건물 검색 팝업 열기 함수
-function openBuildingSearch(fieldKey) {
-    const width = 1000;
-    const height = 600;
-    const left = (screen.width - width) / 2;
-    const top = (screen.height - height) / 2;
-    
-    const popupOptions = [
-        `width=${width}`,
-        `height=${height}`,
-        `left=${left}`,
-        `top=${top}`,
-        'scrollbars=yes',
-        'resizable=yes'
-    ].join(',');
-    
-    const popupUrl = `/search-popup?type=building&field=${fieldKey}`;
-    const popup = window.open(popupUrl, 'buildingSearch', popupOptions);
-    
-    if (!popup || popup.closed) {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
-        return;
-    }
-    
-    popup.focus();
-}
-
-// 비밀번호 모달 관련 함수들
 function showEditPasswordModal() {
-    document.getElementById('edit-password-modal').style.display = 'block';
-    document.getElementById('edit-password-input').focus();
+    const modal = document.getElementById('edit-password-modal');
+    const input = document.getElementById('edit-password-input');
+    if (modal) {
+        modal.style.display = 'block';
+    }
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
 }
 
 function closeEditPasswordModal() {
-    document.getElementById('edit-password-modal').style.display = 'none';
-    document.getElementById('edit-password-input').value = '';
+    const modal = document.getElementById('edit-password-modal');
+    const input = document.getElementById('edit-password-input');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    if (input) {
+        input.value = '';
+    }
 }
 
 function verifyPasswordAndSave() {
-    const password = document.getElementById('edit-password-input').value;
-    
+    const input = document.getElementById('edit-password-input');
+    const password = input ? input.value : '';
+
     if (!password) {
         alert('비밀번호를 입력해주세요.');
+        if (input) {
+            input.focus();
+        }
         return;
     }
-    
-    // 비밀번호가 admin123인지 확인
-    if (password === 'admin123') {
-        closeEditPasswordModal();
-        updateFullProcess();
-    } else {
-        alert('비밀번호가 올바르지 않습니다.');
-        document.getElementById('edit-password-input').value = '';
-        document.getElementById('edit-password-input').focus();
-    }
-}
 
-// receive*Selection 함수들은 popup-handler.js에서 통합 처리됨
-
-// receiveContractorSelection 함수는 popup-handler.js에서 통합 처리됨
-
-
-
-
-// 숫자 입력 유효성 검사 함수들
-function isNumberKey(evt, inputEl) {
-    var charCode = (evt.which) ? evt.which : evt.keyCode;
-    var t = (inputEl && inputEl.getAttribute('data-number-type')) || 'float';
-    if (charCode > 31 && (charCode < 48 || charCode > 57)) {
-        if (t === 'float' && charCode === 46) return true; // '.' 허용 (실수)
-        return false;
-    }
-    return true;
-}
-
-function validateNumberInput(input) {
-    const t = input.getAttribute('data-number-type') || 'float';
-    const value = input.value;
-    const numericValue = t === 'integer' ? value.replace(/[^0-9]/g, '') : value.replace(/[^0-9.]/g, '');
-    
-    if (value !== numericValue) {
-        input.value = numericValue;
-        // 경고 메시지 표시
-        showValidationMessage(input, t === 'integer' ? '정수만 입력할 수 있습니다.' : '숫자만 입력할 수 있습니다.');
-    }
-}
-
-function showValidationMessage(input, message) {
-    // 기존 메시지 제거
-    const existingMessage = input.parentNode.querySelector('.validation-message');
-    if (existingMessage) {
-        existingMessage.remove();
-    }
-    
-    // 새 메시지 생성
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'validation-message';
-    messageDiv.style.color = '#dc3545';
-    messageDiv.style.fontSize = '12px';
-    messageDiv.style.marginTop = '5px';
-    messageDiv.textContent = message;
-    
-    input.parentNode.appendChild(messageDiv);
-    
-    // 3초 후 메시지 제거
-    setTimeout(() => {
-        if (messageDiv.parentNode) {
-            messageDiv.remove();
-        }
-    }, 3000);
-}
-
-// DOMContentLoaded 시 에디터 초기화
-document.addEventListener('DOMContentLoaded', function() {
-    // 에디터 초기화
-    const editorElement = document.getElementById('detailed-content');
-    if (editorElement && editorElement.dataset.content) {
-        try {
-            const content = JSON.parse(editorElement.dataset.content);
-            if (content) {
-                editorElement.innerHTML = content;
-            }
-        } catch (e) {
-            console.log('에디터 초기화 오류:', e);
-        }
-    }
-    
-    // 비밀번호 입력 엔터 키 이벤트
-    const passwordInput = document.getElementById('edit-password-input');
-    if (passwordInput) {
-        passwordInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                verifyPasswordAndSave();
+    BoardDetail.verifyPassword({ boardType: 'full_process', password })
+        .then(() => {
+            closeEditPasswordModal();
+            updateFullProcess();
+        })
+        .catch((error) => {
+            alert(error && error.message ? error.message : '비밀번호가 올바르지 않습니다.');
+            if (input) {
+                input.value = '';
+                input.focus();
             }
         });
-    }
-});
-// 채점 시스템 초기화
-// 채점 로직은 static/js/scoring-system.js 사용
-// 페이지 로드 시 초기화
-document.addEventListener('DOMContentLoaded', function() {
-    initScoringSystem();
-});
+}
 
-// 외부 scoring 데이터 정의 (백엔드에서 전달)
-{% if external_scoring_data %}
-const externalScoringData = {{ external_scoring_data | tojson | safe }};
-console.log('[SCORING] External scoring data loaded:', externalScoringData);
-{% else %}
-const externalScoringData = null;
-console.log('[SCORING] No external scoring data available');
-{% endif %}
-
+window.showEditPasswordModal = showEditPasswordModal;
+window.closeEditPasswordModal = closeEditPasswordModal;
+window.verifyPasswordAndSave = verifyPasswordAndSave;
 </script>
-
-<style>
-/* 채점 시스템 스타일 */
-.scoring-field {
-    width: 100%;
-    padding: 10px;
-    background: #f9fafb;
-    border-radius: 8px;
-}
-
-.scoring-grid {
-    display: grid;
-    gap: 12px;
-}
-
-.scoring-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 12px;
-    background: white;
-    border: 1px solid #e5e7eb;
-    border-radius: 6px;
-}
-
-.scoring-item label {
-    font-weight: 500;
-    color: #374151;
-    margin: 0;
-    min-width: 150px;
-}
-
-.scoring-controls {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.scoring-btn {
-    width: 28px;
-    height: 28px;
-    border: 1px solid #d1d5db;
-    background: white;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 18px;
-    line-height: 1;
-    transition: all 0.2s;
-}
-
-.scoring-btn:hover {
-    background: #f3f4f6;
-    border-color: #9ca3af;
-}
-
-.scoring-btn.minus {
-    color: #ef4444;
-}
-
-.scoring-btn.plus {
-    color: #10b981;
-}
-
-.scoring-count {
-    width: 60px;
-    height: 28px;
-    text-align: center;
-    border: 1px solid #d1d5db;
-    border-radius: 4px;
-    font-size: 14px;
-}
-
-.scoring-points {
-    min-width: 60px;
-    text-align: right;
-    font-weight: 600;
-    font-size: 14px;
-}
-
-.scoring-points.negative {
-    color: #ef4444;
-}
-
-.scoring-points.positive {
-    color: #10b981;
-}
-
-/* 총점 필드 스타일 */
-.score-total-field {
-    padding: 15px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border-radius: 8px;
-    color: white;
-}
-
-.score-display {
-    text-align: center;
-}
-
-.score-value {
-    font-size: 36px;
-    font-weight: bold;
-    display: inline-block;
-    margin-right: 5px;
-}
-
-.score-value.excellent {
-    color: #10b981;
-}
-
-.score-value.good {
-    color: #3b82f6;
-}
-
-.score-value.fair {
-    color: #f59e0b;
-}
-
-.score-value.poor {
-    color: #ef4444;
-}
-
-.score-breakdown {
-    margin-top: 10px;
-    display: flex;
-    justify-content: center;
-    gap: 15px;
-    font-size: 12px;
-    opacity: 0.9;
-}
-
-.score-breakdown span {
-    padding: 2px 8px;
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 4px;
-}
-
-/* 추가 스타일 */
-.info-cell textarea {
-    width: 100%;
-    padding: 8px 12px;
-    border: 1px solid #d1d5db;
-    border-radius: 4px;
-    font-size: 14px;
-    resize: vertical;
-}
-
-.info-cell.span-1 { grid-column: span 1 !important; }
-.info-cell.span-2 { grid-column: span 2 !important; }
-.info-cell.span-3 { grid-column: span 3 !important; }
-.info-cell.span-4 { grid-column: span 4 !important; }
-.info-cell.span-5 { grid-column: span 5 !important; }
-.info-cell.span-6 { grid-column: span 6 !important; }
-.info-cell.span-7 { grid-column: span 7 !important; }
-.info-cell.span-8 { grid-column: span 8 !important; }
-
-.info-row {
-    display: grid;
-    grid-template-columns: repeat(8, minmax(0, 1fr));
-    gap: 16px;
-    margin-bottom: 16px;
-}
-
-.input-group {
-    display: flex;
-    gap: 4px;
-}
-
-.input-group input {
-    flex: 1;
-}
-
-.input-group button {
-    padding: 4px 8px;
-    background: #f3f4f6;
-    border: 1px solid #d1d5db;
-    border-radius: 4px;
-    cursor: pointer;
-}
-
-.input-group button:hover {
-    background: #e5e7eb;
-}
-
-/* 페이지 헤더 */
-.page-header {
-    margin-bottom: 20px;
-    padding-bottom: 15px;
-    border-bottom: 2px solid #2f5fd3;
-}
-.page-title {
-    font-size: 20px;
-    font-weight: 700;
-    color: #333;
-    margin: 0 0 8px 0;
-}
-.breadcrumb {
-    font-size: 14px;
-    color: #6b7280;
-}
-.breadcrumb a {
-    color: #2f5fd3;
-    text-decoration: none;
-}
-.breadcrumb a:hover {
-    text-decoration: underline;
-}
-.breadcrumb .separator {
-    margin: 0 8px;
-}
-.breadcrumb .current {
-    color: #374151;
-    font-weight: 600;
-}
-
-/* 팝업 모드일 때 헤더와 액션 버튼 숨김 */
-{% if is_popup %}
-.page-header, .action-buttons {
-    display: none !important;
-}
-{% endif %}
-
-/* 메인 컨테이너 */
-.fullprocess-detail-container {
-    max-width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-}
-
-{% if is_popup %}
-.fullprocess-detail-container {
-    padding: 0;
-    gap: 0;
-}
-
-.section {
-    border-radius: 0;
-    border-left: none;
-    border-right: none;
-    border-top: none;
-}
-
-.section:last-child {
-    border-bottom: none;
-}
-{% endif %}
-
-/* 섹션 공통 스타일 */
-.section {
-    background: white;
-    border: 1px solid #e1e5e9;
-}
-
-.section-header {
-    background: #f8f9fa;
-    padding: 12px 20px;
-    border-bottom: 1px solid #e1e5e9;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.section-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: #333;
-    margin: 0;
-}
-
-.collapse-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 4px;
-}
-
-.collapse-icon {
-    font-size: 12px;
-    color: #666;
-    transition: transform 0.2s;
-}
-
-.section-content {
-    padding: 20px;
-}
-
-/* 정보 테이블 */
-.info-table {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.info-row {
-    display: grid;
-    grid-template-columns: repeat(8, minmax(0, 1fr));
-    gap: 20px;
-}
-
-.info-cell {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.info-cell.span-1 { grid-column: span 1 !important; }
-.info-cell.span-2 { grid-column: span 2 !important; }
-.info-cell.span-3 { grid-column: span 3 !important; }
-.info-cell.span-4 { grid-column: span 4 !important; }
-.info-cell.span-5 { grid-column: span 5 !important; }
-.info-cell.span-6 { grid-column: span 6 !important; }
-.info-cell.span-7 { grid-column: span 7 !important; }
-.info-cell.span-8 { grid-column: span 8 !important; }
-
-.info-cell label {
-    font-weight: 600;
-    color: #333;
-    font-size: 14px;
-    min-height: 20px;
-}
-
-.info-cell .value {
-    padding: 8px 12px;
-    background: #f8f9fa;
-    border: 1px solid #e1e5e9;
-    border-radius: 4px;
-    font-size: 14px;
-    color: #333;
-    min-height: 20px;
-}
-
-.info-cell input,
-.info-cell select,
-.info-cell textarea {
-    width: 100%;
-    padding: 8px 12px;
-    border: 1px solid #d1d5db;
-    border-radius: 4px;
-    font-size: 14px;
-    transition: border-color 0.15s;
-}
-
-.info-cell input:focus,
-.info-cell select:focus,
-.info-cell textarea:focus {
-    outline: none;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
-/* 3. 상세내용 섹션 */
-.detail-content-section .section-content {
-    padding: 20px;
-}
-
-.content-editor {
-    position: relative;
-}
-
-/* 간단한 편집 가능한 영역 스타일 */
-.editable-content {
-    width: 100%;
-    min-height: 400px;
-    padding: 20px;
-    border: 1px solid #e1e5e9;
-    border-radius: 4px;
-    font-size: 14px;
-    line-height: 1.6;
-    color: #333;
-    font-family: inherit;
-    box-sizing: border-box;
-    background: white;
-    outline: none;
-    overflow-y: auto;
-}
-
-.editable-content:focus {
-    border-color: #2f5fd3;
-    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
-}
-
-.editable-content:empty:before {
-    content: attr(placeholder);
-    color: #999;
-    font-style: italic;
-}
-
-/* 저장 버튼 */
-.save-section {
-    display: flex;
-    justify-content: center;
-    gap: 10px;
-    padding: 20px;
-    background: white;
-    border: 1px solid #e1e5e9;
-    border-top: none;
-}
-
-.btn-save, .btn-cancel {
-    padding: 10px 24px;
-    border: none;
-    border-radius: 4px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.btn-save {
-    background: #2f5fd3;
-    color: white;
-}
-
-.btn-save:hover {
-    background: #1d4ed8;
-}
-
-.btn-cancel {
-    background: #6b7280;
-    color: white;
-    margin-left: 10px;
-
-/* 리스트 표시 스타일 */
-.list-display {
-    width: 100%;
-    max-height: 300px;
-    overflow-y: auto;
-}
-
-.list-item-display {
-    border: 1px solid #dee2e6;
-    background: #f8f9fa;
-    font-size: 13px;
-}
-}
-
-.btn-cancel:hover {
-    background: #4b5563;
-}
-
-/* 비밀번호 모달 */
-.modal {
-    display: none;
-    position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0,0,0,0.4);
-}
-
-.modal-content {
-    background-color: #fefefe;
-    margin: 15% auto;
-    padding: 0;
-    border: none;
-    border-radius: 8px;
-    width: 400px;
-    max-width: 90%;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-}
-
-.modal-header {
-    padding: 20px 25px 15px;
-    border-bottom: 1px solid #e1e5e9;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.modal-header h3 {
-    margin: 0;
-    color: #333;
-    font-size: 18px;
-    font-weight: 600;
-}
-
-.close {
-    color: #999;
-    font-size: 24px;
-    font-weight: bold;
-    cursor: pointer;
-    line-height: 1;
-}
-
-.close:hover {
-    color: #333;
-}
-
-.modal-body {
-    padding: 25px;
-}
-
-.modal-body p {
-    margin: 0 0 20px 0;
-    color: #555;
-    font-size: 14px;
-}
-
-.password-field {
-    width: 100%;
-    padding: 12px 15px;
-    border: 1px solid #e1e5e9;
-    border-radius: 4px;
-    font-size: 14px;
-    margin-bottom: 20px;
-    box-sizing: border-box;
-}
-
-.password-field:focus {
-    outline: none;
-    border-color: #2f5fd3;
-    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
-}
-
-.modal-buttons {
-    display: flex;
-    gap: 10px;
-    justify-content: flex-end;
-}
-
-.btn-confirm, .modal-buttons .btn-cancel {
-    padding: 10px 20px;
-    border: none;
-    border-radius: 4px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    min-width: 80px;
-}
-
-.btn-confirm {
-    background: #2f5fd3;
-    color: white;
-}
-
-.btn-confirm:hover {
-    background: #1d4ed8;
-}
-
-.modal-buttons .btn-cancel {
-    background: #6b7280;
-    color: white;
-}
-
-.modal-buttons .btn-cancel:hover {
-    background: #4b5563;
-}
-</style>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/scoring-system.css') }}">
-
-
 <!-- 공통 첨부파일 스크립트와 스타일 import -->
 {% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
 {{ attachment_styles() }}

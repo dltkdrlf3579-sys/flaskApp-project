@@ -5,6 +5,8 @@
 {% endif %}
 
 {% block head %}
+    {{ super() }}
+    {% include 'includes/board_form_scripts.html' %}
 {% endblock %}
 
 {% block title %}사고 등록{% endblock %}
@@ -383,16 +385,15 @@
 
 <!-- 스타일 제거 - 인라인 스타일로 대체 -->
 
+{% include 'includes/board_form_scripts.html' %}
+
 <script>
-// 섹션 정보
 const sections = {{ sections | tojson | safe }};
 const sectionColumns = {{ section_columns | tojson | safe }};
 
-// 섹션 토글
 function toggleSection(sectionId) {
     const content = document.getElementById(sectionId + '-content');
     const icon = event.target;
-    
     if (content.style.display === 'none') {
         content.style.display = 'block';
         icon.textContent = '▲';
@@ -402,239 +403,39 @@ function toggleSection(sectionId) {
     }
 }
 
-// 첨부파일 관련 변수는 공통 컴포넌트에서 제공됨
-
-// handleFileUpload 함수는 공통 컴포넌트에서 제공됨
-
-// removeFile 함수는 공통 컴포넌트에서 제공됨
-
-// updateFileInfo 함수는 공통 컴포넌트에서 제공됨
-
-// 동적 필드 수집 함수
-function collectDynamicFields() {
-    const data = {};
-    
-    // 모든 섹션 순회
-    sections.forEach(section => {
-        const sectionInputs = document.querySelectorAll(`[data-section="${section.section_key}"]`);
-        
-        sectionInputs.forEach(input => {
-            const fieldKey = input.dataset.field;
-            let value = '';
-            
-            if (input.tagName === 'SELECT') {
-                value = input.value;
-            } else if (input.type === 'checkbox') {
-                value = input.checked ? '1' : '0';
-            } else if (input.tagName === 'TEXTAREA') {
-                value = input.value;
-            } else {
-                value = input.value;
-            }
-            
-            // 리스트 필드 처리 - 더 간단하고 확실한 방법
-            // 1. data-field-type 체크 또는 2. JSON 배열 문자열 체크
-            if ((input.getAttribute('data-field-type') === 'list' || 
-                 (typeof value === 'string' && value.trim().startsWith('['))) && value) {
-                console.log(`🔍 리스트 필드 감지: ${fieldKey}`);
-                try {
-                    const parsed = JSON.parse(value);
-                    if (Array.isArray(parsed)) {
-                        value = parsed;
-                        console.log(`✅ 리스트 필드 ${fieldKey} 파싱 성공: ${parsed.length}개 항목`);
-                    } else {
-                        console.log(`⚠️ ${fieldKey}는 배열이 아님`);
-                    }
-                } catch(e) {
-                    console.log(`❌ 리스트 필드 ${fieldKey} 파싱 실패:`, e);
-                    // 파싱 실패 시 빈 배열로 설정
-                    value = [];
-                }
-            }
-            
-            data[fieldKey] = value;
-        });
-    });
-    
-    return data;
-}
-
-// 등록 함수
 function registerAccident() {
-    console.log('=== 등록 시작 ===');
     const formData = new FormData();
-    
-    // CKEditor 또는 textarea에서 값 가져오기
-    const contentTextarea = document.getElementById('detailed-content');
-    let detailedContent = '';
-    
-    if (window.RichText && typeof window.RichText.getData === 'function') {
-        detailedContent = window.RichText.getData();
-    } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
-        detailedContent = window.editorInstance.getData();
-    } else if (contentTextarea) {
-        detailedContent = contentTextarea.value || '';
-    }
-    
-    formData.append('detailed_content', detailedContent);
-    console.log('상세내용:', detailedContent);
-    
-    // 동적 필드 수집
-    const dynamicData = collectDynamicFields();
-    console.log('=== collectDynamicFields 결과 ===');
-    console.log('전체 데이터:', dynamicData);
-    
-    // 각 필드의 타입 확인
-    for (const [key, value] of Object.entries(dynamicData)) {
-        if (Array.isArray(value)) {
-            console.log(`  ${key}: 배열 (${value.length}개 항목)`);
-        } else if (typeof value === 'string' && value.startsWith('[')) {
-            console.log(`  ${key}: JSON 문자열 "${value.substring(0, 50)}..."`);
-        } else {
-            console.log(`  ${key}: ${typeof value} = "${value}"`);
-        }
-    }
-    
-    // 각 필드를 FormData에 추가
-    for (const [key, value] of Object.entries(dynamicData)) {
-        // 배열은 JSON 문자열로 변환해서 추가
-        if (Array.isArray(value)) {
-            formData.append(key, JSON.stringify(value));
-        } else {
-            formData.append(key, value);
-        }
-    }
-    
-    // base_fields 처리 (기본 섹션)
-    const baseFields = {};
-    const basicColumns = sectionColumns['basic'] || [];
-    basicColumns.forEach(col => {
-        if (dynamicData[col.column_key] !== undefined) {
-            baseFields[col.column_key] = dynamicData[col.column_key];
-        }
-    });
-    formData.append('base_fields', JSON.stringify(baseFields));
-    
-    // custom_data 처리 (기본 섹션 제외한 나머지)
-    const customData = {};
-    
-    // 모든 섹션의 동적 컬럼 데이터를 custom_data에 포함
-    sections.forEach(section => {
-        const columns = sectionColumns[section.section_key] || [];
-        columns.forEach(col => {
-            // 기본 섹션의 필드는 제외
-            if (section.section_key !== 'basic' && dynamicData[col.column_key] !== undefined) {
-                let value = dynamicData[col.column_key];
-                
-                // 리스트 필드 처리 - custom_data 구성 시점에서 한 번 더 확인
-                if (typeof value === 'string' && value.trim().startsWith('[')) {
-                    console.log(`custom_data 구성 시 리스트 필드 감지: ${col.column_key}`);
-                    try {
-                        const parsed = JSON.parse(value);
-                        if (Array.isArray(parsed)) {
-                            value = parsed;
-                            console.log(`✅ custom_data에서 파싱 성공: ${col.column_key} = 배열(${parsed.length}개)`);
-                        }
-                    } catch(e) {
-                        console.log(`❌ custom_data에서 파싱 실패: ${col.column_key}`, e);
-                    }
-                }
-                
-                customData[col.column_key] = value;
-                
-                // 디버깅: 최종 타입 확인
-                if (Array.isArray(value)) {
-                    console.log(`✅ custom_data에 배열로 저장됨: ${col.column_key} = 배열(${value.length}개)`);
-                } else if (typeof value === 'string') {
-                    console.log(`⚠️ custom_data에 문자열로 저장됨: ${col.column_key} = "${value.substring(0, 50)}..."`);
-                } else {
-                    console.log(`custom_data에 추가: ${col.column_key} = ${typeof value}`);
-                }
-            }
-        });
-    });
-    
-    console.log('최종 custom_data 객체:', customData);
-    const customDataString = JSON.stringify(customData);
-    console.log('최종 custom_data JSON 문자열:', customDataString);
-    
-    // custom_data 검증 - 리스트 필드가 올바르게 포함되었는지 확인
-    for (const [key, value] of Object.entries(customData)) {
-        if (Array.isArray(value)) {
-            console.log(`✅ 리스트 필드 ${key}: 배열로 정상 포함됨, 항목 수: ${value.length}`);
-        } else if (typeof value === 'string' && value.startsWith('[')) {
-            console.log(`❌ 리스트 필드 ${key}: 문자열로 포함됨 (이중 인코딩 문제!)`, value);
-        }
-    }
-    
-    formData.append('custom_data', customDataString);
-    
-    // 첨부파일 처리
-    const attachmentData = [];
-    document.querySelectorAll('#attachments-tbody .table-row:not(.no-data)').forEach((row, index) => {
-        const descInput = row.querySelector('.attachment-desc');
-        attachmentData.push({
-            description: descInput ? descInput.value : ''
-        });
-    });
-    
-    // 새 첨부파일 처리 (공통 컴포넌트 변수 사용)
-    if (typeof pendingFiles !== 'undefined') {
-        pendingFiles.forEach((file, index) => {
-            formData.append('files', file);
-            if (attachmentData[index]) {
-                formData.append(`file_desc_${index}`, attachmentData[index].description);
-            }
-        });
-    }
 
-    // 서버 측에서 설명 배열을 사용할 수 있도록 attachment_data 전송
-    try {
-        formData.append('attachment_data', JSON.stringify(attachmentData));
-    } catch (e) {
-        console.warn('attachment_data 직렬화 실패:', e);
-    }
-    
-    // FormData 내용 확인
-    console.log('=== FormData 전송 내용 ===');
-    for (let [key, value] of formData.entries()) {
-        if (key === 'custom_data') {
-            console.log(`${key}:`, value);
-            try {
-                const parsed = JSON.parse(value);
-                console.log('custom_data 파싱된 내용:', parsed);
-                for (const [k, v] of Object.entries(parsed)) {
-                    if (Array.isArray(v)) {
-                        console.log(`  - ${k}: 배열 (${v.length}개 항목)`);
-                    } else {
-                        console.log(`  - ${k}: ${typeof v}`);
-                    }
-                }
-            } catch(e) {
-                console.error('custom_data 파싱 실패:', e);
-            }
-        } else {
-            console.log(`${key}:`, value);
-        }
-    }
-    
-    // 서버로 전송
-    console.log('서버로 전송 시작...');
+    const detailedContent = BoardForm.getEditorContent('detailed-content');
+    formData.append('detailed_content', detailedContent);
+
+    const dynamicData = BoardForm.collectDynamicFields({ sections });
+    const grouped = BoardForm.groupFieldsBySection(dynamicData, sectionColumns);
+    BoardForm.appendSectionGroups(formData, grouped);
+
+    const baseFields = BoardForm.buildBaseFields(dynamicData, [
+        'accident_name', 'accident_date', 'workplace', 'accident_grade',
+        'major_category', 'injury_form', 'injury_type', 'building', 'floor',
+        'location_category', 'location_detail', 'created_at', 'day_of_week', 'report_date'
+    ]);
+    formData.append('base_fields', JSON.stringify(baseFields));
+
+    BoardForm.appendCustomData(formData, dynamicData);
+    BoardForm.appendPendingFiles(formData, (typeof pendingFiles !== 'undefined') ? pendingFiles : []);
+
+    const attachmentMeta = BoardForm.buildAttachmentMeta({
+        rowSelector: '#attachments-tbody .table-row'
+    });
+    formData.append('attachment_data', JSON.stringify(attachmentMeta));
+
     fetch('/register-accident', {
         method: 'POST',
         body: formData
     })
-    .then(response => {
-        console.log('서버 응답 상태:', response.status);
-        return response.json();
-    })
+    .then(response => response.json())
     .then(data => {
-        console.log('서버 응답 데이터:', data);
         if (data.success) {
             alert('사고가 성공적으로 등록되었습니다.');
-            console.log('등록 성공! Console을 확인하세요.');
-            
-            // 팝업창 닫기
             if (window.opener) {
                 window.opener.location.reload();
                 window.close();
@@ -643,7 +444,6 @@ function registerAccident() {
             }
         } else {
             alert('등록 실패: ' + (data.message || '알 수 없는 오류'));
-            console.error('등록 실패 상세:', data);
         }
     })
     .catch(error => {
@@ -652,83 +452,7 @@ function registerAccident() {
     });
 }
 
-// 숫자 입력 유효성 검사 함수들
-function isNumberKey(evt, inputEl) {
-    var charCode = (evt.which) ? evt.which : evt.keyCode;
-    var t = (inputEl && inputEl.getAttribute('data-number-type')) || 'float';
-    if (charCode > 31 && (charCode < 48 || charCode > 57)) {
-        if (t === 'float' && charCode === 46) return true; // '.' 허용 (실수)
-        return false;
-    }
-    return true;
-}
-
-function validateNumberInput(input) {
-    const t = input.getAttribute('data-number-type') || 'float';
-    const value = input.value;
-    const numericValue = t === 'integer' ? value.replace(/[^0-9]/g, '') : value.replace(/[^0-9.]/g, '');
-    
-    if (value !== numericValue) {
-        input.value = numericValue;
-        // 경고 메시지 표시
-        showValidationMessage(input, t === 'integer' ? '정수만 입력할 수 있습니다.' : '숫자만 입력할 수 있습니다.');
-    }
-}
-
-function showValidationMessage(input, message) {
-    // 기존 메시지 제거
-    const existingMessage = input.parentNode.querySelector('.validation-message');
-    if (existingMessage) {
-        existingMessage.remove();
-    }
-    
-    // 새 메시지 생성
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'validation-message';
-    messageDiv.style.color = '#dc3545';
-    messageDiv.style.fontSize = '12px';
-    messageDiv.style.marginTop = '5px';
-    messageDiv.textContent = message;
-    
-    input.parentNode.appendChild(messageDiv);
-    
-    // 3초 후 메시지 제거
-    setTimeout(() => {
-        if (messageDiv.parentNode) {
-            messageDiv.remove();
-        }
-    }, 3000);
-}
-
-// 모든 팝업 함수는 공통 popup-handler.js에서 제공됨
-// openPersonSearch, openCompanySearch, openBuildingSearch,
-// openDepartmentSearch, openContractorSearch 등
-
-// 페이지 로드시 디버깅
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('=== 페이지에 렌더링된 모든 필드 ===');
-    const allInputs = document.querySelectorAll('input[id]');
-    const fieldGroups = {};
-    
-    allInputs.forEach(input => {
-        const id = input.id;
-        console.log(`필드: id="${id}", type="${input.type}", readonly="${input.readOnly}", value="${input.value}"`);
-        
-        // 필드를 그룹별로 분류
-        if (id.includes('test1') || id.includes('test2') || id.includes('test3') || id.includes('test4')) {
-            const baseKey = id.split('_')[0];
-            if (!fieldGroups[baseKey]) fieldGroups[baseKey] = [];
-            fieldGroups[baseKey].push(id);
-        }
-    });
-    
-    console.log('=== 테스트 필드 그룹 ===');
-    Object.keys(fieldGroups).forEach(key => {
-        console.log(`${key}: ${fieldGroups[key].join(', ')}`);
-    });
-});
-
-// 기본 스크립트 끝
+window.registerAccident = registerAccident;
 </script>
 
 <style>

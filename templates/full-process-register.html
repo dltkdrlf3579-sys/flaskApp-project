@@ -4,10 +4,15 @@
 {% extends "base.html" %}
 {% endif %}
 
+{% from 'includes/board_form/detail_content.html' import render_detail_content %}
+{% from 'includes/board_form/save_controls.html' import render_save_button %}
+
 {% block head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/scoring-system.css') }}">
-<script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
-<script src="{{ url_for('static', filename='js/scoring-external.js') }}"></script>
+    {{ super() }}
+    {% include 'includes/board_form_scripts.html' %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/scoring-system.css') }}">
+    <script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/scoring-external.js') }}"></script>
 {% endblock %}
 
 {% block title %}Full Process 등록{% endblock %}
@@ -35,7 +40,7 @@
     <div class="section {{ section.section_key|replace('_', '-') }}-section">
         <div class="section-header">
             <h3 class="section-title">{{ section.section_name }}</h3>
-            <button class="collapse-btn" onclick="toggleSection('{{ section.section_key|replace('_', '-') }}')">
+            <button class="collapse-btn" onclick="BoardDetail.toggleSection('{{ section.section_key|replace('_', '-') }}', this)">
                 <span class="collapse-icon">▲</span>
             </button>
         </div>
@@ -383,8 +388,8 @@
     </div>
 
     <!-- 첨부파일 영역 (공통 컴포넌트) -->
-    {% from 'includes/attachment_section.html' import render_attachment_section %}
-    {{ render_attachment_section([], 'safety_sop') }}
+{% from 'includes/attachment_section.html' import render_attachment_section %}
+{{ render_attachment_section([], 'full_process') }}
 
     <!-- 저장 버튼 영역 -->
     <div class="save-section">
@@ -393,234 +398,56 @@
 </div>
 
 <!-- 스타일 -->
-<link rel="stylesheet" href="/static/styles/accident-register.css">
 
 <script>
-// 섹션 정보
 const sections = {{ sections | tojson | safe }};
 const sectionColumns = {{ section_columns | tojson | safe }};
 
-// 섹션 토글
-function toggleSection(sectionId) {
-    const content = document.getElementById(sectionId + '-content');
-    const icon = event.target;
-    
-    if (content.style.display === 'none') {
-        content.style.display = 'block';
-        icon.textContent = '▲';
-    } else {
-        content.style.display = 'none';
-        icon.textContent = '▼';
-    }
-}
+const registerFullProcess = BoardDetail.createUpdater({
 
-// 첨부파일 관련 변수와 함수는 공통 컴포넌트에서 제공됨
+    endpoint: '/register-full-process',
 
-// 동적 필드 수집 함수
-function collectDynamicFields() {
-    const data = {};
+    sections: sections,
 
-    // 모든 섹션 순회
-    sections.forEach(section => {
-        const sectionInputs = document.querySelectorAll(`[data-section="${section.section_key}"]`);
+    sectionColumns: sectionColumns,
 
-        sectionInputs.forEach(input => {
-            const fieldKey = input.dataset.field;
-            let value = '';
+    attachmentsSelector: '#attachments-tbody .table-row, .attachments-table .table-row',
 
-            if (input.tagName === 'SELECT') {
-                value = input.value;
-            } else if (input.type === 'checkbox') {
-                value = input.checked ? '1' : '0';
-            } else if (input.tagName === 'TEXTAREA') {
-                value = input.value;
-            } else {
-                value = input.value;
-            }
-            
-            // 리스트 필드 처리 - 더 간단하고 확실한 방법
-            // 1. data-field-type 체크 또는 2. JSON 배열 문자열 체크
-            if ((input.getAttribute('data-field-type') === 'list' || 
-                 (typeof value === 'string' && value.trim().startsWith('['))) && value) {
-                console.log(`🔍 리스트 필드 감지: ${fieldKey}`);
-                try {
-                    const parsed = JSON.parse(value);
-                    if (Array.isArray(parsed)) {
-                        value = parsed;
-                        console.log(`✅ 리스트 필드 ${fieldKey} 파싱 성공: ${parsed.length}개 항목`);
-                    } else {
-                        console.log(`⚠️ ${fieldKey}는 배열이 아님`);
-                    }
-                } catch(e) {
-                    console.log(`❌ 리스트 필드 ${fieldKey} 파싱 실패:`, e);
-                    // 파싱 실패 시 빈 배열로 설정
-                    value = [];
-                }
-            }
-            
-            data[fieldKey] = value;
-        });
-    });
-    
-    return data;
-}
+    popupReload: {{ 'true' if is_popup else 'false' }},
 
-// 섹션별 필드 그룹화 함수
-function groupFieldsBySection(dynamicData) {
-    const sectionGroups = {};
+    successMessage: 'Full Process가 성공적으로 등록되었습니다.',
 
-    // 모든 섹션의 컬럼을 순회하면서 그룹화
-    Object.keys(sectionColumns).forEach(sectionKey => {
-        const columns = sectionColumns[sectionKey] || [];
-        columns.forEach(col => {
-            // 해당 섹션의 그룹이 없으면 생성
-            if (!sectionGroups[sectionKey]) {
-                sectionGroups[sectionKey] = {};
-            }
-            const fieldKey = col.column_key;
-            // dynamicData에 해당 필드가 있으면 섹션 그룹에 추가
-            if (dynamicData[fieldKey] !== undefined) {
-                sectionGroups[sectionKey][fieldKey] = dynamicData[fieldKey];
-            }
-        });
-    });
+    failurePrefix: '등록 실패',
 
-    console.log('=== 섹션별 그룹화 결과 ===');
-    Object.keys(sectionGroups).forEach(sectionKey => {
-        console.log(`${sectionKey}:`, sectionGroups[sectionKey]);
-    });
+    reloadCurrent: false,
 
-    return sectionGroups;
-}
+    onSuccess(data) {
 
-// 등록 함수
-function registerFullProcess() {
-    const formData = new FormData();
+        {% if is_popup %}
 
-    // 상세내용 처리 - CKEditor 또는 textarea에서 값 가져오기
-    const contentTextarea = document.getElementById('detailed-content');
-    let detailedContent = '';
+        if (window.opener && !window.opener.closed) {
 
-    // CKEditor가 있다면 CKEditor에서 값 가져오기
-    if (window.RichText && typeof window.RichText.getData === 'function') {
-        detailedContent = window.RichText.getData();
-    } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
-        detailedContent = window.editorInstance.getData();
-    } else if (contentTextarea) {
-        detailedContent = contentTextarea.value || '';
-    }
+            window.opener.location.reload();
 
-    formData.append('detailed_content', detailedContent);
-
-    // 동적 필드 수집
-    const dynamicData = collectDynamicFields();
-
-    // 섹션별로 그룹화해서 전송
-    const sectionGroups = groupFieldsBySection(dynamicData);
-
-    // 각 섹션별로 FormData에 추가
-    Object.keys(sectionGroups).forEach(sectionKey => {
-        console.log(`Sending section ${sectionKey}:`, sectionGroups[sectionKey]);
-        formData.append(sectionKey, JSON.stringify(sectionGroups[sectionKey]));
-    });
-
-    // 하위 호환성을 위해 custom_data도 전송 (전체 데이터)
-    formData.append('custom_data', JSON.stringify(dynamicData));
-    
-    // 새 첨부파일 처리 (공통 컴포넌트 변수 사용)
-    if (typeof pendingFiles !== 'undefined') {
-        pendingFiles.forEach((file, index) => {
-            formData.append('files', file);
-        });
-    }
-    
-    // 첨부파일 설명 정보 (GPT 권장: 객체 배열로 전송)
-    const attachmentDescriptions = [];
-    document.querySelectorAll('.attachment-desc').forEach((input, index) => {
-        const row = input.closest('tr') || input.closest('.attachment-row');
-        attachmentDescriptions.push({
-            id: row ? (row.dataset.id || row.dataset.attachmentId || null) : null,
-            description: input.value || '',
-            isNew: row ? (row.dataset.isNew === 'true') : false
-        });
-    });
-    formData.append('attachment_data', JSON.stringify(attachmentDescriptions));
-    
-    // 서버로 전송
-    fetch('/register-full-process', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            alert('Full Process가 성공적으로 등록되었습니다.');
-            
-            // 팝업 모드인 경우 부모 창 새로고침
-            {% if is_popup %}
-            if (window.opener && !window.opener.closed) {
-                window.opener.location.reload();
-            }
-            {% endif %}
-            
-            if (window.opener) {
-                window.opener.location.reload();
-                window.close();
-            } else {
-                window.location.href = '/full-process';
-            }
-        } else {
-            alert('등록 실패: ' + (data.message || '알 수 없는 오류'));
         }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('등록 중 오류가 발생했습니다.');
-    });
-}
 
-// 팝업 열기 함수 - popup-handler.js에서 처리
-// openPopup 함수는 사용하지 않음 (각 타입별 함수 사용)
-// openPersonSearch, openCompanySearch, openBuildingSearch,
-// openDepartmentSearch, openContractorSearch 등
+        window.close();
 
-// 테이블 검색 팝업 열기 함수
-function openTableSearch(fieldKey) {
-    // 팝업 윈도우 옵션 설정
-    const width = 1000;
-    const height = 600;
-    const left = (screen.width - width) / 2;
-    const top = (screen.height - height) / 2;
-    
-    const popupOptions = [
-        `width=${width}`,
-        `height=${height}`,
-        `left=${left}`,
-        `top=${top}`,
-        'scrollbars=yes',
-        'resizable=yes',
-        'toolbar=no',
-        'menubar=no',
-        'location=no',
-        'status=no'
-    ].join(',');
-    
-    // 테이블 검색 팝업 URL (향후 구현 필요)
-    const popupUrl = `/table-search?field=${fieldKey}&type=employee`;
-    const popup = window.open(popupUrl, 'tableSearch', popupOptions);
-    
-    // 팝업이 차단되었는지 확인
-    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
-        return;
+        {% else %}
+
+        window.location.href = '/full-process';
+
+        {% endif %}
+
     }
-    
-    // 팝업에서 선택된 데이터를 받는 함수
-    // receiveTableSelection 함수는 popup-handler.js에서 통합 처리됨
-    
-    popup.focus();
-}
-</script>
+
+});
+
+
+
+window.registerFullProcess = registerFullProcess;
+
+/script>
 
 <script>
 // 실시간 채점 계산 (Full Process)
@@ -654,253 +481,6 @@ document.addEventListener('input', function(e) {
     }
 });
 </script>
-
-<style>
-/* 그리드 레이아웃 핵심 스타일 */
-.accident-detail-container {
-    padding: 20px;
-}
-
-.section {
-    background: white;
-    border: 1px solid #e1e5e9;
-    border-radius: 8px;
-    margin-bottom: 20px;
-    overflow: hidden;
-}
-
-.section-header {
-    background: #f8f9fa;
-    padding: 15px 20px;
-    border-bottom: 1px solid #e1e5e9;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.section-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: #333;
-    margin: 0;
-}
-
-.collapse-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 5px 10px;
-    color: #666;
-}
-
-.section-content {
-    padding: 20px;
-}
-
-.info-table {
-    width: 100%;
-}
-
-.info-row {
-    display: grid !important;
-    grid-template-columns: repeat(8, minmax(0, 1fr)) !important;
-    gap: 16px !important;
-    margin-bottom: 16px !important;
-}
-
-.info-cell {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 8px !important;
-    min-height: 60px !important;
-}
-
-.info-cell label {
-    font-weight: 600;
-    color: #374151;
-    font-size: 14px;
-    margin-bottom: 4px;
-}
-
-.info-cell input,
-.info-cell select,
-.info-cell textarea,
-.info-cell .value {
-    width: 100% !important;
-    padding: 8px 12px !important;
-    border: 1px solid #d1d5db !important;
-    border-radius: 4px !important;
-    font-size: 14px !important;
-    display: block !important;
-    visibility: visible !important;
-}
-
-.info-cell textarea {
-    resize: vertical;
-    min-height: 80px;
-}
-
-.info-cell.span-1 { grid-column: span 1 !important; }
-.info-cell.span-2 { grid-column: span 2 !important; }
-.info-cell.span-3 { grid-column: span 3 !important; }
-.info-cell.span-4 { grid-column: span 4 !important; }
-.info-cell.span-5 { grid-column: span 5 !important; }
-.info-cell.span-6 { grid-column: span 6 !important; }
-.info-cell.span-7 { grid-column: span 7 !important; }
-.info-cell.span-8 { grid-column: span 8 !important; }
-
-.input-group {
-    display: flex;
-    gap: 4px;
-}
-
-.input-group input {
-    flex: 1;
-}
-
-.input-group button {
-    padding: 4px 8px;
-    background: #f3f4f6;
-    border: 1px solid #d1d5db;
-    border-radius: 4px;
-    cursor: pointer;
-}
-
-.input-group button:hover {
-    background: #e5e7eb;
-}
-
-/* 상세내용 섹션 */
-.detail-content-section .section-content {
-    padding: 20px;
-}
-
-.content-editor {
-    width: 100%;
-}
-
-.editable-content {
-    min-height: 300px;
-    padding: 15px;
-    border: 1px solid #d1d5db;
-    border-radius: 4px;
-    background: white;
-    font-size: 14px;
-    line-height: 1.6;
-    outline: none;
-}
-
-.editable-content:focus {
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
-.editable-content p {
-    margin: 10px 0;
-}
-
-.editable-content br {
-    line-height: 1.6;
-}
-
-.editable-content table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 15px 0;
-}
-
-.editable-content table td,
-.editable-content table th {
-    border: 1px solid #e1e5e9;
-    padding: 8px 12px;
-    text-align: left;
-}
-
-.editable-content table th {
-    background: #f8f9fa;
-    font-weight: 600;
-}
-
-.editable-content table tr:nth-child(even) {
-    background: #f8f9fa;
-}
-
-/* 첨부파일 섹션 */
-.attachments-section .section-header {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-}
-
-.btn-add-file {
-    padding: 6px 12px;
-    background: #28a745;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: 12px;
-    cursor: pointer;
-    margin-left: auto;
-    margin-right: 10px;
-}
-
-.btn-add-file:hover {
-    background: #218838;
-}
-
-.file-count, .file-size {
-    font-size: 14px;
-    color: #666;
-}
-
-/* 첨부파일 테이블 스타일은 attachment_section.html에서 제공됨 */
-
-.btn-delete {
-    padding: 4px 8px;
-    background: #dc3545;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: 12px;
-    cursor: pointer;
-}
-
-.btn-delete:hover {
-    background: #c82333;
-}
-
-.file-desc-input {
-    width: 100%;
-    padding: 4px 8px;
-    border: 1px solid #d1d5db;
-    border-radius: 4px;
-    font-size: 12px;
-}
-
-/* 저장 버튼 영역 */
-.save-section {
-    padding: 20px;
-    text-align: center;
-}
-
-.btn-save {
-    padding: 10px 30px;
-    background: #3b82f6;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-}
-
-.btn-save:hover {
-    background: #2563eb;
-}
-</style>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/scoring-system.css') }}">
-
-
 <!-- 공통 첨부파일 스크립트와 스타일 import -->
 {% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
 {{ attachment_styles() }}

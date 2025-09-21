@@ -1,15 +1,15 @@
 """Blueprint wrappers for Safety Instruction board routes."""
 
-from flask import Blueprint
+from flask import Blueprint, request
 
 safety_instruction_bp = Blueprint('safety_instruction', __name__)
 
 
 @safety_instruction_bp.route("/safety-instruction")
 def safety_instruction_route():
-    from app import safety_instruction_route_logic
+    from app import _safety_instruction_controller
 
-    return safety_instruction_route_logic()
+    return _safety_instruction_controller.list_view(request)
 
 
 @safety_instruction_bp.route(
@@ -17,9 +17,9 @@ def safety_instruction_route():
     endpoint="safety_instruction_register",
 )
 def safety_instruction_register():
-    from app import safety_instruction_register_logic
+    from app import _safety_instruction_controller
 
-    return safety_instruction_register_logic()
+    return _safety_instruction_controller.register_view(request)
 
 
 @safety_instruction_bp.route(
@@ -27,9 +27,9 @@ def safety_instruction_register():
     endpoint="safety_instruction_detail",
 )
 def safety_instruction_detail(issue_number):
-    from app import safety_instruction_detail_logic
+    from app import _safety_instruction_controller
 
-    return safety_instruction_detail_logic(issue_number)
+    return _safety_instruction_controller.detail_view(request, issue_number)
 
 
 @safety_instruction_bp.route(
@@ -38,9 +38,9 @@ def safety_instruction_detail(issue_number):
     endpoint='update_safety_instruction'
 )
 def update_safety_instruction():
-    from app import update_safety_instruction_logic
+    from app import _safety_instruction_controller
 
-    return update_safety_instruction_logic()
+    return _safety_instruction_controller.update(request)
 
 
 @safety_instruction_bp.route(
@@ -49,6 +49,6 @@ def update_safety_instruction():
     endpoint='register_safety_instruction'
 )
 def register_safety_instruction():
-    from app import register_safety_instruction_logic
+    from app import _safety_instruction_controller
 
-    return register_safety_instruction_logic()
+    return _safety_instruction_controller.save(request)

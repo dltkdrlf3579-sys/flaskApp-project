@@ -1,9 +1,53 @@
-import sqlite3
 import logging
 from datetime import datetime
-from timezone_config import get_korean_time
+from typing import Iterable, Optional
 
-def generate_unique_id(prefix, db_path, table_name, id_column, base_datetime=None, counter_digits=4):
+from timezone_config import get_korean_time
+from db_connection import get_db_connection
+
+
+def _resolve_existing_table(conn, primary: str, candidates: Optional[Iterable[str]] = None) -> str:
+    """Return the first table name that exists on the current backend."""
+    names: list[str] = []
+    if primary:
+        names.append(primary)
+    if candidates:
+        for name in candidates:
+            if name and name not in names:
+                names.append(name)
+
+    if not names:
+        return primary
+
+    for name in names:
+        try:
+            cursor = conn.cursor()
+            try:
+                if getattr(conn, 'is_postgres', False):
+                    cursor.execute("SELECT to_regclass(%s)", (name,))
+                    row = cursor.fetchone()
+                    exists = bool(row and row[0])
+                else:
+                    cursor.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+                        (name,),
+                    )
+                    exists = cursor.fetchone() is not None
+            finally:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+        except Exception:
+            exists = False
+
+        if exists:
+            return name
+
+    return primary
+
+
+def generate_unique_id(prefix, db_path, table_name, id_column, base_datetime=None, counter_digits=4, table_candidates=None):
     """
     접두사 + yyMMdd + N자리 순번 형식의 고유 ID 생성
 
@@ -27,66 +71,113 @@ def generate_unique_id(prefix, db_path, table_name, id_column, base_datetime=Non
 
     base_id = korean_time.strftime('%y%m%d')  # yyMMdd (날짜만)
 
-    conn = sqlite3.connect(db_path, timeout=30.0)
-    conn.execute("PRAGMA journal_mode=WAL")
-    cursor = conn.cursor()
+    conn = None
+    cursor = None
+    resolved_table = table_name
 
     try:
-        # 트랜잭션으로 안전하게 처리
-        cursor.execute("BEGIN EXCLUSIVE")
+        conn = get_db_connection(db_path, timeout=30.0)
+        resolved_table = _resolve_existing_table(conn, table_name, table_candidates)
+        cursor = conn.cursor()
 
-        # 같은 날짜의 기존 ID들 검색
+        if getattr(conn, 'is_postgres', False):
+            cursor.execute("BEGIN")
+        else:
+            cursor.execute("BEGIN EXCLUSIVE")
+
         pattern = f"{prefix}{base_id}%"
-        cursor.execute(f"""
-            SELECT {id_column} FROM {table_name}
+        cursor.execute(
+            f"""
+            SELECT {id_column}
+            FROM {resolved_table}
             WHERE {id_column} LIKE ?
             ORDER BY {id_column} DESC
             LIMIT 1
-        """, (pattern,))
+            """,
+            (pattern,),
+        )
 
         result = cursor.fetchone()
 
         if result:
-            # 마지막 순번 추출하여 +1
-            last_id = result[0]
-            last_counter = int(last_id[len(prefix) + 6:])  # 접두사 + 6자리 날짜 제외
+            if isinstance(result, dict):
+                last_id = result.get(id_column)
+                if not last_id and result:
+                    try:
+                        last_id = next(iter(result.values()))
+                    except Exception:
+                        last_id = None
+            else:
+                try:
+                    last_id = result[0]
+                except Exception:
+                    last_id = None
+            last_counter = int(str(last_id)[len(prefix) + 6:]) if last_id else 0
             new_counter = last_counter + 1
         else:
-            # 첫 번째 ID
             new_counter = 1
 
-        # 지정된 자릿수로 포맷
-        max_counter = 10 ** counter_digits - 1  # 4자리면 9999, 5자리면 99999
+        max_counter = 10 ** counter_digits - 1
         if new_counter > max_counter:
-            # 최대값 초과시 다음 날짜로 롤오버 (실제로는 거의 발생 안함)
             logging.warning(f"Counter overflow for {prefix}{base_id}, resetting to 1")
             new_counter = 1
 
         unique_id = f"{prefix}{base_id}{new_counter:0{counter_digits}d}"
 
-        cursor.execute("COMMIT")
-        logging.info(f"고유 ID 생성: {unique_id}")
+        conn.commit()
+        logging.info(f"고유 ID 생성: {unique_id} (table={resolved_table})")
         return unique_id
 
     except Exception as e:
-        cursor.execute("ROLLBACK")
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         logging.error(f"ID 생성 오류: {e}")
-        # 폴백: 날짜 + 랜덤
         import random
         max_random = 10 ** counter_digits - 1
         fallback_id = f"{prefix}{base_id}{random.randint(1, max_random):0{counter_digits}d}"
         logging.warning(f"폴백 ID 사용: {fallback_id}")
         return fallback_id
     finally:
-        conn.close()
+        try:
+            if cursor and hasattr(cursor, 'close'):
+                cursor.close()
+        except Exception:
+            pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
 
 def generate_followsop_number(db_path, base_datetime=None):
     """Follow SOP 점검번호 생성 (FSYYMMDDNNNN - 4자리 순번)"""
-    return generate_unique_id('FS', db_path, 'follow_sop', 'work_req_no', base_datetime, counter_digits=4)
+    return generate_unique_id(
+        'FS',
+        db_path,
+        'follow_sop',
+        'work_req_no',
+        base_datetime,
+        counter_digits=4,
+        table_candidates=('follow_sop_cache', 'followsop_cache'),
+    )
+
 
 def generate_fullprocess_number(db_path, base_datetime=None):
     """Full Process 평가번호 생성 (FPYYMMDDNNNNN - 5자리 순번)"""
-    return generate_unique_id('FP', db_path, 'full_process', 'fullprocess_number', base_datetime, counter_digits=5)
+    return generate_unique_id(
+        'FP',
+        db_path,
+        'full_process',
+        'fullprocess_number',
+        base_datetime,
+        counter_digits=5,
+        table_candidates=('full_process_cache', 'fullprocess_cache'),
+    )
+
 
 def generate_safeplace_number(db_path, base_datetime=None):
     """Safe Workplace 점검번호 생성 (SPYYMMDDNNNN - 4자리 순번)
@@ -100,25 +191,40 @@ def generate_safeplace_number(db_path, base_datetime=None):
     try:
         from db_connection import get_db_connection
         conn = get_db_connection()
+        table_name = _resolve_existing_table(conn, 'safe_workplace', ('safe_workplace_cache',))
         cursor = conn.cursor()
 
         pattern = f"{prefix}{base_id}%"
         cursor.execute(
-            """
+            f"""
             SELECT safeplace_no
-            FROM safe_workplace
-            WHERE safeplace_no LIKE %s
+            FROM {table_name}
+            WHERE safeplace_no LIKE ?
             ORDER BY safeplace_no DESC
             LIMIT 1
             """,
-            (pattern,)
+            (pattern,),
         )
 
         row = cursor.fetchone()
-        if row and row[0]:
-            last_id = row[0]
+        last_id = None
+        if row:
+            if isinstance(row, dict):
+                last_id = row.get('safeplace_no')
+                if not last_id and row:
+                    try:
+                        last_id = next(iter(row.values()))
+                    except Exception:
+                        last_id = None
+            else:
+                try:
+                    last_id = row[0]
+                except Exception:
+                    last_id = None
+
+        if last_id:
             try:
-                last_counter = int(last_id[len(prefix) + 6:])
+                last_counter = int(str(last_id)[len(prefix) + 6:])
             except ValueError:
                 last_counter = 0
             new_counter = last_counter + 1
@@ -134,7 +240,7 @@ def generate_safeplace_number(db_path, base_datetime=None):
 
         cursor.close()
         conn.close()
-        logging.info(f"Safe Workplace 고유 ID 생성(PostgreSQL): {unique_id}")
+        logging.info(f"Safe Workplace 고유 ID 생성(PostgreSQL): {unique_id} (table={table_name})")
         return unique_id
 
     except Exception as e:

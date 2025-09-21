@@ -860,22 +860,29 @@ function closeEditPasswordModal() {
 }
 
 function verifyPasswordAndSave() {
-    const password = document.getElementById('edit-password-input').value;
-    
+    const input = document.getElementById('edit-password-input');
+    const password = input ? input.value : '';
+
     if (!password) {
         alert('비밀번호를 입력해주세요.');
+        if (input) {
+            input.focus();
+        }
         return;
     }
-    
-    // 비밀번호가 admin123인지 확인
-    if (password === 'admin123') {
-        closeEditPasswordModal();
-        saveChanges();
-    } else {
-        alert('비밀번호가 올바르지 않습니다.');
-        document.getElementById('edit-password-input').value = '';
-        document.getElementById('edit-password-input').focus();
-    }
+
+    BoardDetail.verifyPassword({ boardType: 'partner', password })
+        .then(() => {
+            closeEditPasswordModal();
+            saveChanges();
+        })
+        .catch((error) => {
+            alert(error && error.message ? error.message : '비밀번호가 올바르지 않습니다.');
+            if (input) {
+                input.value = '';
+                input.focus();
+            }
+        });
 }
 
 function saveChanges_OLD_REMOVE() {

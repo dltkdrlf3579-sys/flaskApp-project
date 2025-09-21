@@ -1,4 +1,4 @@
-"""Full Process board controller for Phase 2 refactor."""
+"""Follow SOP board controller for Phase 2 refactor."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from controllers import BoardController, BoardControllerConfig
 from utils.board_layout import order_value
 
 
-class FullProcessController(BoardController):
-    """Controller that encapsulates Full Process board behaviour."""
+class FollowSopController(BoardController):
+    """Controller that encapsulates Follow SOP board behaviour."""
 
     def list_view(self, request) -> Any:
         filters = self._extract_filters(request)
@@ -58,7 +58,7 @@ class FullProcessController(BoardController):
         if items:
             items = smart_apply_mappings(
                 items,
-                "full_process",
+                "follow_sop",
                 dynamic_columns,
                 self.repository.db_path,
             )
@@ -66,7 +66,7 @@ class FullProcessController(BoardController):
         pagination = self._build_pagination(page, per_page, total_count)
 
         context = self._build_template_context(
-            fullprocesses=items,
+            followsops=items,
             dynamic_columns=dynamic_columns,
             sections=sections,
             display_columns=display_columns,
@@ -77,13 +77,13 @@ class FullProcessController(BoardController):
         )
         return render_template(self.config.list_template, **context)
 
-    def detail_view(self, request, fullprocess_number: str) -> Any:
+    def detail_view(self, request, work_req_no: str) -> Any:
         context_data = self.repository.fetch_detail_context(
-            fullprocess_number,
+            work_req_no,
             request.args.get('popup') == '1',
         )
         if not context_data:
-            return "Full Process를 찾을 수 없습니다.", 404
+            return "Follow SOP를 찾을 수 없습니다.", 404
         context = self._build_template_context(**context_data)
         return render_template(self.config.detail_template, **context)
 
@@ -189,7 +189,7 @@ class FullProcessController(BoardController):
                         column["column_type"] = popup_map.get("person", column.get("column_type"))
                         column.setdefault("input_type", "table")
         except Exception as exc:
-            logging.warning("[FULL_PROCESS] normalize column types failed: %s", exc)
+            logging.warning("[FOLLOW_SOP] normalize column types failed: %s", exc)
 
         normalize_column_types(dynamic_columns)
 
@@ -218,7 +218,7 @@ class FullProcessController(BoardController):
         scoring_cols: list[Dict[str, Any]] = []
         score_total_cols: list[Dict[str, Any]] = []
 
-        excluded = {"detailed_content", "fullprocess_number", "created_at"}
+        excluded = {"detailed_content", "work_req_no", "created_at"}
 
         for column in dynamic_columns:
             column_key = column.get("column_key")
@@ -306,7 +306,7 @@ class FullProcessController(BoardController):
             try:
                 return json.loads(raw)
             except Exception:
-                logging.error("[FULL_PROCESS] custom_data parse error", exc_info=True)
+                logging.error("[FOLLOW_SOP] custom_data parse error", exc_info=True)
         return {}
 
     def _flatten_scoring_fields(
@@ -445,16 +445,16 @@ class FullProcessController(BoardController):
         return Pagination(page, per_page, total_count)
 
 
-def build_full_process_config() -> BoardControllerConfig:
+def build_follow_sop_config() -> BoardControllerConfig:
     return BoardControllerConfig(
-        board_type="full_process",
-        list_template="full-process.html",
-        detail_template="full-process-detail.html",
-        register_template="full-process-register.html",
+        board_type="follow_sop",
+        list_template="follow-sop.html",
+        detail_template="follow-sop-detail.html",
+        register_template="follow-sop-register.html",
         attachments_enabled=True,
         scoring_enabled=True,
         per_page_default=20,
         extra_context={
-            "menu_section": "full_process",
+            "menu_section": "follow_sop",
         },
     )

@@ -4,9 +4,14 @@
 {% extends "base.html" %}
 {% endif %}
 
+{% from 'includes/board_form/detail_content.html' import render_detail_content %}
+{% from 'includes/board_form/save_controls.html' import render_save_button, render_password_modal %}
+
 {% block head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/scoring-system.css') }}">
-<script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
+    {{ super() }}
+    {% include 'includes/board_form_scripts.html' %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/scoring-system.css') }}">
+    <script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
 {% endblock %}
 
 {% block title %}Follow SOP 상세정보{% endblock %}
@@ -30,7 +35,7 @@
     <div class="section {% if section.section_key == 'basic_info' %}basic-info{% elif section.section_key == 'violation_info' %}violation-info{% elif section.section_key == 'additional' %}additional{% else %}{{ section.section_key|replace('_', '-') }}{% endif %}-section">
         <div class="section-header">
             <h3 class="section-title">{{ section.section_name }}</h3>
-            <button class="collapse-btn" onclick="toggleSection('{% if section.section_key == 'basic_info' %}basic-info{% elif section.section_key == 'violation_info' %}violation-info{% elif section.section_key == 'additional' %}additional{% else %}{{ section.section_key|replace('_', '-') }}{% endif %}')">
+            <button class="collapse-btn" onclick="BoardDetail.toggleSection('{% if section.section_key == 'basic_info' %}basic-info{% elif section.section_key == 'violation_info' %}violation-info{% elif section.section_key == 'additional' %}additional{% else %}{{ section.section_key|replace('_', '-') }}{% endif %}', this)">
                 <span class="collapse-icon">▲</span>
             </button>
         </div>
@@ -88,7 +93,10 @@
                                     {% set base_key = col.column_key %}
                                     {% for s in suffixes %}
                                         {% if base_key.endswith(s) %}
-                                            {% set base_key = base_key[:-s|length] %}
+                                            {% set suffix_len = s|length %}
+                                            {% if suffix_len > 0 %}
+                                                {% set base_key = base_key[:-suffix_len] %}
+                                            {% endif %}
                                         {% endif %}
                                     {% endfor %}
                                     {% set base_keys_src = all_column_keys if all_column_keys is defined else (dynamic_columns | map(attribute='column_key') | list) %}
@@ -136,7 +144,8 @@
                                     <!-- 리스트 필드는 항상 custom_data에서 가져오기 -->
                                     {% set col_value = custom_data.get(col.column_key, '[]') if custom_data else '[]' %}
                                 {% else %}
-                                    {% set col_value = sop[col.column_key] | default('', true) %}
+                                    {% set sop_val = sop.get(col.column_key) if sop else None %}
+                                    {% set col_value = (sop_val if sop_val not in (None, '') else (custom_data.get(col.column_key) if custom_data else '')) %}
                                 {% endif %}
                                 
                                 {% if col.column_type == 'dropdown' %}
@@ -310,760 +319,116 @@
     </div>
     {% endfor %}
 
-    <!-- 상세내용 영역 -->
-    <div class="section detail-content-section">
-        <div class="section-header">
-            <h3 class="section-title">상세내용</h3>
-        </div>
-        <div class="section-content">
-            <div class="content-editor">
-                <!-- CKEditor 5 -->
-                <!-- 디버그: detailed_content 값 확인 -->
-                <div style="display:none" id="debug-detailed-content">{{ sop.detailed_content or '(비어있음)' }}</div>
-                <textarea id="detailed-content"
-                          class="editable-content"
-                          data-ckeditor="true"
-                          placeholder="상세내용을 입력하세요.">{{ sop.detailed_content if sop.detailed_content else '' }}</textarea>
-            </div>
-        </div>
-    </div>
+    {{ render_detail_content(
+        value=sop.detailed_content if sop.detailed_content else '',
+        textarea_name='detailed_content',
+        textarea_id='detailed-content',
+        placeholder='상세내용을 입력하세요.'
+    ) }}
 
     <!-- 첨부파일 영역 (공통 컴포넌트) -->
-    {% from 'includes/attachment_section.html' import render_attachment_section %}
-    {{ render_attachment_section(attachments, 'safety_sop') }}
+{% from 'includes/attachment_section.html' import render_attachment_section %}
+{{ render_attachment_section(attachments, 'follow_sop') }}
 
-    <!-- 저장 버튼 영역 -->
-    <div class="save-section">
-        <button class="btn-save" onclick="showEditPasswordModal()">수정완료</button>
-    </div>
-    
+    {{ render_save_button('showEditPasswordModal()') }}
+
 </div>
 
-<!-- 스타일 -->
-<link rel="stylesheet" href="/static/styles/accident-register.css">
-
 <script>
-// 섹션 정보
 const sections = {{ sections | tojson | safe }};
 const sectionColumns = {{ section_columns | tojson | safe }};
 const issueNumber = "{{ sop.work_req_no }}";
 
-// 섹션 토글
-function toggleSection(sectionId) {
-    const content = document.getElementById(sectionId + '-content');
-    const icon = event.target;
-    
-    if (content.style.display === 'none') {
-        content.style.display = 'block';
-        icon.textContent = '▲';
-    } else {
-        content.style.display = 'none';
-        icon.textContent = '▼';
-    }
-}
+const updateFollowSop = BoardDetail.createUpdater({
 
-// 첨부파일 관련 변수와 함수는 공통 컴포넌트에서 제공됨
+    endpoint: '/update-follow-sop',
 
-// 동적 필드 수집 함수
-function collectDynamicFields() {
-    const data = {};
-    
-    // 모든 섹션 순회
-    sections.forEach(section => {
-        const sectionInputs = document.querySelectorAll(`[data-section="${section.section_key}"]`);
-        
-        sectionInputs.forEach(input => {
-            const fieldKey = input.dataset.field;
-            let value = '';
-            
-            if (input.tagName === 'SELECT') {
-                value = input.value;
-            } else if (input.type === 'checkbox') {
-                value = input.checked ? '1' : '0';
-            } else if (input.tagName === 'TEXTAREA') {
-                value = input.value;
-            } else if (input.classList.contains('value')) {
-                // 읽기 전용 div
-                return;
-            } else {
-                value = input.value;
-            }
-            
-            // 리스트 필드 처리: data-field-type 또는 JSON 배열 문자열 판별
-            if ((input.getAttribute('data-field-type') === 'list' || 
-                 (typeof value === 'string' && value.trim().startsWith('['))) && value) {
-                try {
-                    const parsed = JSON.parse(value);
-                    data[fieldKey] = Array.isArray(parsed) ? parsed : value;
-                } catch(e) {
-                    data[fieldKey] = value;
-                }
-            } else {
-                data[fieldKey] = value;
-            }
-        });
-    });
-    
-    return data;
-}
+    idField: 'work_req_no',
 
-// 섹션별 필드 그룹화 함수
-function groupFieldsBySection(dynamicData) {
-    const sectionGroups = {};
+    idValue: issueNumber,
 
-    // 모든 섹션의 컬럼을 순회하면서 그룹화
-    Object.keys(sectionColumns).forEach(sectionKey => {
-        const columns = sectionColumns[sectionKey] || [];
-        columns.forEach(col => {
-            // 해당 섹션의 그룹이 없으면 생성
-            if (!sectionGroups[sectionKey]) {
-                sectionGroups[sectionKey] = {};
-            }
-            const fieldKey = col.column_key;
-            // dynamicData에 해당 필드가 있으면 섹션 그룹에 추가
-            if (dynamicData[fieldKey] !== undefined) {
-                sectionGroups[sectionKey][fieldKey] = dynamicData[fieldKey];
-            }
-        });
-    });
+    sections: sections,
 
-    console.log('=== 섹션별 그룹화 결과 ===');
-    Object.keys(sectionGroups).forEach(sectionKey => {
-        console.log(`${sectionKey}:`, sectionGroups[sectionKey]);
-    });
+    sectionColumns: sectionColumns,
 
-    return sectionGroups;
-}
+    attachmentsSelector: '#attachments-tbody .table-row',
 
-// 수정 함수
-function updateFollowSop() {
-    const formData = new FormData();
+    popupReload: {{ 'true' if is_popup else 'false' }},
 
-    // work_req_no (중요: issue_number가 아닌 work_req_no)
-    formData.append('work_req_no', issueNumber);
+    successMessage: 'Follow SOP가 성공적으로 수정되었습니다.',
 
-    // 상세내용 처리 - data-content 패턴과 에디터 초기화 지원
-    const contentElement = document.getElementById('detailed-content');
-    let detailedContent = '';
+    failurePrefix: '수정 실패',
 
-    // CKEditor가 있다면 CKEditor에서 값 가져오기
-    if (window.RichText && typeof window.RichText.getData === 'function') {
-        detailedContent = window.RichText.getData();
-    } else if (window['editor_detailed-content'] && typeof window['editor_detailed-content'].getData === 'function') {
-        detailedContent = window['editor_detailed-content'].getData();
-    } else if (window.editorInstance && typeof window.editorInstance.getData === 'function') {
-        detailedContent = window.editorInstance.getData();
-    } else if (contentElement) {
-        // div 형태의 에디터 또는 textarea 모두 지원
-        if (contentElement.tagName === 'DIV') {
-            detailedContent = contentElement.innerHTML || '';
-        } else {
-            detailedContent = contentElement.value || '';
-        }
-    }
+    includeDeletedAttachments: true
 
-    formData.append('detailed_content', detailedContent);
-
-    // 동적 필드 수집
-    const dynamicData = collectDynamicFields();
-
-    // 섹션별로 그룹화해서 전송
-    const sectionGroups = groupFieldsBySection(dynamicData);
-
-    // 각 섹션별로 FormData에 추가
-    Object.keys(sectionGroups).forEach(sectionKey => {
-        console.log(`Sending section ${sectionKey}:`, sectionGroups[sectionKey]);
-        formData.append(sectionKey, JSON.stringify(sectionGroups[sectionKey]));
-    });
-
-    // 하위 호환성을 위해 custom_data도 전송 (전체 데이터)
-    formData.append('custom_data', JSON.stringify(dynamicData));
-    
-    // 새 첨부파일 처리 (공통 컴포넌트 변수 사용)
-    if (typeof pendingFiles !== 'undefined') {
-        pendingFiles.forEach((file, index) => {
-            formData.append('files', file);
-        });
-    }
-    
-    // 삭제된 첨부파일 정보
-    if (typeof deletedAttachments !== 'undefined') {
-        formData.append('deleted_attachments', JSON.stringify(deletedAttachments));
-    }
-    
-    // 첨부파일 설명 정보 (accident와 동일한 방식 + 강화된 처리)
-    const attachmentDescriptions = [];
-    document.querySelectorAll('#attachments-tbody .table-row').forEach((row) => {
-        const descEl = row.querySelector('.attachment-desc, .file-desc-input'); // 양쪽 다 지원
-        const rawIsNew = String(row.dataset.isNew || '').toLowerCase();
-        attachmentDescriptions.push({
-            id: row.dataset.id ? parseInt(row.dataset.id, 10) :
-                (row.dataset.attachmentId ? parseInt(row.dataset.attachmentId, 10) : null),
-            description: descEl ? (descEl.value ?? descEl.textContent ?? '') : '',
-            isNew: rawIsNew === 'true' || rawIsNew === '1' || row.classList.contains('new-file-row')
-        });
-    });
-    formData.append('attachment_data', JSON.stringify(attachmentDescriptions));
-    
-    // 서버로 전송
-    fetch('/update-follow-sop', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            alert('Follow SOP가 성공적으로 수정되었습니다.');
-            
-            // 팝업 모드인 경우 부모 창 새로고침
-            {% if is_popup %}
-            if (window.opener && !window.opener.closed) {
-                window.opener.location.reload();
-            }
-            {% endif %}
-            
-            // 현재 창 새로고침 (캐시 무시) - 기존 t 파라미터 제거 후 추가
-            var url = window.location.href;
-            url = url.replace(/[?&]t=\d+/g, '');  // 모든 t 파라미터 제거
-            var separator = url.indexOf('?') !== -1 ? '&' : '?';
-            window.location.href = url + separator + 't=' + new Date().getTime();
-        } else {
-            alert('수정 실패: ' + (data.message || '알 수 없는 오류'));
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('수정 중 오류가 발생했습니다.');
-    });
-}
-
-
-// openPopup 함수는 popup-handler.js에서 제공됨
-
-// 디버깅 헬퍼 함수 (개발자 도구 Console에서 사용)
-window.debugFields = function() {
-    console.log('=== 디버깅 시작 ===');
-
-    // 1. data-field 속성이 있는 요소들 확인
-    const fieldsWithDataAttr = document.querySelectorAll('[data-field]');
-    console.log(`data-field 속성이 있는 요소: ${fieldsWithDataAttr.length}개`);
-
-    // 2. 각 필드의 값 확인
-    fieldsWithDataAttr.forEach(field => {
-        const fieldKey = field.dataset.field;
-        const value = field.value;
-        const section = field.dataset.section;
-        console.log(`  ${fieldKey} (섹션: ${section}): "${value}"`);
-    });
-
-    // 3. collectDynamicFields 실행
-    console.log('\n=== collectDynamicFields 실행 ===');
-    const collected = collectDynamicFields();
-    console.log('수집된 데이터:', collected);
-
-    // 4. 비어있지 않은 필드만 표시
-    const nonEmpty = {};
-    Object.keys(collected).forEach(key => {
-        if (collected[key] && collected[key] !== '') {
-            nonEmpty[key] = collected[key];
-        }
-    });
-    console.log('\n값이 있는 필드:', nonEmpty);
-
-    // 5. 섹션별 그룹화
-    console.log('\n=== 섹션별 그룹화 ===');
-    const grouped = groupFieldsBySection(collected);
-    console.log('그룹화 결과:', grouped);
-
-    return {
-        total: fieldsWithDataAttr.length,
-        collected: collected,
-        nonEmpty: nonEmpty,
-        grouped: grouped
-    };
-};
-
-// 테스트 데이터 입력 함수
-window.fillTestData = function() {
-    console.log('테스트 데이터 입력 중...');
-
-    // 각 필드에 테스트 값 입력
-    const testData = {
-        'company_name': '테스트회사',
-        'work_type': '정기점검',
-        'department': '안전팀',
-        'work_status': '진행중',
-        'contractor': '협력업체A',
-        'work_date': '2025-01-13'
-    };
-
-    Object.keys(testData).forEach(fieldKey => {
-        const field = document.getElementById(fieldKey);
-        if (field) {
-            field.value = testData[fieldKey];
-            console.log(`✓ ${fieldKey}: ${testData[fieldKey]}`);
-        } else {
-            console.log(`✗ ${fieldKey}: 필드를 찾을 수 없음`);
-        }
-    });
-
-    // 상세내용도 입력
-    const detailContent = document.getElementById('detailed-content');
-    if (detailContent) {
-        if (window.RichText && typeof window.RichText.setData === 'function') {
-            window.RichText.setData('<p>테스트 상세내용입니다.</p>');
-        } else {
-            detailContent.innerHTML = '<p>테스트 상세내용입니다.</p>';
-        }
-        console.log('✓ 상세내용 입력 완료');
-    }
-
-    console.log('\n테스트 데이터 입력 완료!');
-    console.log('이제 debugFields()를 실행해서 확인하거나');
-    console.log('저장 버튼을 클릭해보세요.');
-};
-
-// 테이블 선택 결과 수신 함수
-// receive*Selection 함수들은 popup-handler.js에서 통합 처리됨
-
-// DOMContentLoaded 시 에디터 초기화 및 엔터키 이벤트 추가
-document.addEventListener('DOMContentLoaded', function() {
-    // CKEditor는 ckeditor-simple.js에서 자동으로 초기화됨
-    // data-ckeditor="true" 속성이 있는 요소를 찾아서 처리
-
-    // 비밀번호 입력 엔터 키 이벤트
-    const passwordInput = document.getElementById('edit-password-input');
-    if (passwordInput) {
-        passwordInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                verifyPasswordAndSave();
-            }
-        });
-    }
 });
 
-// verifyPasswordAndSave 함수 추가 (비밀번호 확인)
-function verifyPasswordAndSave() {
-    const password = document.getElementById('edit-password-input').value;
-    
-    if (!password) {
-        alert('비밀번호를 입력해주세요.');
-        return;
-    }
-    
-    // 비밀번호가 admin123인지 확인
-    if (password === 'admin123') {
-        closeEditPasswordModal();
-        updateFollowSop();
-    } else {
-        alert('비밀번호가 올바르지 않습니다.');
-        document.getElementById('edit-password-input').value = '';
-        document.getElementById('edit-password-input').focus();
-    }
-}
-
-// showEditPasswordModal 함수 추가 (다른 detail 페이지와 일관성)
-function showEditPasswordModal() {
-    document.getElementById('edit-password-modal').style.display = 'block';
-    document.getElementById('edit-password-input').focus();
-}
-
-function closeEditPasswordModal() {
-    document.getElementById('edit-password-modal').style.display = 'none';
-    document.getElementById('edit-password-input').value = '';
-}
-</script>
-
-    <!-- 비밀번호 입력 모달 -->
-    <div id="edit-password-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>편집 권한 확인</h3>
-                <span class="close" onclick="closeEditPasswordModal()">&times;</span>
-            </div>
-            <div class="modal-body">
-                <p>편집을 위해 비밀번호를 입력해주세요.</p>
-                <input type="password" id="edit-password-input" placeholder="비밀번호" class="password-field">
-                <div class="modal-buttons">
-                    <button class="btn-confirm" onclick="verifyPasswordAndSave()">확인</button>
-                    <button class="btn-cancel" onclick="closeEditPasswordModal()">취소</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-<!-- 팝업 핸들러 스크립트 -->
-<script src="/static/js/popup-handler.js"></script>
-
-<style>
-/* 그리드 레이아웃 핵심 스타일 */
-.safety-sop-detail-container {
-    padding: 20px;
-}
-
-.section {
-    background: white;
-    border: 1px solid #e1e5e9;
-    border-radius: 8px;
-    margin-bottom: 20px;
-    overflow: hidden;
-}
-
-.section-header {
-    background: #f8f9fa;
-    padding: 15px 20px;
-    border-bottom: 1px solid #e1e5e9;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.section-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: #333;
-    margin: 0;
-}
-
-.collapse-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 5px 10px;
-    color: #666;
-}
-
-.section-content {
-    padding: 20px;
-}
-
-.info-table {
-    width: 100%;
-}
-
-.info-row {
-    display: grid !important;
-    grid-template-columns: repeat(8, minmax(0, 1fr)) !important;
-    gap: 16px !important;
-    margin-bottom: 16px !important;
-}
-
-.info-cell {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.info-cell label {
-    font-weight: 600;
-    color: #374151;
-    font-size: 14px;
-    margin-bottom: 4px;
-}
-
-.info-cell input,
-.info-cell select,
-.info-cell textarea,
-.info-cell .value {
-    width: 100%;
-    padding: 8px 12px;
-    border: 1px solid #d1d5db;
-    border-radius: 4px;
-    font-size: 14px;
-}
-
-.info-cell textarea {
-    resize: vertical;
-    min-height: 80px;
-}
-
-.info-cell.span-1 { grid-column: span 1 !important; }
-.info-cell.span-2 { grid-column: span 2 !important; }
-.info-cell.span-3 { grid-column: span 3 !important; }
-.info-cell.span-4 { grid-column: span 4 !important; }
-.info-cell.span-5 { grid-column: span 5 !important; }
-.info-cell.span-6 { grid-column: span 6 !important; }
-.info-cell.span-7 { grid-column: span 7 !important; }
-.info-cell.span-8 { grid-column: span 8 !important; }
-
-.input-group {
-    display: flex;
-    gap: 4px;
-}
-
-.input-group input {
-    flex: 1;
-}
-
-/* Bootstrap input-group button styles will be used - removed duplicate definitions */
-
-/* 첨부파일 섹션 */
-.attachments-section .section-header {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-}
-
-.btn-add-file {
-    padding: 6px 12px;
-    background: #28a745;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: 12px;
-    cursor: pointer;
-    margin-left: auto;
-    margin-right: 10px;
-}
-
-.btn-add-file:hover {
-    background: #218838;
-}
-
-.file-count {
-    font-size: 14px;
-    color: #666;
-}
-
-/* 첨부파일 테이블 스타일은 attachment_section.html에서 제공됨 */
-
-.btn-delete {
-    padding: 4px 8px;
-    background: #dc3545;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-size: 12px;
-    cursor: pointer;
-}
-
-.btn-delete:hover {
-    background: #c82333;
-}
-
-.file-desc-input {
-    width: 100%;
-    padding: 4px 8px;
-    border: 1px solid #d1d5db;
-    border-radius: 4px;
-    font-size: 12px;
-}
-
-/* 저장 버튼 영역 */
-.save-section {
-    padding: 20px;
-    text-align: center;
-}
-
-/* 비밀번호 모달 */
-.modal {
-    display: none;
-    position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0,0,0,0.4);
-}
-
-.modal-content {
-    background-color: #fefefe;
-    margin: 15% auto;
-    padding: 0;
-    border: none;
-    border-radius: 8px;
-    width: 400px;
-    max-width: 90%;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-}
-
-.modal-header {
-    padding: 20px 25px 15px;
-    border-bottom: 1px solid #e1e5e9;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.modal-header h3 {
-    margin: 0;
-    color: #333;
-    font-size: 18px;
-    font-weight: 600;
-}
-
-.close {
-    color: #999;
-    font-size: 24px;
-    font-weight: bold;
-    cursor: pointer;
-    line-height: 1;
-}
-
-.close:hover {
-    color: #333;
-}
-
-.modal-body {
-    padding: 25px;
-}
-
-.modal-body p {
-    margin: 0 0 20px 0;
-    color: #555;
-    font-size: 14px;
-}
-
-.password-field {
-    width: 100%;
-    padding: 12px 15px;
-    border: 1px solid #e1e5e9;
-    border-radius: 4px;
-    font-size: 14px;
-    margin-bottom: 20px;
-    box-sizing: border-box;
-}
-
-.password-field:focus {
-    outline: none;
-    border-color: #2f5fd3;
-    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
-}
-
-.modal-buttons {
-    display: flex;
-    gap: 10px;
-    justify-content: flex-end;
-}
-
-.btn-confirm, .modal-buttons .btn-cancel {
-    padding: 10px 20px;
-    border: none;
-    border-radius: 4px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    min-width: 80px;
-}
-
-.btn-confirm {
-    background: #2f5fd3;
-    color: white;
-}
-
-.btn-confirm:hover {
-    background: #1d4ed8;
-}
-
-.modal-buttons .btn-cancel {
-    background: #6b7280;
-    color: white;
-}
-
-.modal-buttons .btn-cancel:hover {
-    background: #4b5563;
-}
-
-/* 저장/취소 버튼 스타일 */
-.btn-save, .btn-cancel {
-    padding: 10px 24px;
-    border: none;
-    border-radius: 4px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.btn-save {
-    background: #2f5fd3;
-    color: white;
-}
-
-.btn-save:hover {
-    background: #1d4ed8;
-}
-
-.btn-cancel {
-    background: #6b7280;
-    color: white;
-    margin-left: 10px;
-}
-
-.btn-cancel:hover {
-    background: #4b5563;
-}
-
-/* 상세내용 섹션 */
-.detail-content-section .section-content {
-    padding: 20px;
-}
-
-.content-editor {
-    width: 100%;
-}
-
-.editable-content {
-    width: 100%;
-    min-height: 400px;
-    padding: 20px;
-    border: 1px solid #e1e5e9;
-    border-radius: 4px;
-    font-size: 14px;
-    line-height: 1.6;
-    color: #333;
-    font-family: inherit;
-    box-sizing: border-box;
-    background: white;
-    outline: none;
-    overflow-y: auto;
-}
-
-.editable-content:focus {
-    border-color: #2f5fd3;
-    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
-}
-
-.editable-content:empty:before {
-    content: attr(placeholder);
-    color: #999;
-    font-style: italic;
-}
-
-.editable-content p {
-    margin: 10px 0;
-}
-
-.editable-content br {
-    line-height: 1.6;
-}
-
-.editable-content table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 15px 0;
-}
-
-.editable-content table td,
-.editable-content table th {
-    border: 1px solid #e1e5e9;
-    padding: 8px 12px;
-    text-align: left;
-}
-
-.editable-content table th {
-    background: #f8f9fa;
-    font-weight: 600;
-}
-
-.editable-content table tr:nth-child(even) {
-    background: #f8f9fa;
-}
-</style>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/scoring-system.css') }}">
 
 
+window.updateFollowSop = updateFollowSop;
+
+
+function showEditPasswordModal() {
+    const modal = document.getElementById('edit-password-modal');
+    const input = document.getElementById('edit-password-input');
+    if (modal) {
+        modal.style.display = 'block';
+    }
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
+}
+
+function closeEditPasswordModal() {
+    const modal = document.getElementById('edit-password-modal');
+    const input = document.getElementById('edit-password-input');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    if (input) {
+        input.value = '';
+    }
+}
+
+function verifyPasswordAndSave() {
+    const input = document.getElementById('edit-password-input');
+    const password = input ? input.value : '';
+
+    if (!password) {
+        alert('비밀번호를 입력해주세요.');
+        if (input) {
+            input.focus();
+        }
+        return;
+    }
+
+    BoardDetail.verifyPassword({ boardType: 'follow_sop', password })
+        .then(() => {
+            closeEditPasswordModal();
+            updateFollowSop();
+        })
+        .catch((error) => {
+            alert(error && error.message ? error.message : '비밀번호가 올바르지 않습니다.');
+            if (input) {
+                input.value = '';
+                input.focus();
+            }
+        });
+}
+
+window.showEditPasswordModal = showEditPasswordModal;
+window.closeEditPasswordModal = closeEditPasswordModal;
+window.verifyPasswordAndSave = verifyPasswordAndSave;
+
+/script>
+
+{{ render_password_modal(
+    modal_id='edit-password-modal',
+    input_id='edit-password-input',
+    confirm_onclick='verifyPasswordAndSave()',
+    cancel_onclick='closeEditPasswordModal()'
+) }}
 <!-- 공통 첨부파일 스크립트와 스타일 import -->
 {% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
 {{ attachment_styles() }}

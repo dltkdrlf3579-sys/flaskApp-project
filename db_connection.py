@@ -1,84 +1,58 @@
-"""
-데이터베이스 연결 통합 모듈 - v7 (SQLite/PostgreSQL 통합)
-v7 계획에 따라 CompatConnection을 반환하여 투명한 호환성 제공
-"""
-import sqlite3
+"""PostgreSQL 전용 DB 연결 모듈."""
+
 import logging
 import configparser
+import sqlite3  # sqlite3.Row 재사용용 (커서 결과 dict 변환)
 from typing import Optional
+
 from db.compat import CompatConnection
 
 
-def get_db_connection(db_path: str = None, timeout: float = 10.0, row_factory: bool = False):
-    """
-    통합 DB 연결 함수 - v7 호환 레이어
-    
-    Args:
-        db_path: SQLite DB 경로 (PostgreSQL일 때는 무시)
-        timeout: 연결 타임아웃
-        row_factory: sqlite3.Row 사용 여부
-    
-    Returns:
-        CompatConnection 객체 (SQLite/PostgreSQL 투명 처리)
-    """
-    
-    # config.ini에서 설정 읽기
+def _load_config() -> configparser.ConfigParser:
     config = configparser.ConfigParser()
     try:
         config.read('config.ini', encoding='utf-8')
-    except Exception as e:
-        logging.warning(f"config.ini 읽기 실패, 기본값 사용: {e}")
-    
-    # 백엔드 결정
-    backend = config.get('DATABASE', 'db_backend', fallback='sqlite')
-    
-    # 로깅 설정 확인
+    except Exception as exc:
+        logging.warning("config.ini 읽기 실패 (기본값 사용): %s", exc)
+    return config
+
+
+def _require_postgres_backend(config: configparser.ConfigParser) -> str:
+    backend = config.get('DATABASE', 'db_backend', fallback='postgres').strip().lower()
+    if backend != 'postgres':
+        raise RuntimeError(
+            "DATABASE.db_backend 는 이제 'postgres' 만 지원합니다. "
+            "config.ini 를 수정하거나 Postgres 연결을 점검하세요."
+        )
+    dsn = config.get('DATABASE', 'postgres_dsn', fallback='').strip()
+    if not dsn:
+        raise RuntimeError("DATABASE.postgres_dsn 값이 비어 있습니다. Postgres DSN을 설정하세요.")
+    return dsn
+
+
+def get_db_connection(db_path: str = None, timeout: float = 10.0, row_factory: bool = False):
+    """PostgreSQL 연결을 생성한다. 실패 시 예외를 그대로 전파한다."""
+
+    config = _load_config()
+
     log_backend = config.getboolean('LOGGING', 'log_db_backend', fallback=False)
     if log_backend:
-        logging.info(f"DB Backend: {backend}")
-    
-    if backend == 'postgres':
-        # PostgreSQL 연결
-        try:
-            dsn = config.get('DATABASE', 'postgres_dsn')
-            conn = CompatConnection(backend='postgres', dsn=dsn, timeout=timeout)
-            logging.debug(f"PostgreSQL connection established: {dsn}")
-        except Exception as e:
-            logging.error(f"PostgreSQL connection error: {e}")
-            # 기본값을 강제해 SQLite 폴백을 차단 (요청 사항 준수)
-            strict = config.getboolean('DATABASE', 'strict_postgres', fallback=True)
-            if strict:
-                raise
-            logging.warning("Falling back to SQLite (DATABASE.strict_postgres=false 일 때만 허용)")
-            backend = 'sqlite'
-        else:
-            # PostgreSQL 연결 성공 시 row_factory 설정
-            if row_factory:
-                conn.row_factory = sqlite3.Row
-            return conn
-    
-    # SQLite 연결 (기본 또는 fallback)
-    if db_path is None:
-        db_path = config.get('DATABASE', 'local_db_path', fallback='portal.db')
-    
-    try:
-        conn = CompatConnection(backend='sqlite', database=db_path, timeout=timeout)
-        logging.debug(f"SQLite connection established: {db_path}")
-        
-        # row_factory 설정
-        if row_factory:
-            conn.row_factory = sqlite3.Row
-        
-        return conn
-        
-    except Exception as e:
-        logging.error(f"SQLite connection error: {e}")
-        raise
+        logging.info("DB Backend: postgres")
+
+    dsn = _require_postgres_backend(config)
+
+    conn = CompatConnection(backend='postgres', dsn=dsn, timeout=timeout)
+    logging.debug("PostgreSQL connection established: %s", dsn)
+
+    if row_factory:
+        conn.row_factory = sqlite3.Row
+
+    return conn
 
 
 class DatabaseConnection:
     """기존 코드 호환용 클래스 - 내부에서 get_db_connection 사용"""
-    
+
     @staticmethod
     def get_connection(db_path: str, timeout: float = 10.0, row_factory: bool = False):
         """
@@ -146,35 +120,23 @@ class DatabaseContextManager:
 # v7: 백엔드 상태 확인 함수 (디버그용)
 def check_backend_status():
     """현재 설정된 백엔드 상태 확인"""
-    config = configparser.ConfigParser()
-    config.read('config.ini', encoding='utf-8')
-    
-    backend = config.get('DATABASE', 'db_backend', fallback='sqlite')
-    
-    print(f"Current DB Backend: {backend}")
-    
-    if backend == 'postgres':
-        dsn = config.get('DATABASE', 'postgres_dsn', fallback='Not configured')
-        print(f"PostgreSQL DSN: {dsn}")
-        
-        # 연결 테스트
-        try:
-            conn = get_db_connection()
-            print("OK - PostgreSQL connection: SUCCESS")
-            conn.close()
-        except Exception as e:
-            print(f"ERROR - PostgreSQL connection: FAILED - {e}")
-    else:
-        db_path = config.get('DATABASE', 'local_db_path', fallback='portal.db')
-        print(f"SQLite Path: {db_path}")
-        
-        # 연결 테스트
-        try:
-            conn = get_db_connection()
-            print("OK - SQLite connection: SUCCESS")
-            conn.close()
-        except Exception as e:
-            print(f"ERROR - SQLite connection: FAILED - {e}")
+    config = _load_config()
+
+    try:
+        dsn = _require_postgres_backend(config)
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}")
+        return
+
+    print("Current DB Backend: postgres")
+    print(f"PostgreSQL DSN: {dsn}")
+
+    try:
+        conn = get_db_connection()
+        print("OK - PostgreSQL connection: SUCCESS")
+        conn.close()
+    except Exception as exc:
+        print(f"ERROR - PostgreSQL connection: FAILED - {exc}")
 
 
 if __name__ == "__main__":

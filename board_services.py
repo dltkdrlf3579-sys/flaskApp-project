@@ -613,36 +613,33 @@ class AttachmentService:
             should_close = True
         cursor = conn.cursor()
         
-        # 보드별 테이블 전략 사용 - 통일화된 id_column 사용 (PostgreSQL 호환)
-        cursor.execute(f"""
-            CREATE TABLE IF NOT EXISTS {self.attachment_table} (
-                id SERIAL PRIMARY KEY,
-                {self.id_column} TEXT NOT NULL,  -- 보드별 식별자 (accident_number, issue_number, request_number 등)
-                file_name TEXT NOT NULL,
-                file_path TEXT NOT NULL,
-                file_size INTEGER,
-                mime_type TEXT,
-                description TEXT,
-                uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                uploaded_by TEXT DEFAULT 'system',
-                is_deleted INTEGER DEFAULT 0
-            )
-        """)
+        if not getattr(conn, 'is_postgres', False):
+            raise RuntimeError("AttachmentService는 PostgreSQL 연결에서만 동작합니다. config.ini 설정을 확인하세요.")
+
+        cursor.execute(
+            f"""
+                CREATE TABLE IF NOT EXISTS {self.attachment_table} (
+                    id SERIAL PRIMARY KEY,
+                    {self.id_column} TEXT NOT NULL,
+                    file_name TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    file_size BIGINT,
+                    mime_type TEXT,
+                    description TEXT,
+                    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    uploaded_by TEXT DEFAULT 'system',
+                    is_deleted INTEGER DEFAULT 0
+                )
+            """
+        )
 
         # 호환성: 기존 테이블에 is_deleted 컬럼이 없을 수도 있으므로 보강
         def _col_exists(table: str, col: str) -> bool:
-            try:
-                if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                    cursor.execute(
-                        "SELECT 1 FROM information_schema.columns WHERE table_name = %s AND column_name = %s",
-                        (table.lower(), col.lower())
-                    )
-                    return cursor.fetchone() is not None
-                else:
-                    # SQLite는 지원하지 않음 - PostgreSQL만 사용
-                    return False
-            except Exception:
-                return False
+            cursor.execute(
+                "SELECT 1 FROM information_schema.columns WHERE table_name = %s AND column_name = %s",
+                (table.lower(), col.lower())
+            )
+            return cursor.fetchone() is not None
 
         try:
             if not _col_exists(self.attachment_table, 'is_deleted'):
@@ -654,11 +651,28 @@ class AttachmentService:
         # uploaded_at 누락 테이블 보강 (정렬 안정성)
         try:
             if not _col_exists(self.attachment_table, 'uploaded_at'):
-                cursor.execute(f"ALTER TABLE {self.attachment_table} ADD COLUMN uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+                cursor.execute(
+                    f"ALTER TABLE {self.attachment_table} ADD COLUMN uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                )
         except Exception:
             # 이미 존재하거나 권한 이슈는 무시 (list()에서 id로 정렬 폴백)
             pass
-        
+
+        # 구 스키마 호환: mime_type, uploaded_by 컬럼 보강
+        try:
+            if not _col_exists(self.attachment_table, 'mime_type'):
+                cursor.execute(f"ALTER TABLE {self.attachment_table} ADD COLUMN mime_type TEXT")
+        except Exception:
+            pass
+
+        try:
+            if not _col_exists(self.attachment_table, 'uploaded_by'):
+                cursor.execute(
+                    f"ALTER TABLE {self.attachment_table} ADD COLUMN uploaded_by TEXT DEFAULT 'system'"
+                )
+        except Exception:
+            pass
+
         # 인덱스 추가 (중앙화된 id_column 사용)
         cursor.execute(f"""
             CREATE INDEX IF NOT EXISTS idx_{self.attachment_table}_{self.id_column}
@@ -726,17 +740,20 @@ class AttachmentService:
     def add(self, item_id: str, file, meta: Dict = None) -> int:
         """
         첨부파일 추가
-        
+
         Args:
             item_id: 아이템 식별자
             file: 업로드된 파일 객체 (werkzeug.FileStorage)
             meta: 추가 메타데이터 (description, uploaded_by 등)
-            
+
         Returns:
             첨부파일 ID
         """
         import os
         import time
+
+        # 컬럼 누락으로 인한 예외를 방지하기 위해, add 시점에서도 보강 로직 실행
+        self._ensure_table_exists()
 
         if not file or not file.filename:
             raise ValueError("파일이 없습니다.")
@@ -785,7 +802,7 @@ class AttachmentService:
             RETURNING id
         """
 
-        cursor.execute(sql, (
+        params = (
             item_id,
             original_filename,
             file_path,
@@ -793,7 +810,20 @@ class AttachmentService:
             mime_type,
             meta.get('description', '') if meta else '',
             meta.get('uploaded_by', 'system') if meta else 'system'
-        ))
+        )
+
+        try:
+            cursor.execute(sql, params)
+        except Exception as exc:
+            # 컬럼 누락 등 스키마 불일치가 감지되면 재보강 후 한 번 더 시도
+            message = str(exc).lower()
+            if any(keyword in message for keyword in ('mime_type', 'uploaded_by', 'uploaded_at', 'is_deleted')):
+                logging.warning("[%s] attachment insert failed due to schema mismatch. Re-applying ensure step.", self.board_type)
+                self._ensure_table_exists()
+                cursor = conn.cursor()
+                cursor.execute(sql, params)
+            else:
+                raise
 
         # PostgreSQL에서 RETURNING 결과 가져오기
         result = cursor.fetchone()

@@ -1,0 +1,24 @@
+{% macro render_save_button(onclick, button_label='수정완료', button_id=None, button_class='btn-save') %}
+<div class="save-section">
+    <button class="{{ button_class }}" {% if button_id %}id="{{ button_id }}"{% endif %} onclick="{{ onclick }}">{{ button_label }}</button>
+</div>
+{% endmacro %}
+
+{% macro render_password_modal(modal_id='edit-password-modal', input_id='edit-password-input', title='편집 권한 확인', message='편집을 위해 비밀번호를 입력해주세요.', confirm_label='확인', cancel_label='취소', confirm_onclick='verifyPasswordAndSave()', cancel_onclick='closeEditPasswordModal()') %}
+<div id="{{ modal_id }}" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>{{ title }}</h3>
+            <span class="close" onclick="{{ cancel_onclick }}">&times;</span>
+        </div>
+        <div class="modal-body">
+            <p>{{ message }}</p>
+            <input type="password" id="{{ input_id }}" placeholder="비밀번호" class="password-field">
+            <div class="modal-buttons">
+                <button class="btn-confirm" onclick="{{ confirm_onclick }}">{{ confirm_label }}</button>
+                <button class="btn-cancel" onclick="{{ cancel_onclick }}">{{ cancel_label }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endmacro %}

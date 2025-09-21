@@ -153,7 +153,7 @@ class CompatConnection:
     def _convert_sql(self, sql):
         """안전한 SQL 변환"""
         if not self.is_postgres:
-            return sql
+            return self._convert_sqlite_placeholders(sql)
         
         # 1. 플레이스홀더 변환 (v7: 문자열 리터럴 보호)
         sql = self._safe_placeholder_conversion(sql)
@@ -198,6 +198,13 @@ class CompatConnection:
             sql = re.sub(pattern, replacement, sql, flags=re.IGNORECASE)
         
         return sql
+
+    def _convert_sqlite_placeholders(self, sql):
+        """SQLite용 플레이스홀더(%s -> ?) 변환"""
+        if '%s' not in sql:
+            return sql
+        # %%s (포맷 문자열)과 구분하기 위해 % 바로 앞이 또 다른 %가 아닌 경우만 치환
+        return re.sub(r'(?<!%)%s', '?', sql)
     
     def _safe_placeholder_conversion(self, sql):
         """
