@@ -10,7 +10,7 @@ from decimal import Decimal
 import numpy as np
 import json
 import re
-from db_connection import get_db_connection
+from db_connection import get_db_connection, get_postgres_dsn
 from db.upsert import safe_upsert
 
 # 설정 파일 로드
@@ -1815,15 +1815,18 @@ class DatabaseConfig:
         self.config = config
         self.local_db_path = config.get('DATABASE', 'LOCAL_DB_PATH', fallback='portal.db')
         self.external_db_enabled = config.getboolean('DATABASE', 'EXTERNAL_DB_ENABLED', fallback=False)
-    
-    def get_sqlite_connection(self, timeout=10.0):
-        """SQLite 연결 반환"""
-        conn = get_db_connection(self.local_db_path, timeout=timeout)
-        cur = conn.cursor()
-        cur.execute("PRAGMA journal_mode=WAL")
-        cur.execute("PRAGMA busy_timeout=5000")
-        cur.execute("PRAGMA synchronous=NORMAL")
-        return conn
+
+    def get_connection(self, timeout: float = 10.0, *, row_factory: bool = False):
+        """PostgreSQL 기본 연결을 반환한다 (레거시 호환)."""
+        return get_db_connection(timeout=timeout, row_factory=row_factory)
+
+    def get_sqlite_connection(self, timeout=10.0, row_factory: bool = False):
+        """레거시 호환용 메서드: 이제 PostgreSQL 연결을 반환한다."""
+        return self.get_connection(timeout=timeout, row_factory=row_factory)
+
+    def get_postgres_dsn(self) -> str:
+        """현재 설정된 PostgreSQL DSN을 반환한다."""
+        return get_postgres_dsn()
 
 # 전역 인스턴스
 db_config = DatabaseConfig()

@@ -64,10 +64,10 @@
                                 <label>{{ col.column_name }}</label>
                                 {% set value = workplace[col.column_key] | default('', true) %}
                                 {% if col.column_key == 'safeplace_no' %}
-                                    <input type="text" value="{{ workplace.safeplace_no or '-' }}" readonly style="background-color: #f3f4f6;">
+                                    <input type="text" value="{{ workplace.safeplace_no or '-' }}" readonly class="readonly-highlight">
                                     <input type="hidden" name="safeplace_no" value="{{ workplace.safeplace_no }}">
                                 {% elif col.column_key == 'created_at' %}
-                                    <input type="text" value="{{ (workplace.created_at|date_only) if workplace.created_at else '-' }}" readonly style="background-color: #f3f4f6;">
+                                    <input type="text" value="{{ (workplace.created_at|date_only) if workplace.created_at else '-' }}" readonly class="readonly-highlight">
                                 {% elif col.column_type == 'dropdown' %}
                                     <select class="{{ section.section_key|replace('_', '-') }}-input"
                                             data-field="{{ col.column_key }}"
@@ -171,7 +171,14 @@
     {% from 'includes/attachment_section.html' import render_attachment_section, attachment_scripts, attachment_styles %}
     {{ render_attachment_section(attachments, 'safe_workplace') }}
 
-    {{ render_save_button('triggerSafeWorkplaceUpdate()') }}
+    {{ render_save_button('showEditPasswordModal()') }}
+
+    {{ render_password_modal(
+        modal_id='edit-password-modal',
+        input_id='edit-password-input',
+        confirm_onclick='verifyPasswordAndSave()',
+        cancel_onclick='closeEditPasswordModal()'
+    ) }}
 </div>
 
 {{ attachment_styles() }}
@@ -196,28 +203,61 @@ const submitSafeWorkplaceUpdate = BoardDetail.createUpdater({
 
 window.submitSafeWorkplaceUpdate = submitSafeWorkplaceUpdate;
 
-function triggerSafeWorkplaceUpdate() {
-    if (window.PwModal && typeof window.PwModal.show === 'function') {
-        window.updateFunction = submitSafeWorkplaceUpdate;
-        window.PwModal.defaultBoardType = 'safe_workplace';
-        window.PwModal.show(submitSafeWorkplaceUpdate, { boardType: 'safe_workplace' });
+function showEditPasswordModal() {
+    const modal = document.getElementById('edit-password-modal');
+    const input = document.getElementById('edit-password-input');
+
+    if (modal) {
+        modal.style.display = 'block';
+    }
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
+}
+
+function closeEditPasswordModal() {
+    const modal = document.getElementById('edit-password-modal');
+    const input = document.getElementById('edit-password-input');
+
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    if (input) {
+        input.value = '';
+    }
+}
+
+function verifyPasswordAndSave() {
+    const input = document.getElementById('edit-password-input');
+    const password = input ? input.value : '';
+
+    if (!password) {
+        alert('비밀번호를 입력해주세요.');
+        if (input) {
+            input.focus();
+        }
         return;
     }
 
-    const password = prompt('편집 비밀번호를 입력해주세요.');
-    if (password === null) {
-        return;
-    }
     BoardDetail.verifyPassword({ boardType: 'safe_workplace', password })
-        .then(() => submitSafeWorkplaceUpdate())
+        .then(() => {
+            closeEditPasswordModal();
+            submitSafeWorkplaceUpdate();
+        })
         .catch((error) => {
             alert(error && error.message ? error.message : '비밀번호가 올바르지 않습니다.');
+            if (input) {
+                input.value = '';
+                input.focus();
+            }
         });
 }
 
-window.triggerSafeWorkplaceUpdate = triggerSafeWorkplaceUpdate;
+window.showEditPasswordModal = showEditPasswordModal;
+window.closeEditPasswordModal = closeEditPasswordModal;
+window.verifyPasswordAndSave = verifyPasswordAndSave;
 </script>
 
 {{ attachment_scripts() }}
-{% include 'includes/password_modal.html' %}
 {% endblock %}

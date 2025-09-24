@@ -12,6 +12,8 @@
 {% block title %}사고 상세정보{% endblock %}
 {% block popup_title %}{{ accident.accident_number }} - 사고 상세정보{% endblock %}
 {% block content %}
+{% from 'includes/board_form/save_controls.html' import render_save_button, render_password_modal %}
+{% from 'includes/board_form/detail_content.html' import render_detail_content %}
 
 {% if not is_popup %}
 <div class="page-header">
@@ -27,25 +29,27 @@
 <div class="accident-detail-container">
     <!-- 동적 섹션 렌더링 -->
     {% for section in sections %}
-    <div class="section {{ section.section_key }}-section">
+    {% set section_css = section.section_key|replace('_', '-') %}
+    <div class="section {{ section_css }}-section">
         <div class="section-header">
             <h3 class="section-title">{{ section.section_name }}</h3>
-            <button class="collapse-btn" onclick="toggleSection('{{ section.section_key }}')">
+            <button class="collapse-btn" onclick="BoardDetail.toggleSection('{{ section_css }}', this)">
                 <span class="collapse-icon">▲</span>
             </button>
         </div>
-        <div class="section-content" id="{{ section.section_key }}-content">
+        <div class="section-content" id="{{ section_css }}-content">
             <div class="info-table">
                 {% set all_columns = section_columns[section.section_key] %}
                 
                 <!-- accident_id와 created_at 추가 (첫 번째 섹션에만) -->
                 {% if loop.index == 1 %}
                 <div class="info-row">
-                    <div class="info-cell span-1">
+                    <div class="info-cell span-2">
                         <label>사고번호</label>
-                        <input type="text" value="{{ accident.accident_number or '-' }}" readonly style="background-color: #f3f4f6;">
+                        <input type="text" value="{{ accident.accident_number or '-' }}" readonly
+                               class="readonly-highlight">
                     </div>
-                    <div class="info-cell span-1">
+                    <div class="info-cell span-2">
                         <label>등록일</label>
                         {# K사고도 report_date가 비어있으면 created_at/accident_date로 폴백 #}
                         {% if accident.accident_number and accident.accident_number.startswith('K') %}
@@ -67,7 +71,7 @@
                                 {% set reg_date = '-' %}
                             {% endif %}
                         {% endif %}
-                        <input type="text" value="{{ reg_date }}" readonly style="background-color: #f3f4f6;">
+                        <input type="text" value="{{ reg_date }}" readonly class="readonly-highlight">
                     </div>
                 </div>
                 {% endif %}
@@ -86,11 +90,17 @@
                 <div class="info-row">
                     {% for col in chunk %}
                         {% if col %}
-                            {% set span = col.column_span|default(1)|int %}
                             {% if col.column_type == 'list' %}
+                                {% set span = 8 %}
+                            {% elif col.column_type == 'score_total' %}
                                 {% set span = 4 %}
+                            {% elif col.column_span and col.column_span|int > 0 %}
+                                {% set cs = col.column_span|int %}
+                                {% set span = cs if cs >= 2 else 2 %}
+                            {% else %}
+                                {% set span = 2 %}
                             {% endif %}
-                            
+
                             {# 효과적인 렌더 타입 계산 #}
                             {% set render_type = col.column_type %}
                             {% if not render_type or render_type == 'text' %}
@@ -140,7 +150,7 @@
                                 {% endif %}
                             {% endif %}
 
-                            <div class="info-cell {% if span > 1 %}span-{{ span }}{% endif %}">
+                            <div class="info-cell span-{{ span }}">
                                 {% if col.column_type != 'list' %}
                                 <label>{{ col.column_name }}</label>
                                 {% endif %}
@@ -157,7 +167,7 @@
                                 <div class="value">{{ col_value or '-' }}</div>
                             {% elif render_type == 'dropdown' %}
                                 <!-- 드롭다운 필드 -->
-                                <select class="{{ section.section_key }}-input" 
+                                <select class="{{ section_css }}-input" 
                                         data-field="{{ col.column_key }}"
                                         data-section="{{ section.section_key }}">
                                     <option value="">선택하세요</option>
@@ -180,14 +190,14 @@
                             {% elif render_type == 'date' %}
                                 <!-- 날짜 필드 -->
                                 <input type="date" 
-                                       class="{{ section.section_key }}-input" 
+                                       class="{{ section_css }}-input" 
                                        data-field="{{ col.column_key }}"
                                        data-section="{{ section.section_key }}"
                                        value="{{ col_value }}">
                             {% elif render_type == 'time' %}
                                 <!-- 시간 필드 -->
                                 <input type="time" 
-                                       class="{{ section.section_key }}-input" 
+                                       class="{{ section_css }}-input" 
                                        data-field="{{ col.column_key }}"
                                        data-section="{{ section.section_key }}"
                                        value="{{ col_value }}"
@@ -200,7 +210,7 @@
                                 <!-- 숫자 필드 -->
                                 {% set _nt = 'integer' if col.input_type == 'number_integer' else 'float' %}
                                 <input type="number" 
-                                       class="{{ section.section_key }}-input" 
+                                       class="{{ section_css }}-input" 
                                        data-field="{{ col.column_key }}"
                                        data-section="{{ section.section_key }}"
                                        data-number-type="{{ _nt }}"
@@ -213,14 +223,13 @@
                                 <!-- 연결된 필드 (읽기 전용) - table_group 기반 연동 -->
                                 <input type="text"
                                        id="{{ col.column_key }}"
-                                       class="{{ section.section_key }}-input linked-field"
+                                       class="{{ section_css }}-input linked-field"
                                        data-field="{{ col.column_key }}"
                                        data-section="{{ section.section_key }}"
                                        {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
                                        {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                        value="{{ col_value }}"
-                                       readonly
-                                       style="background-color: #f3f4f6;">
+                                       readonly>
                             {% elif render_type == 'popup' or render_type in ['popup_person','popup_company','popup_department','popup_building','popup_contractor','popup_division'] %}
                                 <!-- 팝업 필드 -->
                                 <!-- ⚠️ IMPORTANT: 버튼 클래스는 btn-primary 유지 (파란색), 아이콘 없이 "검색" 텍스트만 사용 -->
@@ -228,7 +237,7 @@
                                 <div class="input-group">
                                     <input type="text"
                                            id="{{ col.column_key }}"
-                                           class="{{ section.section_key }}-input"
+                                           class="{{ section_css }}-input"
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
@@ -246,13 +255,12 @@
                                 <div class="input-group">
                                     <input type="text" 
                                            id="{{ col.column_key }}" 
-                                           class="{{ section.section_key }}-input" 
+                                           class="{{ section_css }}-input" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            data-input-type="popup_person"
                                            value="{{ col_value }}"
-                                           readonly
-                                           style="background-color: #f8f9fa;">
+                                           readonly>
                                     <button class="btn btn-sm btn-primary" 
                                             onclick="openPersonSearch('{{ col.column_key }}')">
                                         검색
@@ -263,13 +271,12 @@
                                 <div class="input-group">
                                     <input type="text" 
                                            id="{{ col.column_key }}" 
-                                           class="{{ section.section_key }}-input" 
+                                           class="{{ section_css }}-input" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            data-input-type="popup_company"
                                            value="{{ col_value }}"
-                                           readonly
-                                           style="background-color: #f8f9fa;">
+                                           readonly>
                                     <button class="btn btn-sm btn-primary" 
                                             onclick="openCompanySearch('{{ col.column_key }}')">
                                         검색
@@ -280,13 +287,12 @@
                                 <div class="input-group">
                                     <input type="text" 
                                            id="{{ col.column_key }}" 
-                                           class="{{ section.section_key }}-input" 
+                                           class="{{ section_css }}-input" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            data-input-type="popup_building"
                                            value="{{ col_value }}"
-                                           readonly
-                                           style="background-color: #f8f9fa;">
+                                           readonly>
                                     <button class="btn btn-sm btn-primary" 
                                             onclick="openBuildingSearch('{{ col.column_key }}')">
                                         검색
@@ -297,13 +303,12 @@
                                 <div class="input-group">
                                     <input type="text" 
                                            id="{{ col.column_key }}" 
-                                           class="{{ section.section_key }}-input" 
+                                           class="{{ section_css }}-input" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            data-input-type="popup_department"
                                            value="{{ col_value }}"
-                                           readonly
-                                           style="background-color: #f8f9fa;">
+                                           readonly>
                                     <button class="btn btn-sm btn-primary" 
                                             onclick="openDepartmentSearch('{{ col.column_key }}')">
                                         검색
@@ -314,15 +319,14 @@
                                 <div class="input-group">
                                     <input type="text"
                                            id="{{ col.column_key }}"
-                                           class="{{ section.section_key }}-input"
+                                           class="{{ section_css }}-input"
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
                                            {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                            data-input-type="popup_contractor"
                                            value="{{ col_value }}"
-                                           readonly
-                                           style="background-color: #f8f9fa;">
+                                           readonly>
                                     <button class="btn btn-sm btn-primary"
                                             onclick="openContractorSearch('{{ col.column_key }}')">
                                         검색
@@ -334,15 +338,14 @@
                                 <div class="input-group">
                                     <input type="text"
                                            id="{{ col.column_key }}"
-                                           class="{{ section.section_key }}-input"
+                                           class="{{ section_css }}-input"
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
                                            {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                            data-input-type="popup_division"
                                            value="{{ col_value }}"
-                                           readonly
-                                           style="background-color: #f8f9fa;">
+                                           readonly>
                                     <button class="btn btn-sm btn-primary"
                                             onclick="openDivisionSearch('{{ col.column_key }}')">
                                         검색
@@ -353,15 +356,14 @@
                                 <div class="input-group">
                                     <input type="text"
                                            id="{{ col.column_key }}"
-                                           class="{{ section.section_key }}-input"
+                                           class="{{ section_css }}-input"
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
                                            {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                            data-input-type="popup_company"
                                            value="{{ col_value }}"
-                                           readonly
-                                           style="background-color: #f8f9fa;">
+                                           readonly>
                                     <button class="btn btn-sm btn-primary"
                                             onclick="openCompanySearch('{{ col.column_key }}')">
                                         검색
@@ -370,7 +372,7 @@
                             {% else %}
                                 <!-- 기본 텍스트 필드 -->
                                 <input type="text" 
-                                       class="{{ section.section_key }}-input" 
+                                       class="{{ section_css }}-input" 
                                        data-field="{{ col.column_key }}"
                                        data-section="{{ section.section_key }}"
                                        value="{{ col_value }}">
@@ -387,53 +389,28 @@
     </div>
     {% endfor %}
 
-    <!-- 3. 사고 상세내용 영역 -->
-    <div class="section detail-content-section">
-        <div class="section-header">
-            <h3 class="section-title">사고내용</h3>
-        </div>
-        <div class="section-content">
-            <div class="content-editor">
-                <!-- 간단한 편집 가능한 영역 -->
-                <!-- textarea로 변경하여 안정적인 편집 기능 제공 -->
-                <textarea id="detailed-content" 
-                          class="editable-content" 
-                          placeholder="사고 상세내용을 입력하세요."
-                          rows="10" 
-                          style="width: 100%; min-height: 200px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;" data-ckeditor="true">{{ accident.detailed_content if accident.detailed_content else '' }}</textarea>
-            </div>
-        </div>
-    </div>
+    {{ render_detail_content(
+        section_title='사고내용',
+        value=accident.detailed_content if accident.detailed_content else '',
+        textarea_name='detailed_content',
+        textarea_id='detailed-content'
+    ) }}
 
     <!-- 4. 첨부파일 영역 (공통 컴포넌트) -->
     {% from 'includes/attachment_section.html' import render_attachment_section %}
     {{ render_attachment_section(attachments, 'accident') }}
 
-    <!-- 저장 버튼 영역 -->
-    <div class="save-section">
-        <button class="btn-save" onclick="showEditPasswordModal()">수정완료</button>
-    </div>
+    {{ render_save_button('showEditPasswordModal()') }}
 
-    <!-- 비밀번호 입력 모달 -->
-    <div id="edit-password-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>편집 권한 확인</h3>
-                <span class="close" onclick="closeEditPasswordModal()">&times;</span>
-            </div>
-            <div class="modal-body">
-                <p>편집을 위해 비밀번호를 입력해주세요.</p>
-                <input type="password" id="edit-password-input" placeholder="비밀번호" class="password-field">
-                <div class="modal-buttons">
-                    <button class="btn-confirm" onclick="verifyPasswordAndSave()">확인</button>
-                    <button class="btn-cancel" onclick="closeEditPasswordModal()">취소</button>
-                </div>
-            </div>
-        </div>
-    </div>
+    {{ render_password_modal(
+        modal_id='edit-password-modal',
+        input_id='edit-password-input',
+        confirm_onclick='verifyPasswordAndSave()',
+        cancel_onclick='closeEditPasswordModal()'
+    ) }}
 </div>
 
-<!-- 스타일 제거 - 인라인 스타일로 대체 -->
+<!-- Detail scripts -->
 
 <script>
 const sections = {{ sections | tojson | safe }};
@@ -446,19 +423,6 @@ const externalManagedKeys = [
   'injury_form','injury_type','accident_date','day_of_week','report_date',
   'building','floor','location_category','location_detail'
 ];
-
-function toggleSection(sectionId) {
-    const content = document.getElementById(sectionId + '-content');
-    const icon = event.target;
-
-    if (content.style.display === 'none') {
-        content.style.display = 'block';
-        icon.textContent = '▲';
-    } else {
-        content.style.display = 'none';
-        icon.textContent = '▼';
-    }
-}
 
 function updateAccident() {
     const formData = new FormData();
@@ -525,7 +489,7 @@ document.addEventListener('DOMContentLoaded', () => {
   inputs.forEach(el => {
     const key = el.getAttribute('data-field');
     if (externalManagedKeys.includes(key)) {
-      el.style.backgroundColor = '#f3f4f6';
+      el.classList.add('external-managed-field');
     }
   });
 });
@@ -571,427 +535,27 @@ window.showEditPasswordModal = showEditPasswordModal;
 window.closeEditPasswordModal = closeEditPasswordModal;
 </script>
 
-<style>
-/* 추가 스타일 */
-.info-cell textarea {
-    width: 100%;
-    padding: 8px 12px;
-    border: 1px solid #d1d5db;
-    border-radius: 4px;
-    font-size: 14px;
-    resize: vertical;
-}
-
-.info-cell.span-2 {
-    grid-column: span 2;
-}
-
-.info-cell.span-3 {
-    grid-column: span 3;
-}
-
-.info-cell.span-4 {
-    grid-column: span 4;
-}
-
-.info-row {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 16px;
-    margin-bottom: 16px;
-}
-
-.input-group {
-    display: flex;
-    gap: 4px;
-}
-
-.input-group input {
-    flex: 1;
-}
-
-.input-group button {
-    padding: 4px 8px;
-    background: #f3f4f6;
-    border: 1px solid #d1d5db;
-    border-radius: 4px;
-    cursor: pointer;
-}
-
-.input-group button:hover {
-    background: #e5e7eb;
-}
-
-/* 페이지 헤더 */
-.page-header {
-    margin-bottom: 20px;
-    padding-bottom: 15px;
-    border-bottom: 2px solid #2f5fd3;
-}
-.page-title {
-    font-size: 20px;
-    font-weight: 700;
-    color: #333;
-    margin: 0 0 8px 0;
-}
-.breadcrumb {
-    font-size: 14px;
-    color: #6b7280;
-}
-.breadcrumb a {
-    color: #2f5fd3;
-    text-decoration: none;
-}
-.breadcrumb a:hover {
-    text-decoration: underline;
-}
-.breadcrumb .separator {
-    margin: 0 8px;
-}
-.breadcrumb .current {
-    color: #374151;
-    font-weight: 600;
-}
-
-/* 팝업 모드일 때 헤더와 액션 버튼 숨김 */
 {% if is_popup %}
+<style>
 .page-header, .action-buttons {
     display: none !important;
 }
-{% endif %}
-
-/* 메인 컨테이너 */
-.accident-detail-container {
-    max-width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-}
-
-{% if is_popup %}
 .accident-detail-container {
     padding: 0;
     gap: 0;
 }
-
 .section {
     border-radius: 0;
     border-left: none;
     border-right: none;
     border-top: none;
 }
-
 .section:last-child {
     border-bottom: none;
 }
+</style>
 {% endif %}
 
-/* 섹션 공통 스타일 */
-.section {
-    background: white;
-    border: 1px solid #e1e5e9;
-}
-
-.section-header {
-    background: #f8f9fa;
-    padding: 12px 20px;
-    border-bottom: 1px solid #e1e5e9;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.section-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: #333;
-    margin: 0;
-}
-
-.collapse-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 4px;
-}
-
-.collapse-icon {
-    font-size: 12px;
-    color: #666;
-    transition: transform 0.2s;
-}
-
-.section-content {
-    padding: 20px;
-}
-
-/* 정보 테이블 */
-.info-table {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.info-row {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 20px;
-}
-
-.info-cell {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.info-cell.span-2 {
-    grid-column: span 2;
-}
-
-.info-cell.span-3 {
-    grid-column: span 3;
-}
-
-.info-cell.span-4 {
-    grid-column: span 4;
-}
-
-.info-cell label {
-    font-weight: 600;
-    color: #333;
-    font-size: 14px;
-    min-height: 20px;
-}
-
-.info-cell .value {
-    padding: 8px 12px;
-    background: #f8f9fa;
-    border: 1px solid #e1e5e9;
-    border-radius: 4px;
-    font-size: 14px;
-    color: #333;
-    min-height: 20px;
-}
-
-.info-cell input,
-.info-cell select,
-.info-cell textarea {
-    width: 100%;
-    padding: 8px 12px;
-    border: 1px solid #d1d5db;
-    border-radius: 4px;
-    font-size: 14px;
-    transition: border-color 0.15s;
-}
-
-.info-cell input:focus,
-.info-cell select:focus,
-.info-cell textarea:focus {
-    outline: none;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
-/* 3. 사고 상세내용 섹션 */
-.detail-content-section .section-content {
-    padding: 20px;
-}
-
-.content-editor {
-    position: relative;
-}
-
-/* 간단한 편집 가능한 영역 스타일 */
-.editable-content {
-    width: 100%;
-    min-height: 400px;
-    padding: 20px;
-    border: 1px solid #e1e5e9;
-    border-radius: 4px;
-    font-size: 14px;
-    line-height: 1.6;
-    color: #333;
-    font-family: inherit;
-    box-sizing: border-box;
-    background: white;
-    outline: none;
-    overflow-y: auto;
-}
-
-.editable-content:focus {
-    border-color: #2f5fd3;
-    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
-}
-
-.editable-content:empty:before {
-    content: attr(placeholder);
-    color: #999;
-    font-style: italic;
-}
-
-/* 저장 버튼 */
-.save-section {
-    display: flex;
-    justify-content: center;
-    gap: 10px;
-    padding: 20px;
-    background: white;
-    border: 1px solid #e1e5e9;
-    border-top: none;
-}
-
-.btn-save, .btn-cancel {
-    padding: 10px 24px;
-    border: none;
-    border-radius: 4px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.btn-save {
-    background: #2f5fd3;
-    color: white;
-}
-
-.btn-save:hover {
-    background: #1d4ed8;
-}
-
-.btn-cancel {
-    background: #6b7280;
-    color: white;
-    margin-left: 10px;
-
-/* 리스트 표시 스타일 */
-.list-display {
-    width: 100%;
-    max-height: 300px;
-    overflow-y: auto;
-}
-
-.list-item-display {
-    border: 1px solid #dee2e6;
-    background: #f8f9fa;
-    font-size: 13px;
-}
-}
-
-.btn-cancel:hover {
-    background: #4b5563;
-}
-
-/* 비밀번호 모달 */
-.modal {
-    display: none;
-    position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0,0,0,0.4);
-}
-
-.modal-content {
-    background-color: #fefefe;
-    margin: 15% auto;
-    padding: 0;
-    border: none;
-    border-radius: 8px;
-    width: 400px;
-    max-width: 90%;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-}
-
-.modal-header {
-    padding: 20px 25px 15px;
-    border-bottom: 1px solid #e1e5e9;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.modal-header h3 {
-    margin: 0;
-    color: #333;
-    font-size: 18px;
-    font-weight: 600;
-}
-
-.close {
-    color: #999;
-    font-size: 24px;
-    font-weight: bold;
-    cursor: pointer;
-    line-height: 1;
-}
-
-.close:hover {
-    color: #333;
-}
-
-.modal-body {
-    padding: 25px;
-}
-
-.modal-body p {
-    margin: 0 0 20px 0;
-    color: #555;
-    font-size: 14px;
-}
-
-.password-field {
-    width: 100%;
-    padding: 12px 15px;
-    border: 1px solid #e1e5e9;
-    border-radius: 4px;
-    font-size: 14px;
-    margin-bottom: 20px;
-    box-sizing: border-box;
-}
-
-.password-field:focus {
-    outline: none;
-    border-color: #2f5fd3;
-    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
-}
-
-.modal-buttons {
-    display: flex;
-    gap: 10px;
-    justify-content: flex-end;
-}
-
-.btn-confirm, .modal-buttons .btn-cancel {
-    padding: 10px 20px;
-    border: none;
-    border-radius: 4px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    min-width: 80px;
-}
-
-.btn-confirm {
-    background: #2f5fd3;
-    color: white;
-}
-
-.btn-confirm:hover {
-    background: #1d4ed8;
-}
-
-.modal-buttons .btn-cancel {
-    background: #6b7280;
-    color: white;
-}
-
-.modal-buttons .btn-cancel:hover {
-    background: #4b5563;
-}
-</style>
 
 <!-- 공통 첨부파일 스크립트와 스타일 import -->
 {% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}

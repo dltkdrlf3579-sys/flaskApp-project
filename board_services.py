@@ -6,62 +6,12 @@ import json
 import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+import sqlite3
+
 from db_connection import get_db_connection
 from db.upsert import safe_upsert
-from upload_utils import validate_uploaded_files
-
-# 보드 설정
-BOARD_CONFIGS = {
-    'accident': {
-        'board_type': 'accident',
-        'display_name': '협력사 사고',
-        'number_prefix': 'ACC',
-        'cache_table': 'accidents_cache',
-        'column_table': 'accident_column_config',
-        'upload_path': 'uploads/accident/',
-    },
-    'safety_instruction': {
-        'board_type': 'safety_instruction',
-        'display_name': '환경안전 지시서',
-        'number_prefix': 'SI',
-        'cache_table': 'safety_instructions',
-        'column_table': 'safety_instruction_column_config',
-        'upload_path': 'uploads/safety_instruction/',
-    },
-    'change_request': {
-        'board_type': 'change_request',
-        'display_name': '기준정보 변경요청',
-        'number_prefix': 'CR',
-        'cache_table': 'change_requests',
-        'column_table': 'change_request_column_config',
-        'upload_path': 'uploads/change_request/',
-    },
-    # 추가: Follow SOP / Full Process 보드 지원
-    'follow_sop': {
-        'board_type': 'follow_sop',
-        'display_name': 'Follow SOP',
-        'number_prefix': 'FS',
-        'cache_table': 'follow_sop',
-        'column_table': 'follow_sop_column_config',
-        'upload_path': 'uploads/follow_sop/',
-    },
-    'full_process': {
-        'board_type': 'full_process',
-        'display_name': 'Full Process',
-        'number_prefix': 'FP',
-        'cache_table': 'full_process',
-        'column_table': 'full_process_column_config',
-        'upload_path': 'uploads/full_process/',
-    },
-    'safe_workplace': {
-        'board_type': 'safe_workplace',
-        'display_name': 'Safe Workplace',
-        'number_prefix': 'SP',
-        'cache_table': 'safe_workplace',
-        'column_table': 'safe_workplace_column_config',
-        'upload_path': 'uploads/safe_workplace/',
-    }
-}
+from upload_utils import sanitize_filename, validate_uploaded_files
+from repositories.common.board_config import BOARD_CONFIGS, get_board_config
 
 class ColumnService:
     """컬럼 관리 서비스"""
@@ -69,9 +19,7 @@ class ColumnService:
     def __init__(self, board_type: str, db_path: str):
         self.board_type = board_type
         self.db_path = db_path
-        self.config = BOARD_CONFIGS.get(board_type)
-        if not self.config:
-            raise ValueError(f"Unknown board type: {board_type}")
+        self.config = get_board_config(board_type)
     
     def list(self, active_only=True) -> List[Dict]:
         """컬럼 목록 조회 (관리 UI용 보호 컬럼 제외)
@@ -390,9 +338,7 @@ class ItemService:
     def __init__(self, board_type: str, db_path: str):
         self.board_type = board_type
         self.db_path = db_path
-        self.config = BOARD_CONFIGS.get(board_type)
-        if not self.config:
-            raise ValueError(f"Unknown board type: {board_type}")
+        self.config = get_board_config(board_type)
     
     def list(self, filters: Dict = None, page: int = 1, per_page: int = 10) -> Dict:
         """아이템 목록 조회"""
@@ -589,9 +535,7 @@ class AttachmentService:
         self.board_type = board_type
         self.db_path = db_path
         self.conn = conn  # 기존 연결 재사용
-        self.config = BOARD_CONFIGS.get(board_type)
-        if not self.config:
-            raise ValueError(f"Unknown board type: {board_type}")
+        self.config = get_board_config(board_type)
         
         # 보드별 첨부파일 테이블명 설정
         self.attachment_table = f"{board_type}_attachments"
@@ -977,29 +921,51 @@ class AttachmentService:
         
         cursor = conn.cursor()
 
-        cursor.execute(f"""
-            SELECT file_path, file_name, mime_type
-            FROM {self.attachment_table}
-            WHERE id = %s AND is_deleted = 0
-        """, (attachment_id,))
+        cursor.execute(
+            f"SELECT file_path, file_name, mime_type FROM {self.attachment_table} "
+            "WHERE id = %s AND is_deleted = 0",
+            (attachment_id,)
+        )
         attachment = cursor.fetchone()
-        
-        # 새로 생성한 연결만 닫기
+
+        if not attachment:
+            if should_close:
+                conn.close()
+            logging.debug(
+                "[%s] attachment not found: table=%s id=%s",
+                self.board_type,
+                self.attachment_table,
+                attachment_id
+            )
+            return None
+
+        file_path = attachment['file_path']
+        file_name = attachment['file_name']
+        mime_type = attachment['mime_type']
+
+        import os
+        if not os.path.isabs(file_path):
+            file_path = os.path.join(os.getcwd(), file_path.lstrip('/\\'))
+
+        exists = os.path.exists(file_path)
+
         if should_close:
             conn.close()
-        
-        if attachment:
-            import os
-            # PostgreSQL returns tuple, not dict
-            file_path, file_name, mime_type = attachment
-            if os.path.exists(file_path):
-                return {
-                    'path': file_path,
-                    'name': file_name,
-                    'mime_type': mime_type
-                }
-        
-        return None
+
+        if not exists:
+            logging.debug(
+                "[%s] attachment missing on disk: id=%s path=%s",
+                self.board_type,
+                attachment_id,
+                file_path
+            )
+            return None
+
+        return {
+            'path': file_path,
+            'name': file_name,
+            'mime_type': mime_type
+        }
     
     def bulk_add(self, item_id: str, files: List, meta: Dict = None) -> List[int]:
         """
@@ -1015,10 +981,8 @@ class AttachmentService:
         """
         import os
         import time
-        from werkzeug.utils import secure_filename
-        
         attachment_ids = []
-        
+
         # 기존 연결이 있으면 재사용, 없으면 새로 생성
         if self.conn:
             conn = self.conn
@@ -1038,7 +1002,7 @@ class AttachmentService:
         for file_info in valid_files:
             try:
                 file = file_info['file']
-                original_filename = file_info['safe_filename']
+                original_filename = sanitize_filename(file_info['safe_filename'])
                 timestamp = str(int(time.time()))
                 safe_filename = f"{timestamp}_{original_filename}"
 

@@ -7,7 +7,6 @@ import shutil
 from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, Response, send_from_directory
 import configparser
 from timezone_config import KST, get_korean_time, get_korean_time_str
-from werkzeug.utils import secure_filename
 from config.menu import MENU_CONFIG
 from database_config import db_config, partner_manager
 import re
@@ -16,14 +15,15 @@ import sqlite3
 import math
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
-from board_services import ColumnService, CodeService, ItemService
+from board_services import CodeService, ItemService
+from repositories.common.column_config_repository import ColumnConfigRepository
 from column_service import ColumnConfigService
 from search_popup_service import SearchPopupService
 from column_sync_service import ColumnSyncService
 from db_connection import get_db_connection
 from db.upsert import safe_upsert
 from column_utils import normalize_column_types, determine_linked_type
-from upload_utils import validate_uploaded_files
+from upload_utils import sanitize_filename, validate_uploaded_files
 from add_page_routes import follow_sop_bp, full_process_bp, safe_workplace_bp
 from boards.safety_instruction import safety_instruction_bp
 from controllers.boards.accident_controller import (
@@ -37,6 +37,7 @@ from controllers.boards.safety_instruction_controller import (
 )
 from repositories.boards.safety_instruction_repository import SafetyInstructionRepository
 from utils.sql_filters import sql_is_active_true, sql_is_deleted_false
+from typing import List
 import schedule
 import threading
 import time
@@ -294,658 +295,50 @@ def api_calculate_score(board):
         return jsonify({'success': False, 'message': str(e)}), 400
 
 def init_db():
-    """기본 설정 초기화 및 데이터 동기화"""
-    # 로컬 DB 테이블 초기화 (partner_manager에서 처리)
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # 페이지 테이블만 여기서 관리
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS pages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            url TEXT UNIQUE,
-            title TEXT,
-            content TEXT
-        )
-    ''')
-
-    # Dropdown v2 table (board-scoped) and migration from legacy v1
+    """Run database migrations and seed static page definitions."""
+    logging.info("[INIT] Running database migrations")
     try:
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS dropdown_option_codes_v2 (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                board_type TEXT NOT NULL,
-                column_key TEXT NOT NULL,
-                option_code TEXT NOT NULL,
-                option_value TEXT NOT NULL,
-                display_order INTEGER DEFAULT 0,
-                is_active INTEGER DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                created_by TEXT,
-                updated_by TEXT,
-                UNIQUE(board_type, column_key, option_code)
-            )
-        ''')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_doc_v2_board_col ON dropdown_option_codes_v2(board_type, column_key, is_active)')
-        # Migrate from v1 if v2 is empty and v1 exists
-        cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='dropdown_option_codes'")
-        v1_exists = cursor.fetchone()[0] > 0
-        cursor.execute("SELECT COUNT(*) FROM dropdown_option_codes_v2")
-        v2_count = cursor.fetchone()[0]
-        if v1_exists and v2_count == 0:
-            cursor.execute('''
-                INSERT OR IGNORE INTO dropdown_option_codes_v2
-                    (board_type, column_key, option_code, option_value, display_order, is_active)
-                SELECT 'accident', column_key, option_code, option_value, display_order, is_active
-                FROM dropdown_option_codes
-            ''')
-    except Exception as _e:
-        logging.debug(f"Dropdown v2 ensure/migrate skipped: {_e}")
-    
-    # Ensure board-specific column config tables exist (avoid cross-board fallback)
+        from migrations.run_migrations import run_migrations
+        run_migrations()
+    except Exception as exc:
+        logging.error("[INIT] Migration execution failed: %s", exc)
+        raise
+
+    conn = None
     try:
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS accident_column_config (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                column_key TEXT UNIQUE NOT NULL,
-                column_name TEXT NOT NULL,
-                column_type TEXT DEFAULT 'text',
-                column_order INTEGER DEFAULT 0,
-                is_active INTEGER DEFAULT 1,
-                dropdown_options TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS safety_instruction_column_config (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                column_key TEXT UNIQUE NOT NULL,
-                column_name TEXT NOT NULL,
-                column_type TEXT DEFAULT 'text',
-                column_order INTEGER DEFAULT 0,
-                is_active INTEGER DEFAULT 1,
-                dropdown_options TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # 동적 섹션 관리를 위한 테이블 추가
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS section_config (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                board_type TEXT NOT NULL,
-                section_key TEXT NOT NULL,
-                section_name TEXT NOT NULL,
-                section_order INTEGER DEFAULT 0,
-                is_active INTEGER DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(board_type, section_key)
-            )
-        ''')
-        # 보강: is_deleted 컬럼이 없으면 추가(soft delete 일관성)
+        conn = get_db_connection()
+        cursor = conn.cursor()
         try:
-            # PostgreSQL: information_schema를 통해 컬럼 정보 조회
-            cursor.execute("""
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_name = 'section_config'
-            """)
-            cols = [r[0].lower() for r in cursor.fetchall()]
-            if 'is_deleted' not in cols:
-                cursor.execute("ALTER TABLE section_config ADD COLUMN is_deleted INTEGER DEFAULT 0")
-        except Exception:
-            pass
-        
-        # 기본 섹션 데이터 삽입 (없는 경우에만)
-        cursor.execute("SELECT COUNT(*) FROM section_config WHERE board_type = 'safety_instruction'")
-        if cursor.fetchone()[0] == 0:
-            cursor.execute('''
-                INSERT INTO section_config (board_type, section_key, section_name, section_order) VALUES
-                ('safety_instruction', 'basic_info', '기본정보', 1),
-                ('safety_instruction', 'violation_info', '위반정보', 2),
-                ('safety_instruction', 'additional', '추가기입정보', 3)
-            ''')
-        
-        # 사고게시판용 섹션 데이터 삽입 (없는 경우에만)
-        cursor.execute("SELECT COUNT(*) FROM section_config WHERE board_type = 'accident'")
-        if cursor.fetchone()[0] == 0:
-            cursor.execute('''
-                INSERT INTO section_config (board_type, section_key, section_name, section_order) VALUES
-                ('accident', 'basic_info', '기본정보', 1),
-                ('accident', 'accident_info', '사고정보', 2),
-                ('accident', 'location_info', '장소정보', 3),
-                ('accident', 'additional', '추가정보', 4)
-            ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS partner_standards_column_config (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                column_key TEXT UNIQUE NOT NULL,
-                column_name TEXT NOT NULL,
-                column_type TEXT DEFAULT 'text',
-                column_order INTEGER DEFAULT 0,
-                is_active INTEGER DEFAULT 1,
-                dropdown_options TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Follow SOP 컬럼 설정 테이블
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS follow_sop_column_config (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                column_key TEXT UNIQUE NOT NULL,
-                column_name TEXT NOT NULL,
-                column_type TEXT DEFAULT 'text',
-                column_order INTEGER DEFAULT 0,
-                is_active INTEGER DEFAULT 1,
-                is_deleted INTEGER DEFAULT 0,
-                dropdown_options TEXT,
-                tab TEXT,
-                column_span INTEGER DEFAULT 1,
-                linked_columns TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Follow SOP 테이블에 is_deleted 컬럼 추가 (기존 테이블 업데이트)
-        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
-        cursor.execute("""
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'follow_sop_column_config'
-        """)
-        columns = [col[0] for col in cursor.fetchall()]
-        if 'is_deleted' not in columns:
-            cursor.execute("ALTER TABLE follow_sop_column_config ADD COLUMN is_deleted INTEGER DEFAULT 0")
-        
-        # Full Process 컬럼 설정 테이블
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS full_process_column_config (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                column_key TEXT UNIQUE NOT NULL,
-                column_name TEXT NOT NULL,
-                column_type TEXT DEFAULT 'text',
-                column_order INTEGER DEFAULT 0,
-                is_active INTEGER DEFAULT 1,
-                is_deleted INTEGER DEFAULT 0,
-                dropdown_options TEXT,
-                tab TEXT,
-                column_span INTEGER DEFAULT 1,
-                linked_columns TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Full Process 테이블에 is_deleted 컬럼 추가 (기존 테이블 업데이트)
-        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
-        cursor.execute("""
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'full_process_column_config'
-        """)
-        columns = [col[0] for col in cursor.fetchall()]
-        if 'is_deleted' not in columns:
-            cursor.execute("ALTER TABLE full_process_column_config ADD COLUMN is_deleted INTEGER DEFAULT 0")
-        
-        # Safety Instruction 테이블에 누락된 컬럼들 추가 (startup 보강)
-        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
-        cursor.execute("""
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'safety_instruction_column_config'
-        """)
-        safety_columns = [col[0] for col in cursor.fetchall()]
-        if 'is_deleted' not in safety_columns:
-            cursor.execute("ALTER TABLE safety_instruction_column_config ADD COLUMN is_deleted INTEGER DEFAULT 0")
-        if 'tab' not in safety_columns:
-            cursor.execute("ALTER TABLE safety_instruction_column_config ADD COLUMN tab TEXT")
-        if 'column_span' not in safety_columns:
-            cursor.execute("ALTER TABLE safety_instruction_column_config ADD COLUMN column_span INTEGER DEFAULT 1")
-        
-        # Follow SOP 데이터 테이블 (동적 컬럼 데이터 저장용)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS follow_sop (
-                work_req_no TEXT PRIMARY KEY,
-                custom_data TEXT DEFAULT '{}',
-                is_deleted INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                created_by TEXT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_by TEXT
-            )
-        ''')
-        
-        # Follow SOP 테이블에 is_deleted 컬럼 추가 (기존 테이블 업데이트)
-        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
-        cursor.execute("""
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'follow_sop'
-        """)
-        columns = [col[0] for col in cursor.fetchall()]
-        if 'is_deleted' not in columns:
-            cursor.execute("ALTER TABLE follow_sop ADD COLUMN is_deleted INTEGER DEFAULT 0")
-        
-        # Follow SOP sections 테이블 생성
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS follow_sop_sections (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                section_key TEXT UNIQUE,
-                section_name TEXT,
-                section_order INTEGER,
-                is_active INTEGER DEFAULT 1
-            )
-        ''')
-        
-        # Follow SOP sections 테이블에 section_order 컬럼 추가 (기존 테이블 업데이트)
-        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
-        cursor.execute("""
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'follow_sop_sections'
-        """)
-        columns = [col[0] for col in cursor.fetchall()]
-        if 'section_order' not in columns:
-            cursor.execute("ALTER TABLE follow_sop_sections ADD COLUMN section_order INTEGER DEFAULT 1")
-            logging.info("follow_sop_sections 테이블에 section_order 컬럼 추가")
-        if 'is_active' not in columns:
-            cursor.execute("ALTER TABLE follow_sop_sections ADD COLUMN is_active INTEGER DEFAULT 1")
-            logging.info("follow_sop_sections 테이블에 is_active 컬럼 추가")
-        if 'is_deleted' not in columns:
-            cursor.execute("ALTER TABLE follow_sop_sections ADD COLUMN is_deleted INTEGER DEFAULT 0")
-            logging.info("follow_sop_sections 테이블에 is_deleted 컬럼 추가")
-
-        # Safe Workplace 데이터 테이블 (동적 컬럼 데이터 저장용)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS safe_workplace (
-                safeplace_no TEXT PRIMARY KEY,
-                custom_data TEXT DEFAULT '{}',
-                is_deleted INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                created_by TEXT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_by TEXT
-            )
-        ''')
-
-        cursor.execute("""
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'safe_workplace'
-        """)
-        columns = [col[0] for col in cursor.fetchall()]
-        if 'is_deleted' not in columns:
-            cursor.execute("ALTER TABLE safe_workplace ADD COLUMN is_deleted INTEGER DEFAULT 0")
-
-        # Safe Workplace sections 테이블 생성
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS safe_workplace_sections (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                section_key TEXT UNIQUE,
-                section_name TEXT,
-                section_order INTEGER,
-                is_active INTEGER DEFAULT 1
-            )
-        ''')
-
-        cursor.execute("""
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'safe_workplace_sections'
-        """)
-        columns = [col[0] for col in cursor.fetchall()]
-        if 'section_order' not in columns:
-            cursor.execute("ALTER TABLE safe_workplace_sections ADD COLUMN section_order INTEGER DEFAULT 1")
-            logging.info("safe_workplace_sections 테이블에 section_order 컬럼 추가")
-        if 'is_active' not in columns:
-            cursor.execute("ALTER TABLE safe_workplace_sections ADD COLUMN is_active INTEGER DEFAULT 1")
-            logging.info("safe_workplace_sections 테이블에 is_active 컬럼 추가")
-        if 'is_deleted' not in columns:
-            cursor.execute("ALTER TABLE safe_workplace_sections ADD COLUMN is_deleted INTEGER DEFAULT 0")
-            logging.info("safe_workplace_sections 테이블에 is_deleted 컬럼 추가")
-
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS safe_workplace_details (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                safeplace_no TEXT UNIQUE NOT NULL,
-                detailed_content TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-
-        # Full Process 데이터 테이블 (동적 컬럼 데이터 저장용)
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS full_process (
-                fullprocess_number TEXT PRIMARY KEY,
-                custom_data TEXT DEFAULT '{}',
-                is_deleted INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                created_by TEXT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_by TEXT
-            )
-        ''')
-        
-        # Full Process 테이블에 is_deleted 컬럼 추가 (기존 테이블 업데이트)
-        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
-        cursor.execute("""
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'full_process'
-        """)
-        columns = [col[0] for col in cursor.fetchall()]
-        if 'is_deleted' not in columns:
-            cursor.execute("ALTER TABLE full_process ADD COLUMN is_deleted INTEGER DEFAULT 0")
-        
-        # Full Process sections 테이블 생성
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS full_process_sections (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                section_key TEXT UNIQUE,
-                section_name TEXT,
-                section_order INTEGER,
-                is_active INTEGER DEFAULT 1
-            )
-        ''')
-        
-        # Full Process sections 테이블에 section_order 컬럼 추가 (기존 테이블 업데이트)
-        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
-        cursor.execute("""
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'full_process_sections'
-        """)
-        columns = [col[0] for col in cursor.fetchall()]
-        if 'section_order' not in columns:
-            cursor.execute("ALTER TABLE full_process_sections ADD COLUMN section_order INTEGER DEFAULT 1")
-            logging.info("full_process_sections 테이블에 section_order 컬럼 추가")
-        if 'is_active' not in columns:
-            cursor.execute("ALTER TABLE full_process_sections ADD COLUMN is_active INTEGER DEFAULT 1")
-            logging.info("full_process_sections 테이블에 is_active 컬럼 추가")
-        if 'is_deleted' not in columns:
-            cursor.execute("ALTER TABLE full_process_sections ADD COLUMN is_deleted INTEGER DEFAULT 0")
-            logging.info("full_process_sections 테이블에 is_deleted 컬럼 추가")
-            
-        # safety_instruction_sections 테이블 생성 및 보정
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS safety_instruction_sections (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                section_key TEXT UNIQUE,
-                section_name TEXT,
-                section_order INTEGER DEFAULT 1,
-                is_active INTEGER DEFAULT 1,
-                is_deleted INTEGER DEFAULT 0
-            )
-        ''')
-        
-        # safety_instruction_sections 스키마 보정
-        # PostgreSQL: information_schema를 통해 컬럼 정보 조회
-        cursor.execute("""
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_name = 'safety_instruction_sections'
-        """)
-        columns = [col[0] for col in cursor.fetchall()]
-        if 'section_order' not in columns:
-            cursor.execute("ALTER TABLE safety_instruction_sections ADD COLUMN section_order INTEGER DEFAULT 1")
-            logging.info("safety_instruction_sections 테이블에 section_order 컬럼 추가")
-        if 'is_active' not in columns:
-            cursor.execute("ALTER TABLE safety_instruction_sections ADD COLUMN is_active INTEGER DEFAULT 1")
-            logging.info("safety_instruction_sections 테이블에 is_active 컬럼 추가")
-        if 'is_deleted' not in columns:
-            cursor.execute("ALTER TABLE safety_instruction_sections ADD COLUMN is_deleted INTEGER DEFAULT 0")
-            logging.info("safety_instruction_sections 테이블에 is_deleted 컬럼 추가")
-            
-        # 섹션 초기 데이터 시드
-        # Safety Instruction 섹션
-        cursor.execute("SELECT COUNT(*) FROM safety_instruction_sections")
-        if cursor.fetchone()[0] == 0:
-            cursor.execute("""
-                INSERT INTO safety_instruction_sections (section_key, section_name, section_order, is_active, is_deleted)
-                VALUES 
-                    ('basic_info', '기본정보', 1, 1, 0),
-                    ('violation_info', '위반정보', 2, 1, 0),
-                    ('additional', '추가정보', 3, 1, 0)
-            """)
-            logging.info("safety_instruction_sections 초기 데이터 추가")
-            
-        # Follow SOP 섹션
-        cursor.execute("SELECT COUNT(*) FROM follow_sop_sections")
-        if cursor.fetchone()[0] == 0:
-            cursor.execute("""
-                INSERT INTO follow_sop_sections (section_key, section_name, section_order, is_active, is_deleted)
-                VALUES 
-                    ('basic_info', '기본정보', 1, 1, 0),
-                    ('work_info', '작업정보', 2, 1, 0),
-                    ('additional', '추가정보', 3, 1, 0)
-            """)
-            logging.info("follow_sop_sections 초기 데이터 추가")
-            
-        # Safe Workplace 섹션
-        cursor.execute("SELECT COUNT(*) FROM safe_workplace_sections")
-        if cursor.fetchone()[0] == 0:
-            cursor.execute("""
-                INSERT INTO safe_workplace_sections (section_key, section_name, section_order, is_active, is_deleted)
-                VALUES 
-                    ('basic_info', '기본정보', 1, 1, 0),
-                    ('workplace_info', '작업장정보', 2, 1, 0),
-                    ('safety_info', '안전정보', 3, 1, 0)
-            """)
-            logging.info("safe_workplace_sections 초기 데이터 추가")
-            
-        # Full Process 섹션
-        cursor.execute("SELECT COUNT(*) FROM full_process_sections")
-        if cursor.fetchone()[0] == 0:
-            cursor.execute("""
-                INSERT INTO full_process_sections (section_key, section_name, section_order, is_active, is_deleted)
-                VALUES 
-                    ('basic_info', '기본정보', 1, 1, 0),
-                    ('process_info', '프로세스정보', 2, 1, 0),
-                    ('additional', '추가정보', 3, 1, 0)
-            """)
-            logging.info("full_process_sections 초기 데이터 추가")
-            
-        # 컬럼 tab 매핑 수정 - NULL인 경우 적절한 섹션으로 자동 배정
-        # Safety Instruction
-        cursor.execute("""
-            UPDATE safety_instruction_column_config 
-            SET tab = 'basic_info' 
-            WHERE tab IS NULL AND column_key IN (
-                'issue_number', 'company_name', 'business_number', 'created_at', 
-                'issue_date', 'improvement_deadline', 'status', 'issuer', 'recipient'
-            )
-        """)
-        
-        cursor.execute("""
-            UPDATE safety_instruction_column_config 
-            SET tab = 'violation_info' 
-            WHERE tab IS NULL AND column_key IN (
-                'violation_type', 'violation_details', 'legal_basis', 'penalty',
-                'violation_location', 'violation_date', 'violation_severity'
-            )
-        """)
-        
-        # 나머지 NULL은 모두 additional로
-        _wa_si = sql_is_active_true('is_active', conn)
-        _wd_si = sql_is_deleted_false('is_deleted', conn)
-        cursor.execute(f"""
-            UPDATE safety_instruction_column_config 
-            SET tab = 'additional' 
-            WHERE (tab IS NULL OR tab = '') 
-              AND {_wa_si}
-              AND {_wd_si}
-        """)
-        
-        # Follow SOP
-        cursor.execute("""
-            UPDATE follow_sop_column_config 
-            SET tab = 'basic_info' 
-            WHERE tab IS NULL AND column_key IN (
-                'work_req_no', 'company_name', 'business_number', 'created_at',
-                'created_by', 'request_date', 'department'
-            )
-        """)
-        
-        cursor.execute("""
-            UPDATE follow_sop_column_config 
-            SET tab = 'work_info' 
-            WHERE tab IS NULL AND column_key IN (
-                'work_type', 'work_location', 'work_content', 'work_status',
-                'worker_count', 'work_duration', 'safety_measures'
-            )
-        """)
-        
-        _wa_fs = sql_is_active_true('is_active', conn)
-        _wd_fs = sql_is_deleted_false('is_deleted', conn)
-        cursor.execute(f"""
-            UPDATE follow_sop_column_config 
-            SET tab = 'additional' 
-            WHERE (tab IS NULL OR tab = '') 
-              AND {_wa_fs}
-              AND {_wd_fs}
-        """)
-        
-        # Safe Workplace
-        cursor.execute("""
-            UPDATE safe_workplace_column_config 
-            SET tab = 'basic_info' 
-            WHERE tab IS NULL AND column_key IN (
-                'safeplace_no', 'company_name', 'business_number', 'created_at',
-                'created_by', 'work_date', 'department'
-            )
-        """)
-
-        cursor.execute("""
-            UPDATE safe_workplace_column_config 
-            SET tab = 'workplace_info' 
-            WHERE tab IS NULL AND column_key IN (
-                'work_name', 'work_location', 'building_code', 'worker_count',
-                'safety_manager', 'work_type', 'risk_assessment'
-            )
-        """)
-
-        cursor.execute("""
-            UPDATE safe_workplace_column_config 
-            SET tab = 'safety_info' 
-            WHERE tab IS NULL AND column_key IN (
-                'safety_measures', 'hazard_identification', 'protective_equipment',
-                'emergency_contact', 'inspection_result'
-            )
-        """)
-
-        _wa_sw = sql_is_active_true('is_active', conn)
-        _wd_sw = sql_is_deleted_false('is_deleted', conn)
-        cursor.execute(f"""
-            UPDATE safe_workplace_column_config 
-            SET tab = 'additional' 
-            WHERE (tab IS NULL OR tab = '') 
-              AND {_wa_sw}
-              AND {_wd_sw}
-        """)
-        
-        # Full Process
-        cursor.execute("""
-            UPDATE full_process_column_config 
-            SET tab = 'basic_info' 
-            WHERE tab IS NULL AND column_key IN (
-                'fullprocess_number', 'company_name', 'business_number', 'created_at',
-                'created_by', 'process_date', 'department'
-            )
-        """)
-        
-        cursor.execute("""
-            UPDATE full_process_column_config 
-            SET tab = 'process_info' 
-            WHERE tab IS NULL AND column_key IN (
-                'process_type', 'process_name', 'process_status', 'process_owner',
-                'process_steps', 'process_duration', 'process_output'
-            )
-        """)
-        
-        _wa_fp = sql_is_active_true('is_active', conn)
-        _wd_fp = sql_is_deleted_false('is_deleted', conn)
-        cursor.execute(f"""
-            UPDATE full_process_column_config 
-            SET tab = 'additional' 
-            WHERE (tab IS NULL OR tab = '') 
-              AND {_wa_fp}
-              AND {_wd_fp}
-        """)
-        
-        # Accident
-        cursor.execute("""
-            UPDATE accident_column_config 
-            SET tab = 'basic_info' 
-            WHERE tab IS NULL AND column_key IN (
-                'accident_number', 'company_name', 'business_number', 'created_at',
-                'accident_date', 'reporter', 'department'
-            )
-        """)
-        
-        cursor.execute("""
-            UPDATE accident_column_config 
-            SET tab = 'accident_info' 
-            WHERE tab IS NULL AND column_key IN (
-                'accident_type', 'accident_cause', 'injury_type', 'injury_severity',
-                'accident_description', 'victim_name', 'victim_age'
-            )
-        """)
-        
-        cursor.execute("""
-            UPDATE accident_column_config 
-            SET tab = 'location_info' 
-            WHERE tab IS NULL AND column_key IN (
-                'accident_location', 'location_detail', 'building', 'floor'
-            )
-        """)
-        
-        _wa_ac = sql_is_active_true('is_active', conn)
-        _wd_ac = sql_is_deleted_false('is_deleted', conn)
-        cursor.execute(f"""
-            UPDATE accident_column_config 
-            SET tab = 'additional' 
-            WHERE (tab IS NULL OR tab = '') 
-              AND {_wa_ac}
-              AND {_wd_ac}
-        """)
-        
-        logging.info("컬럼 tab 매핑 업데이트 완료")
-    except Exception as _e:
-        logging.debug(f"Column config table ensure failed: {_e}")
-        # PostgreSQL에서 트랜잭션 오류가 발생한 경우 롤백
-        try:
+            for category in MENU_CONFIG:
+                for submenu in category['submenu']:
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM pages WHERE url = %s",
+                        (submenu['url'],),
+                    )
+                    if cursor.fetchone()[0] == 0:
+                        cursor.execute(
+                            "INSERT INTO pages (url, title, content) VALUES (%s, %s, %s)",
+                            (
+                                submenu['url'],
+                                submenu['title'],
+                                f"<h1>{submenu['title']}</h1><p>이 페이지의 내용을 편집하세요.</p>",
+                            ),
+                        )
+            conn.commit()
+        finally:
+            cursor.close()
+    except Exception as exc:
+        if conn:
             conn.rollback()
-        except:
-            pass
-    
-    # 메뉴 설정에서 페이지 자동 생성
-    for category in MENU_CONFIG:
-        for submenu in category['submenu']:
-            cursor.execute("SELECT COUNT(*) FROM pages WHERE url = %s", (submenu['url'],))
-            if cursor.fetchone()[0] == 0:
-                cursor.execute(
-                    "INSERT INTO pages (url, title, content) VALUES (%s, %s, %s)",
-                    (submenu['url'], submenu['title'], 
-                     f"<h1>{submenu['title']}</h1><p>이 페이지의 내용을 편집하세요.</p>")
-                )
-    
-    conn.commit()
-    conn.close()
-    
-    # 샘플 데이터 초기화 (SEED_DUMMY=true일 때만)
-    if db_config.config.getboolean('DEFAULT', 'SEED_DUMMY', fallback=False):
-        init_sample_data()
+        logging.error("[INIT] 기본 페이지 시드 중 오류: %s", exc)
+        raise
+    finally:
+        if conn:
+            conn.close()
 
-    # 외부 DB 동기화 실행 (EXTERNAL_DB_ENABLED=True일 때만)
+    if db_config.config.getboolean('DEFAULT', 'SEED_DUMMY', fallback=False):
+        logging.warning("[INIT] SEED_DUMMY 옵션은 Postgres 환경에서 지원되지 않아 건너뜁니다.")
+
     if db_config.external_db_enabled:
         logging.info("외부 DB 동기화 시작...")
         try:
@@ -954,7 +347,8 @@ def init_db():
         except Exception as e:
             logging.error(f"외부 DB 동기화 실패: {e}")
     else:
-        logging.info("EXTERNAL_DB_ENABLED=False - 샘플 데이터만 사용")
+        logging.info("EXTERNAL_DB_ENABLED=False - 외부 동기화를 건너뜁니다")
+
 
 def sync_all_master_data():
     """모든 마스터 데이터 동기화 함수 (스케줄러용)"""
@@ -1048,7 +442,7 @@ def run_scheduler():
 
 def init_sample_data():
     """외부 DB 없을 때 샘플 데이터 생성"""
-    conn = partner_manager.db_config.get_sqlite_connection()
+    conn = partner_manager.db_config.get_connection()
     cursor = conn.cursor()
     
     # 이미 데이터가 있는지 확인
@@ -1829,7 +1223,7 @@ def partner_detail(business_number: str):
 
     attachments: List[Dict[str, Any]] = []
     try:
-        conn = partner_manager.db_config.get_sqlite_connection()
+        conn = partner_manager.db_config.get_connection()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute(
@@ -2748,18 +2142,18 @@ def update_partner():
         print(f"New attachments: {new_attachments}")
         
         for i, file in enumerate(files):
-            if file.filename and i < len(new_attachments):
-                filename = file.filename
+            if file and file.filename and i < len(new_attachments):
                 # 파일명에 타임스탬프 추가하여 중복 방지
                 import time
+                original_filename = sanitize_filename(file.filename, fallback_prefix='upload')
                 timestamp = str(int(time.time()))
-                name, ext = os.path.splitext(filename)
+                name, ext = os.path.splitext(original_filename)
                 unique_filename = f"{name}_{timestamp}{ext}"
                 file_path = os.path.join(upload_folder, unique_filename)
-                
-                print(f"Saving file: {filename} as {unique_filename}")
+
+                print(f"Saving file: {original_filename} as {unique_filename}")
                 file.save(file_path)
-                
+
                 attachment_info = new_attachments[i]
                 cursor.execute("""
                     INSERT INTO partner_attachments 
@@ -2767,12 +2161,12 @@ def update_partner():
                     VALUES (%s, %s, %s, %s, %s)
                 """, (
                     business_number,
-                    filename,  # 원본 파일명으로 저장
+                    original_filename,
                     file_path,
                     os.path.getsize(file_path),
                     attachment_info.get('description', '')
                 ))
-                logging.info(f"첨부파일 추가: {filename} - {attachment_info.get('description', '')}")
+                logging.info(f"첨부파일 추가: {original_filename} - {attachment_info.get('description', '')}")
         
         # 커밋 전 확인
         check_result = cursor.execute("SELECT COUNT(*) FROM partner_attachments WHERE business_number = %s", (business_number,)).fetchone()
@@ -3243,31 +2637,31 @@ def _legacy_update_accident():
         print(f"New attachments: {new_attachments}")
         
         for i, file in enumerate(files):
-            if file.filename and i < len(new_attachments):
-                filename = file.filename
+            if file and file.filename and i < len(new_attachments):
                 # 파일명에 타임스탬프 추가하여 중복 방지
                 import time
+                original_filename = sanitize_filename(file.filename, fallback_prefix='upload')
                 timestamp = str(int(time.time()))
-                name, ext = os.path.splitext(filename)
+                name, ext = os.path.splitext(original_filename)
                 unique_filename = f"{name}_{timestamp}{ext}"
                 file_path = os.path.join(upload_folder, unique_filename)
-                
-                print(f"Saving file: {filename} as {unique_filename}")
+
+                print(f"Saving file: {original_filename} as {unique_filename}")
                 file.save(file_path)
-                
+
                 attachment_info = new_attachments[i]
                 cursor.execute("""
                     INSERT INTO accident_attachments 
                     (accident_number, file_name, file_path, file_size, description)
                     VALUES (%s, %s, %s, %s, %s)
                 """, (
-                    accident_number,  # accident_number 저장
-                    filename,  # 원본 파일명으로 저장
+                    accident_number,
+                    original_filename,
                     file_path,
                     os.path.getsize(file_path),
                     attachment_info.get('description', '')
                 ))
-                logging.info(f"첨부파일 추가: {filename} - {attachment_info.get('description', '')}")
+                logging.info(f"첨부파일 추가: {original_filename} - {attachment_info.get('description', '')}")
         
         # 커밋 전 확인
         check_result = cursor.execute("SELECT COUNT(*) FROM accident_attachments WHERE accident_number = %s", (accident_number,)).fetchone()
@@ -3317,68 +2711,129 @@ def update_accident():
     return _accident_controller.update(request)
 
 
-@app.route("/download/<int:attachment_id>")
-def download_attachment(attachment_id):
-    """첨부파일 다운로드 (협력사 및 사고 통합)"""
-    conn = get_db_connection()
-    
-    # 먼저 partner_attachments에서 찾기
-    attachment = conn.execute(
-        "SELECT * FROM partner_attachments WHERE id = %s", 
-        (attachment_id,)
-    ).fetchone()
-    
-    # partner_attachments에 없으면 accident_attachments에서 찾기
-    if not attachment:
-        attachment = conn.execute(
-            "SELECT * FROM accident_attachments WHERE id = %s", 
-            (attachment_id,)
-        ).fetchone()
-    
-    conn.close()
-    
-    if not attachment:
-        return "File not found", 404
-    
+def _send_attachment_response(file_path: str, original_name: Optional[str], mime_type: Optional[str] = None):
+    """첨부파일을 안전하게 전송하는 공통 헬퍼"""
     from flask import send_file
     import os
-    
-    # DB에 저장된 file_path 사용 (실제 저장된 경로)
-    stored_file_path = attachment['file_path']
-    
-    # 절대 경로인지 상대 경로인지 확인
-    if os.path.isabs(stored_file_path):
-        actual_file_path = stored_file_path
-    else:
-        # 상대 경로면 현재 디렉토리 기준으로 구성
-        actual_file_path = os.path.join(os.getcwd(), stored_file_path.lstrip('/\\'))
-    
-    logging.info(f"다운로드 요청: ID={attachment_id}, 파일={attachment['file_name']}, 경로={actual_file_path}")
-    
-    try:
-        if os.path.exists(actual_file_path):
-            # ASCII 폴백 파일명 생성 (한글/특수문자 제거)
-            import re
-            safe_ascii = re.sub(r'[^\w\-_\.]', '_', attachment['file_name'])
-            if not safe_ascii:
-                safe_ascii = 'download.file'
+    from urllib.parse import quote
 
-            # 바이너리로 강제 전송하여 프록시/게이트웨이 문제 회피
-            response = send_file(
-                actual_file_path,
-                mimetype='application/octet-stream',  # HTML도 바이너리로 전송
-                as_attachment=True,
-                download_name=attachment['file_name']
-            )
-            # RFC5987 형식 폴백 파일명 추가
-            response.headers['Content-Disposition'] += f'; filename="{safe_ascii}"'
-            return response
-        else:
-            logging.error(f"파일을 찾을 수 없습니다: {actual_file_path}")
-            return "File not found on disk", 404
-    except Exception as e:
-        logging.error(f"파일 다운로드 중 오류: {e}")
-        return f"Download error: {str(e)}", 500
+    if not file_path:
+        return "File path missing", 400
+
+    if os.path.isabs(file_path):
+        actual_file_path = file_path
+    else:
+        actual_file_path = os.path.join(os.getcwd(), file_path.lstrip('/\\'))
+
+    if not os.path.exists(actual_file_path):
+        logging.error(f"파일을 찾을 수 없습니다: {actual_file_path}")
+        return "File not found on disk", 404
+
+    original_name = original_name or os.path.basename(actual_file_path) or 'download'
+    safe_name = sanitize_filename(original_name, fallback_prefix='download')
+    if not safe_name:
+        safe_name = 'download.file'
+
+    encoded_name = quote(safe_name)
+    ascii_fallback = safe_name.encode('ascii', 'ignore').decode('ascii', 'ignore')
+    if not ascii_fallback:
+        ascii_fallback = 'download.file'
+
+    logging.debug(
+        "[download] sending attachment path=%s cwd=%s safe_name=%s",
+        actual_file_path,
+        os.getcwd(),
+        safe_name
+    )
+
+    response = send_file(
+        actual_file_path,
+        mimetype=mime_type or 'application/octet-stream',
+        as_attachment=True,
+        download_name=safe_name
+    )
+    response.headers['Content-Disposition'] = (
+        f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded_name}"
+    )
+    return response
+
+
+def _get_attachment_info(board_type: str, attachment_id: int, conn=None) -> Optional[Dict[str, Any]]:
+    """보드 타입 별 첨부파일 정보를 반환"""
+    normalized = board_type.replace('-', '_').lower()
+
+    if normalized == 'partner':
+        close_conn = False
+        if conn is None:
+            conn = get_db_connection()
+            close_conn = True
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT file_path, file_name, COALESCE(mime_type, '') FROM partner_attachments WHERE id = %s",
+            (attachment_id,)
+        )
+        row = cursor.fetchone()
+        if close_conn:
+            conn.close()
+        if row:
+            file_path, file_name, mime_type = row
+            return {'path': file_path, 'name': file_name, 'mime_type': mime_type or None}
+        return None
+
+    from board_services import AttachmentService
+
+    valid_boards = AttachmentService.ID_COLUMN_MAP.keys()
+    if normalized not in valid_boards:
+        return None
+
+    service = AttachmentService(normalized, DB_PATH, conn)
+    return service.download(attachment_id)
+
+
+@app.route("/download/<board_type>/<int:attachment_id>")
+def download_attachment_for_board(board_type, attachment_id):
+    """보드 타입별 첨부파일 다운로드 엔드포인트"""
+    info = _get_attachment_info(board_type, attachment_id)
+    if not info:
+        return "File not found", 404
+
+    logging.info(
+        "다운로드 요청: board=%s, id=%s, file=%s",
+        board_type,
+        attachment_id,
+        info.get('name')
+    )
+
+    return _send_attachment_response(info['path'], info.get('name'), info.get('mime_type'))
+
+
+@app.route("/download/<int:attachment_id>")
+def download_attachment(attachment_id):
+    """레거시 첨부파일 다운로드 - 모든 게시판을 순회 탐색"""
+    conn = get_db_connection()
+
+    try:
+        info = _get_attachment_info('partner', attachment_id, conn)
+        if info:
+            logging.info("다운로드 요청(legacy): board=partner, id=%s, file=%s", attachment_id, info.get('name'))
+            return _send_attachment_response(info['path'], info.get('name'), info.get('mime_type'))
+
+        from board_services import AttachmentService
+
+        for board in AttachmentService.ID_COLUMN_MAP.keys():
+            info = _get_attachment_info(board, attachment_id, conn)
+            if info:
+                logging.info(
+                    "다운로드 요청(legacy): board=%s, id=%s, file=%s",
+                    board,
+                    attachment_id,
+                    info.get('name')
+                )
+                return _send_attachment_response(info['path'], info.get('name'), info.get('mime_type'))
+    finally:
+        conn.close()
+
+    return "File not found", 404
 
 
 @app.route("/partner-attachments/<business_number>")
@@ -3493,7 +2948,8 @@ def auto_upload_partner_files():
                 
                 # 표시용 한글 파일명 생성 (base64 인코딩 제거)
                 korean_filename = f"{company_name}_{year}년_{month}월_통합레포트.html"
-                
+                auto_upload_desc = korean_filename
+
                 from timezone_config import get_korean_time_str
                 cursor.execute("""
                     INSERT INTO partner_attachments
@@ -3885,8 +3341,21 @@ def admin_follow_sop_codes():
     """Follow SOP 코드 관리 임베디드 페이지"""
     column_key = request.args.get('column_key', '')
     embedded = request.args.get('embedded', 'false') == 'true'
-    
+
     return render_template('admin-follow-sop-codes.html', 
+                         column_key=column_key,
+                         embedded=embedded,
+                         menu=MENU_CONFIG)
+
+
+@app.route("/admin/safe-workplace-codes")
+@require_admin_auth
+def admin_safe_workplace_codes():
+    """안전한 일터 코드 관리 임베디드 페이지"""
+    column_key = request.args.get('column_key', '')
+    embedded = request.args.get('embedded', 'false') == 'true'
+
+    return render_template('admin-safe-workplace-codes.html',
                          column_key=column_key,
                          embedded=embedded,
                          menu=MENU_CONFIG)
@@ -5107,13 +4576,13 @@ def delete_full_process():
     try:
         data = request.json
         ids = data.get('ids', [])  # 실제로는 fullprocess_number들
-        
+
         if not ids:
             return jsonify({"success": False, "message": "삭제할 항목이 없습니다."}), 400
-        
+
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
         # full_process 테이블에서 소프트 삭제 (fullprocess_number 기준)
         placeholders = ','.join(['%s'] * len(ids))
         cursor.execute(f"""
@@ -5121,11 +4590,11 @@ def delete_full_process():
             SET is_deleted = 1 
             WHERE fullprocess_number IN ({placeholders})
         """, ids)
-        
+
         deleted_count = cursor.rowcount
         conn.commit()
         conn.close()
-        
+
         return jsonify({
             "success": True,
             "deleted_count": deleted_count,
@@ -5134,6 +4603,260 @@ def delete_full_process():
     except Exception as e:
         logging.error(f"Full Process 삭제 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
+def _update_final_check_bulk(conn, *, board_type: str, id_field: str, ids: List[str], status_value: str, tables: List[str]):
+    """공통 JSONB 업데이트 로직"""
+
+    cursor = conn.cursor()
+
+    def _row_value(row, key, index):
+        if isinstance(row, dict):
+            return row.get(key)
+        getter = getattr(row, 'get', None)
+        if callable(getter):
+            value = getter(key)
+            if value is not None:
+                return value
+        try:
+            return row[index]
+        except Exception:
+            return getattr(row, key, None)
+
+    try:
+        cursor.execute(
+            """
+            SELECT option_code, option_value
+            FROM dropdown_option_codes_v2
+            WHERE board_type = %s
+              AND column_key = %s
+              AND COALESCE(is_active, 1) = 1
+            ORDER BY display_order
+            """,
+            (board_type, 'final_check_yn'),
+        )
+        option_rows = cursor.fetchall()
+    except Exception:
+        option_rows = []
+
+    status_code = None
+    status_label = status_value
+
+    if option_rows:
+        matched_row = None
+        for row in option_rows:
+            value = _row_value(row, 'option_value', 1)
+            if isinstance(value, str) and value.strip() == status_value:
+                matched_row = row
+                break
+        if matched_row is None:
+            matched_row = option_rows[0]
+
+        status_code = _row_value(matched_row, 'option_code', 0)
+        raw_label = _row_value(matched_row, 'option_value', 1)
+        if isinstance(raw_label, str) and raw_label.strip():
+            status_label = raw_label.strip()
+
+    payload_dict = {
+        'final_check_yn': status_code or status_value,
+        'final_check_yn_label': status_label,
+    }
+    payload_json = json.dumps(payload_dict, ensure_ascii=False)
+
+    placeholders = ','.join(['%s'] * len(ids))
+
+    def _table_exists(table_name: str) -> bool:
+        cursor.execute("SELECT to_regclass(%s)", (f"public.{table_name}",))
+        row = cursor.fetchone()
+        if isinstance(row, dict):
+            value = next(iter(row.values()), None)
+        else:
+            value = row[0] if row else None
+        return value is not None
+
+    updated_count = 0
+    primary_count_recorded = False
+
+    for table_name in tables:
+        if not _table_exists(table_name):
+            continue
+
+        update_sql = (
+            f"UPDATE {table_name} "
+            "SET custom_data = jsonb_set("  # outer jsonb_set to update label
+            "    jsonb_set("  # inner jsonb_set to update code
+            "        COALESCE(custom_data::jsonb, '{}'::jsonb),"
+            "        '{final_check_yn}', to_jsonb(%s::text), true"
+            "    ),"
+            "    '{final_check_yn_label}', to_jsonb(%s::text), true"
+            ") "
+            f"WHERE {id_field} IN ({placeholders})"
+        )
+        cursor.execute(update_sql, [status_code or status_value, status_label, *ids])
+        if not primary_count_recorded:
+            updated_count = cursor.rowcount
+            primary_count_recorded = True
+
+    return updated_count, status_label
+
+
+@app.route('/api/full-process/final-check', methods=['POST'])
+def mark_full_process_final_check():
+    """선택 항목의 최종 검토 상태를 일괄 업데이트"""
+    data = request.get_json(silent=True) or {}
+    ids = data.get('ids', [])
+
+    if not ids:
+        return jsonify({"success": False, "message": "처리할 항목을 선택해주세요."}), 400
+
+    status_value = (data.get('status') or '검토완료').strip() or '검토완료'
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        if not getattr(conn, 'is_postgres', False):
+            raise RuntimeError('PostgreSQL backend is required for final check updates.')
+
+        unique_ids = list(dict.fromkeys(str(x).strip() for x in ids if str(x).strip()))
+        if not unique_ids:
+            return jsonify({"success": False, "message": "유효한 항목이 없습니다."}), 400
+
+        updated_count, status_label = _update_final_check_bulk(
+            conn,
+            board_type='full_process',
+            id_field='fullprocess_number',
+            ids=unique_ids,
+            status_value=status_value,
+            tables=['full_process', 'full_process_cache', 'fullprocess_cache'],
+        )
+
+        conn.commit()
+
+        message_suffix = f" '{status_label}'" if status_label else ''
+        return jsonify({
+            "success": True,
+            "updated_count": updated_count,
+            "message": f"{updated_count}건의 상태가{message_suffix}로 변경되었습니다.",
+        })
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logging.error(f"Full Process 최종 검토 업데이트 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/api/follow-sop/final-check', methods=['POST'])
+def mark_follow_sop_final_check():
+    data = request.get_json(silent=True) or {}
+    ids = data.get('ids', [])
+
+    if not ids:
+        return jsonify({"success": False, "message": "처리할 항목을 선택해주세요."}), 400
+
+    status_value = (data.get('status') or '검토완료').strip() or '검토완료'
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        if not getattr(conn, 'is_postgres', False):
+            raise RuntimeError('PostgreSQL backend is required for final check updates.')
+
+        unique_ids = list(dict.fromkeys(str(x).strip() for x in ids if str(x).strip()))
+        if not unique_ids:
+            return jsonify({"success": False, "message": "유효한 항목이 없습니다."}), 400
+
+        updated_count, status_label = _update_final_check_bulk(
+            conn,
+            board_type='follow_sop',
+            id_field='work_req_no',
+            ids=unique_ids,
+            status_value=status_value,
+            tables=['follow_sop', 'follow_sop_cache'],
+        )
+
+        conn.commit()
+
+        message_suffix = f" '{status_label}'" if status_label else ''
+        return jsonify({
+            "success": True,
+            "updated_count": updated_count,
+            "message": f"{updated_count}건의 상태가{message_suffix}로 변경되었습니다.",
+        })
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logging.error(f"Follow SOP 최종 검토 업데이트 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+@app.route('/api/safe-workplace/final-check', methods=['POST'])
+def mark_safe_workplace_final_check():
+    data = request.get_json(silent=True) or {}
+    ids = data.get('ids', [])
+
+    if not ids:
+        return jsonify({"success": False, "message": "처리할 항목을 선택해주세요."}), 400
+
+    status_value = (data.get('status') or '검토완료').strip() or '검토완료'
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        if not getattr(conn, 'is_postgres', False):
+            raise RuntimeError('PostgreSQL backend is required for final check updates.')
+
+        unique_ids = list(dict.fromkeys(str(x).strip() for x in ids if str(x).strip()))
+        if not unique_ids:
+            return jsonify({"success": False, "message": "유효한 항목이 없습니다."}), 400
+
+        updated_count, status_label = _update_final_check_bulk(
+            conn,
+            board_type='safe_workplace',
+            id_field='safeplace_no',
+            ids=unique_ids,
+            status_value=status_value,
+            tables=['safe_workplace'],
+        )
+
+        conn.commit()
+
+        message_suffix = f" '{status_label}'" if status_label else ''
+        return jsonify({
+            "success": True,
+            "updated_count": updated_count,
+            "message": f"{updated_count}건의 상태가{message_suffix}로 변경되었습니다.",
+        })
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logging.error(f"Safe Workplace 최종 검토 업데이트 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
 
 @app.route('/api/accidents/restore', methods=['POST'])
 def restore_accidents():
@@ -8239,17 +7962,17 @@ def board_columns_api(board):
     board_type = board.replace('-', '_')
     
     try:
-        service = ColumnService(board_type, DB_PATH)
-        
+        repository = ColumnConfigRepository(DB_PATH, board_type)
+
         if request.method == "GET":
-            columns = service.list()
+            columns = repository.list()
             return jsonify(columns)
-        
+
         elif request.method == "POST":
-            data = request.json
-            column_id = service.add(data)
+            data = request.json or {}
+            column_id = repository.add(data)
             return jsonify({"success": True, "id": column_id})
-            
+
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
     except Exception as e:
@@ -8262,17 +7985,17 @@ def board_column_api(board, column_id):
     board_type = board.replace('-', '_')
     
     try:
-        service = ColumnService(board_type, DB_PATH)
-        
+        repository = ColumnConfigRepository(DB_PATH, board_type)
+
         if request.method == "PUT":
-            data = request.json
-            service.update(column_id, data)
+            data = request.json or {}
+            repository.update(column_id, data)
             return jsonify({"success": True})
-        
+
         elif request.method == "DELETE":
-            service.delete(column_id)
+            repository.delete(column_id)
             return jsonify({"success": True})
-            
+
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
     except Exception as e:
@@ -8285,11 +8008,11 @@ def board_columns_order_api(board):
     board_type = board.replace('-', '_')
     
     try:
-        service = ColumnService(board_type, DB_PATH)
-        items = request.json
-        service.reorder(items)
+        repository = ColumnConfigRepository(DB_PATH, board_type)
+        items = request.json or []
+        repository.reorder(items)
         return jsonify({"success": True})
-        
+
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
     except Exception as e:
@@ -8632,7 +8355,7 @@ def upload_inline_image():
 
         # 안전한 파일명
         import time
-        basename = secure_filename(file.filename)
+        basename = sanitize_filename(file.filename, fallback_prefix='inline')
         fname = f"{int(time.time())}_{basename}"
         path = os.path.join(upload_dir, fname)
         file.save(path)

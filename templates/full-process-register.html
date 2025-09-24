@@ -51,17 +51,16 @@
                 <div class="info-row">
                     <div class="info-cell span-2">
                         <label>평가번호</label>
-                        <div class="value" style="color: #6b7280; font-style: italic;">자동으로 입력됩니다</div>
+                        <div class="value readonly-highlight" style="font-style: italic;">자동으로 입력됩니다</div>
                     </div>
                     <div class="info-cell span-2">
                         <label>등록일</label>
                         <input type="date"
-                               class="form-input date-input"
+                               class="form-input date-input readonly-highlight"
                                name="created_at"
                                data-field="created_at"
                                value="{{ today_date }}"
-                               readonly
-                               style="background-color: #f3f4f6;">
+                               readonly>
                     </div>
                 </div>
                 {% endif %}
@@ -110,11 +109,11 @@
                                 
                                 {% if col.column_key == 'fullprocess_number' %}
                                     <!-- 평가번호는 자동 생성 -->
-                                    <div class="value" style="color: #6b7280; font-style: italic;">자동으로 입력됩니다</div>
+                                    <div class="value readonly-highlight" style="font-style: italic;">자동으로 입력됩니다</div>
                                     
                                 {% elif col.column_key == 'created_at' %}
                                     <!-- 등록일 표시 (읽기 전용) -->
-                                    <div class="value" style="color: #6b7280; font-weight: 500;">
+                                    <div class="value readonly-highlight">
                                         {{ (col.default_value|date_only) if col.default_value else today_date }}
                                     </div>
                                     
@@ -148,10 +147,7 @@
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            value="{{ (col.default_value|date_only) if col.default_value else (today_date if col.column_key == 'created_at' else '') }}"
-                                           {% if col.column_key == 'created_at' %}
-                                           readonly
-                                           style="background-color: #f3f4f6;"
-                                           {% endif %}>
+                                           {% if col.column_key == 'created_at' %}readonly{% endif %}>
                                            
                                 {% elif col.column_type == 'number' %}
                                     <!-- 숫자 필드 -->
@@ -176,8 +172,7 @@
                                            data-section="{{ section.section_key }}"
                                            {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
                                            {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
-                                           readonly
-                                           style="background-color: #f3f4f6;">
+                                           readonly>
                                            
                                 {% elif col.column_type and col.column_type.startswith('popup') %}
                                     <!-- 팝업 필드 -->
@@ -298,9 +293,10 @@
                                         {% endif %}
 
                                         <input type="hidden"
-                                               class="{{ section.section_key|replace('_', '-') }}-input"
+                                               id="{{ col.column_key }}"
+                                               class="hard-hidden {{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
-                                               data-section="{{ section.section_key }}"
+                                               data-section="{{ section.section_key}}"
                                                value='{}'>
                                     </div>
                                 {% elif col.column_type == 'score_total' %}
@@ -328,7 +324,7 @@
                                                        style="width: 100%; border: 1px solid #d1d5db; border-radius: 4px; padding: 6px 8px; font-weight: bold; text-align: center; background: #f8f9fa;">
                                                 <input type="hidden"
                                                        id="{{ col.column_key }}"
-                                                       class="{{ section.section_key|replace('_', '-') }}-input"
+                                                       class="hard-hidden {{ section.section_key|replace('_', '-') }}-input"
                                                        data-field="{{ col.column_key }}"
                                                        data-section="{{ section.section_key }}"
                                                        value="{{ base_score }}">
@@ -447,7 +443,7 @@ const registerFullProcess = BoardDetail.createUpdater({
 
 window.registerFullProcess = registerFullProcess;
 
-/script>
+</script>
 
 <script>
 // 실시간 채점 계산 (Full Process)

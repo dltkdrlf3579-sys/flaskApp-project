@@ -4,7 +4,11 @@
 {% extends "base.html" %}
 {% endif %}
 
+{% from 'includes/board_form/save_controls.html' import render_save_button, render_password_modal %}
+
 {% block head %}
+    {{ super() }}
+    {% include 'includes/board_form_scripts.html' %}
 {% endblock %}
 
 {% block title %}변경요청 상세정보{% endblock %}
@@ -122,8 +126,7 @@
                                    {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
                                    {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                    value="{{ col_value }}"
-                                   readonly
-                                   style="background-color: #f3f4f6;">
+                                   readonly>
                         
                         {% elif col.column_type == 'popup_company' %}
                             <div class="input-group">
@@ -246,28 +249,14 @@
     {% from 'includes/attachment_section.html' import render_attachment_section %}
     {{ render_attachment_section(attachments, 'change_request') }}
 
-    <!-- 저장 버튼 영역 -->
-    <div class="save-section">
-        <button class="btn-save" onclick="showEditPasswordModal()">수정완료</button>
-    </div>
+    {{ render_save_button('showEditPasswordModal()') }}
     
-    <!-- 비밀번호 입력 모달 -->
-    <div id="edit-password-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>편집 권한 확인</h3>
-                <span class="close" onclick="closeEditPasswordModal()">&times;</span>
-            </div>
-            <div class="modal-body">
-                <p>편집을 위해 비밀번호를 입력해주세요.</p>
-                <input type="password" id="edit-password-input" placeholder="비밀번호" class="password-field">
-                <div class="modal-buttons">
-                    <button class="btn-confirm" onclick="verifyPasswordAndSave()">확인</button>
-                    <button class="btn-cancel" onclick="closeEditPasswordModal()">취소</button>
-                </div>
-            </div>
-        </div>
-    </div>
+    {{ render_password_modal(
+        modal_id='edit-password-modal',
+        input_id='edit-password-input',
+        confirm_onclick='verifyPasswordAndSave()',
+        cancel_onclick='closeEditPasswordModal()'
+    ) }}
 
     {% if not is_popup %}
     <div class="action-buttons">

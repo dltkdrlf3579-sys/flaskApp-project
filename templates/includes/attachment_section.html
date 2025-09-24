@@ -27,7 +27,7 @@
                         <div class="col-no">{{ loop.index }}</div>
                         <div class="col-file">
                             <span class="file-icon">📄</span>
-                            <a href="/download/{{ attachment.id }}" class="file-link" download>{{ attachment.file_name }}</a>
+                            <a href="{{ url_for('download_attachment_for_board', board_type=board_type, attachment_id=attachment.id) }}" class="file-link" download>{{ attachment.file_name }}</a>
                             <span class="file-size">({{ (attachment.file_size / 1024) | round(2) }} KB)</span>
                         </div>
                         <div class="col-desc">

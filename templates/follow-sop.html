@@ -48,7 +48,15 @@
 
 <!-- 목록 테이블 -->
 <div class="table-section">
-    {{ render_table_controls(total_count, show_excel=True, show_register=True, show_delete=True) }}
+    {{ render_table_controls(
+        total_count,
+        show_excel=True,
+        show_register=True,
+        show_delete=True,
+        show_final_check=True,
+        final_check_label='검토완료 처리',
+        final_check_callback='requestFollowSopFinalCheck()'
+    ) }}
     <div class="table-wrapper">
         <table class="data-table">
             <thead>
@@ -817,19 +825,93 @@ function toggleSelectAll() {
 // 삭제 버튼 활성화/비활성화 업데이트
 function updateDeleteButton() {
     const checkboxes = document.querySelectorAll('.accident-checkbox:checked');
+    const selectedCount = checkboxes.length;
+
     const deleteBtn = document.querySelector('.btn-delete');
-    
-    if (checkboxes.length > 0) {
-        deleteBtn.style.display = 'inline-block';
-        deleteBtn.textContent = `선택 삭제 (${checkboxes.length}건)`;
-    } else {
-        deleteBtn.style.display = 'none';
+    if (deleteBtn) {
+        const baseLabel = deleteBtn.dataset.defaultLabel || '선택 삭제';
+        if (selectedCount > 0) {
+            deleteBtn.style.display = 'inline-block';
+            deleteBtn.textContent = `${baseLabel} (${selectedCount}건)`;
+        } else {
+            deleteBtn.style.display = 'none';
+            deleteBtn.textContent = baseLabel;
+        }
+    }
+
+    const finalBtn = document.querySelector('.btn-final-check');
+    if (finalBtn) {
+        const baseLabel = finalBtn.dataset.defaultLabel || '검토완료 처리';
+        finalBtn.style.display = 'inline-block';
+        finalBtn.textContent = selectedCount > 0
+            ? `${baseLabel} (${selectedCount}건)`
+            : baseLabel;
     }
 }
 
 // 비밀번호 확인 후 선택한 항목 삭제
 function deleteSelectedWithPassword() {
     PwModal.show(deleteSelected);
+}
+
+function requestFollowSopFinalCheck() {
+    const checkboxes = document.querySelectorAll('.accident-checkbox:checked');
+    if (checkboxes.length === 0) {
+        alert('처리할 항목을 선택해주세요.');
+        return;
+    }
+
+    PwModal.show(() => markFollowSopFinalCheck(), { boardType: 'follow_sop' });
+}
+
+function markFollowSopFinalCheck() {
+    const checkboxes = document.querySelectorAll('.accident-checkbox:checked');
+    const ids = Array.from(checkboxes).map(cb => cb.value);
+
+    if (ids.length === 0) {
+        alert('처리할 항목을 선택해주세요.');
+        return;
+    }
+
+    if (!confirm(`선택한 ${ids.length}건의 상태를 '검토완료'로 변경하시겠습니까?`)) {
+        return;
+    }
+
+    const finalBtn = document.querySelector('.btn-final-check');
+    const baseLabel = finalBtn ? (finalBtn.dataset.defaultLabel || '검토완료 처리') : '검토완료 처리';
+
+    if (finalBtn) {
+        finalBtn.disabled = true;
+        finalBtn.textContent = '처리 중...';
+    }
+
+    fetch('/api/follow-sop/final-check', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ids: ids, status: '검토완료' })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message || '처리가 완료되었습니다.');
+            location.reload();
+        } else {
+            alert(data.message || '처리 중 오류가 발생했습니다.');
+        }
+    })
+    .catch(error => {
+        console.error(error);
+        alert('처리 중 오류가 발생했습니다.');
+    })
+    .finally(() => {
+        if (finalBtn) {
+            finalBtn.disabled = false;
+            finalBtn.textContent = baseLabel;
+            updateDeleteButton();
+        }
+    });
 }
 
 // 선택한 항목 삭제
@@ -868,6 +950,8 @@ function deleteSelected() {
         console.error(error);
     });
 }
+
+document.addEventListener('DOMContentLoaded', updateDeleteButton);
 </script>
 
 <!-- 비밀번호 모달 포함 -->

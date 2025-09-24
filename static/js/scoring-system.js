@@ -694,3 +694,46 @@ function syncScoreTotalLabels() {
         }
     });
 }
+// ---- hide empty .info-cell (공통) ----
+(function () {
+  function isEffectivelyEmpty(el) {
+    // 1) 자식 요소가 하나도 없고
+    if (el.children.length === 0) {
+      // 2) 텍스트가 모두 공백이면 비어있다고 판단
+      return (el.textContent || '').trim() === '';
+    }
+    return false;
+  }
+
+  function hideEmptyInfoCells() {
+    var cells = document.querySelectorAll('.info-cell');
+    for (var i = 0; i < cells.length; i++) {
+      var el = cells[i];
+      if (isEffectivelyEmpty(el)) {
+        el.style.display = 'none';
+        el.classList.add('ghost-hidden');
+      }
+    }
+  }
+
+  // 최초 실행
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', hideEmptyInfoCells);
+  } else {
+    hideEmptyInfoCells();
+  }
+
+  // 동적 변화에도 반영 (섹션 토글/비동기 렌더 등)
+  try {
+    var mo = new MutationObserver(function () {
+      // 간단히 재실행 (문제 셀 수가 적으니 성능 부담 거의 없음)
+      hideEmptyInfoCells();
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+  } catch (e) {
+    // MutationObserver 미지원 환경이면 무시
+  }
+
+  // 디버그/수동 호출용
+  window.hideEmptyInfoCells = hideEmptyInfoCells;
+})();

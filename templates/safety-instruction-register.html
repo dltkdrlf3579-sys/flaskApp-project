@@ -47,11 +47,11 @@
                 <div class="info-row">
                     <div class="info-cell span-2">
                         <label>발부번호</label>
-                        <input type="text" value="자동 생성" readonly style="background-color: #f3f4f6; color: #6b7280; font-style: italic;">
+                        <input type="text" value="자동 생성" readonly style="color: #6b7280; font-style: italic;">
                     </div>
                     <div class="info-cell span-2">
                         <label>등록일</label>
-                        <input type="date" value="{{ today_date }}" readonly style="background-color: #f3f4f6;">
+                        <input type="date" value="{{ today_date }}" readonly>
                     </div>
                 </div>
                 {% endif %}
@@ -86,7 +86,7 @@
                                 
                                 {% if col.column_key == 'issue_number' %}
                                     <!-- 발부번호는 자동 생성 -->
-                                    <div class="value">자동 생성됩니다</div>
+                                    <div class="value readonly-highlight">자동 생성됩니다</div>
                                     
                                 {% elif col.column_type == 'dropdown' %}
                                     <!-- 드롭다운 필드 -->
@@ -110,14 +110,11 @@
                                     <!-- 날짜 필드 -->
                                     <input type="date" 
                                            id="{{ col.column_key }}" 
-                                           class="{{ section.section_key|replace('_', '-') }}-input" 
+                                           class="{{ section.section_key|replace('_', '-') }}-input{% if col.column_key == 'created_at' %} readonly-highlight{% endif %}" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            value="{{ (col.default_value|date_only) if col.default_value else (today_date if col.column_key == 'created_at' else '') }}"
-                                           {% if col.column_key == 'created_at' %}
-                                           readonly
-                                           style="background-color: #f3f4f6;"
-                                           {% endif %}>
+                                           {% if col.column_key == 'created_at' %}readonly{% endif %}>
                                            
                                 {% elif col.column_type == 'number' %}
                                     <!-- 숫자 필드 -->
@@ -137,13 +134,13 @@
                                     <!-- 연결된 필드 (읽기 전용) -->
                                     <input type="text"
                                            id="{{ col.column_key }}"
-                                           class="{{ section.section_key|replace('_', '-') }}-input linked-field"
+                                           class="{{ section.section_key|replace('_', '-') }}-input linked-field readonly-highlight"
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
                                            {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                            readonly
-                                           style="background-color: #e9ecef; cursor: not-allowed;">
+                                           data-linked-type="{{ col.column_type }}">
                                            
                                 {% elif col.column_type == 'popup' %}
                                     <!-- 팝업 필드 -->
@@ -557,8 +554,8 @@ const registerSafetyInstruction = BoardDetail.createUpdater({
     }
 });
 
-window.registerSafetyInstruction = registerSafetyInstruction;
-/script>
+window.registerSafetyInstruction = registerSafetyInstruction;
+</script>
 
 <script>
 // 실시간 채점 계산 (Safety Instruction)

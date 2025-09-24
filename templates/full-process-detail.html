@@ -47,11 +47,11 @@
                 <div class="info-row">
                     <div class="info-cell span-2">
                         <label>평가번호</label>
-                        <input type="text" value="{{ process.fullprocess_number or '-' }}" readonly style="background-color: #f3f4f6;">
+                        <input type="text" value="{{ process.fullprocess_number or '-' }}" readonly class="readonly-highlight">
                     </div>
                     <div class="info-cell span-2">
                         <label>등록일</label>
-                        <input type="text" value="{{ (process.created_at|date_only) if process.created_at else '-' }}" readonly style="background-color: #f3f4f6;">
+                        <input type="text" value="{{ (process.created_at|date_only) if process.created_at else '-' }}" readonly class="readonly-highlight">
                     </div>
                 </div>
                 {% endif %}
@@ -223,8 +223,7 @@
                                            {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
                                            {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                            value="{{ col_value }}"
-                                           readonly
-                                           style="background-color: #f3f4f6;">
+                                           readonly>
                                            
                                 {% elif col.column_type == 'popup' %}
                                     <!-- 팝업 필드 -->

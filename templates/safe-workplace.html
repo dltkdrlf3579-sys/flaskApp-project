@@ -30,7 +30,16 @@
 </div>
 
 <div class="table-section">
-    {{ render_table_controls(total_count, show_excel=True, show_register=True, show_delete=True, register_callback='openRegisterPopup()') }}
+    {{ render_table_controls(
+        total_count,
+        show_excel=True,
+        show_register=True,
+        show_delete=True,
+        register_callback='openRegisterPopup()',
+        show_final_check=True,
+        final_check_label='검토완료 처리',
+        final_check_callback='requestSafeWorkplaceFinalCheck()'
+    ) }}
     <div class="table-wrapper">
         <table class="data-table">
             <thead>
@@ -163,19 +172,92 @@ function toggleSelectAll() {
 
 function updateDeleteButton() {
     const checked = document.querySelectorAll('.safe-checkbox:checked');
+    const selectedCount = checked.length;
+
     const deleteBtn = document.querySelector('.btn-delete');
     if (deleteBtn) {
-        if (checked.length > 0) {
+        const baseLabel = deleteBtn.dataset.defaultLabel || '선택 삭제';
+        if (selectedCount > 0) {
             deleteBtn.style.display = 'inline-block';
-            deleteBtn.textContent = `선택 삭제 (${checked.length}건)`;
+            deleteBtn.textContent = `${baseLabel} (${selectedCount}건)`;
         } else {
             deleteBtn.style.display = 'none';
+            deleteBtn.textContent = baseLabel;
         }
+    }
+
+    const finalBtn = document.querySelector('.btn-final-check');
+    if (finalBtn) {
+        const baseLabel = finalBtn.dataset.defaultLabel || '검토완료 처리';
+        finalBtn.style.display = 'inline-block';
+        finalBtn.textContent = selectedCount > 0
+            ? `${baseLabel} (${selectedCount}건)`
+            : baseLabel;
     }
 }
 
 function deleteSelectedWithPassword() {
     PwModal.show(deleteSelected);
+}
+
+function requestSafeWorkplaceFinalCheck() {
+    const checked = document.querySelectorAll('.safe-checkbox:checked');
+    if (checked.length === 0) {
+        alert('처리할 항목을 선택해주세요.');
+        return;
+    }
+
+    PwModal.show(() => markSafeWorkplaceFinalCheck(), { boardType: 'safe_workplace' });
+}
+
+function markSafeWorkplaceFinalCheck() {
+    const checked = document.querySelectorAll('.safe-checkbox:checked');
+    const ids = Array.from(checked).map(cb => cb.value);
+
+    if (ids.length === 0) {
+        alert('처리할 항목을 선택해주세요.');
+        return;
+    }
+
+    if (!confirm(`선택한 ${ids.length}건의 상태를 '검토완료'로 변경하시겠습니까?`)) {
+        return;
+    }
+
+    const finalBtn = document.querySelector('.btn-final-check');
+    const baseLabel = finalBtn ? (finalBtn.dataset.defaultLabel || '검토완료 처리') : '검토완료 처리';
+
+    if (finalBtn) {
+        finalBtn.disabled = true;
+        finalBtn.textContent = '처리 중...';
+    }
+
+    fetch('/api/safe-workplace/final-check', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ids, status: '검토완료' })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message || '처리가 완료되었습니다.');
+            location.reload();
+        } else {
+            alert(data.message || '처리 중 오류가 발생했습니다.');
+        }
+    })
+    .catch(error => {
+        console.error(error);
+        alert('처리 중 오류가 발생했습니다.');
+    })
+    .finally(() => {
+        if (finalBtn) {
+            finalBtn.disabled = false;
+            finalBtn.textContent = baseLabel;
+            updateDeleteButton();
+        }
+    });
 }
 
 function deleteSelected() {
@@ -209,6 +291,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (deleteBtn) {
         deleteBtn.style.display = 'none';
     }
+    updateDeleteButton();
 });
 </script>
 

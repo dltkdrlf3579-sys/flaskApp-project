@@ -231,3 +231,32 @@
         gap: 5px;
     }
 }
+/* force-hide any hidden inputs in case some global reset breaks UA styles */
+
+/* 스코어링 들어간 셀의 껍데기(보더/배경/패딩) 제거 */
+.info-cell.no-shell{
+  border: 0 !important;
+  background: transparent !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+.info-cell.no-shell::before,
+.info-cell.no-shell::after{
+  content: none !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+/* 스코어링이 들어간 행(.info-row)의 바깥 껍데기도 제거 */
+.info-row.no-row-shell{
+  border: 0 !important;
+  background: transparent !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+}
+.info-row.no-row-shell::before,
+.info-row.no-row-shell::after{
+  content: none !important;
+  border: 0 !important;
+  background: transparent !important;
+}

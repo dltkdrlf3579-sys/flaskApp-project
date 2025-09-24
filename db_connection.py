@@ -50,6 +50,13 @@ def get_db_connection(db_path: str = None, timeout: float = 10.0, row_factory: b
     return conn
 
 
+def get_postgres_dsn() -> str:
+    """config.ini에서 PostgreSQL DSN을 읽어온다."""
+
+    config = _load_config()
+    return _require_postgres_backend(config)
+
+
 class DatabaseConnection:
     """기존 코드 호환용 클래스 - 내부에서 get_db_connection 사용"""
 

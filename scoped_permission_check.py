@@ -11,6 +11,105 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def _row_value(row, index, key):
+    """Helper to read value from either tuple-like or dict-like rows."""
+    if row is None:
+        return None
+    if hasattr(row, 'keys'):
+        return row.get(key)
+    return row[index]
+
+
+def _get_dept_info(cursor, dept_id):
+    """Return (dept_code, dept_full_path) for the given dept_id."""
+    if not dept_id:
+        return None, None
+
+    try:
+        cursor.execute(
+            """
+            SELECT dept_code, COALESCE(dept_full_path, dept_code)
+            FROM departments_external
+            WHERE dept_id = %s AND is_active = true
+            """,
+            (dept_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return None, None
+        dept_code = _row_value(row, 0, 'dept_code')
+        dept_path = _row_value(row, 1, 'coalesce')
+        return dept_code, dept_path
+    except Exception as exc:
+        logger.debug(f"departments_external lookup failed: {exc}")
+        return None, None
+
+
+def _get_dept_permission_levels(cursor, menu_code, dept_id, dept_code, dept_path):
+    """
+    Fetch the most specific department permission row matching the user department hierarchy.
+    Returns dict with keys read_level, write_level, can_delete when available.
+    """
+    if not menu_code or not (dept_id or dept_code):
+        return None
+
+    where_clauses = []
+    params = [menu_code]
+
+    if dept_id:
+        where_clauses.append("dept_id = %s")
+        params.append(dept_id)
+
+    path_codes = []
+    if dept_path:
+        path_codes = [code.strip() for code in dept_path.split('|') if code.strip()]
+
+    if dept_code and dept_code not in path_codes:
+        path_codes.append(dept_code)
+
+    if path_codes:
+        where_clauses.append("dept_code = ANY(%s)")
+        params.append(path_codes)
+
+    if not where_clauses:
+        return None
+
+    where_sql = " OR ".join(where_clauses)
+
+    # Prefer exact dept_id match, then the most specific ancestor (longer path)
+    params.extend([
+        dept_id if dept_id else '',
+    ])
+
+    sql = f"""
+        SELECT read_level, write_level, can_delete
+        FROM dept_menu_roles
+        WHERE menu_code = %s
+          AND is_active = true
+          AND ({where_sql})
+        ORDER BY
+            CASE WHEN dept_id = %s THEN 0 ELSE 1,
+            COALESCE(length(dept_full_path), 0) DESC,
+            updated_at DESC
+        LIMIT 1
+    """
+
+    try:
+        cursor.execute(sql, params)
+        row = cursor.fetchone()
+        if not row:
+            return None
+
+        return {
+            'read_level': _row_value(row, 0, 'read_level'),
+            'write_level': _row_value(row, 1, 'write_level'),
+            'can_delete': _row_value(row, 2, 'can_delete'),
+        }
+    except Exception as exc:
+        logger.debug(f"dept_menu_roles lookup failed for {menu_code}: {exc}")
+        return None
+
 class PermissionLevel:
     """권한 레벨 상수"""
     NONE = 0      # 권한 없음
@@ -56,26 +155,27 @@ def get_permission_level(login_id, dept_id, menu_code, action='read'):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # 개인 권한 레벨
         column = 'read_level' if action == 'read' else 'write_level'
-        cursor.execute(f"""
+
+        # 개인 권한 레벨 (login_id 기준)
+        cursor.execute(
+            f"""
             SELECT {column}
             FROM user_menu_permissions
             WHERE login_id = %s AND menu_code = %s AND is_active = true
-        """, (login_id, menu_code))
+            """,
+            (login_id, menu_code),
+        )
 
         user_result = cursor.fetchone()
-        user_level = user_result[0] if user_result else 0
+        user_level = _row_value(user_result, 0, column) if user_result else 0
 
-        # 부서 권한 레벨
-        cursor.execute(f"""
-            SELECT {column}
-            FROM dept_menu_roles
-            WHERE dept_id = %s AND menu_code = %s AND is_active = true
-        """, (dept_id, menu_code))
-
-        dept_result = cursor.fetchone()
-        dept_level = dept_result[0] if dept_result else 0
+        # 부서 권한 레벨 (SSO deptid 기준, 상위 조직 포함)
+        dept_code, dept_path = _get_dept_info(cursor, dept_id)
+        dept_perm = _get_dept_permission_levels(cursor, menu_code, dept_id, dept_code, dept_path)
+        dept_level = 0
+        if dept_perm:
+            dept_level = dept_perm.get(column) or 0
 
         cursor.close()
         conn.close()
@@ -133,24 +233,22 @@ def check_delete_permission(login_id, dept_id, menu_code):
         cursor = conn.cursor()
 
         # 개인 삭제 권한
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT can_delete
             FROM user_menu_permissions
             WHERE login_id = %s AND menu_code = %s AND is_active = true
-        """, (login_id, menu_code))
+            """,
+            (login_id, menu_code),
+        )
 
         user_result = cursor.fetchone()
-        user_can_delete = user_result[0] if user_result else False
+        user_can_delete = _row_value(user_result, 0, 'can_delete') if user_result else False
 
-        # 부서 삭제 권한
-        cursor.execute("""
-            SELECT can_delete
-            FROM dept_menu_roles
-            WHERE dept_id = %s AND menu_code = %s AND is_active = true
-        """, (dept_id, menu_code))
-
-        dept_result = cursor.fetchone()
-        dept_can_delete = dept_result[0] if dept_result else False
+        # 부서 삭제 권한 (상위 조직 포함)
+        dept_code, dept_path = _get_dept_info(cursor, dept_id)
+        dept_perm = _get_dept_permission_levels(cursor, menu_code, dept_id, dept_code, dept_path)
+        dept_can_delete = dept_perm.get('can_delete') if dept_perm else False
 
         cursor.close()
         conn.close()
@@ -194,40 +292,92 @@ def get_user_permission_summary(login_id, dept_id):
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # 모든 메뉴의 권한 조회
-        cursor.execute("""
-            WITH user_perms AS (
-                SELECT menu_code, read_level, write_level, can_delete
-                FROM user_menu_permissions
-                WHERE login_id = %s AND is_active = true
-            ),
-            dept_perms AS (
-                SELECT menu_code, read_level, write_level, can_delete
-                FROM dept_menu_roles
-                WHERE dept_id = %s AND is_active = true
-            )
-            SELECT
-                COALESCE(u.menu_code, d.menu_code) as menu_code,
-                GREATEST(COALESCE(u.read_level, 0), COALESCE(d.read_level, 0)) as read_level,
-                GREATEST(COALESCE(u.write_level, 0), COALESCE(d.write_level, 0)) as write_level,
-                (COALESCE(u.can_delete, FALSE) OR COALESCE(d.can_delete, FALSE)) as can_delete
-            FROM user_perms u
-            FULL OUTER JOIN dept_perms d ON u.menu_code = d.menu_code
-        """, (login_id, dept_id))
+        # 개인 권한
+        cursor.execute(
+            """
+            SELECT menu_code, read_level, write_level, can_delete
+            FROM user_menu_permissions
+            WHERE login_id = %s AND is_active = true
+            """,
+            (login_id,),
+        )
+        personal = {}
+        for row in cursor.fetchall():
+            menu_code = _row_value(row, 0, 'menu_code')
+            personal[menu_code] = {
+                'read_level': _row_value(row, 1, 'read_level') or 0,
+                'write_level': _row_value(row, 2, 'write_level') or 0,
+                'can_delete': bool(_row_value(row, 3, 'can_delete')),
+            }
 
-        results = cursor.fetchall()
+        # 부서 권한 (상위 조직 포함)
+        dept_code, dept_path = _get_dept_info(cursor, dept_id)
+        dept_perms = {}
+        if dept_code or dept_id:
+            where_parts = []
+            params = []
+            if dept_id:
+                where_parts.append("dept_id = %s")
+                params.append(dept_id)
+
+            path_codes = []
+            if dept_path:
+                path_codes = [code.strip() for code in dept_path.split('|') if code.strip()]
+
+            if dept_code and dept_code not in path_codes:
+                path_codes.append(dept_code)
+
+            if where_parts or path_codes:
+                if path_codes:
+                    where_parts.append("dept_code = ANY(%s)")
+                    params.append(path_codes)
+
+                where_sql = " OR ".join(where_parts)
+                params_extended = params + [dept_id if dept_id else '']
+
+                cursor.execute(
+                    f"""
+                    SELECT menu_code, read_level, write_level, can_delete, dept_full_path, updated_at
+                    FROM dept_menu_roles
+                    WHERE is_active = true AND menu_code IS NOT NULL
+                      AND ({where_sql})
+                    ORDER BY
+                        CASE WHEN dept_id = %s THEN 0 ELSE 1,
+                        COALESCE(length(dept_full_path), 0) DESC,
+                        updated_at DESC
+                    """,
+                    params_extended,
+                )
+
+                for row in cursor.fetchall():
+                    menu_code = _row_value(row, 0, 'menu_code')
+                    if menu_code in dept_perms:
+                        continue
+                    dept_perms[menu_code] = {
+                        'read_level': _row_value(row, 1, 'read_level') or 0,
+                        'write_level': _row_value(row, 2, 'write_level') or 0,
+                        'can_delete': bool(_row_value(row, 3, 'can_delete')),
+                    }
+
         cursor.close()
         conn.close()
 
+        all_codes = set(personal.keys()) | set(dept_perms.keys())
         permissions = {}
-        for row in results:
-            menu_code, read_level, write_level, can_delete = row
+        for menu_code in all_codes:
+            user_perm = personal.get(menu_code, {'read_level': 0, 'write_level': 0, 'can_delete': False})
+            dept_perm = dept_perms.get(menu_code, {'read_level': 0, 'write_level': 0, 'can_delete': False})
+
+            read_level = max(user_perm['read_level'], dept_perm['read_level'])
+            write_level = max(user_perm['write_level'], dept_perm['write_level'])
+            can_delete = user_perm['can_delete'] or dept_perm['can_delete']
+
             permissions[menu_code] = {
                 'read_level': read_level,
                 'read_level_name': PermissionLevel.get_name(read_level, 'read'),
                 'write_level': write_level,
                 'write_level_name': PermissionLevel.get_name(write_level, 'write'),
-                'can_delete': can_delete
+                'can_delete': can_delete,
             }
 
         return permissions

@@ -688,3 +688,158 @@ class SafeWorkplaceRepository:
             'message': '안전한 일터가 등록되었습니다.',
             'safeplace_no': safeplace_no,
         }, 200
+
+    def update_from_request(self, request) -> Any:
+        data = request.form
+        files: List[FileStorage] = request.files.getlist('files')
+
+        safeplace_no = (data.get('safeplace_no') or '').strip()
+        if not safeplace_no:
+            return {'success': False, 'message': '안전한 일터 번호가 필요합니다.'}, 400
+
+        valid_files, validation_errors = validate_uploaded_files(files)
+        if validation_errors:
+            return {'success': False, 'message': validation_errors[0], 'errors': validation_errors}, 400
+
+        if not data.get('sections'):
+            sections_json: Dict[str, Any] = {}
+            for key in data.keys():
+                if key in {'custom_data', 'attachment_data', 'detailed_content', 'deleted_attachments'}:
+                    continue
+                try:
+                    sections_json[key] = json.loads(data.get(key) or '{}')
+                except Exception:
+                    sections_json[key] = {}
+            custom_data = {}
+            for payload in sections_json.values():
+                if isinstance(payload, dict):
+                    custom_data.update(payload)
+        else:
+            try:
+                custom_data = json.loads(data.get('sections') or '{}')
+            except Exception:
+                custom_data = {}
+
+        custom_data_raw = data.get('custom_data', '{}')
+        try:
+            if isinstance(custom_data_raw, dict):
+                custom_data.update(custom_data_raw)
+            else:
+                custom_data.update(json.loads(custom_data_raw) or {})
+        except Exception:
+            pass
+
+        custom_data_json = json.dumps(custom_data, ensure_ascii=False)
+        detailed_content = data.get('detailed_content', '')
+
+        deleted_raw = data.get('deleted_attachments', '[]')
+        try:
+            deleted_ids = [
+                int(str(item).strip())
+                for item in json.loads(deleted_raw or '[]')
+                if isinstance(item, (int, str)) and str(item).strip().isdigit()
+            ]
+        except Exception:
+            deleted_ids = []
+
+        attachment_data_raw = data.get('attachment_data', '[]')
+        if isinstance(attachment_data_raw, list):
+            attachment_meta = attachment_data_raw
+        else:
+            try:
+                attachment_meta = json.loads(attachment_data_raw or '[]')
+            except Exception:
+                attachment_meta = []
+        if not isinstance(attachment_meta, list):
+            attachment_meta = []
+
+        with self.connection() as conn:
+            table = self._resolve_table_name(conn)
+            table_columns = set(self._get_columns(conn, table))
+
+            upsert_data: Dict[str, Any] = {
+                'safeplace_no': safeplace_no,
+                'custom_data': custom_data_json,
+            }
+
+            update_cols = ['custom_data']
+
+            timestamp = get_korean_time().strftime('%Y-%m-%d %H:%M:%S')
+            if 'updated_at' in table_columns:
+                upsert_data['updated_at'] = timestamp
+                update_cols.append('updated_at')
+
+            updated_by = data.get('updated_by') or data.get('user_id', 'system')
+            if 'updated_by' in table_columns:
+                upsert_data['updated_by'] = updated_by
+                update_cols.append('updated_by')
+            elif data.get('updated_by') and 'created_by' in table_columns:
+                upsert_data['created_by'] = updated_by
+                update_cols.append('created_by')
+
+            safe_upsert(
+                conn,
+                table,
+                upsert_data,
+                conflict_cols=['safeplace_no'],
+                update_cols=update_cols,
+            )
+
+            safe_upsert(
+                conn,
+                'safe_workplace_details',
+                {
+                    'safeplace_no': safeplace_no,
+                    'detailed_content': detailed_content,
+                    'updated_at': None,
+                },
+                conflict_cols=['safeplace_no'],
+                update_cols=['detailed_content', 'updated_at'],
+            )
+
+            from board_services import AttachmentService
+
+            attachment_service = AttachmentService('safe_workplace', self._db_path, conn)
+
+            if deleted_ids:
+                attachment_service.delete(deleted_ids)
+
+            for meta in attachment_meta:
+                attachment_id = None
+                if isinstance(meta, dict) and meta.get('id') and not meta.get('isNew'):
+                    try:
+                        attachment_id = int(meta['id'])
+                    except Exception:
+                        attachment_id = None
+                if attachment_id:
+                    fields: Dict[str, Any] = {}
+                    if 'description' in meta:
+                        fields['description'] = meta.get('description', '')
+                    if fields:
+                        attachment_service.update_meta(attachment_id, fields)
+
+            new_meta_iter = iter([
+                meta for meta in attachment_meta
+                if isinstance(meta, dict) and (not meta.get('id') or meta.get('isNew'))
+            ])
+            uploaded_by = updated_by or 'system'
+
+            for file_info in valid_files:
+                file_obj: FileStorage = file_info['file']
+                meta: Dict[str, Any] = {}
+                try:
+                    candidate = next(new_meta_iter)
+                except StopIteration:
+                    candidate = None
+                if isinstance(candidate, dict):
+                    meta['description'] = candidate.get('description', '')
+                meta.setdefault('uploaded_by', uploaded_by)
+                attachment_service.add(safeplace_no, file_obj, meta)
+
+            conn.commit()
+
+        return {
+            'success': True,
+            'message': '안전한 일터가 수정되었습니다.',
+            'safeplace_no': safeplace_no,
+        }, 200

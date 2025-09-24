@@ -13,6 +13,36 @@ import configparser
 import os
 from typing import Dict, Any
 
+
+def _as_bool(value: str) -> bool:
+    """Interpret common truthy strings as boolean True."""
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def is_scoring_enabled(config_path: str = None) -> bool:
+    """Check configuration and environment flags to decide if scoring runs."""
+    env_value = os.environ.get("ENABLE_EXTERNAL_SCORING")
+    if env_value is not None:
+        try:
+            return _as_bool(env_value)
+        except AttributeError:
+            return False
+
+    if not config_path:
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.ini')
+
+    config = configparser.ConfigParser()
+    config.read(config_path, encoding='utf-8')
+
+    if config.has_option('APPLICATION', 'scoring_enabled'):
+        return config.getboolean('APPLICATION', 'scoring_enabled', fallback=True)
+
+    return True
+
+
+SCORING_ENABLED = is_scoring_enabled()
+_SCORING_DISABLED_LOGGED = False
+
 def get_scoring_sections_from_config(config_path: str = None) -> Dict[str, Dict[str, str]]:
     """
     config.ini에서 scoring 섹션들을 동적으로 찾기
@@ -147,12 +177,20 @@ def apply_external_scoring_to_custom_data(cursor, fullprocess_number: str, exist
     외부 데이터를 가져와서 custom_data 업데이트
     완전 동적, config.ini 기반
     """
+    global _SCORING_DISABLED_LOGGED
+
+    if not SCORING_ENABLED:
+        if not _SCORING_DISABLED_LOGGED:
+            logging.info("[SCORING] External scoring disabled; skipping update.")
+            _SCORING_DISABLED_LOGGED = True
+        return existing_custom_data
+
     try:
         # 1. config.ini에서 scoring 섹션들 동적으로 가져오기
         scoring_mappings = get_scoring_sections_from_config()
 
         if not scoring_mappings:
-            logging.warning("[SCORING] No scoring sections found in config.ini")
+            logging.info("[SCORING] No scoring sections found in config.ini; skipping external scoring.")
             return existing_custom_data
 
         logging.info(f"[SCORING] Processing sections: {list(scoring_mappings.keys())}")

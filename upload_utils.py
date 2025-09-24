@@ -2,9 +2,57 @@
 파일 업로드 유틸리티 - config.ini 설정에 따른 제한 적용
 """
 import os
+import re
+import time
+import unicodedata
 import configparser
-from werkzeug.utils import secure_filename
-from flask import current_app
+
+DEFAULT_FILENAME_FALLBACK = "file"
+SAFE_FILENAME_PATTERN = re.compile(r"[^0-9A-Za-z가-힣._-]+")
+
+
+def sanitize_filename(filename: str, fallback_prefix: str = DEFAULT_FILENAME_FALLBACK) -> str:
+    """한글을 포함한 안전한 파일명으로 정규화"""
+    if not filename:
+        return f"{fallback_prefix}_{int(time.time())}"
+
+    # FileStorage filename may be latin-1 decoded bytes; try to recover UTF-8
+    if isinstance(filename, bytes):
+        try:
+            filename = filename.decode('utf-8')
+        except UnicodeDecodeError:
+            filename = filename.decode('latin-1', 'ignore')
+    else:
+        # If the string is made of 8-bit characters only, it may be latin-1 decoded bytes
+        try:
+            raw_bytes = filename.encode('latin-1')
+        except UnicodeEncodeError:
+            raw_bytes = None  # contains true Unicode already
+
+        if raw_bytes is not None:
+            try:
+                decoded = raw_bytes.decode('utf-8')
+            except UnicodeDecodeError:
+                decoded = None
+            if decoded:
+                filename = decoded
+
+    # Normalize unicode to prevent equivalent composed forms from being different
+    normalized = unicodedata.normalize('NFKC', filename)
+
+    # Replace path separators just in case
+    cleaned = normalized.replace('\\', '_').replace('/', '_')
+
+    # Remove any disallowed characters while keeping Korean, digits, ascii, dot, dash, underscore
+    cleaned = SAFE_FILENAME_PATTERN.sub('_', cleaned)
+
+    # Trim leading/trailing dots/underscores to avoid hidden files or empty names
+    cleaned = cleaned.strip('._ ')
+
+    if not cleaned:
+        cleaned = f"{fallback_prefix}_{int(time.time())}"
+
+    return cleaned
 
 class UploadValidator:
     """파일 업로드 검증 클래스"""
@@ -96,7 +144,7 @@ class UploadValidator:
             return result
 
         # 안전한 파일명 생성
-        result['filename'] = secure_filename(file.filename)
+        result['filename'] = sanitize_filename(file.filename)
 
         # 확장자 확인
         if '.' in file.filename:
@@ -201,7 +249,7 @@ def validate_uploaded_files(files):
             continue
 
         result = validator.validate_file(file)
-        safe_name = result.get('filename') or secure_filename(file.filename)
+        safe_name = result.get('filename') or sanitize_filename(file.filename)
 
         if not result.get('valid', False):
             filename = file.filename or safe_name

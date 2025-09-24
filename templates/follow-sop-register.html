@@ -50,17 +50,16 @@
                 <div class="info-row">
                     <div class="info-cell span-2">
                         <label>점검번호</label>
-                        <div class="value" style="color: #6b7280; font-style: italic;">자동으로 입력됩니다</div>
+                        <div class="value readonly-highlight" style="font-style: italic;">자동으로 입력됩니다</div>
                     </div>
                     <div class="info-cell span-2">
                         <label>등록일</label>
                         <input type="date"
-                               class="form-input date-input"
+                               class="form-input date-input readonly-highlight"
                                name="created_at"
                                data-field="created_at"
                                value="{{ today_date }}"
-                               readonly
-                               style="background-color: #f3f4f6;">
+                               readonly>
                     </div>
                 </div>
                 {% endif %}
@@ -85,7 +84,13 @@
                             {% elif col.column_type == 'scoring' %}
                                 {% set span = 8 %}
                             {% elif col.column_type == 'score_total' %}
-                                {% set span = 4 %}
+                                {% set prev_idx = loop.index0 - 1 %}
+                                {% set prev_col = chunk[prev_idx] if prev_idx >= 0 else None %}
+                                {% if prev_col and prev_col.column_type == 'scoring' %}
+                                    {% set span = 0 %}
+                                {% else %}
+                                    {% set span = 2 %}
+                                {% endif %}
                             {% elif col.column_span and col.column_span|int > 0 %}
                                 {% set cs = col.column_span|int %}
                                 {% set span = cs if cs >= 2 else 2 %}
@@ -93,16 +98,19 @@
                                 {% set span = 2 %}
                             {% endif %}
 
+                            {% if span > 0 %}
                             <div class="info-cell span-{{ span }}">
+                            {% if col.column_type not in ['scoring', 'score_total'] %}
                                 <label>{{ col.column_name }}</label>
-                                
+                            {% endif %}
+                                                        
                                 {% if col.column_key == 'work_req_no' %}
                                     <!-- 점검번호는 자동 생성 -->
-                                    <div class="value" style="color: #6b7280; font-style: italic;">자동으로 입력됩니다</div>
+                                    <div class="value readonly-highlight" style="font-style: italic;">자동으로 입력됩니다</div>
                                     
                                 {% elif col.column_key == 'created_at' %}
                                     <!-- 등록일은 자동 생성 -->
-                                    <div class="value">{{ (col.default_value|date_only) if col.default_value else '자동 생성됩니다' }}</div>
+                                    <div class="value readonly-highlight">{{ (col.default_value|date_only) if col.default_value else '자동 생성됩니다' }}</div>
                                     
                                 {% elif col.is_readonly %}
                                     <!-- 읽기 전용 필드 -->
@@ -134,10 +142,7 @@
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            value="{{ (col.default_value|date_only) if col.default_value else (today_date if col.column_key == 'created_at' else '') }}"
-                                           {% if col.column_key == 'created_at' %}
-                                           readonly
-                                           style="background-color: #f3f4f6;"
-                                           {% endif %}>
+                                           {% if col.column_key == 'created_at' %}readonly{% endif %}>
                                            
                                 {% elif col.column_type == 'number' %}
                                     <!-- 숫자 필드 -->
@@ -162,8 +167,7 @@
                                            data-section="{{ section.section_key }}"
                                            {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
                                            {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
-                                           readonly
-                                           style="background-color: #f3f4f6;">
+                                           readonly>
                                            
                                 {% elif col.column_type and col.column_type.startswith('popup') %}
                                     <!-- 팝업 필드 -->
@@ -207,10 +211,43 @@
                                     </div>
                                     
                                 {% elif col.column_type == 'scoring' %}
-                                    {# 간단 네모 입력들로 바로 렌더링 #}
+                                    {# scoring 필드 #}
+                                    <label>{{ col.column_name }}</label>  {# 내부 라벨은 유지: full-process도 내부에서 라벨 표시 #}
                                     {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}
                                     {% set items = sc['items'] if sc and ('items' in sc) else [] %}
+                                    {# 이전 컬럼이 score_total인지 확인 #}
+                                    {% set prev_idx = loop.index0 - 1 %}
+                                    {% set prev_col = chunk[prev_idx] if prev_idx >= 0 else None %}
+                                    {% set has_prev_score_total = prev_col and prev_col.column_type == 'score_total' %}
+                                    {# 다음 컬럼이 score_total인지 확인 #}
+                                    {% set next_idx = loop.index0 + 1 %}
+                                    {% set next_col = chunk[next_idx] if next_idx < chunk|length else None %}
+                                    {% set has_score_total = next_col and next_col.column_type == 'score_total' %}
+
                                     <div class="scoring-group scoring-columns" data-field="{{ col.column_key }}" data-config='{{ col.scoring_config|default("{}")|tojson }}' data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}">
+                                        {# score_total이 이전에 있으면 첫 번째로 포함 #}
+                                        {% if has_prev_score_total %}
+                                            {% set sc_total = (prev_col.scoring_config|from_json) if prev_col.scoring_config else {} %}
+                                            {% set base_score = sc_total.get('base_score') if sc_total and sc_total.get('base_score') else 100 %}
+                                            <div class="sc-col">
+                                                <label class="form-label">{{ prev_col.column_name }}</label>
+                                                <input type="number"
+                                                       id="{{ prev_col.column_key }}_display"
+                                                       class="total-score-display"
+                                                       data-field="{{ prev_col.column_key }}"
+                                                       data-config='{{ prev_col.scoring_config|default("{}")|tojson }}'
+                                                       data-base-score="{{ base_score }}"
+                                                       value="{{ base_score }}"
+                                                       readonly
+                                                       style="width: 100%; border: 1px solid #d1d5db; border-radius: 4px; padding: 6px 8px; font-weight: bold; text-align: center; background: #f8f9fa;">
+                                                <input type="hidden"
+                                                       id="{{ prev_col.column_key }}"
+                                                       class="{{ section.section_key|replace('_', '-') }}-input"
+                                                       data-field="{{ prev_col.column_key }}"
+                                                       data-section="{{ section.section_key }}"
+                                                       value="{{ base_score }}">
+                                            </div>
+                                        {% endif %}
                                         {% for it in items %}
                                         <div class="sc-col">
                                             <label class="form-label">{{ it.name or it.label or '항목' }}</label>
@@ -219,11 +256,37 @@
                                                    data-item="{{ it.id }}"
                                                    data-score="{{ it.per_unit_delta }}"
                                                    data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}"
-                                                   value="0">
-                                            {% set _show = sc.get('show_unit_hint', True) %}
-                                            {% if _show %}<small class="hint">{{ it.per_unit_delta }}점/건</small>{% endif %}
+                                                   value="">
+                                            {% if sc.get('show_unit_hint', True) %}
+                                            <small class="hint">{{ it.per_unit_delta }}점/건</small>
+                                            {% endif %}
                                         </div>
                                         {% endfor %}
+
+                                        {# score_total이 다음에 있으면 같은 그룹에 포함 #}
+                                        {% if has_score_total %}
+                                            {% set sc_total = (next_col.scoring_config|from_json) if next_col.scoring_config else {} %}
+                                            {% set base_score = sc_total.get('base_score') if sc_total and sc_total.get('base_score') else 100 %}
+                                            <div class="sc-col">
+                                                <label class="form-label">{{ next_col.column_name }}</label>
+                                                <input type="number"
+                                                       id="{{ next_col.column_key }}_display"
+                                                       class="total-score-display"
+                                                       data-field="{{ next_col.column_key }}"
+                                                       data-config='{{ next_col.scoring_config|default("{}")|tojson }}'
+                                                       data-base-score="{{ base_score }}"
+                                                       value="{{ base_score }}"
+                                                       readonly
+                                                       style="text-align: center; background: #f8f9fa;">
+                                                <input type="hidden"
+                                                       id="{{ next_col.column_key }}"
+                                                       class="{{ section.section_key|replace('_', '-') }}-input"
+                                                       data-field="{{ next_col.column_key }}"
+                                                       data-section="{{ section.section_key }}"
+                                                       value="{{ base_score }}">
+                                            </div>
+                                        {% endif %}
+
                                         <input type="hidden"
                                                class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
@@ -231,24 +294,38 @@
                                                value='{}'>
                                     </div>
                                 {% elif col.column_type == 'score_total' %}
-                                    <!-- 총점 필드 (자동 계산: 선택된 채점 컬럼들의 합산) -->
-                                    {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}
-                                    {% set base_score = sc.get('base_score') if sc and sc.get('base_score') else 100 %}
-                                    <div class="scoring-columns">
-                                        <div class="sc-col score-total-field" data-field="{{ col.column_key }}" data-config='{{ col.scoring_config|default("{}")|tojson }}' data-base-score="{{ base_score }}">
-                                            <label class="form-label">총점</label>
-                                            <input type="number"
-                                                   class="total-score-display"
-                                                   value="{{ base_score }}"
-                                                   readonly
-                                                   style="background: #f0f0f0; font-weight: bold;">
-                                            <input type="hidden"
-                                                   class="{{ section.section_key|replace('_', '-') }}-input"
-                                                   data-field="{{ col.column_key }}"
-                                                   data-section="{{ section.section_key }}"
-                                                   value="">
+                                    {# 이전 컬럼이 scoring이거나 다음 컬럼이 scoring이면 건너뛰기 #}
+                                    {% set prev_idx = loop.index0 - 1 %}
+                                    {% set prev_col = chunk[prev_idx] if prev_idx >= 0 else None %}
+                                    {% set next_idx = loop.index0 + 1 %}
+                                    {% set next_col = chunk[next_idx] if next_idx < chunk|length else None %}
+                                    {% if not (prev_col and prev_col.column_type == 'scoring') and not (next_col and next_col.column_type == 'scoring') %}
+                                        <!-- 총점 필드 (독립적으로 표시) -->
+                                        <label>{{ col.column_name }}</label>
+                                        {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}
+                                        {% set base_score = sc.get('base_score') if sc and sc.get('base_score') else 100 %}
+                                        <div class="scoring-columns" style="grid-template-columns: repeat(1, minmax(0, 1fr));">
+                                            <div class="sc-col">
+                                                <label class="form-label">{{ col.column_name }}</label>
+                                                <input type="number"
+                                                       id="{{ col.column_key }}_display"
+                                                       class="total-score-display"
+                                                       data-field="{{ col.column_key }}"
+                                                       data-config='{{ col.scoring_config|default("{}")|tojson }}'
+                                                       data-base-score="{{ base_score }}"
+                                                       value="{{ base_score }}"
+                                                       readonly
+                                                       style="width: 100%; border: 1px solid #d1d5db; border-radius: 4px; padding: 6px 8px; font-weight: bold; text-align: center; background: #f8f9fa;">
+                                                <input type="hidden"
+                                                       id="{{ col.column_key }}"
+                                                       class="{{ section.section_key|replace('_', '-') }}-input"
+                                                       data-field="{{ col.column_key }}"
+                                                       data-section="{{ section.section_key }}"
+                                                       value="{{ base_score }}">
+                                            </div>
                                         </div>
-                                    </div>
+                                    {% endif %}
+
                                 {% elif col.column_type == 'textarea' %}
                                     <!-- 텍스트영역 필드 -->
                                     <textarea id="{{ col.column_key }}" 
@@ -273,6 +350,7 @@
                                            placeholder="{{ col.column_name }} 입력">
                                 {% endif %}
                             </div>
+                            {% endif %}
                         {% endif %}
                     {% endfor %}
                 </div>
@@ -359,7 +437,7 @@ const registerFollowSop = BoardDetail.createUpdater({
 
 window.registerFollowSop = registerFollowSop;
 
-/script>
+</script>
 <!-- 공통 첨부파일 스크립트와 스타일 import -->
 {% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
 {{ attachment_styles() }}

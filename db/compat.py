@@ -167,6 +167,7 @@ class CompatConnection:
             r"BEGIN EXCLUSIVE": "START TRANSACTION",
             r"\bDATETIME\b": "TIMESTAMP",  # DATETIME -> TIMESTAMP 변환
             r"INTEGER PRIMARY KEY AUTOINCREMENT": "SERIAL PRIMARY KEY",  # AUTOINCREMENT -> SERIAL
+            r"\bINTEGER\s+PRIMARY\s+KEY\b": "SERIAL PRIMARY KEY",  # SQLite 자동 증가 기본키 호환
             r"INTEGER DEFAULT 1": "INTEGER DEFAULT 1",  # INTEGER boolean값 유지
             r"INTEGER DEFAULT 0": "INTEGER DEFAULT 0",  # INTEGER boolean값 유지
         }

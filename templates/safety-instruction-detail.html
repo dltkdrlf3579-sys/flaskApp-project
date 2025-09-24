@@ -52,11 +52,11 @@
                 <div class="info-row">
                     <div class="info-cell span-2">
                         <label>발부번호</label>
-                        <input type="text" value="{{ instruction.issue_number or '-' }}" readonly style="background-color: #f3f4f6;">
+                        <input type="text" value="{{ instruction.issue_number or '-' }}" readonly class="readonly-highlight">
                     </div>
                     <div class="info-cell span-2">
                         <label>등록일</label>
-                        <input type="text" value="{{ (instruction.created_at|date_only) if instruction.created_at else '-' }}" readonly style="background-color: #f3f4f6;">
+                        <input type="text" value="{{ (instruction.created_at|date_only) if instruction.created_at else '-' }}" readonly class="readonly-highlight">
                     </div>
                 </div>
                 {% endif %}
@@ -147,7 +147,7 @@
                                 
                                 {% if col.column_key == 'issue_number' %}
                                     <!-- 발부번호는 수정 불가 -->
-                                    <div class="value">{{ col_value or '-' }}</div>
+                                    <div class="value readonly-highlight">{{ col_value or '-' }}</div>
                                     
                                 {% elif render_type == 'dropdown' %}
                                     <!-- 드롭다운 필드 -->
@@ -175,14 +175,11 @@
                                 {% elif col.column_type == 'date' %}
                                     <!-- 날짜 필드 -->
                                     <input type="date" 
-                                           class="{{ section.section_key|replace('_', '-') }}-input" 
+                                           class="{{ section.section_key|replace('_', '-') }}-input{% if col.column_key == 'created_at' %} readonly-highlight{% endif %}" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            value="{{ col_value }}"
-                                           {% if col.column_key == 'created_at' %}
-                                           readonly
-                                           style="background-color: #f3f4f6;"
-                                           {% endif %}>
+                                           {% if col.column_key == 'created_at' %}readonly{% endif %}>
                                            
                                 {% elif render_type == 'number' %}
                                     <!-- 숫자 필드 -->
@@ -201,14 +198,14 @@
                                     <!-- 연결된 필드 (읽기 전용) -->
                                     <input type="text"
                                            id="{{ col.column_key }}"
-                                           class="{{ section.section_key|replace('_', '-') }}-input linked-field"
+                                           class="{{ section.section_key|replace('_', '-') }}-input linked-field readonly-highlight"
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
                                            {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
                                            {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                            value="{{ col_value }}"
                                            readonly
-                                           style="background-color: #f3f4f6;">
+                                           data-linked-type="{{ col.column_type }}">
                                            
                                 {% elif render_type in ['popup','popup_person','popup_company','popup_department','popup_building','popup_contractor','popup_division'] %}
                                     <!-- 팝업 필드 -->

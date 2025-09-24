@@ -1,5 +1,14 @@
 {# 테이블 헤더 컨트롤 공통 컴포넌트 #}
-{% macro render_table_controls(total_count, show_excel=True, show_register=True, show_delete=True, register_callback='showRegisterModal()') %}
+{% macro render_table_controls(
+    total_count,
+    show_excel=True,
+    show_register=True,
+    show_delete=True,
+    register_callback='showRegisterModal()',
+    show_final_check=False,
+    final_check_label='검토완료 처리',
+    final_check_callback='markFinalCheckCompleted()'
+) %}
 <style>
 /* 테이블 헤더 공통 스타일 */
 .table-header {
@@ -88,6 +97,18 @@
     background-color: #bb2d3b !important;
     border-color: #b02a37 !important;
 }
+
+.btn-final-check {
+    background-color: #0d6efd !important;
+    color: white !important;
+    border-color: #0d6efd !important;
+    display: inline-block;
+}
+
+.btn-final-check:hover {
+    background-color: #0b5ed7 !important;
+    border-color: #0a58ca !important;
+}
 </style>
 
 <div class="table-header">
@@ -104,8 +125,13 @@
     </div>
     <div class="action-buttons">
         {% if show_delete %}
-        <button class="btn btn-delete" onclick="deleteSelectedWithPassword()">
+        <button class="btn btn-delete" data-default-label="선택 삭제" onclick="deleteSelectedWithPassword()">
             선택 삭제
+        </button>
+        {% endif %}
+        {% if show_final_check %}
+        <button class="btn btn-final-check" data-default-label="{{ final_check_label }}" onclick="{{ final_check_callback }}">
+            {{ final_check_label }}
         </button>
         {% endif %}
         {% if show_excel %}
