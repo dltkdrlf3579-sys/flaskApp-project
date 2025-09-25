@@ -94,6 +94,11 @@ max_permission_denials_per_hour = 100
 max_cache_size = 10000
 min_cache_hit_rate = 0.8
 
+[USAGE_DASHBOARD]
+# 월별 집계 결과를 반환하는 쿼리 (date, count 컬럼 필요)
+portal_trend_query = SELECT CURRENT_DATE::date AS date, 0::int AS count
+chatbot_trend_query = SELECT CURRENT_DATE::date AS date, 0::int AS count
+
 [BACKUP]
 # 자동 백업 설정
 auto_backup = true

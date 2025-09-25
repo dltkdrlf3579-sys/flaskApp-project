@@ -4241,6 +4241,12 @@ def admin_permission_settings():
         is_super_admin=super_flag
     )
 
+@app.route("/admin/usage-dashboard")
+@require_admin_auth
+def admin_usage_dashboard():
+    """사용 현황 대시보드"""
+    return render_template('admin/usage_dashboard.html', menu=MENU_CONFIG)
+
 @app.route("/admin/data-management")
 @require_admin_auth
 def admin_data_management():
@@ -8478,6 +8484,98 @@ def api_menus():
                 'name': item.get('title')
             })
     return jsonify(flattened)
+
+
+@app.route('/api/admin/usage-dashboard')
+@require_admin_auth
+def api_admin_usage_dashboard():
+    """사용 현황 대시보드 데이터"""
+
+    def _extract(row, key, index):
+        if hasattr(row, 'keys'):
+            try:
+                if hasattr(row, 'get'):
+                    value = row.get(key)
+                    if value is not None:
+                        return value
+            except Exception:
+                pass
+            try:
+                if key in row.keys():
+                    return row[key]
+            except Exception:
+                pass
+        try:
+            return row[index]
+        except Exception:
+            return None
+
+    def _fetch_trend(option_name):
+        query = db_config.config.get('USAGE_DASHBOARD', option_name, fallback='').strip()
+        if not query:
+            return []
+
+        conn = None
+        cursor = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute(query)
+            rows = cursor.fetchall() or []
+        except Exception as exc:  # noqa: BLE001
+            logging.error("Usage dashboard query 실패 (%s): %s", option_name, exc)
+            return []
+        finally:
+            if cursor:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+            if conn:
+                conn.close()
+
+        trend = []
+        for row in rows:
+            raw_date = _extract(row, 'date', 0)
+            raw_count = _extract(row, 'count', 1)
+
+            if raw_date is None:
+                raw_date = _extract(row, 'usage_date', 0)
+            if raw_count is None:
+                raw_count = _extract(row, 'total', 1)
+                if raw_count is None:
+                    raw_count = _extract(row, 'value', 1)
+
+            if isinstance(raw_date, datetime):
+                date_str = raw_date.strftime('%Y-%m-%d')
+            else:
+                date_str = str(raw_date) if raw_date is not None else ''
+
+            try:
+                count_val = int(raw_count) if raw_count is not None else 0
+            except (TypeError, ValueError):
+                try:
+                    count_val = int(float(raw_count))
+                except Exception:
+                    count_val = 0
+
+            if date_str:
+                trend.append({'date': date_str, 'count': count_val})
+
+        return trend
+
+    portal_trend = _fetch_trend('portal_trend_query')
+    chatbot_trend = _fetch_trend('chatbot_trend_query')
+
+    response = {
+        'portal_trend': portal_trend,
+        'chatbot_trend': chatbot_trend,
+        'portal_total': sum(item.get('count', 0) or 0 for item in portal_trend),
+        'chatbot_total': sum(item.get('count', 0) or 0 for item in chatbot_trend),
+        'updated_at': datetime.utcnow().isoformat() + 'Z'
+    }
+
+    return jsonify(response)
 
 # =====================
 # SSO 샘플 라우트 추가
