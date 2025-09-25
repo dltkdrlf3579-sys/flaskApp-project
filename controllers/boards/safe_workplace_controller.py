@@ -446,5 +446,6 @@ def build_safe_workplace_config() -> BoardControllerConfig:
         per_page_default=20,
         extra_context={
             "menu_section": "safe_workplace",
+            "permission_code": "SAFE_WORKPLACE",
         },
     )

@@ -76,5 +76,6 @@ def build_accident_config() -> BoardControllerConfig:
         per_page_default=10,
         extra_context={
             "menu_section": "accident",
+            "permission_code": "ACCIDENT_MGT",
         },
     )

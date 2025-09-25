@@ -2,6 +2,8 @@
 
 from flask import Blueprint, request
 
+from permission_helpers import enforce_permission
+
 safety_instruction_bp = Blueprint('safety_instruction', __name__)
 
 
@@ -9,6 +11,9 @@ safety_instruction_bp = Blueprint('safety_instruction', __name__)
 def safety_instruction_route():
     from app import _safety_instruction_controller
 
+    guard = enforce_permission('SAFETY_INSTRUCTION', 'view')
+    if guard:
+        return guard
     return _safety_instruction_controller.list_view(request)
 
 
@@ -19,6 +24,9 @@ def safety_instruction_route():
 def safety_instruction_register():
     from app import _safety_instruction_controller
 
+    guard = enforce_permission('SAFETY_INSTRUCTION', 'write')
+    if guard:
+        return guard
     return _safety_instruction_controller.register_view(request)
 
 
@@ -29,6 +37,9 @@ def safety_instruction_register():
 def safety_instruction_detail(issue_number):
     from app import _safety_instruction_controller
 
+    guard = enforce_permission('SAFETY_INSTRUCTION', 'view')
+    if guard:
+        return guard
     return _safety_instruction_controller.detail_view(request, issue_number)
 
 
@@ -40,6 +51,9 @@ def safety_instruction_detail(issue_number):
 def update_safety_instruction():
     from app import _safety_instruction_controller
 
+    guard = enforce_permission('SAFETY_INSTRUCTION', 'write', response_type='json')
+    if guard:
+        return guard
     return _safety_instruction_controller.update(request)
 
 
@@ -51,4 +65,7 @@ def update_safety_instruction():
 def register_safety_instruction():
     from app import _safety_instruction_controller
 
+    guard = enforce_permission('SAFETY_INSTRUCTION', 'write', response_type='json')
+    if guard:
+        return guard
     return _safety_instruction_controller.save(request)

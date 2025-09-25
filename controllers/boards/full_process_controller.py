@@ -456,5 +456,6 @@ def build_full_process_config() -> BoardControllerConfig:
         per_page_default=20,
         extra_context={
             "menu_section": "full_process",
+            "permission_code": "FULL_PROCESS",
         },
     )

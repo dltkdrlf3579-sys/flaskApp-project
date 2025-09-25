@@ -419,6 +419,7 @@
 const sections = {{ sections | tojson | safe }};
 const sectionColumns = {{ section_columns | tojson | safe }};
 const issueNumber = "{{ sop.work_req_no }}";
+const CAN_WRITE = {{ can_write|default(false)|tojson }};
 
 const updateFollowSop = BoardDetail.createUpdater({
 
@@ -450,6 +451,14 @@ window.updateFollowSop = updateFollowSop;
 
 
 function showEditPasswordModal() {
+
+    if (!CAN_WRITE) {
+
+        alert('등록/수정 권한이 없습니다. 권한 신청 후 승인을 받아주세요.');
+
+        return;
+
+    }
 
     const modal = document.getElementById('edit-password-modal');
 

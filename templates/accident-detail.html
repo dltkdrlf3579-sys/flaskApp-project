@@ -417,6 +417,7 @@ const sections = {{ sections | tojson | safe }};
 const sectionColumns = {{ section_columns | tojson | safe }};
 const issueNumber = "{{ accident.accident_number }}";
 const isDirectEntry = {{ 'true' if is_direct_entry else 'false' }};
+const CAN_WRITE = {{ can_write|default(false)|tojson }};
 
 const externalManagedKeys = [
   'accident_number','accident_name','workplace','accident_grade','major_category',
@@ -495,6 +496,10 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function showEditPasswordModal() {
+    if (!CAN_WRITE) {
+        alert('등록/수정 권한이 없습니다. 권한 신청 후 승인을 받아주세요.');
+        return;
+    }
     document.getElementById('edit-password-modal').style.display = 'block';
     document.getElementById('edit-password-input').focus();
 }

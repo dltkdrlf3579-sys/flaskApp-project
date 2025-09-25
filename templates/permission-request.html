@@ -1,0 +1,413 @@
+{% extends 'base.html' %}
+
+{% block title %}권한 신청{% endblock %}
+
+{% block content %}
+<div class="permission-request-wrapper">
+  <div class="request-card">
+    <h2>권한 신청</h2>
+    <p class="text-muted">필요한 메뉴와 권한 수준을 선택하고 신청 사유를 입력해주세요. 관리자가 검토 후 승인하면 권한이 부여됩니다.</p>
+
+    <form id="permissionRequestForm" class="request-form">
+      <div class="mb-3">
+        <label class="form-label">신청 메뉴</label>
+        <p class="form-text">메뉴별로 필요한 권한을 체크하세요. ‘등록/수정’을 선택하면 조회 권한도 함께 신청됩니다.</p>
+        <div class="table-responsive menu-table-wrapper">
+          <table class="table table-sm align-middle menu-selection-table" id="menuPermissionTable">
+            <thead>
+              <tr>
+                <th style="width: 50%">메뉴</th>
+                <th class="text-center" style="width: 25%">조회</th>
+                <th class="text-center" style="width: 25%">등록/수정</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for group in menu_options %}
+              <tr class="menu-group-row"><td colspan="3">{{ group.group }}</td></tr>
+              {% for item in group.menus %}
+              <tr class="menu-permission-row" data-menu-code="{{ item.code }}">
+                <td>
+                  <div class="d-flex justify-content-between align-items-center">
+                    <span>{{ item.title }}</span>
+                    <button type="button" class="btn btn-link btn-sm text-decoration-none" onclick="clearMenuSelection('{{ item.code }}')">선택 해제</button>
+                  </div>
+                </td>
+                <td class="text-center">
+                  <div class="form-check form-check-inline">
+                    <input class="form-check-input perm-read" type="checkbox" id="perm_{{ item.code }}_read" data-menu-code="{{ item.code }}">
+                    <label class="form-check-label" for="perm_{{ item.code }}_read">필요</label>
+                  </div>
+                </td>
+                <td class="text-center">
+                  <div class="form-check form-check-inline">
+                    <input class="form-check-input perm-write" type="checkbox" id="perm_{{ item.code }}_write" data-menu-code="{{ item.code }}">
+                    <label class="form-check-label" for="perm_{{ item.code }}_write">필요</label>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label for="reason" class="form-label">신청 사유</label>
+        <textarea id="reason" class="form-control" rows="4" placeholder="업무 목적과 필요한 작업을 구체적으로 작성해주세요 (최소 10자)." required></textarea>
+        <div class="form-text">신청 사유는 관리자에게 그대로 전달됩니다.</div>
+      </div>
+
+      <div class="submit-row">
+        <button type="submit" class="btn btn-primary">
+          <i class="bi bi-send"></i> 신청하기
+        </button>
+      </div>
+
+      <div id="requestMessage" class="alert d-none" role="alert"></div>
+    </form>
+  </div>
+
+  <div class="request-card">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h3 class="mb-0">내 권한 신청 내역</h3>
+      <button class="btn btn-sm btn-outline-secondary" id="refreshRequests">
+        <i class="bi bi-arrow-clockwise"></i> 새로고침
+      </button>
+    </div>
+
+    <div class="table-responsive">
+      <table class="table table-hover align-middle" id="myRequestTable">
+        <thead>
+          <tr>
+            <th>신청 메뉴</th>
+            <th>신청 권한</th>
+            <th>사유</th>
+            <th>상태</th>
+            <th>신청일</th>
+            <th>검토자</th>
+            <th>작업</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td colspan="7" class="text-center py-4 text-muted">신청 내역을 불러오는 중입니다...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const requestMessageEl = document.getElementById('requestMessage');
+const requestForm = document.getElementById('permissionRequestForm');
+const myRequestTableBody = document.querySelector('#myRequestTable tbody');
+const refreshBtn = document.getElementById('refreshRequests');
+const reasonInput = document.getElementById('reason');
+
+function showMessage(message, type = 'success') {
+  requestMessageEl.classList.remove('d-none', 'alert-success', 'alert-danger');
+  requestMessageEl.classList.add(type === 'success' ? 'alert-success' : 'alert-danger');
+  requestMessageEl.textContent = message;
+}
+
+function clearMessage() {
+  requestMessageEl.classList.add('d-none');
+  requestMessageEl.textContent = '';
+}
+
+function clearMenuSelection(menuCode) {
+  const row = document.querySelector(`.menu-permission-row[data-menu-code="${menuCode}"]`);
+  if (!row) return;
+  row.querySelectorAll('.perm-read, .perm-write').forEach((checkbox) => {
+    checkbox.checked = false;
+  });
+}
+
+function resetMenuSelections() {
+  document.querySelectorAll('.perm-read, .perm-write').forEach((checkbox) => {
+    checkbox.checked = false;
+  });
+}
+
+function attachMenuCheckboxHandlers() {
+  document.querySelectorAll('.menu-permission-row').forEach((row) => {
+    const readBox = row.querySelector('.perm-read');
+    const writeBox = row.querySelector('.perm-write');
+    if (writeBox && readBox) {
+      writeBox.addEventListener('change', () => {
+        if (writeBox.checked) {
+          readBox.checked = true;
+        }
+      });
+      readBox.addEventListener('change', () => {
+        if (!readBox.checked && writeBox.checked) {
+          writeBox.checked = false;
+        }
+      });
+    }
+  });
+}
+
+function collectMenuRequests() {
+  const selections = [];
+  document.querySelectorAll('.menu-permission-row').forEach((row) => {
+    const code = row.getAttribute('data-menu-code');
+    if (!code) return;
+
+    const readChecked = row.querySelector('.perm-read')?.checked;
+    const writeChecked = row.querySelector('.perm-write')?.checked;
+
+    if (writeChecked) {
+      selections.push({ menu_code: code, permission_type: 'read_write' });
+    } else if (readChecked) {
+      selections.push({ menu_code: code, permission_type: 'read' });
+    }
+  });
+  return selections;
+}
+
+async function loadMyRequests() {
+  myRequestTableBody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">신청 내역을 불러오는 중입니다...</td></tr>';
+  try {
+    const resp = await fetch('/api/permission-requests/my');
+    const result = await resp.json();
+    const requests = result.data || [];
+
+    if (!requests.length) {
+      myRequestTableBody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">현재 신청 내역이 없습니다.</td></tr>';
+      return;
+    }
+
+    myRequestTableBody.innerHTML = '';
+    requests.forEach((item) => {
+      const isPending = item.status === 'pending';
+      const permLabel = item.permission_type === 'read_write' ? '조회, 등록/수정' : '조회';
+      const actions = isPending
+        ? `<button type="button" class="btn btn-sm btn-outline-danger" onclick="cancelRequest(${item.id})">취소</button>`
+        : '-';
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${item.menu_name || item.menu_code || '-'}</td>
+        <td>${permLabel}</td>
+        <td>${item.reason || '-'}</td>
+        <td><span class="badge ${statusBadgeClass(item.status)}">${statusLabel(item.status)}</span></td>
+        <td>${formatDateTime(item.created_at)}</td>
+        <td>${item.reviewed_by || '-'}</td>
+        <td>${actions}</td>
+      `;
+      myRequestTableBody.appendChild(tr);
+    });
+  } catch (error) {
+    console.error('권한 신청 내역 조회 실패:', error);
+    myRequestTableBody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-danger">신청 내역을 불러오지 못했습니다.</td></tr>';
+  }
+}
+
+function statusLabel(status) {
+  switch (status) {
+    case 'approved':
+      return '승인';
+    case 'rejected':
+      return '반려';
+    case 'cancelled':
+      return '취소';
+    default:
+      return '대기';
+  }
+}
+
+function statusBadgeClass(status) {
+  switch (status) {
+    case 'approved':
+      return 'bg-success';
+    case 'rejected':
+      return 'bg-danger';
+    case 'cancelled':
+      return 'bg-secondary';
+    default:
+      return 'bg-warning text-dark';
+  }
+}
+
+function formatDateTime(isoString) {
+  if (!isoString) return '-';
+  try {
+    const dt = new Date(isoString);
+    const yyyy = dt.getFullYear();
+    const mm = String(dt.getMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getDate()).padStart(2, '0');
+    const hh = String(dt.getHours()).padStart(2, '0');
+    const mi = String(dt.getMinutes()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+  } catch (err) {
+    return isoString;
+  }
+}
+
+requestForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  clearMessage();
+
+  const menuRequests = collectMenuRequests();
+  const reason = reasonInput.value.trim();
+
+  if (!menuRequests.length) {
+    showMessage('신청할 메뉴를 하나 이상 선택해주세요.', 'error');
+    return;
+  }
+  if (reason.length < 10) {
+    showMessage('신청 사유를 10자 이상 입력해주세요.', 'error');
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/permission-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ menu_requests: menuRequests, reason })
+    });
+
+    const result = await resp.json();
+    if (!resp.ok || result.error) {
+      throw new Error(result.error || result.message || '권한 신청 처리 중 오류가 발생했습니다.');
+    }
+
+    let alertType = 'success';
+    let messageText = result.message || '권한 신청이 등록되었습니다. 관리자 승인 후 사용 가능합니다.';
+
+    if (result.skipped_menus && result.skipped_menus.length) {
+      const skippedList = result.skipped_menus
+        .map(item => {
+          if (!item) return '';
+          if (typeof item === 'string') return item;
+          const label = skippedReasonLabel(item.reason);
+          return `${item.menu_code}${label ? ` (${label})` : ''}`;
+        })
+        .filter(Boolean)
+        .join(', ');
+      if (skippedList) {
+        messageText += ` (대기 중: ${skippedList})`;
+      }
+    }
+
+    if (result.status === 'skipped') {
+      alertType = 'error';
+    }
+
+    showMessage(messageText, alertType);
+
+    requestForm.reset();
+    reasonInput.value = '';
+    resetMenuSelections();
+    loadMyRequests();
+  } catch (error) {
+    console.error('권한 신청 실패:', error);
+    showMessage(error.message || '권한 신청에 실패했습니다.', 'error');
+  }
+});
+
+refreshBtn.addEventListener('click', () => {
+  loadMyRequests();
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  attachMenuCheckboxHandlers();
+  loadMyRequests();
+});
+
+async function cancelRequest(requestId) {
+  if (!confirm('해당 권한 신청을 취소하시겠습니까?')) {
+    return;
+  }
+
+  try {
+    const resp = await fetch(`/api/permission-requests/${requestId}/cancel`, {
+      method: 'POST'
+    });
+    const result = await resp.json();
+    if (!resp.ok || result.error) {
+      throw new Error(result.error || result.message || '취소 처리 중 오류가 발생했습니다.');
+    }
+    showMessage(result.message || '권한 신청이 취소되었습니다.', 'success');
+    loadMyRequests();
+  } catch (error) {
+    console.error('권한 신청 취소 실패:', error);
+    showMessage(error.message || '권한 신청 취소에 실패했습니다.', 'error');
+  }
+}
+
+function skippedReasonLabel(reason) {
+  switch (reason) {
+    case 'already_pending':
+      return '이미 대기 중';
+    case 'invalid_permission_type':
+      return '권한 유형 오류';
+    default:
+      return '';
+  }
+}
+
+window.clearMenuSelection = clearMenuSelection;
+window.cancelRequest = cancelRequest;
+</script>
+
+<style>
+.permission-request-wrapper {
+  max-width: 900px;
+  margin: 30px auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.request-card {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.1);
+}
+.request-card h2 {
+  font-size: 24px;
+  margin-bottom: 12px;
+}
+.request-card h3 {
+  font-size: 20px;
+}
+.request-form .form-label {
+  font-weight: 600;
+  color: #1f2937;
+}
+.submit-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+#requestMessage {
+  margin-top: 16px;
+}
+.menu-table-wrapper {
+  max-height: 360px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: auto;
+}
+.menu-selection-table thead th {
+  background: #f5f7fb;
+  font-weight: 600;
+}
+.menu-selection-table tbody tr.menu-group-row td {
+  background: #f0f2f8;
+  font-weight: 600;
+  color: #1f2937;
+}
+.menu-selection-table tbody tr.menu-permission-row td {
+  vertical-align: middle;
+}
+.menu-selection-table .btn-link {
+  font-size: 12px;
+  padding: 0;
+}
+</style>
+{% endblock %}

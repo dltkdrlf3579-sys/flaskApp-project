@@ -4,7 +4,7 @@ from datetime import datetime
 import pytz
 from pathlib import Path
 import shutil
-from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, Response, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, Response, send_from_directory, abort
 import configparser
 from timezone_config import KST, get_korean_time, get_korean_time_str
 from config.menu import MENU_CONFIG
@@ -24,6 +24,14 @@ from db_connection import get_db_connection
 from db.upsert import safe_upsert
 from column_utils import normalize_column_types, determine_linked_type
 from upload_utils import sanitize_filename, validate_uploaded_files
+from permission_helpers import (
+    is_super_admin,
+    SUPER_ADMIN_USERS,
+    build_user_menu_config,
+    enforce_permission,
+    resolve_menu_code,
+)
+from permission_api import register_permission_routes
 from add_page_routes import follow_sop_bp, full_process_bp, safe_workplace_bp
 from boards.safety_instruction import safety_instruction_bp
 from controllers.boards.accident_controller import (
@@ -91,6 +99,16 @@ app.register_blueprint(follow_sop_bp)
 app.register_blueprint(full_process_bp)
 app.register_blueprint(safety_instruction_bp)
 app.register_blueprint(safe_workplace_bp)
+register_permission_routes(app)
+
+
+@app.context_processor
+def inject_user_menu():
+    try:
+        return {'user_menu': build_user_menu_config()}
+    except Exception as exc:
+        logging.debug('inject_user_menu failed: %s', exc)
+        return {'user_menu': MENU_CONFIG}
 
 # Jinja2 템플릿 필터 정의
 @app.template_filter('date_only')
@@ -834,21 +852,33 @@ def search_popup():
 @app.route("/partner-standards")
 def partner_standards_route():
     """협력사 기준정보 페이지 라우트"""
+    guard = enforce_permission('VENDOR_MGT', 'view')
+    if guard:
+        return guard
     return partner_standards()
 
 @app.route("/partner-change-request")
 def partner_change_request_route():
     """기준정보 변경요청 페이지 라우트"""
+    guard = enforce_permission('REFERENCE_CHANGE', 'view')
+    if guard:
+        return guard
     return partner_change_request()
 
 @app.route("/change-request-detail/<int:request_id>")
 def change_request_detail_route(request_id):
     """변경요청 상세정보 페이지 라우트"""
+    guard = enforce_permission('REFERENCE_CHANGE', 'view')
+    if guard:
+        return guard
     return change_request_detail(request_id)
 
 @app.route("/accident")
 def accident_route():
     """사고 메인 페이지 라우트"""
+    guard = enforce_permission('ACCIDENT_MGT', 'view')
+    if guard:
+        return guard
     return _accident_controller.list_view(request)
 
 
@@ -884,6 +914,9 @@ def _table_has_column(conn, table_name: str, column_name: str) -> bool:
 
 def partner_standards():
     """협력사 기준정보 페이지"""
+    guard = enforce_permission('VENDOR_MGT', 'view')
+    if guard:
+        return guard
     page = max(1, request.args.get('page', 1, type=int))
     per_page = request.args.get('per_page', 10, type=int)
     per_page = max(1, min(per_page, 200))
@@ -999,6 +1032,9 @@ def partner_standards():
 
 def partner_change_request():
     """기준정보 변경요청 페이지"""
+    guard = enforce_permission('REFERENCE_CHANGE', 'view')
+    if guard:
+        return guard
     page = max(1, request.args.get('page', 1, type=int))
     per_page = request.args.get('per_page', 10, type=int)
     per_page = max(1, min(per_page, 200))
@@ -1736,18 +1772,27 @@ def update_change_request():
 @app.route("/accident-register")
 def accident_register():
     """사고 등록 페이지 (컨트롤러 위임)"""
+    guard = enforce_permission('ACCIDENT_MGT', 'write')
+    if guard:
+        return guard
     return _accident_controller.register_view(request)
 
 
 @app.route("/accident-detail/<accident_id>")
 def accident_detail(accident_id):
     """사고 상세 페이지 (컨트롤러 위임)"""
+    guard = enforce_permission('ACCIDENT_MGT', 'view')
+    if guard:
+        return guard
     return _accident_controller.detail_view(request, accident_id)
 
 
 @app.route("/register-accident", methods=["POST"])
 def register_accident():
     """사고 신규 등록 처리"""
+    guard = enforce_permission('ACCIDENT_MGT', 'write', response_type='json')
+    if guard:
+        return guard
     return _accident_controller.save(request)
 
 
@@ -2708,6 +2753,9 @@ def _legacy_update_accident():
 
 @app.route("/update-accident", methods=["POST"])
 def update_accident():
+    guard = enforce_permission('ACCIDENT_MGT', 'write', response_type='json')
+    if guard:
+        return guard
     return _accident_controller.update(request)
 
 
@@ -4148,12 +4196,50 @@ def admin_menu_settings():
     """메뉴 설정 페이지"""
     return render_template('admin-menu-settings.html', menu=MENU_CONFIG)
 
+@app.route('/permission-request')
+def permission_request_page():
+    """일반 사용자의 권한 신청 페이지"""
+    if not session.get('user_name'):
+        session['next_url'] = request.url
+        return redirect('/SSO')
+
+    menu_options = []
+    for section in MENU_CONFIG:
+        submenu_items = section.get('submenu', [])
+        if not submenu_items:
+            continue
+        menu_options.append({
+            'group': section.get('title', ''),
+            'menus': [
+                {
+                    'code': resolve_menu_code(item.get('url')),
+                    'slug': item.get('url'),
+                    'title': item.get('title')
+                }
+                for item in submenu_items if item.get('url')
+            ]
+        })
+
+    return render_template(
+        'permission-request.html',
+        menu=MENU_CONFIG,
+        menu_options=menu_options
+    )
+
 @app.route("/admin/permission-settings")
 @require_admin_auth
 def admin_permission_settings():
     """권한 설정 페이지 - 세밀한 CRUD 권한 관리"""
-    # 사용자별 메뉴별 CRUD 권한 관리 페이지
-    return render_template('admin/permission_management.html', menu=MENU_CONFIG)
+    try:
+        super_flag = is_super_admin()
+    except Exception:
+        login_id = session.get('user_id')
+        super_flag = login_id in SUPER_ADMIN_USERS if login_id else False
+    return render_template(
+        'admin/permission_management.html',
+        menu=MENU_CONFIG,
+        is_super_admin=super_flag
+    )
 
 @app.route("/admin/data-management")
 @require_admin_auth
@@ -8372,6 +8458,28 @@ def serve_uploaded_content(filename):
     return send_from_directory(directory, filename)
 
 # =====================
+# 메뉴/권한 관련 헬퍼
+# =====================
+
+@app.route('/api/menus')
+@require_admin_auth
+def api_menus():
+    """상단 메뉴 구성을 반환"""
+    flattened = []
+    for section in MENU_CONFIG:
+        group = section.get('title')
+        for item in section.get('submenu', []):
+            slug = item.get('url')
+            code = resolve_menu_code(slug)
+            flattened.append({
+                'group': group,
+                'code': code,
+                'slug': slug,
+                'name': item.get('title')
+            })
+    return jsonify(flattened)
+
+# =====================
 # SSO 샘플 라우트 추가
 # =====================
 
@@ -8423,6 +8531,87 @@ def _compute_redirect_uri(cfg: configparser.ConfigParser) -> str:
 def _urlencode(params: dict) -> str:
     from urllib.parse import urlencode
     return urlencode(params)
+
+
+def _load_sso_config():
+    cfg = configparser.ConfigParser()
+    cfg.read('config.ini', encoding='utf-8')
+    return cfg
+
+
+def _sso_dev_flags(cfg: configparser.ConfigParser):
+    dev_mode = cfg.getboolean('SSO', 'dev_mode', fallback=False)
+    dev_flow = cfg.getboolean('SSO', 'dev_simulate_flow', fallback=False)
+    return dev_mode and dev_flow, dev_mode, dev_flow
+
+
+@app.route('/sso/dev-login', methods=['GET', 'POST'])
+def sso_dev_login():
+    """개발용 SSO 시뮬레이터."""
+    cfg = _load_sso_config()
+    dev_enabled, dev_mode, dev_flow = _sso_dev_flags(cfg)
+
+    if not dev_enabled:
+        abort(404)
+
+    defaults = {
+        'login_id': cfg.get('SSO', 'dev_user_id', fallback='dev_user'),
+        'user_name': cfg.get('SSO', 'dev_user_name', fallback='개발자'),
+        'dept_id': cfg.get('SSO', 'dev_department', fallback='DEV001'),
+        'dept_name': cfg.get('SSO', 'dev_department_name', fallback=cfg.get('SSO', 'dev_department', fallback='개발팀')),
+        'email': cfg.get('SSO', 'dev_user_email', fallback='dev@example.com'),
+        'emp_id': cfg.get('SSO', 'dev_emp_id', fallback='DEVUSER'),
+        'company_id': cfg.get('SSO', 'dev_company_id', fallback='COMP001'),
+        'grade': cfg.get('SSO', 'dev_grade', fallback='과장'),
+    }
+
+    super_admin_users = []
+    try:
+        from permission_helpers import SUPER_ADMIN_USERS
+        super_admin_users = SUPER_ADMIN_USERS
+    except Exception:
+        super_admin_users = []
+
+    if request.method == 'POST':
+        form = request.form
+        login_id = form.get('login_id', '').strip() or defaults['login_id']
+        user_name = form.get('user_name', '').strip() or defaults['user_name']
+        emp_id = form.get('emp_id', '').strip() or login_id
+        dept_id = form.get('dept_id', '').strip() or defaults['dept_id']
+        dept_name = form.get('dept_name', '').strip() or defaults['dept_name']
+        email = form.get('email', '').strip() or defaults['email']
+        company_id = form.get('company_id', '').strip() or defaults['company_id']
+        grade = form.get('grade', '').strip() or defaults['grade']
+
+        session['user_id'] = login_id
+        session['loginid'] = login_id
+        session['emp_id'] = emp_id
+        session['userid'] = emp_id
+        session['user_name'] = user_name
+        session['deptid'] = dept_id
+        session['deptname'] = dept_name
+        session['mail'] = email
+        session['compid'] = company_id
+        session['grade'] = grade
+        session['authenticated'] = True
+        session['sso_simulated'] = True
+
+        if login_id in super_admin_users:
+            session['role'] = 'super_admin'
+        else:
+            session['role'] = session.get('role', 'user')
+
+        next_url = session.pop('next_url', '/') if 'next_url' in session else '/'
+        print(f"[SSO DEV] Simulated login for {login_id}, redirect -> {next_url}")
+        return redirect(next_url)
+
+    return render_template(
+        'sso-dev-login.html',
+        defaults=defaults,
+        super_admins=super_admin_users,
+        dev_mode=dev_mode,
+        dev_flow=dev_flow
+    )
 
 @app.route('/SSO')
 def sso():
@@ -8690,28 +8879,35 @@ def auto_sso_redirect():
 
     # 제외 경로 (SSO, 정적 파일, API 등)
     excluded_paths = [
-        '/SSO', '/sso', '/sso/diagnostics', '/acs', '/slo', '/static', '/uploads', '/api',
+        '/SSO', '/sso', '/sso/diagnostics', '/sso/dev-login', '/acs', '/slo', '/static', '/uploads', '/api',
         '/admin/login', '/debug-session',
         # allow automation endpoints without SSO session
         '/admin/sync-now', '/admin/sync-now/', '/admin/cache-counts'
     ]
 
-    cfg = configparser.ConfigParser()
+    cfg = None
     try:
-        cfg.read('config.ini', encoding='utf-8')
+        cfg = _load_sso_config()
     except Exception:
         cfg = None
 
-    # SSO 비활성화 설정이면 자동 리다이렉트 스킵
+    enabled_flag = True
+    sso_enabled_flag = True
+    dev_enabled = False
+    dev_mode_flag = False
+    dev_flow_flag = False
     if cfg:
         try:
             enabled_flag = cfg.getboolean('SSO', 'enabled', fallback=True)
             sso_enabled_flag = cfg.getboolean('SSO', 'sso_enabled', fallback=True)
-            if not (enabled_flag and sso_enabled_flag):
-                return None
+            dev_enabled, dev_mode_flag, dev_flow_flag = _sso_dev_flags(cfg)
         except Exception:
-            # 설정 파싱 실패 시 기존 동작 유지
-            pass
+            enabled_flag = True
+            sso_enabled_flag = True
+            dev_enabled = False
+
+    if not (enabled_flag and sso_enabled_flag) and not dev_enabled:
+        return None
 
     # 동기화 토큰이 있는 요청은 항상 통과 (자동화/스크립트 호출용)
     expected = ''
@@ -8728,10 +8924,13 @@ def auto_sso_redirect():
         if request.path.startswith(path):
             return None
 
-    # 세션에 user_name이 없으면 자동 SSO
+    # 세션에 user_name이 없으면 자동 SSO 또는 개발용 로그인
     if not session.get('user_name'):
         # 원래 가려던 URL 저장
         session['next_url'] = request.url
+        if dev_enabled and not (enabled_flag and sso_enabled_flag):
+            print(f"[AUTO SSO] Dev simulate enabled, redirecting to /sso/dev-login from {request.path}")
+            return redirect('/sso/dev-login')
         print(f"[AUTO SSO] No session, redirecting to /SSO from {request.path}")
         return redirect('/SSO')
 

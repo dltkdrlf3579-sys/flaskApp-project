@@ -95,5 +95,6 @@ def build_safety_instruction_config() -> BoardControllerConfig:
         per_page_default=10,
         extra_context={
             "menu_section": "safety_instruction",
+            "permission_code": "SAFETY_INSTRUCTION",
         },
     )

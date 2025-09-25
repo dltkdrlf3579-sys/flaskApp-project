@@ -74,10 +74,11 @@
           <img src="/static/logo-sample.png" alt="Logo" class="logo-img">
           상생EHS Portal
         </a>
+        {% set _nav_menu = user_menu if user_menu is defined and user_menu else menu %}
         <ul class="nav-main" role="menubar" aria-label="메인 메뉴">
           {# 현재 활성 슬러그 파악 #}
           {% set active_slug = (request.view_args.get('url') if request.view_args else '') %}
-          {% for m in menu %}
+          {% for m in _nav_menu %}
           {% set is_active = false %}
           {% for sm in m.submenu %}
             {% if active_slug == sm.url %}
@@ -112,6 +113,11 @@
             <span class="user-name">{{ session.get('user_name') }}</span>
             {% endif %}
           </div>
+          {% if session.get('user_name') %}
+          <a class="btn btn-sm btn-outline-primary permission-request-btn" href="{{ url_for('permission_request_page') }}">
+            <i class="bi bi-send"></i> 권한 신청
+          </a>
+          {% endif %}
           <div class="admin-tools">
             <div class="dropdown">
               <button class="btn btn-sm btn-admin-menu dropdown-toggle" type="button" id="adminMenu" data-bs-toggle="dropdown" aria-expanded="false">
@@ -148,6 +154,14 @@
     .admin-tools { margin-left: 0; }
     .user-info { margin-right: 12px; color: #6b7280; font-size: 14px; }
     .user-info .user-name { font-weight: 600; color: #374151; }
+    .permission-request-btn {
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
     .logo-img {
       height: 40px;
       width: auto;

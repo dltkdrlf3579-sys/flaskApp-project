@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>권한 관리 시스템</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .main-header {
+            background: var(--primary-gradient);
+            color: white;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .permission-table {
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .table thead th {
+            background: #f8f9fa;
+            font-weight: 600;
+            border-bottom: 2px solid #dee2e6;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .permission-checkbox {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+
+        .btn-save-permissions {
+            background: var(--primary-gradient);
+            color: white;
+            border: none;
+            padding: 10px 30px;
+            border-radius: 5px;
+            font-weight: 600;
+        }
+
+        .btn-save-permissions:hover {
+            opacity: 0.9;
+            color: white;
+        }
+
+        .role-badge {
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .role-super_admin { background: #dc3545; color: white; }
+        .role-admin { background: #fd7e14; color: white; }
+        .role-manager { background: #6f42c1; color: white; }
+        .role-user { background: #0d6efd; color: white; }
+        .role-partner { background: #6c757d; color: white; }
+        .role-viewer { background: #198754; color: white; }
+
+        .menu-row:hover {
+            background: #f8f9fa;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .search-box {
+            position: relative;
+            margin-bottom: 1rem;
+        }
+
+        .search-box input {
+            padding-left: 40px;
+        }
+
+        .search-box i {
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #6c757d;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 5px;
+        }
+
+        .btn-sm {
+            padding: 5px 10px;
+            font-size: 0.875rem;
+        }
+
+        .permission-cell {
+            text-align: center;
+            vertical-align: middle;
+        }
+
+        .permission-group {
+            display: inline-flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .permission-label {
+            font-size: 0.8rem;
+            color: #6c757d;
+            margin: 0 5px;
+        }
+
+        .table-responsive {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .sticky-column {
+            position: sticky;
+            left: 0;
+            background: white;
+            z-index: 5;
+        }
+
+        .menu-header {
+            background: #e9ecef;
+            font-weight: bold;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-header">
+        <div class="container-fluid">
+            <h2><i class="bi bi-shield-lock"></i> 권한 관리 시스템</h2>
+            <p class="mb-0">사용자별 메뉴 접근 권한을 설정합니다</p>
+        </div>
+    </div>
+
+    <div class="container-fluid">
+        <!-- 필터 및 검색 -->
+        <div class="row mb-3">
+            <div class="col-md-4">
+                <div class="search-box">
+                    <i class="bi bi-search"></i>
+                    <input type="text" class="form-control" id="userSearch" placeholder="사용자 검색 (사번, 이름, 부서)">
+                </div>
+            </div>
+            <div class="col-md-3">
+                <select class="form-select" id="roleFilter">
+                    <option value="">전체 역할</option>
+                    <option value="super_admin">Super Admin</option>
+                    <option value="admin">Admin</option>
+                    <option value="manager">Manager</option>
+                    <option value="user">User</option>
+                    <option value="partner">Partner</option>
+                    <option value="viewer">Viewer</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <select class="form-select" id="deptFilter">
+                    <option value="">전체 부서</option>
+                    <option value="IT부서">IT부서</option>
+                    <option value="생산관리부서">생산관리부서</option>
+                    <option value="품질관리부서">품질관리부서</option>
+                    <option value="안전관리부서">안전관리부서</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-success w-100" onclick="applyFilter()">
+                    <i class="bi bi-funnel"></i> 필터 적용
+                </button>
+            </div>
+        </div>
+
+        <!-- 권한 테이블 -->
+        <div class="permission-table">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th class="sticky-column" rowspan="2" style="min-width: 200px;">사용자 정보</th>
+                            <th colspan="4" class="menu-header">사고 관리</th>
+                            <th colspan="4" class="menu-header">안전지시서</th>
+                            <th colspan="4" class="menu-header">Follow SOP</th>
+                            <th colspan="4" class="menu-header">Full Process</th>
+                            <th colspan="4" class="menu-header">협력사</th>
+                            <th colspan="4" class="menu-header">변경 관리</th>
+                            <th rowspan="2">작업</th>
+                        </tr>
+                        <tr>
+                            <!-- 사고 관리 -->
+                            <th>C</th><th>R</th><th>U</th><th>D</th>
+                            <!-- 안전지시서 -->
+                            <th>C</th><th>R</th><th>U</th><th>D</th>
+                            <!-- Follow SOP -->
+                            <th>C</th><th>R</th><th>U</th><th>D</th>
+                            <!-- Full Process -->
+                            <th>C</th><th>R</th><th>U</th><th>D</th>
+                            <!-- 협력사 -->
+                            <th>C</th><th>R</th><th>U</th><th>D</th>
+                            <!-- 변경 관리 -->
+                            <th>C</th><th>R</th><th>U</th><th>D</th>
+                        </tr>
+                    </thead>
+                    <tbody id="permissionTableBody">
+                        <!-- 동적으로 생성될 사용자 행들 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 저장 버튼 -->
+        <div class="mt-3 d-flex justify-content-between">
+            <div>
+                <button class="btn btn-secondary" onclick="loadPermissions()">
+                    <i class="bi bi-arrow-clockwise"></i> 새로고침
+                </button>
+                <button class="btn btn-warning" onclick="resetToDefault()">
+                    <i class="bi bi-arrow-counterclockwise"></i> 기본값으로 초기화
+                </button>
+            </div>
+            <div>
+                <button class="btn btn-save-permissions" onclick="saveAllPermissions()">
+                    <i class="bi bi-check-circle"></i> 변경사항 저장
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        // 메뉴 코드 정의
+        const MENUS = [
+            'accident',
+            'safety',
+            'follow_sop',
+            'full_process',
+            'partner',
+            'change_request'
+        ];
+
+        // 페이지 로드시 권한 데이터 불러오기
+        $(document).ready(function() {
+            loadPermissions();
+        });
+
+        function loadPermissions() {
+            $.ajax({
+                url: '/api/permissions/all',
+                method: 'GET',
+                success: function(data) {
+                    renderPermissionTable(data);
+                },
+                error: function() {
+                    // 테스트 데이터로 렌더링
+                    const testData = [
+                        {
+                            emp_id: 'EMP001',
+                            emp_name: '홍길동',
+                            department: 'IT부서',
+                            role: 'admin',
+                            permissions: {
+                                accident: {create: true, read: true, update: true, delete: true},
+                                safety: {create: true, read: true, update: true, delete: false},
+                                follow_sop: {create: true, read: true, update: true, delete: false},
+                                full_process: {create: true, read: true, update: true, delete: false},
+                                partner: {create: true, read: true, update: true, delete: false},
+                                change_request: {create: true, read: true, update: true, delete: false}
+                            }
+                        },
+                        {
+                            emp_id: 'EMP002',
+                            emp_name: '김철수',
+                            department: '품질관리부서',
+                            role: 'manager',
+                            permissions: {
+                                accident: {create: true, read: true, update: true, delete: false},
+                                safety: {create: true, read: true, update: true, delete: false},
+                                follow_sop: {create: false, read: true, update: false, delete: false},
+                                full_process: {create: false, read: true, update: false, delete: false},
+                                partner: {create: false, read: false, update: false, delete: false},
+                                change_request: {create: true, read: true, update: false, delete: false}
+                            }
+                        },
+                        {
+                            emp_id: 'EMP003',
+                            emp_name: '이영희',
+                            department: '생산관리부서',
+                            role: 'user',
+                            permissions: {
+                                accident: {create: true, read: true, update: false, delete: false},
+                                safety: {create: true, read: true, update: false, delete: false},
+                                follow_sop: {create: false, read: true, update: false, delete: false},
+                                full_process: {create: false, read: true, update: false, delete: false},
+                                partner: {create: false, read: false, update: false, delete: false},
+                                change_request: {create: true, read: true, update: false, delete: false}
+                            }
+                        }
+                    ];
+                    renderPermissionTable(testData);
+                }
+            });
+        }
+
+        function renderPermissionTable(users) {
+            const tbody = $('#permissionTableBody');
+            tbody.empty();
+
+            users.forEach(user => {
+                let row = `
+                    <tr data-user="${user.emp_id}">
+                        <td class="sticky-column">
+                            <div class="user-info">
+                                <div>
+                                    <strong>${user.emp_id}</strong><br>
+                                    ${user.emp_name}<br>
+                                    <small class="text-muted">${user.department}</small><br>
+                                    <span class="role-badge role-${user.role}">${user.role.toUpperCase()}</span>
+                                </div>
+                            </div>
+                        </td>`;
+
+                MENUS.forEach(menu => {
+                    const perm = user.permissions[menu] || {create: false, read: false, update: false, delete: false};
+                    row += `
+                        <td class="permission-cell">
+                            <input type="checkbox" class="permission-checkbox"
+                                data-user="${user.emp_id}"
+                                data-menu="${menu}"
+                                data-action="create"
+                                ${perm.create ? 'checked' : ''}>
+                        </td>
+                        <td class="permission-cell">
+                            <input type="checkbox" class="permission-checkbox"
+                                data-user="${user.emp_id}"
+                                data-menu="${menu}"
+                                data-action="read"
+                                ${perm.read ? 'checked' : ''}>
+                        </td>
+                        <td class="permission-cell">
+                            <input type="checkbox" class="permission-checkbox"
+                                data-user="${user.emp_id}"
+                                data-menu="${menu}"
+                                data-action="update"
+                                ${perm.update ? 'checked' : ''}>
+                        </td>
+                        <td class="permission-cell">
+                            <input type="checkbox" class="permission-checkbox"
+                                data-user="${user.emp_id}"
+                                data-menu="${menu}"
+                                data-action="delete"
+                                ${perm.delete ? 'checked' : ''}>
+                        </td>`;
+                });
+
+                row += `
+                    <td>
+                        <div class="action-buttons">
+                            <button class="btn btn-sm btn-primary" onclick="saveUserPermissions('${user.emp_id}')">
+                                <i class="bi bi-save"></i>
+                            </button>
+                            <button class="btn btn-sm btn-info" onclick="copyPermissions('${user.emp_id}')">
+                                <i class="bi bi-files"></i>
+                            </button>
+                            <button class="btn btn-sm btn-danger" onclick="resetUserPermissions('${user.emp_id}')">
+                                <i class="bi bi-x-circle"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>`;
+
+                tbody.append(row);
+            });
+        }
+
+        function saveUserPermissions(emp_id) {
+            const permissions = {};
+
+            MENUS.forEach(menu => {
+                permissions[menu] = {
+                    create: $(`input[data-user="${emp_id}"][data-menu="${menu}"][data-action="create"]`).is(':checked'),
+                    read: $(`input[data-user="${emp_id}"][data-menu="${menu}"][data-action="read"]`).is(':checked'),
+                    update: $(`input[data-user="${emp_id}"][data-menu="${menu}"][data-action="update"]`).is(':checked'),
+                    delete: $(`input[data-user="${emp_id}"][data-menu="${menu}"][data-action="delete"]`).is(':checked')
+                };
+            });
+
+            $.ajax({
+                url: `/api/permissions/user/${emp_id}`,
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({permissions: permissions}),
+                success: function() {
+                    alert(`${emp_id}의 권한이 저장되었습니다.`);
+                },
+                error: function() {
+                    alert('권한 저장에 실패했습니다.');
+                }
+            });
+        }
+
+        function saveAllPermissions() {
+            const allPermissions = [];
+
+            $('tr[data-user]').each(function() {
+                const emp_id = $(this).data('user');
+                const permissions = {};
+
+                MENUS.forEach(menu => {
+                    permissions[menu] = {
+                        create: $(`input[data-user="${emp_id}"][data-menu="${menu}"][data-action="create"]`).is(':checked'),
+                        read: $(`input[data-user="${emp_id}"][data-menu="${menu}"][data-action="read"]`).is(':checked'),
+                        update: $(`input[data-user="${emp_id}"][data-menu="${menu}"][data-action="update"]`).is(':checked'),
+                        delete: $(`input[data-user="${emp_id}"][data-menu="${menu}"][data-action="delete"]`).is(':checked')
+                    };
+                });
+
+                allPermissions.push({
+                    emp_id: emp_id,
+                    permissions: permissions
+                });
+            });
+
+            $.ajax({
+                url: '/api/permissions/batch',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({users: allPermissions}),
+                success: function() {
+                    alert('모든 권한이 저장되었습니다.');
+                },
+                error: function() {
+                    alert('권한 저장에 실패했습니다.');
+                }
+            });
+        }
+
+        function copyPermissions(source_emp_id) {
+            const target_emp_id = prompt(`${source_emp_id}의 권한을 복사할 대상 사번을 입력하세요:`);
+            if (!target_emp_id) return;
+
+            // source 권한 가져오기
+            const permissions = {};
+            MENUS.forEach(menu => {
+                permissions[menu] = {
+                    create: $(`input[data-user="${source_emp_id}"][data-menu="${menu}"][data-action="create"]`).is(':checked'),
+                    read: $(`input[data-user="${source_emp_id}"][data-menu="${menu}"][data-action="read"]`).is(':checked'),
+                    update: $(`input[data-user="${source_emp_id}"][data-menu="${menu}"][data-action="update"]`).is(':checked'),
+                    delete: $(`input[data-user="${source_emp_id}"][data-menu="${menu}"][data-action="delete"]`).is(':checked')
+                };
+            });
+
+            // target에 적용
+            MENUS.forEach(menu => {
+                $(`input[data-user="${target_emp_id}"][data-menu="${menu}"][data-action="create"]`).prop('checked', permissions[menu].create);
+                $(`input[data-user="${target_emp_id}"][data-menu="${menu}"][data-action="read"]`).prop('checked', permissions[menu].read);
+                $(`input[data-user="${target_emp_id}"][data-menu="${menu}"][data-action="update"]`).prop('checked', permissions[menu].update);
+                $(`input[data-user="${target_emp_id}"][data-menu="${menu}"][data-action="delete"]`).prop('checked', permissions[menu].delete);
+            });
+
+            alert(`${source_emp_id}의 권한이 ${target_emp_id}에 복사되었습니다.`);
+        }
+
+        function resetUserPermissions(emp_id) {
+            if (!confirm(`${emp_id}의 모든 권한을 초기화하시겠습니까?`)) return;
+
+            MENUS.forEach(menu => {
+                $(`input[data-user="${emp_id}"][data-menu="${menu}"][data-action="create"]`).prop('checked', false);
+                $(`input[data-user="${emp_id}"][data-menu="${menu}"][data-action="read"]`).prop('checked', true); // 읽기는 기본 허용
+                $(`input[data-user="${emp_id}"][data-menu="${menu}"][data-action="update"]`).prop('checked', false);
+                $(`input[data-user="${emp_id}"][data-menu="${menu}"][data-action="delete"]`).prop('checked', false);
+            });
+        }
+
+        function applyFilter() {
+            const searchText = $('#userSearch').val().toLowerCase();
+            const roleFilter = $('#roleFilter').val();
+            const deptFilter = $('#deptFilter').val();
+
+            $('tr[data-user]').each(function() {
+                const row = $(this);
+                const userInfo = row.find('.user-info').text().toLowerCase();
+                const role = row.find('.role-badge').text().toLowerCase();
+                const dept = row.find('.text-muted').text();
+
+                let show = true;
+
+                if (searchText && !userInfo.includes(searchText)) show = false;
+                if (roleFilter && !role.includes(roleFilter)) show = false;
+                if (deptFilter && !dept.includes(deptFilter)) show = false;
+
+                row.toggle(show);
+            });
+        }
+
+        // 검색 실시간 적용
+        $('#userSearch').on('keyup', applyFilter);
+    </script>
+</body>
+</html>

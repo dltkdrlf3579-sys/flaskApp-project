@@ -456,5 +456,6 @@ def build_follow_sop_config() -> BoardControllerConfig:
         per_page_default=20,
         extra_context={
             "menu_section": "follow_sop",
+            "permission_code": "FOLLOW_SOP",
         },
     )

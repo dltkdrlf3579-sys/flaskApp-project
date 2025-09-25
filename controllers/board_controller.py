@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Mapping, Optional, Protocol, Tuple
 
+from permission_helpers import get_user_permission_level
+
 
 class BoardRepository(Protocol):
     """Minimal contract the controller expects from a board repository."""
@@ -104,4 +106,14 @@ class BoardController:
         context.update(kwargs)
         context.setdefault("menu", self.menu_config)
         context.setdefault("board_type", self.config.board_type)
+
+        permission_code = context.get("permission_code")
+        if permission_code:
+            write_level = get_user_permission_level(permission_code, 'write')
+            read_level = get_user_permission_level(permission_code, 'read')
+            context.setdefault("write_permission_level", write_level)
+            context.setdefault("read_permission_level", read_level)
+            context.setdefault("can_write", write_level > 0)
+            context.setdefault("can_read", read_level > 0)
+
         return context

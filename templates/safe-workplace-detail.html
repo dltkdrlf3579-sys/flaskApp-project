@@ -187,6 +187,7 @@
 const sections = {{ sections | tojson | safe }};
 const sectionColumns = {{ section_columns | tojson | safe }};
 const safeplaceNo = {{ workplace.safeplace_no|default('')|tojson }};
+const CAN_WRITE = {{ can_write|default(false)|tojson }};
 
 const submitSafeWorkplaceUpdate = BoardDetail.createUpdater({
     endpoint: '/update-safe-workplace',
@@ -204,6 +205,10 @@ const submitSafeWorkplaceUpdate = BoardDetail.createUpdater({
 window.submitSafeWorkplaceUpdate = submitSafeWorkplaceUpdate;
 
 function showEditPasswordModal() {
+    if (!CAN_WRITE) {
+        alert('등록/수정 권한이 없습니다. 권한 신청 후 승인을 받아주세요.');
+        return;
+    }
     const modal = document.getElementById('edit-password-modal');
     const input = document.getElementById('edit-password-input');
 

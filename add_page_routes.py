@@ -60,6 +60,7 @@ def _first(row, default=0):
 
 
 from config.menu import MENU_CONFIG
+from permission_helpers import enforce_permission
 
 DB_PATH = db_config.local_db_path
 pyjson = json
@@ -91,11 +92,17 @@ _full_process_controller = FullProcessController(
 @follow_sop_bp.route("/follow-sop", endpoint="follow_sop_route")
 def follow_sop_route():
     """Follow SOP 목록 페이지"""
+    guard = enforce_permission('FOLLOW_SOP', 'view')
+    if guard:
+        return guard
     return _follow_sop_controller.list_view(request)
 
 @follow_sop_bp.route("/follow-sop-register", endpoint="follow_sop_register")
 def follow_sop_register():
     """Follow SOP 등록 페이지"""
+    guard = enforce_permission('FOLLOW_SOP', 'write')
+    if guard:
+        return guard
     return _follow_sop_controller.register_view(request)
 
 @follow_sop_bp.route(
@@ -104,6 +111,9 @@ def follow_sop_register():
 )
 def follow_sop_detail(work_req_no):
     """Follow SOP 상세정보 페이지"""
+    guard = enforce_permission('FOLLOW_SOP', 'view')
+    if guard:
+        return guard
     return _follow_sop_controller.detail_view(request, work_req_no)
 
 @follow_sop_bp.route(
@@ -113,6 +123,9 @@ def follow_sop_detail(work_req_no):
 )
 def register_follow_sop():
     """새 Follow SOP 등록"""
+    guard = enforce_permission('FOLLOW_SOP', 'write', response_type='json')
+    if guard:
+        return guard
     return _follow_sop_controller.save(request)
 
 
@@ -123,17 +136,26 @@ def register_follow_sop():
 )
 def update_follow_sop():
     """Follow SOP 수정"""
+    guard = enforce_permission('FOLLOW_SOP', 'write', response_type='json')
+    if guard:
+        return guard
     return _follow_sop_controller.update(request)
 
 # ============= Safe-Workplace 관련 라우트 =============
 @safe_workplace_bp.route("/safe-workplace", endpoint="safe_workplace_route")
 def safe_workplace_route():
     """Safe Workplace 목록 페이지"""
+    guard = enforce_permission('SAFE_WORKPLACE', 'view')
+    if guard:
+        return guard
     return _safe_workplace_controller.list_view(request)
 
 @safe_workplace_bp.route("/safe-workplace-register", endpoint="safe_workplace_register")
 def safe_workplace_register():
     """Safe Workplace 등록 페이지"""
+    guard = enforce_permission('SAFE_WORKPLACE', 'write')
+    if guard:
+        return guard
     return _safe_workplace_controller.register_view(request)
 
 @safe_workplace_bp.route(
@@ -142,6 +164,9 @@ def safe_workplace_register():
 )
 def safe_workplace_detail(safeplace_no):
     """Safe Workplace 상세 페이지"""
+    guard = enforce_permission('SAFE_WORKPLACE', 'view')
+    if guard:
+        return guard
     return _safe_workplace_controller.detail_view(request, safeplace_no)
 
 @safe_workplace_bp.route(
@@ -151,6 +176,9 @@ def safe_workplace_detail(safeplace_no):
 )
 def register_safe_workplace():
     """Safe Workplace 신규 등록"""
+    guard = enforce_permission('SAFE_WORKPLACE', 'write', response_type='json')
+    if guard:
+        return guard
     return _safe_workplace_controller.save(request)
 
 
@@ -161,17 +189,26 @@ def register_safe_workplace():
 )
 def update_safe_workplace():
     """Safe Workplace 수정"""
+    guard = enforce_permission('SAFE_WORKPLACE', 'write', response_type='json')
+    if guard:
+        return guard
     return _safe_workplace_controller.update(request)
 
 # ============= Full Process 페이지 라우트 =============
 @full_process_bp.route("/full-process", endpoint="full_process_route")
 def full_process_route():
     """Full Process 페이지 라우트"""
+    guard = enforce_permission('FULL_PROCESS', 'view')
+    if guard:
+        return guard
     return _full_process_controller.list_view(request)
 
 @full_process_bp.route("/full-process-register", endpoint="full_process_register")
 def full_process_register():
     """Full Process 등록 페이지"""
+    guard = enforce_permission('FULL_PROCESS', 'write')
+    if guard:
+        return guard
     return _full_process_controller.register_view(request)
 
 @full_process_bp.route(
@@ -180,6 +217,9 @@ def full_process_register():
 )
 def full_process_detail(fullprocess_number):
     """Full Process 상세정보 페이지"""
+    guard = enforce_permission('FULL_PROCESS', 'view')
+    if guard:
+        return guard
     return _full_process_controller.detail_view(request, fullprocess_number)
 
 @full_process_bp.route(
@@ -189,6 +229,9 @@ def full_process_detail(fullprocess_number):
 )
 def register_full_process():
     """새 Full Process 등록"""
+    guard = enforce_permission('FULL_PROCESS', 'write', response_type='json')
+    if guard:
+        return guard
     return _full_process_controller.save(request)
 
 @full_process_bp.route(
@@ -198,4 +241,7 @@ def register_full_process():
 )
 def update_full_process():
     """Full Process 수정"""
+    guard = enforce_permission('FULL_PROCESS', 'write', response_type='json')
+    if guard:
+        return guard
     return _full_process_controller.update(request)

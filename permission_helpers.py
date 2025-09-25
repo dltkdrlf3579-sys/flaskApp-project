@@ -3,9 +3,12 @@
 실제 권한 체크 및 레벨별 데이터 필터링
 """
 from db_connection import get_db_connection
-from flask import session, render_template
+from flask import session, render_template, jsonify
 import logging
 import configparser
+import copy
+
+from config.menu import MENU_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +17,48 @@ config = configparser.ConfigParser()
 config.read('config.ini', encoding='utf-8')
 SUPER_ADMIN_USERS = config.get('PERMISSION', 'super_admin_users', fallback='').split(',')
 SUPER_ADMIN_USERS = [u.strip() for u in SUPER_ADMIN_USERS if u.strip()]
+
+MENU_PERMISSION_MAP = {
+    'partner-standards': 'VENDOR_MGT',
+    'partner-change-request': 'REFERENCE_CHANGE',
+    'partner-change-request-detail': 'REFERENCE_CHANGE',
+    'accident': 'ACCIDENT_MGT',
+    'safety-instruction': 'SAFETY_INSTRUCTION',
+    'follow-sop': 'FOLLOW_SOP',
+    'safe-workplace': 'SAFE_WORKPLACE',
+    'full-process': 'FULL_PROCESS',
+    'safety-council': 'SAFETY_COUNCIL',
+}
+def resolve_menu_code(slug: str) -> str:
+    if not slug:
+        return ''
+    key = slug.strip('/').lower()
+    if key in MENU_PERMISSION_MAP:
+        return MENU_PERMISSION_MAP[key]
+    return key.replace('-', '_').upper()
+
+def build_user_menu_config():
+    try:
+        if is_super_admin():
+            return copy.deepcopy(MENU_CONFIG)
+
+        accessible = get_user_accessible_menus()
+        allowed_codes = {entry.get('code') for entry in accessible if entry.get('code')}
+
+        filtered = []
+        for section in MENU_CONFIG:
+            sub_filtered = []
+            for item in section.get('submenu', []):
+                slug = item.get('url') or ''
+                code = resolve_menu_code(slug)
+                if code in allowed_codes:
+                    sub_filtered.append(dict(item))
+            if sub_filtered:
+                filtered.append({'title': section.get('title'), 'submenu': sub_filtered})
+        return filtered
+    except Exception as exc:
+        logger.debug("build_user_menu_config failed: %s", exc)
+        return copy.deepcopy(MENU_CONFIG)
 
 def is_super_admin():
     """현재 사용자가 슈퍼어드민인지 확인"""
@@ -103,8 +148,22 @@ def check_menu_permission(menu_code, action='view'):
         <head><meta charset="UTF-8"></head>
         <body>
         <script>
-            alert('접근 권한이 없습니다\\n\\n요청하신 페이지에 접근할 수 있는 권한이 없습니다.\\n이 페이지를 보려면 적절한 권한이 필요합니다.\\n\\n권한이 필요하신가요?\\n관리자에게 권한을 요청하세요\\n권한 신청 버튼을 통해 직접 신청할 수 있습니다\\n신청 후 승인까지 대기해 주세요');
-            window.history.back();
+            (function() {
+                alert('접근 권한이 없습니다\\n\\n요청하신 페이지에 접근할 수 있는 권한이 없습니다.\\n이 페이지를 보려면 적절한 권한이 필요합니다.\\n\\n권한이 필요하신가요?\\n관리자에게 권한을 요청하세요\\n권한 신청 버튼을 통해 직접 신청할 수 있습니다\\n신청 후 승인까지 대기해 주세요');
+                try {
+                    if (window.opener && !window.opener.closed) {
+                        window.close();
+                        return;
+                    }
+                } catch (err) {
+                    console.warn('권한 팝업 닫기 실패:', err);
+                }
+                if (window.history.length > 1) {
+                    window.history.back();
+                } else {
+                    window.location.href = '/';
+                }
+            })();
         </script>
         </body>
         </html>
@@ -112,6 +171,16 @@ def check_menu_permission(menu_code, action='view'):
         return False, error_html, 403
 
     return True, None, None
+
+def enforce_permission(menu_code, action='view', response_type='html'):
+    allowed, error_html, status = check_menu_permission(menu_code, action)
+    if allowed:
+        return None
+
+    status_code = status or 403
+    if response_type == 'json':
+        return jsonify({'error': '권한이 없습니다.'}), status_code
+    return (error_html or '권한이 없습니다.'), status_code
 
 def get_user_accessible_menus():
     """
@@ -172,7 +241,7 @@ def get_user_accessible_menus():
                 UNION ALL
                 SELECT 'SAFETY_COUNCIL', '안전보건 협의체', '/safety-council', 'fas fa-users'
             )
-            SELECT DISTINCT
+            SELECT
                 m.code,
                 m.name,
                 m.url,

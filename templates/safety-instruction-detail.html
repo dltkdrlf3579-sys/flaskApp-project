@@ -365,6 +365,7 @@
 const sections = {{ sections | tojson | safe }};
 const sectionColumns = {{ section_columns | tojson | safe }};
 const issueNumber = {{ instruction.issue_number|default('')|tojson }};
+const CAN_WRITE = {{ can_write|default(false)|tojson }};
 
 const updateSafetyInstruction = BoardDetail.createUpdater({
 
@@ -395,6 +396,10 @@ const updateSafetyInstruction = BoardDetail.createUpdater({
 window.updateSafetyInstruction = updateSafetyInstruction;
 
 function showEditPasswordModal() {
+    if (!CAN_WRITE) {
+        alert('등록/수정 권한이 없습니다. 권한 신청 후 승인을 받아주세요.');
+        return;
+    }
     const modal = document.getElementById('edit-password-modal');
     const input = document.getElementById('edit-password-input');
     if (modal) {
