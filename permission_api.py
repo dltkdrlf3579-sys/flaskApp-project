@@ -408,6 +408,59 @@ def register_permission_routes(app):
             if conn:
                 conn.close()
 
+    @app.route('/api/menu-roles/users/delete', methods=['POST'])
+    @_admin_required
+    def delete_user_permissions_bulk():
+        """선택한 사용자 권한을 비활성화"""
+        payload = request.get_json(silent=True) or {}
+        login_ids = payload.get('login_ids')
+
+        if not isinstance(login_ids, list) or not login_ids:
+            return jsonify({'error': 'login_ids가 필요합니다.'}), 400
+
+        filtered_ids = [str(lid).strip() for lid in login_ids if str(lid).strip()]
+        if not filtered_ids:
+            return jsonify({'error': '유효한 login_ids가 없습니다.'}), 400
+
+        conn = None
+        cursor = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            placeholders = ','.join(['%s'] * len(filtered_ids))
+            cursor.execute(
+                f"""
+                UPDATE user_menu_permissions
+                   SET is_active = FALSE,
+                       read_level = 0,
+                       write_level = 0,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE login_id IN ({placeholders})
+                """,
+                filtered_ids,
+            )
+            affected = cursor.rowcount or 0
+            conn.commit()
+
+            logger.info(
+                "User permissions deactivated: ids=%s affected=%s",
+                filtered_ids,
+                affected,
+            )
+            return jsonify({'success': True, 'affected': affected})
+
+        except Exception as exc:
+            if conn:
+                conn.rollback()
+            logger.error("Error deleting user permissions: %s", exc)
+            return jsonify({'error': '사용자 권한 삭제 실패', 'message': str(exc)}), 500
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
     @app.route('/api/dept-roles/batch-update', methods=['POST'])
     @_admin_required
     def batch_update_dept_permissions():
@@ -492,6 +545,60 @@ def register_permission_routes(app):
                 conn.rollback()
             logger.error("Error batch updating department permissions: %s", exc)
             return jsonify({'error': '부서 권한 저장 실패', 'message': str(exc)}), 500
+        finally:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+
+    @app.route('/api/dept-roles/delete', methods=['POST'])
+    @_admin_required
+    def delete_dept_permissions_bulk():
+        """선택한 부서 권한을 비활성화"""
+        payload = request.get_json(silent=True) or {}
+        dept_ids = payload.get('dept_ids')
+
+        if not isinstance(dept_ids, list) or not dept_ids:
+            return jsonify({'error': 'dept_ids가 필요합니다.'}), 400
+
+        filtered_ids = [str(dept).strip() for dept in dept_ids if str(dept).strip()]
+        if not filtered_ids:
+            return jsonify({'error': '유효한 dept_ids가 없습니다.'}), 400
+
+        conn = None
+        cursor = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            placeholders = ','.join(['%s'] * len(filtered_ids))
+            cursor.execute(
+                f"""
+                UPDATE dept_menu_roles
+                   SET is_active = FALSE,
+                       read_level = 0,
+                       write_level = 0,
+                       granted_by = %s,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE dept_id IN ({placeholders})
+                """,
+                [session.get('user_id', 'system'), *filtered_ids],
+            )
+            affected = cursor.rowcount or 0
+            conn.commit()
+
+            logger.info(
+                "Department permissions deactivated: ids=%s affected=%s",
+                filtered_ids,
+                affected,
+            )
+            return jsonify({'success': True, 'affected': affected})
+
+        except Exception as exc:
+            if conn:
+                conn.rollback()
+            logger.error("Error deleting department permissions: %s", exc)
+            return jsonify({'error': '부서 권한 삭제 실패', 'message': str(exc)}), 500
         finally:
             if cursor:
                 cursor.close()

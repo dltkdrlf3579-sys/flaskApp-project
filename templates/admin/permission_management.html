@@ -1911,12 +1911,39 @@ function deleteSelectedUsers() {
         return;
     }
 
-    if (confirm(`선택한 ${selected.length}명의 사용자를 삭제하시겠습니까?`)) {
-        selected.forEach(checkbox => {
-            const row = checkbox.closest('tr');
-            row.remove();
-        });
+    if (!confirm(`선택한 ${selected.length}명의 사용자를 삭제하시겠습니까?`)) {
+        return;
     }
+
+    const loginIds = selected.map(checkbox => checkbox.value);
+
+    showLoading();
+
+    fetch('/api/menu-roles/users/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ login_ids: loginIds })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (!data.success) {
+            throw new Error(data.error || '삭제 실패');
+        }
+        alert(`${data.affected || 0}명 사용자 권한을 삭제했습니다.`);
+        loginIds.forEach(id => {
+            if (changes.users[id]) {
+                delete changes.users[id];
+            }
+        });
+        loadUserPermissions();
+    })
+    .catch(error => {
+        console.error('사용자 권한 삭제 오류:', error);
+        alert('사용자 권한 삭제 중 오류가 발생했습니다.');
+    })
+    .finally(() => {
+        hideLoading();
+    });
 }
 
 // 부서 추가 - 공통 팝업 사용
@@ -2027,12 +2054,39 @@ function deleteSelectedDepts() {
         return;
     }
 
-    if (confirm(`선택한 ${selected.length}개 부서를 삭제하시겠습니까?`)) {
-        selected.forEach(checkbox => {
-            const row = checkbox.closest('tr');
-            row.remove();
-        });
+    if (!confirm(`선택한 ${selected.length}개 부서를 삭제하시겠습니까?`)) {
+        return;
     }
+
+    const deptIds = selected.map(checkbox => checkbox.value);
+
+    showLoading();
+
+    fetch('/api/dept-roles/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dept_ids: deptIds })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (!data.success) {
+            throw new Error(data.error || '삭제 실패');
+        }
+        alert(`${data.affected || 0}개 부서 권한을 삭제했습니다.`);
+        deptIds.forEach(id => {
+            if (changes.depts[id]) {
+                delete changes.depts[id];
+            }
+        });
+        loadDeptPermissions();
+    })
+    .catch(error => {
+        console.error('부서 권한 삭제 오류:', error);
+        alert('부서 권한 삭제 중 오류가 발생했습니다.');
+    })
+    .finally(() => {
+        hideLoading();
+    });
 }
 
 // 부서 권한 저장
