@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 # Config 파일에서 슈퍼어드민 목록 읽기
 config = configparser.ConfigParser()
 config.read('config.ini', encoding='utf-8')
+PERMISSION_ENABLED = config.getboolean('PERMISSION', 'enabled', fallback=True)
 SUPER_ADMIN_USERS = config.get('PERMISSION', 'super_admin_users', fallback='').split(',')
 SUPER_ADMIN_USERS = [u.strip() for u in SUPER_ADMIN_USERS if u.strip()]
 
@@ -39,7 +40,7 @@ def resolve_menu_code(slug: str) -> str:
 
 def build_user_menu_config():
     try:
-        if is_super_admin():
+        if not PERMISSION_ENABLED or is_super_admin():
             return copy.deepcopy(MENU_CONFIG)
 
         accessible = get_user_accessible_menus()
@@ -72,6 +73,9 @@ def get_user_permission_level(menu_code, permission_type='read'):
     슈퍼어드민은 항상 레벨 3 반환
     """
     try:
+        if not PERMISSION_ENABLED:
+            return 3
+
         login_id = session.get('user_id')
 
         # 슈퍼어드민 체크
@@ -131,6 +135,9 @@ def check_menu_permission(menu_code, action='view'):
     권한이 없으면 팝업 메시지 후 이전 페이지로
     슈퍼어드민은 항상 통과
     """
+    if not PERMISSION_ENABLED:
+        return True, None, None
+
     # 슈퍼어드민은 모든 권한 통과
     if is_super_admin():
         return True, None, None
@@ -191,8 +198,8 @@ def get_user_accessible_menus():
     try:
         login_id = session.get('user_id')
 
-        # 슈퍼어드민은 모든 메뉴 반환
-        if is_super_admin():
+        # 권한 체크 비활성화 시 전체 메뉴 반환
+        if not PERMISSION_ENABLED or is_super_admin():
             return [
                 {'code': 'VENDOR_MGT', 'name': '협력사 기준정보', 'url': '/vendor-management', 'icon': 'fas fa-building', 'read_level': 3, 'write_level': 3},
                 {'code': 'REFERENCE_CHANGE', 'name': '기준정보 변경요청', 'url': '/reference-change', 'icon': 'fas fa-exchange-alt', 'read_level': 3, 'write_level': 3},
