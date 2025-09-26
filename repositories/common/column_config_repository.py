@@ -54,7 +54,11 @@ class ColumnConfigRepository:
         conn = get_db_connection(self.db_path)
         try:
             protected = self._protected_columns()
-            protected_sql = ','.join(f"'{col.replace("'", "''")}'" for col in sorted(protected)) or "''"
+            protected_quoted: List[str] = []
+            for col in sorted(protected):
+                safe = (col or '').replace("'", "''")
+                protected_quoted.append("'" + safe + "'")
+            protected_sql = ','.join(protected_quoted) if protected_quoted else "''"
 
             where_clauses = [
                 "COALESCE(is_deleted, 0) = 0",
@@ -244,4 +248,3 @@ class ColumnConfigRepository:
             return True
         finally:
             conn.close()
-

@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import logging
 from typing import Iterable, Tuple
 
 from db_connection import get_db_connection
