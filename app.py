@@ -2906,7 +2906,7 @@ def auto_upload_partner_files():
     """협력사 사업자번호에 대한 HTML 파일 자동 생성 및 업로드"""
     try:
         data = request.get_json()
-        business_number = data.get('business_number')
+        business_number = data.gedt('business_number')
         file_paths = data.get('file_paths', [])
         
         if not business_number:

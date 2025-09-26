@@ -952,10 +952,14 @@
 <script>
 // 전역 변수
 let currentPage = { user: 1, dept: 1 };
-let pageSize = 50;
+let pageSize = 500;
 let menus = [];
 let allUsers = {};
 let allDepts = {};
+const FILTERS = {
+    user: { login: '', name: '', dept: '' },
+    dept: { name: '' }
+};
 let changes = { users: {}, depts: {} };
 let selectedDeptForFilter = null;
 let currentSearchMode = 'user';
@@ -1089,16 +1093,28 @@ function renderSubHeaders() {
 }
 
 // 사용자 권한 로드
-function loadUserPermissions(filters = {}) {
+function loadUserPermissions(filterUpdates = null) {
+    if (filterUpdates) {
+        FILTERS.user = {
+            ...FILTERS.user,
+            ...Object.fromEntries(Object.entries(filterUpdates).map(([key, value]) => [key, value || '']))
+        };
+    }
+
     showLoading();
 
     const params = new URLSearchParams({
         page: currentPage.user,
-        size: pageSize,
-        ...filters
+        size: pageSize
+    });
+    Object.entries(FILTERS.user).forEach(([key, value]) => {
+        const trimmed = value ? value.trim() : '';
+        if (trimmed) {
+            params.append(key, trimmed);
+        }
     });
 
-    fetch(`/api/menu-roles/users?${params}`)
+    fetch(`/api/menu-roles/users?${params.toString()}`)
         .then(response => response.json())
         .then(data => {
             allUsers = {};
@@ -1493,58 +1509,45 @@ function filterDeptTreeItems(searchText) {
 
 // 사용자 검색 (테이블에서 필터링)
 function searchUsers() {
-    const loginIdFilter = document.getElementById('userLoginIdFilter').value.trim().toLowerCase();
-    const nameFilter = document.getElementById('userNameFilter').value.trim().toLowerCase();
-    const deptFilter = document.getElementById('userDeptFilter').value.trim().toLowerCase();
-
-    const rows = document.querySelectorAll('#userTableBody tr');
-
-    rows.forEach(row => {
-        const knoxId = row.querySelector('.fixed-column-2')?.textContent.toLowerCase() || '';
-        const name = row.querySelector('.fixed-column-3')?.textContent.toLowerCase() || '';
-        const dept = row.querySelector('.fixed-column-4')?.textContent.toLowerCase() || '';
-
-        let show = true;
-
-        if (loginIdFilter && !knoxId.includes(loginIdFilter)) {
-            show = false;
-        }
-        if (nameFilter && !name.includes(nameFilter)) {
-            show = false;
-        }
-        if (deptFilter && !dept.includes(deptFilter)) {
-            show = false;
-        }
-
-        row.style.display = show ? '' : 'none';
+    currentPage.user = 1;
+    loadUserPermissions({
+        login: document.getElementById('userLoginIdFilter').value.trim(),
+        name: document.getElementById('userNameFilter').value.trim(),
+        dept: document.getElementById('userDeptFilter').value.trim()
     });
 }
 
 // 부서 검색 (테이블에서 필터링)
 function searchDepts() {
-    const deptNameFilter = document.getElementById('deptNameFilter').value.trim().toLowerCase();
-
-    const rows = document.querySelectorAll('#deptTableBody tr');
-
-    rows.forEach(row => {
-        const deptName = row.querySelector('td:nth-child(3)')?.textContent.toLowerCase() || '';
-
-        const show = !deptNameFilter || deptName.includes(deptNameFilter);
-        row.style.display = show ? '' : 'none';
+    currentPage.dept = 1;
+    loadDeptPermissions({
+        name: document.getElementById('deptNameFilter').value.trim()
     });
 }
 
 // 부서 권한 로드
-function loadDeptPermissions(filters = {}) {
+function loadDeptPermissions(filterUpdates = null) {
+    if (filterUpdates) {
+        FILTERS.dept = {
+            ...FILTERS.dept,
+            ...Object.fromEntries(Object.entries(filterUpdates).map(([key, value]) => [key, value || '']))
+        };
+    }
+
     showLoading();
 
     const params = new URLSearchParams({
         page: currentPage.dept,
-        size: pageSize,
-        ...filters
+        size: pageSize
+    });
+    Object.entries(FILTERS.dept).forEach(([key, value]) => {
+        const trimmed = value ? value.trim() : '';
+        if (trimmed) {
+            params.append(key, trimmed);
+        }
     });
 
-    fetch(`/api/menu-roles/departments?${params}`)
+    fetch(`/api/menu-roles/departments?${params.toString()}`)
         .then(response => response.json())
         .then(data => {
             renderDeptTable(data.items);
@@ -2196,9 +2199,13 @@ function resetFilters(type) {
         document.getElementById('userNameFilter').value = '';
         document.getElementById('userDeptFilter').value = '';
         selectedDeptForFilter = null;
+        currentPage.user = 1;
+        FILTERS.user = { login: '', name: '', dept: '' };
         loadUserPermissions();
     } else {
         document.getElementById('deptNameFilter').value = '';
+        currentPage.dept = 1;
+        FILTERS.dept = { name: '' };
         loadDeptPermissions();
     }
 }

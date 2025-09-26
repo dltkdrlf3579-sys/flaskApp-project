@@ -10,6 +10,7 @@ from db_connection import get_db_connection
 from permission_helpers import is_super_admin, resolve_menu_code
 from config.menu import MENU_CONFIG
 from functools import wraps
+from typing import Any, List
 import logging
 
 logger = logging.getLogger(__name__)
@@ -102,28 +103,54 @@ def register_permission_routes(app):
             page = max(1, page)
 
             try:
-                size = int(request.args.get('size', 50))
+                size = int(request.args.get('size', 500))
             except (TypeError, ValueError):
-                size = 50
-            size = max(1, min(200, size))
+                size = 500
+            size = max(1, min(500, size))
             offset = (page - 1) * size
 
             conn = get_db_connection()
             cursor = conn.cursor()
 
-            cursor.execute(
-                """
+            search_login = (request.args.get('login') or '').strip().lower()
+            search_name = (request.args.get('name') or '').strip().lower()
+            search_dept = (request.args.get('dept') or '').strip().lower()
+
+            where_clauses = [
+                "u.is_active = TRUE",
+                "u.login_id IS NOT NULL"
+            ]
+            params: List[Any] = []
+
+            if search_login:
+                where_clauses.append("LOWER(u.login_id) LIKE %s")
+                params.append(f"%{search_login}%")
+
+            if search_name:
+                where_clauses.append("LOWER(u.user_name) LIKE %s")
+                params.append(f"%{search_name}%")
+
+            if search_dept:
+                where_clauses.append("LOWER(COALESCE(d.dept_name, u.dept_name)) LIKE %s")
+                params.append(f"%{search_dept}%")
+
+            where_sql = " AND ".join(where_clauses)
+
+            count_sql = f"""
                 SELECT COUNT(*) AS total
-                FROM system_users
-                WHERE is_active = TRUE
-                  AND login_id IS NOT NULL
-                """
-            )
+                  FROM system_users u
+                  LEFT JOIN departments_external d
+                    ON d.dept_id = u.dept_id AND d.is_active = TRUE
+                 WHERE {where_sql}
+            """
+            cursor.execute(count_sql, params)
             total_row = cursor.fetchone()
             total = _row_value(total_row, 0, 'total') or 0
 
-            cursor.execute(
-                """
+            data_params = list(params)
+            data_params.extend([size, offset])
+
+            data_sql = f"""
                 SELECT
                     u.login_id,
                     u.emp_id,
@@ -135,13 +162,11 @@ def register_permission_routes(app):
                 FROM system_users u
                 LEFT JOIN departments_external d
                     ON d.dept_id = u.dept_id AND d.is_active = TRUE
-                WHERE u.is_active = TRUE
-                  AND u.login_id IS NOT NULL
+                WHERE {where_sql}
                 ORDER BY COALESCE(u.user_name, '') ASC, u.login_id
                 LIMIT %s OFFSET %s
-                """,
-                (size, offset),
-            )
+            """
+            cursor.execute(data_sql, data_params)
             rows = cursor.fetchall()
 
             user_map = {}
@@ -229,27 +254,42 @@ def register_permission_routes(app):
             page = max(1, page)
 
             try:
-                size = int(request.args.get('size', 50))
+                size = int(request.args.get('size', 500))
             except (TypeError, ValueError):
-                size = 50
-            size = max(1, min(200, size))
+                size = 500
+            size = max(1, min(500, size))
             offset = (page - 1) * size
 
             conn = get_db_connection()
             cursor = conn.cursor()
 
+            search_name = (request.args.get('name') or '').strip().lower()
+
+            dept_where = ["is_active = TRUE"]
+            dept_params: List[Any] = []
+
+            if search_name:
+                dept_where.append("(LOWER(dept_name) LIKE %s OR LOWER(dept_code) LIKE %s)")
+                dept_params.extend([f"%{search_name}%", f"%{search_name}%"])
+
+            dept_where_sql = " AND ".join(dept_where)
+
             cursor.execute(
-                """
+                f"""
                 SELECT COUNT(*) AS total
-                FROM departments_external
-                WHERE is_active = TRUE
-                """
+                  FROM departments_external
+                 WHERE {dept_where_sql}
+                """,
+                dept_params,
             )
             total_row = cursor.fetchone()
             total = _row_value(total_row, 0, 'total') or 0
 
+            dept_params_with_limit = list(dept_params)
+            dept_params_with_limit.extend([size, offset])
+
             cursor.execute(
-                """
+                f"""
                 SELECT
                     dept_id,
                     dept_code,
@@ -258,11 +298,11 @@ def register_permission_routes(app):
                     dept_full_path,
                     dept_level
                 FROM departments_external
-                WHERE is_active = TRUE
+                WHERE {dept_where_sql}
                 ORDER BY COALESCE(dept_full_path, dept_code) ASC, dept_code
                 LIMIT %s OFFSET %s
                 """,
-                (size, offset),
+                dept_params_with_limit,
             )
             rows = cursor.fetchall()
 
