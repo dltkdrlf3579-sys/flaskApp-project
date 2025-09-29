@@ -370,6 +370,7 @@ for total_col in score_total_cols:
 
     if stored_total is not None:
         item[col_key] = stored_total
+        custom_data[col_key] = json.dumps({'total': stored_total}, ensure_ascii=False)
         item.setdefault("__stored_totals__", {})[col_key] = stored_total
         continue
 
