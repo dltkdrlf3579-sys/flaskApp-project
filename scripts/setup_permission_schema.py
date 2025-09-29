@@ -42,7 +42,7 @@ def ensure_columns(cursor, table: str, columns: Iterable[Tuple[str, str]]) -> No
     """Add columns that do not yet exist."""
     for column, definition in columns:
         if not column_exists(cursor, table, column):
-            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def ensure_table_user_permissions(cursor) -> None:
