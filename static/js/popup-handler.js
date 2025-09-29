@@ -95,6 +95,29 @@ function updateLinkedFieldsByTableGroup(mainFieldKey, selectedData, tableGroup) 
         field.setAttribute('readonly', true);
         field.style.backgroundColor = '#f8f9fa';
     });
+
+    markContractorCompanyFields(document);
+}
+
+
+function markContractorCompanyFields(context) {
+    const scope = context || document;
+    const inputs = scope.querySelectorAll('input[data-field][id$="_company"]');
+    inputs.forEach(input => {
+        const tableType = (input.getAttribute('data-table-type') || input.getAttribute('data-table-group') || '').toLowerCase();
+        if (tableType === 'contractor') {
+            input.classList.add('linked-field');
+            input.readOnly = true;
+            input.style.backgroundColor = '#f8f9fa';
+            const wrapper = input.closest('.input-group') || input.closest('.popup-input-wrapper');
+            if (wrapper) {
+                const triggerBtn = wrapper.querySelector('button');
+                if (triggerBtn) {
+                    triggerBtn.style.display = 'none';
+                }
+            }
+        }
+    });
 }
 
 // 담당자 검색 팝업 열기
@@ -506,6 +529,8 @@ window.receiveContractorSelection = function(fieldKey, data) {
 
 console.log('✅ Popup handler loaded');
 
+markContractorCompanyFields(document);
+
 // 페이지 로드 후 초기화 (디버깅 코드 제거됨)
 window.openTableSearch = function openTableSearch(fieldKey) {
     const input = document.getElementById(fieldKey);
@@ -599,6 +624,7 @@ function selectTableSearchResult(selectedData) {
         }
     });
     updateLinkedFieldsByTableGroup(fieldKey, details, tableGroup);
+    markContractorCompanyFields(document);
     closeTableSearch();
 }
 

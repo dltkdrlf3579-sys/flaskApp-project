@@ -250,9 +250,14 @@ def require_admin_auth(f):
         # 세션에서 관리자 인증 확인
         if session.get('admin_authenticated') != True:
             # 인증이 안된 경우 비밀번호 입력 페이지로 리다이렉트
-            return render_template('admin-login.html', 
-                                 redirect_url=request.url,
-                                 menu=MENU_CONFIG)
+            target_path = request.full_path if request.query_string else request.path
+            if target_path.endswith('?'):
+                target_path = target_path[:-1]
+            return render_template(
+                'admin-login.html',
+                redirect_url=target_path or '/',
+                menu=MENU_CONFIG
+            )
         return f(*args, **kwargs)
     return decorated_function
 
@@ -3324,17 +3329,26 @@ def update_accident_columns_order():
 @app.route("/admin/login", methods=["POST"])
 def admin_login():
     """관리자 비밀번호 인증 처리"""
+    from urllib.parse import urlparse
+
     password = request.form.get('password')
-    redirect_url = request.form.get('redirect_url', '/admin/menu-settings')
-    
+    redirect_url = request.form.get('redirect_url') or '/admin/menu-settings'
+
+    parsed = urlparse(redirect_url)
+    safe_redirect = parsed.path or '/admin/menu-settings'
+    if parsed.query:
+        safe_redirect = f"{safe_redirect}?{parsed.query}"
+
     if password == ADMIN_PASSWORD:
         session['admin_authenticated'] = True
-        return redirect(redirect_url)
+        return redirect(safe_redirect)
     else:
-        return render_template('admin-login.html', 
-                             error='비밀번호가 틀렸습니다.',
-                             redirect_url=redirect_url,
-                             menu=MENU_CONFIG)
+        return render_template(
+            'admin-login.html',
+            error='비밀번호가 틀렸습니다.',
+            redirect_url=safe_redirect,
+            menu=MENU_CONFIG
+        )
 
 @app.route("/admin/logout")
 def admin_logout():
@@ -4028,13 +4042,21 @@ def admin_safe_workplace_columns():
                 """
                 INSERT INTO safe_workplace_sections (section_key, section_name, section_order, is_active, is_deleted)
                 VALUES (%s, %s, %s, 1, 0)
-                ON CONFLICT (section_key) DO UPDATE
-                SET section_name = EXCLUDED.section_name,
-                    section_order = EXCLUDED.section_order,
-                    is_active = 1,
-                    is_deleted = 0
+                ON CONFLICT (section_key) DO NOTHING
                 """,
                 (key, name, order)
+            )
+
+            cursor.execute(
+                """
+                UPDATE safe_workplace_sections
+                SET section_name = %s,
+                    section_order = %s,
+                    is_active = 1
+                WHERE section_key = %s
+                  AND (is_deleted = 0 OR is_deleted IS NULL)
+                """,
+                (name, order, key)
             )
 
         default_columns = [
@@ -8944,8 +8966,9 @@ def api_admin_audit_logs():
             SELECT
                 al.created_at,
                 al.emp_id,
-                u.user_name,
-                u.dept_name,
+                al.login_id,
+                COALESCE(u_login.user_name, u_emp.user_name) AS user_name,
+                COALESCE(u_login.dept_name, u_emp.dept_name) AS dept_name,
                 al.action_scope,
                 al.action_type,
                 al.action,
@@ -8961,7 +8984,8 @@ def api_admin_audit_logs():
                 al.ip_address,
                 al.error_message
             FROM access_audit_log al
-            LEFT JOIN system_users u ON al.emp_id = u.login_id
+            LEFT JOIN system_users u_login ON al.login_id = u_login.login_id
+            LEFT JOIN system_users u_emp ON al.emp_id = u_emp.emp_id
             LEFT JOIN menu_names mn ON mn.menu_code = al.menu_code
             WHERE 1=1
         """
@@ -8989,9 +9013,9 @@ def api_admin_audit_logs():
             query += " AND al.success = %s"
             params.append(success_filter)
         if user_param:
-            query += " AND (al.emp_id LIKE %s OR u.user_name LIKE %s)"
+            query += " AND (al.login_id ILIKE %s OR al.emp_id ILIKE %s OR u_login.user_name ILIKE %s OR u_emp.user_name ILIKE %s)"
             like_value = f"%{user_param}%"
-            params.extend([like_value, like_value])
+            params.extend([like_value, like_value, like_value, like_value])
 
         query += " ORDER BY al.created_at DESC LIMIT %s OFFSET %s"
         params.extend([per_page, (page - 1) * per_page])
@@ -9022,9 +9046,9 @@ def api_admin_audit_logs():
             count_query += " AND al.success = %s"
             count_params.append(success_filter)
         if user_param:
-            count_query += " AND (al.emp_id LIKE %s OR EXISTS (SELECT 1 FROM system_users su WHERE su.login_id = al.emp_id AND su.user_name LIKE %s))"
+            count_query += " AND (al.login_id ILIKE %s OR al.emp_id ILIKE %s OR EXISTS (SELECT 1 FROM system_users su WHERE su.login_id = al.login_id AND su.user_name ILIKE %s) OR EXISTS (SELECT 1 FROM system_users su WHERE su.emp_id = al.emp_id AND su.user_name ILIKE %s))"
             like_value = f"%{user_param}%"
-            count_params.extend([like_value, like_value])
+            count_params.extend([like_value, like_value, like_value, like_value])
         cursor.execute(count_query, count_params)
         total_count = cursor.fetchone()[0] if cursor.rowcount != -1 else 0
 
@@ -9039,27 +9063,60 @@ def api_admin_audit_logs():
             except Exception:
                 return value
 
+        columns = [desc[0] for desc in cursor.description] if cursor.description else []
+
+        def _row_to_dict(row_tuple):
+            if not columns:
+                return {}
+            mapping = {}
+            for idx, col_name in enumerate(columns):
+                try:
+                    mapping[col_name] = row_tuple[idx]
+                except Exception:
+                    pass
+            return mapping
+
         log_payload = []
         for log in logs:
+            row_map = _row_to_dict(log)
+
+            def _field(name, index):
+                if row_map and name in row_map:
+                    return row_map[name]
+                try:
+                    return log[index]
+                except Exception:
+                    return None
+
+            created_val = _field('created_at', 0)
+            if isinstance(created_val, datetime):
+                created_at_iso = created_val.isoformat()
+            elif created_val is not None:
+                created_at_iso = str(created_val)
+            else:
+                created_at_iso = None
+
+            details_val = _field('details', 16)
+
             log_payload.append({
-                'created_at': log[0].isoformat() if log[0] else None,
-                'emp_id': log[1],
-                'user_name': log[2],
-                'dept_name': log[3],
-                'action_scope': log[4],
-                'action_type': log[5],
-                'action': log[6],
-                'menu_code': log[7],
-                'menu_name': log[8],
-                'request_path': log[9],
-                'object_type': log[10],
-                'object_id': log[11],
-                'object_name': log[12],
-                'success': log[13],
-                'permission_result': log[14],
-                'details': _safe_detail(log[15]),
-                'ip_address': log[16],
-                'error_message': log[17],
+                'created_at': created_at_iso,
+                'login_id': _field('login_id', 2),
+                'user_name': _field('user_name', 3),
+                'dept_name': _field('dept_name', 4),
+                'action_scope': _field('action_scope', 5),
+                'action_type': _field('action_type', 6),
+                'action': _field('action', 7),
+                'menu_code': _field('menu_code', 8),
+                'menu_name': _field('menu_name', 9),
+                'request_path': _field('request_path', 10),
+                'object_type': _field('object_type', 11),
+                'object_id': _field('object_id', 12),
+                'object_name': _field('object_name', 13),
+                'success': _field('success', 14),
+                'permission_result': _field('permission_result', 15),
+                'details': _safe_detail(details_val),
+                'ip_address': _field('ip_address', 17),
+                'error_message': _field('error_message', 18),
             })
 
         return jsonify({
@@ -9113,6 +9170,11 @@ def api_admin_usage_dashboard():
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
+            try:
+                cursor.execute("SET search_path TO iqadb, public")
+            except Exception as exc:  # noqa: BLE001
+                logging.debug("Usage dashboard search_path 설정 실패 (계속 진행): %s", exc)
+
             cursor.execute(query)
             rows = cursor.fetchall() or []
         except Exception as exc:  # noqa: BLE001

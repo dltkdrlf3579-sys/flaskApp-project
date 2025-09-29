@@ -259,7 +259,7 @@ tbody tr:last-child td {
         }
 
         tbody.innerHTML = logs.map(log => {
-          const loginId = log.emp_id || '-';
+          const loginId = log.login_id || '-';
           const userName = log.user_name || '-';
           const deptName = log.dept_name || '-';
           const accessTime = formatTimestamp(log.created_at);
