@@ -339,106 +339,108 @@ class FullProcessController(BoardController):
         score_total_cols: Iterable[Mapping[str, Any]],
     ) -> None:
         scoring_cols = list(scoring_cols)
+        score_total_cols = list(score_total_cols)
 
-for total_col in score_total_cols:
-    col_key = total_col.get("column_key")
-    stored_raw = custom_data.get(col_key) if isinstance(custom_data, dict) else None
-    stored_total = None
-    if isinstance(stored_raw, str):
-        try:
-            parsed = json.loads(stored_raw)
-            if isinstance(parsed, dict) and parsed.get("total") is not None:
-                stored_total = float(parsed.get("total"))
-        except Exception:
-            try:
-                stored_total = float(stored_raw)
-            except Exception:
-                stored_total = None
-    elif isinstance(stored_raw, dict) and stored_raw.get("total") is not None:
-        try:
-            stored_total = float(stored_raw.get("total"))
-        except Exception:
+        for total_col in score_total_cols:
+            col_key = total_col.get("column_key")
+            stored_raw = custom_data.get(col_key) if isinstance(custom_data, dict) else None
             stored_total = None
 
-    conf = total_col.get("scoring_config")
-    if isinstance(conf, str):
-        try:
-            conf = json.loads(conf)
-        except Exception:
-            conf = {}
-    conf = conf or {}
-
-    if stored_total is not None:
-        item[col_key] = stored_total
-        custom_data[col_key] = json.dumps({'total': stored_total}, ensure_ascii=False)
-        item.setdefault("__stored_totals__", {})[col_key] = stored_total
-        continue
-
-    base = conf.get("base_score", 100)
-    include_keys = conf.get("include_keys") or []
-    total = base
-
-    if include_keys:
-        for key in include_keys:
-            target = next((c for c in scoring_cols if c.get("column_key") == key), None)
-            if not target:
-                continue
-            sconf = target.get("scoring_config")
-            if isinstance(sconf, str):
+            if isinstance(stored_raw, str):
                 try:
-                    sconf = json.loads(sconf)
+                    parsed = json.loads(stored_raw)
+                    if isinstance(parsed, dict) and parsed.get("total") is not None:
+                        stored_total = float(parsed.get("total"))
                 except Exception:
-                    sconf = {}
-            sconf = sconf or {}
-            items_cfg = sconf.get("items") or []
-            group_obj = custom_data.get(key, {}) if isinstance(custom_data, dict) else {}
-            if isinstance(group_obj, str):
-                try:
-                    group_obj = json.loads(group_obj)
-                except Exception:
-                    group_obj = {}
-            for cfg in items_cfg:
-                iid = cfg.get("id")
-                delta = float(cfg.get("per_unit_delta") or 0)
-                count = 0
-                if isinstance(group_obj, dict) and iid in group_obj:
                     try:
-                        count = int(group_obj.get(iid) or 0)
+                        stored_total = float(stored_raw)
                     except Exception:
-                        count = 0
-                total += count * delta
-    else:
-        total_key = conf.get("total_key") or "default"
-        for s_column in scoring_cols:
-            sconf = s_column.get("scoring_config")
-            if isinstance(sconf, str):
+                        stored_total = None
+            elif isinstance(stored_raw, dict) and stored_raw.get("total") is not None:
                 try:
-                    sconf = json.loads(sconf)
+                    stored_total = float(stored_raw.get("total"))
                 except Exception:
-                    sconf = {}
-            sconf = sconf or {}
-            if (sconf.get("total_key") or "default") != total_key:
+                    stored_total = None
+
+            conf = total_col.get("scoring_config")
+            if isinstance(conf, str):
+                try:
+                    conf = json.loads(conf)
+                except Exception:
+                    conf = {}
+            conf = conf or {}
+
+            if stored_total is not None:
+                item[col_key] = stored_total
+                if isinstance(custom_data, dict):
+                    custom_data[col_key] = json.dumps({'total': stored_total}, ensure_ascii=False)
+                item.setdefault("__stored_totals__", {})[col_key] = stored_total
                 continue
-            items_cfg = sconf.get("items") or []
-            group_obj = custom_data.get(s_column.get("column_key"), {}) if isinstance(custom_data, dict) else {}
-            if isinstance(group_obj, str):
-                try:
-                    group_obj = json.loads(group_obj)
-                except Exception:
-                    group_obj = {}
-            for cfg in items_cfg:
-                iid = cfg.get("id")
-                delta = float(cfg.get("per_unit_delta") or 0)
-                count = 0
-                if isinstance(group_obj, dict) and iid in group_obj:
-                    try:
-                        count = int(group_obj.get(iid) or 0)
-                    except Exception:
+
+            base = conf.get("base_score", 100)
+            include_keys = conf.get("include_keys") or []
+            total = base
+
+            if include_keys:
+                for key in include_keys:
+                    target = next((c for c in scoring_cols if c.get("column_key") == key), None)
+                    if not target:
+                        continue
+                    sconf = target.get("scoring_config")
+                    if isinstance(sconf, str):
+                        try:
+                            sconf = json.loads(sconf)
+                        except Exception:
+                            sconf = {}
+                    sconf = sconf or {}
+                    items_cfg = sconf.get("items") or []
+                    group_obj = custom_data.get(key, {}) if isinstance(custom_data, dict) else {}
+                    if isinstance(group_obj, str):
+                        try:
+                            group_obj = json.loads(group_obj)
+                        except Exception:
+                            group_obj = {}
+                    for cfg in items_cfg:
+                        iid = cfg.get("id")
+                        delta = float(cfg.get("per_unit_delta") or 0)
                         count = 0
-                total += count * delta
+                        if isinstance(group_obj, dict) and iid in group_obj:
+                            try:
+                                count = int(group_obj.get(iid) or 0)
+                            except Exception:
+                                count = 0
+                        total += count * delta
+            else:
+                total_key = conf.get("total_key") or "default"
+                for s_column in scoring_cols:
+                    sconf = s_column.get("scoring_config")
+                    if isinstance(sconf, str):
+                        try:
+                            sconf = json.loads(sconf)
+                        except Exception:
+                            sconf = {}
+                    sconf = sconf or {}
+                    if (sconf.get("total_key") or "default") != total_key:
+                        continue
+                    items_cfg = sconf.get("items") or []
+                    group_obj = custom_data.get(s_column.get("column_key"), {}) if isinstance(custom_data, dict) else {}
+                    if isinstance(group_obj, str):
+                        try:
+                            group_obj = json.loads(group_obj)
+                        except Exception:
+                            group_obj = {}
+                    for cfg in items_cfg:
+                        iid = cfg.get("id")
+                        delta = float(cfg.get("per_unit_delta") or 0)
+                        count = 0
+                        if isinstance(group_obj, dict) and iid in group_obj:
+                            try:
+                                count = int(group_obj.get(iid) or 0)
+                            except Exception:
+                                count = 0
+                        total += count * delta
 
-    item[col_key] = total
-
+            item[col_key] = total
     def _build_pagination(self, page: int, per_page: int, total_count: int):
         class Pagination:
             def __init__(self, page: int, per_page: int, total_count: int) -> None:
