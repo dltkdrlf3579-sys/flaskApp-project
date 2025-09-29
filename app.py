@@ -2886,7 +2886,8 @@ def _resolve_storage_path(file_path: str) -> Optional[str]:
     if drive_match:
         drive_letter = raw_path[0].lower()
         remainder = raw_path[2:].lstrip('\\/')
-        wsl_candidate = f"/mnt/{drive_letter}/{remainder.replace('\\', '/')}"
+        remainder_for_wsl = remainder.replace('\\', '/')
+        wsl_candidate = f"/mnt/{drive_letter}/{remainder_for_wsl}"
         add_candidate(wsl_candidate)
 
     # 7. WSL 경로(/mnt/c/..) → Windows 경로(C:\..)
@@ -2894,8 +2895,8 @@ def _resolve_storage_path(file_path: str) -> Optional[str]:
         parts = raw_path.split('/')
         if len(parts) > 3:
             drive_letter = parts[2]
-            remainder = '\\'.join(parts[3:])
-            windows_candidate = f"{drive_letter.upper()}:\\{remainder}"
+            remainder_windows = '\\'.join(parts[3:])
+            windows_candidate = f"{drive_letter.upper()}:\\{remainder_windows}"
             add_candidate(windows_candidate)
 
     for candidate in candidates:
