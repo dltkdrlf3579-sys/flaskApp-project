@@ -21,7 +21,7 @@ from column_service import ColumnConfigService
 from search_popup_service import SearchPopupService
 from column_sync_service import ColumnSyncService
 from db_connection import get_db_connection
-from db.compat import CompatConnection
+from database_config import execute_SQL
 from db.upsert import safe_upsert
 from column_utils import normalize_column_types, determine_linked_type
 from upload_utils import sanitize_filename, validate_uploaded_files
@@ -9171,58 +9171,24 @@ def api_admin_usage_dashboard():
         except Exception:
             return None
 
-    usage_cfg = db_config.config
-    usage_backend = usage_cfg.get('USAGE_DASHBOARD', 'db_backend', fallback=usage_cfg.get('DATABASE', 'db_backend', fallback='postgres')).strip().lower()
-    usage_dsn = usage_cfg.get('USAGE_DASHBOARD', 'postgres_dsn', fallback='').strip()
-    usage_schema = usage_cfg.get('USAGE_DASHBOARD', 'schema', fallback='').strip()
-
-    def _open_usage_connection():
-        if usage_dsn:
-            backend = usage_backend or 'postgres'
-            return CompatConnection(backend=backend, dsn=usage_dsn)
-        return get_db_connection()
-
     def _fetch_trend(option_name):
         query = db_config.config.get('USAGE_DASHBOARD', option_name, fallback='').strip()
         if not query:
             return []
 
-        conn = None
-        cursor = None
         try:
-            conn = _open_usage_connection()
-            cursor = conn.cursor()
-            if usage_schema and getattr(conn, 'is_postgres', False):
-                safe_schema = usage_schema.replace(';', ' ').replace('--', ' ')
-                try:
-                    cursor.execute(f"SET search_path TO {safe_schema}, public")
-                except Exception as exc:
-                    logging.debug("Usage dashboard search_path 설정 실패 (%s): %s", usage_schema, exc)
-            cursor.execute(query)
-            rows = cursor.fetchall() or []
+            df = execute_SQL(query)
         except Exception as exc:  # noqa: BLE001
             logging.error("Usage dashboard query 실패 (%s): %s", option_name, exc)
             return []
-        finally:
-            if cursor:
-                try:
-                    cursor.close()
-                except Exception:
-                    pass
-            if conn:
-                conn.close()
+
+        if df is None or df.empty:
+            return []
 
         trend = []
-        for row in rows:
-            raw_date = _extract(row, 'date', 0)
-            raw_count = _extract(row, 'count', 1)
-
-            if raw_date is None:
-                raw_date = _extract(row, 'usage_date', 0)
-            if raw_count is None:
-                raw_count = _extract(row, 'total', 1)
-                if raw_count is None:
-                    raw_count = _extract(row, 'value', 1)
+        for record in [{k.lower(): v for k, v in row.items()} for row in df.to_dict(orient='records')]:
+            raw_date = record.get('date') or record.get('usage_date')
+            raw_count = record.get('count') or record.get('total') or record.get('value')
 
             if isinstance(raw_date, datetime):
                 date_str = raw_date.strftime('%Y-%m-%d')
