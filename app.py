@@ -9176,17 +9176,58 @@ def api_admin_usage_dashboard():
         if not query:
             return []
 
+        records = []
+        df = None
         try:
             df = execute_SQL(query)
         except Exception as exc:  # noqa: BLE001
-            logging.error("Usage dashboard query 실패 (%s): %s", option_name, exc)
-            return []
+            logging.debug("Usage dashboard iqadb 조회 실패 (%s): %s", option_name, exc)
 
-        if df is None or df.empty:
+        if df is not None:
+            try:
+                records = [{k.lower(): v for k, v in row.items()} for row in df.to_dict(orient='records')]
+            except Exception as exc:  # noqa: BLE001
+                logging.debug("Usage dashboard iqadb 결과 변환 실패 (%s): %s", option_name, exc)
+                records = []
+
+        if not records:
+            conn = None
+            cursor = None
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                try:
+                    cursor.execute("SET search_path TO iqadb, public")
+                except Exception as exc:  # noqa: BLE001
+                    logging.debug("Usage dashboard search_path 설정 실패 (계속 진행): %s", exc)
+
+                cursor.execute(query)
+                fetched = cursor.fetchall() or []
+                column_names = [desc[0].lower() for desc in cursor.description] if cursor.description else []
+
+                for row in fetched:
+                    if hasattr(row, 'keys'):
+                        lowered = {str(key).lower(): row[key] for key in row.keys()}
+                    else:
+                        lowered = {column_names[idx]: row[idx] for idx in range(min(len(column_names), len(row)))}
+                    records.append(lowered)
+            except Exception as exc:  # noqa: BLE001
+                logging.error("Usage dashboard query 실패 (%s): %s", option_name, exc)
+                return []
+            finally:
+                if cursor:
+                    try:
+                        cursor.close()
+                    except Exception:
+                        pass
+                if conn:
+                    conn.close()
+
+        if not records:
             return []
 
         trend = []
-        for record in [{k.lower(): v for k, v in row.items()} for row in df.to_dict(orient='records')]:
+        for record in records:
             raw_date = record.get('date') or record.get('usage_date')
             raw_count = record.get('count') or record.get('total') or record.get('value')
 

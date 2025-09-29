@@ -57,10 +57,10 @@
                 {% endif %}
                 
                 {% set all_columns = section_columns[section.section_key] %}
-                <!-- detailed_content와 violation_content는 제외하고 일반 필드만 batch 처리 -->
+                <!-- detailed_content는 별도 영역으로 처리 -->
                 {% set columns = [] %}
                 {% for col in all_columns %}
-                    {% if col.column_key not in ['detailed_content', 'violation_content', 'fullprocess_number', 'created_at'] %}
+                    {% if col.column_key not in ['detailed_content', 'fullprocess_number', 'created_at'] %}
                         {% set _ = columns.append(col) %}
                     {% endif %}
                 {% endfor %}
