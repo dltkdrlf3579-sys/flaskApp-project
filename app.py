@@ -4340,8 +4340,7 @@ def admin_data_management():
 
 
 @app.route('/api/table-search')
-@login_required
-@admin_required
+@require_admin_auth
 def api_table_search():
     group = request.args.get('group', '').strip()
     query = request.args.get('q', '').strip()
