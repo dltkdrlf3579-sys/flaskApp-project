@@ -21,6 +21,7 @@ from column_service import ColumnConfigService
 from search_popup_service import SearchPopupService
 from column_sync_service import ColumnSyncService
 from db_connection import get_db_connection
+from db.compat import CompatConnection
 from db.upsert import safe_upsert
 from column_utils import normalize_column_types, determine_linked_type
 from upload_utils import sanitize_filename, validate_uploaded_files
@@ -9021,6 +9022,7 @@ def api_admin_audit_logs():
         params.extend([per_page, (page - 1) * per_page])
         cursor.execute(query, params)
         logs = cursor.fetchall()
+        select_columns = [desc[0] for desc in cursor.description] if cursor.description else []
 
         count_query = "SELECT COUNT(*) FROM access_audit_log al WHERE 1=1"
         count_params = []
@@ -9063,13 +9065,11 @@ def api_admin_audit_logs():
             except Exception:
                 return value
 
-        columns = [desc[0] for desc in cursor.description] if cursor.description else []
-
         def _row_to_dict(row_tuple):
-            if not columns:
+            if not select_columns:
                 return {}
             mapping = {}
-            for idx, col_name in enumerate(columns):
+            for idx, col_name in enumerate(select_columns):
                 try:
                     mapping[col_name] = row_tuple[idx]
                 except Exception:
@@ -9160,6 +9160,17 @@ def api_admin_usage_dashboard():
         except Exception:
             return None
 
+    usage_cfg = db_config.config
+    usage_backend = usage_cfg.get('USAGE_DASHBOARD', 'db_backend', fallback=usage_cfg.get('DATABASE', 'db_backend', fallback='postgres')).strip().lower()
+    usage_dsn = usage_cfg.get('USAGE_DASHBOARD', 'postgres_dsn', fallback='').strip()
+    usage_schema = usage_cfg.get('USAGE_DASHBOARD', 'schema', fallback='').strip()
+
+    def _open_usage_connection():
+        if usage_dsn:
+            backend = usage_backend or 'postgres'
+            return CompatConnection(backend=backend, dsn=usage_dsn)
+        return get_db_connection()
+
     def _fetch_trend(option_name):
         query = db_config.config.get('USAGE_DASHBOARD', option_name, fallback='').strip()
         if not query:
@@ -9168,13 +9179,14 @@ def api_admin_usage_dashboard():
         conn = None
         cursor = None
         try:
-            conn = get_db_connection()
+            conn = _open_usage_connection()
             cursor = conn.cursor()
-            try:
-                cursor.execute("SET search_path TO iqadb, public")
-            except Exception as exc:  # noqa: BLE001
-                logging.debug("Usage dashboard search_path 설정 실패 (계속 진행): %s", exc)
-
+            if usage_schema and getattr(conn, 'is_postgres', False):
+                safe_schema = usage_schema.replace(';', ' ').replace('--', ' ')
+                try:
+                    cursor.execute(f"SET search_path TO {safe_schema}, public")
+                except Exception as exc:
+                    logging.debug("Usage dashboard search_path 설정 실패 (%s): %s", usage_schema, exc)
             cursor.execute(query)
             rows = cursor.fetchall() or []
         except Exception as exc:  # noqa: BLE001
