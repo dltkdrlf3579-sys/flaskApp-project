@@ -203,9 +203,29 @@ class FollowSopRepository:
             for row in rows
         ]
 
+    def _clean_custom_values(self, payload):
+        """Normalize placeholder strings like 'None' to actual None."""
+        if not isinstance(payload, dict):
+            return payload
+        cleaned = {}
+        for key, value in payload.items():
+            if isinstance(value, str):
+                stripped = value.strip()
+                if stripped.lower() in ('none', 'null'):
+                    cleaned[key] = None
+                elif stripped == '':
+                    cleaned[key] = None
+                else:
+                    cleaned[key] = stripped
+            elif isinstance(value, dict):
+                cleaned[key] = self._clean_custom_values(value)
+            else:
+                cleaned[key] = value
+        return cleaned
+
     def _normalise_custom_data(self, value) -> Dict[str, Any]:
         if isinstance(value, dict):
-            return value
+            return self._clean_custom_values(value)
         if isinstance(value, str):
             cleaned = value.strip()
             if not cleaned:
@@ -213,7 +233,7 @@ class FollowSopRepository:
             try:
                 parsed = json.loads(cleaned)
                 if isinstance(parsed, dict):
-                    return parsed
+                    return self._clean_custom_values(parsed)
             except Exception:
                 return {}
             return {}
