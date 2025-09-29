@@ -9022,7 +9022,14 @@ def api_admin_audit_logs():
         params.extend([per_page, (page - 1) * per_page])
         cursor.execute(query, params)
         logs = cursor.fetchall()
-        select_columns = [desc[0] for desc in cursor.description] if cursor.description else []
+
+        def _cursor_description(cur):
+            desc = getattr(cur, 'description', None)
+            if desc is None and hasattr(cur, '_cursor'):
+                desc = getattr(cur._cursor, 'description', None)
+            return desc or []
+
+        select_columns = [desc[0] for desc in _cursor_description(cursor) if desc]
 
         count_query = "SELECT COUNT(*) FROM access_audit_log al WHERE 1=1"
         count_params = []
@@ -9066,14 +9073,18 @@ def api_admin_audit_logs():
                 return value
 
         def _row_to_dict(row_tuple):
-            if not select_columns:
-                return {}
             mapping = {}
-            for idx, col_name in enumerate(select_columns):
+            if select_columns:
+                for idx, col_name in enumerate(select_columns):
+                    try:
+                        mapping[col_name] = row_tuple[idx]
+                    except Exception:
+                        continue
+            elif hasattr(row_tuple, 'keys') and callable(row_tuple.keys):
                 try:
-                    mapping[col_name] = row_tuple[idx]
+                    mapping = {k: row_tuple[k] for k in row_tuple.keys()}
                 except Exception:
-                    pass
+                    mapping = {}
             return mapping
 
         log_payload = []
