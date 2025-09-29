@@ -513,7 +513,7 @@ window.openTableSearch = function openTableSearch(fieldKey) {
         alert('필드를 찾을 수 없습니다.');
         return;
     }
-    const tableGroup = input.getAttribute('data-table-group');
+    const tableGroup = input.getAttribute('data-table-group') || input.getAttribute('data-table-type');
     window.currentTableSearchField = fieldKey;
     window.currentTableSearchGroup = tableGroup;
     const modal = document.getElementById('table-search-modal');

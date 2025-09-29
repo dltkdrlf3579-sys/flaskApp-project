@@ -147,7 +147,7 @@
                                            class="{{ section.section_key|replace('_', '-') }}-input linked-field"
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
-                                           {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                           {% if col.table_type or col.table_group %}data-table-group="{{ col.table_type or col.table_group }}"{% endif %}
                                            {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                            readonly>
                                 {% elif col.column_type and col.column_type.startswith('popup') %}
@@ -157,7 +157,7 @@
                                                class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
-                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type or col.table_group %}data-table-group="{{ col.table_type or col.table_group }}"{% endif %}
                                                {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                placeholder="클릭하여 선택"
                                                readonly>
@@ -173,7 +173,7 @@
                                                class="{{ section.section_key|replace('_', '-') }}-input"
                                                data-field="{{ col.column_key }}"
                                                data-section="{{ section.section_key }}"
-                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type or col.table_group %}data-table-group="{{ col.table_type or col.table_group }}"{% endif %}
                                                {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                                placeholder="검색하여 선택"
                                                readonly
