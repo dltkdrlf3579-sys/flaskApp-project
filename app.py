@@ -2836,22 +2836,84 @@ def update_accident():
     return response
 
 
+def _resolve_storage_path(file_path: str) -> Optional[str]:
+    """DB에 저장된 파일 경로를 실제 파일 시스템 경로로 매핑한다."""
+    if not file_path:
+        return None
+
+    raw_path = str(file_path).strip().strip('\"\'')
+    if not raw_path:
+        return None
+
+    import os
+    import re
+    from flask import current_app
+
+    candidates: list[str] = []
+
+    def add_candidate(path: Optional[str]) -> None:
+        if not path:
+            return
+        normalized = path
+        if normalized not in candidates:
+            candidates.append(normalized)
+
+    # 1. 원본 경로 그대로
+    add_candidate(raw_path)
+
+    # 2. OS 기본 구분자로 정규화한 경로
+    normalized_sep = raw_path.replace('\\', os.sep)
+    add_candidate(normalized_sep)
+
+    # 3. 절대 경로라면 그대로 검사
+    if os.path.isabs(normalized_sep):
+        add_candidate(os.path.normpath(normalized_sep))
+
+    # 4. 현재 작업 디렉터리 기준 상대 경로
+    rel_fragment = normalized_sep.lstrip('/\\')
+    add_candidate(os.path.join(os.getcwd(), rel_fragment))
+
+    # 5. Flask 애플리케이션 루트 기준 상대 경로
+    try:
+        app_root = current_app.root_path
+    except Exception:
+        app_root = None
+    if app_root:
+        add_candidate(os.path.join(app_root, rel_fragment))
+
+    # 6. Windows 드라이브 경로(C:\..) → WSL 경로(/mnt/c/..)
+    drive_match = re.match(r'^[A-Za-z]:[\\/]', raw_path)
+    if drive_match:
+        drive_letter = raw_path[0].lower()
+        remainder = raw_path[2:].lstrip('\\/')
+        wsl_candidate = f"/mnt/{drive_letter}/{remainder.replace('\\', '/')}"
+        add_candidate(wsl_candidate)
+
+    # 7. WSL 경로(/mnt/c/..) → Windows 경로(C:\..)
+    if raw_path.startswith('/mnt/'):
+        parts = raw_path.split('/')
+        if len(parts) > 3:
+            drive_letter = parts[2]
+            remainder = '\\'.join(parts[3:])
+            windows_candidate = f"{drive_letter.upper()}:\\{remainder}"
+            add_candidate(windows_candidate)
+
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+
+    return None
+
+
 def _send_attachment_response(file_path: str, original_name: Optional[str], mime_type: Optional[str] = None):
     """첨부파일을 안전하게 전송하는 공통 헬퍼"""
     from flask import send_file
     import os
     from urllib.parse import quote
 
-    if not file_path:
-        return "File path missing", 400
-
-    if os.path.isabs(file_path):
-        actual_file_path = file_path
-    else:
-        actual_file_path = os.path.join(os.getcwd(), file_path.lstrip('/\\'))
-
-    if not os.path.exists(actual_file_path):
-        logging.error(f"파일을 찾을 수 없습니다: {actual_file_path}")
+    actual_file_path = _resolve_storage_path(file_path)
+    if not actual_file_path:
+        logging.error(f"파일을 찾을 수 없습니다: {file_path}")
         return "File not found on disk", 404
 
     original_name = original_name or os.path.basename(actual_file_path) or 'download'
