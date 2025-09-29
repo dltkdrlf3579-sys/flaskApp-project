@@ -2992,7 +2992,14 @@ def _get_attachment_info(board_type: str, attachment_id: int, conn=None) -> Opti
         if close_conn:
             conn.close()
         if row:
-            file_path, file_name, mime_type = row
+            try:
+                file_path = row['file_path']
+                file_name = row['file_name']
+                mime_type = row.get('mime_type') if hasattr(row, 'get') else row['mime_type']
+            except (TypeError, KeyError):
+                file_path = row[0] if len(row) > 0 else None
+                file_name = row[1] if len(row) > 1 else None
+                mime_type = row[2] if len(row) > 2 else None
             return {'path': file_path, 'name': file_name, 'mime_type': mime_type or None}
         return None
 
