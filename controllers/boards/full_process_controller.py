@@ -356,6 +356,14 @@ class FullProcessController(BoardController):
                         stored_total = float(stored_raw)
                     except Exception:
                         stored_total = None
+            elif isinstance(stored_raw, (int, float)):
+                stored_total = float(stored_raw)
+
+            elif isinstance(stored_raw, dict) and stored_raw.get("total") is not None:
+                try:
+                    stored_total = float(stored_raw.get("total"))
+                except Exception:
+                    stored_total = None
             elif isinstance(stored_raw, dict) and stored_raw.get("total") is not None:
                 try:
                     stored_total = float(stored_raw.get("total"))
