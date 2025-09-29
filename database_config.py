@@ -53,6 +53,160 @@ def _to_sqlite_safe(v):
         return float(v)
     return v
 
+
+def _sanitize_external_value(value):
+    """외부 데이터에서 들어오는 값 정규화"""
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if not trimmed:
+            return ''
+        lowered = trimmed.lower()
+        if lowered in ('none', 'null', 'nan', 'undefined'):
+            return None
+        return trimmed
+
+    if value is None:
+        return None
+
+    if isinstance(value, (pd.Timestamp, datetime, date)) or str(type(value)).endswith(("numpy.datetime64'>", "numpy.timedelta64'>")):
+        return str(value)
+
+    if isinstance(value, Decimal):
+        return float(value)
+
+    if isinstance(value, (np.integer, )):
+        return int(value)
+
+    if isinstance(value, (np.floating, )):
+        return float(value)
+
+    return value
+
+
+def _clean_row_dict(row):
+    """DataFrame row → dict 변환 시 값 정리"""
+    if hasattr(row, 'to_dict'):
+        raw = row.to_dict()
+    else:
+        raw = dict(row)
+
+    cleaned = {}
+    for key, value in raw.items():
+        cleaned[key] = _sanitize_external_value(value)
+    return cleaned
+
+
+def _safe_int(value):
+    if value in (None, ''):
+        return 0
+    try:
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return 0
+            value = value.replace(',', '')
+        return int(float(value))
+    except Exception:
+        return 0
+
+
+def _safe_float(value):
+    if value in (None, ''):
+        return None
+    try:
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+            value = value.replace(',', '')
+        return float(value)
+    except Exception:
+        return None
+
+
+SYSTEM_SECTIONS = {
+    'DEFAULT', 'DATABASE', 'SECURITY', 'LOGGING', 'DASHBOARD',
+    'SQL_QUERIES', 'COLUMNS', 'MASTER_DATA_QUERIES',
+    'CONTENT_DATA_QUERIES', 'SSO', 'APPLICATION', 'REDIS'
+}
+
+
+def _build_scoring_mappings() -> dict:
+    mappings = {}
+    for section_name in config.sections():
+        upper = section_name.upper()
+        if upper in SYSTEM_SECTIONS or upper.startswith('SCORING_MAPPING_'):
+            continue
+
+        section = config[section_name]
+        item_columns = {
+            key: value for key, value in section.items()
+            if key.lower().startswith('item_') and value
+        }
+        if not item_columns:
+            continue
+
+        mappings[section_name] = {
+            'items': item_columns,
+            'total_column': section.get('total') or section.get('total_column') or section.get('score_total'),
+            'total_key': section.get('total_key')
+        }
+    return mappings
+
+
+SCORING_MAPPINGS = _build_scoring_mappings()
+
+
+def _apply_scoring_mappings(row_dict: dict) -> dict:
+    for group, info in SCORING_MAPPINGS.items():
+        item_columns = info.get('items', {})
+        if not item_columns:
+            continue
+
+        present = any(col in row_dict for col in item_columns.values())
+        if not present:
+            continue
+
+        payload = {}
+        for item_id, column_name in item_columns.items():
+            raw_value = row_dict.pop(column_name, None)
+            payload[item_id] = _safe_int(raw_value)
+
+        row_dict[group] = json.dumps(payload, ensure_ascii=False)
+
+        candidate_cols = []
+        total_column = info.get('total_column')
+        if total_column:
+            candidate_cols.append(total_column)
+        candidate_cols.extend([
+            f'{group}_total',
+            f'{group}_total_score',
+            f'{group}_score_total',
+            f'{group}_points',
+        ])
+
+        for candidate in candidate_cols:
+            if not candidate or candidate not in row_dict:
+                continue
+            total_value = _safe_float(row_dict.pop(candidate, None))
+            total_key = info.get('total_key') or candidate
+            if total_value is not None:
+                row_dict[total_key] = str(total_value)
+            break
+
+    return row_dict
+
+
+def _prepare_row_custom_data(row) -> dict:
+    cleaned = _clean_row_dict(row)
+    return _apply_scoring_mappings(cleaned)
+
 def execute_SQL(query):
     """
     기존 성공 방식: IQADB_CONNECT310을 사용한 데이터베이스 조회
@@ -853,34 +1007,31 @@ class PartnerDataManager:
             # 배치 삽입을 위한 데이터 준비 (동적 컬럼 방식)
             rows = []
             for _, row in df.iterrows():
-                # 모든 데이터를 custom_data에 JSON으로 저장
-                row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
-                # 날짜 타입들을 안전하게 문자열로 변환 (GPT 지침에 따른 정확한 numpy 감지)
-                for k, v in row_dict.items():
-                    if isinstance(v, (pd.Timestamp, datetime, date)) or str(type(v)).endswith(("numpy.datetime64'>", "numpy.timedelta64'>")):
-                        row_dict[k] = str(v)
-                    elif pd.isna(v):
-                        row_dict[k] = None
+                row_dict = _prepare_row_custom_data(row)
 
-                # 원본 데이터 그대로 저장 (수동 업데이트로 변경)
                 custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
-                
+
                 # issue_number 추출
-                issue_number = (row.get('issue_number') or row.get('발부번호') or '').strip()
+                issue_number = str(
+                    row_dict.get('issue_number') or row_dict.get('발부번호') or ''
+                ).strip()
                 if not issue_number:
                     # UNIQUE 키가 비어 있으면 스킵
                     continue
 
                 # 외부 created_at 추출 (Full Process처럼)
-                created_at_str = (row.get('created_at', '') or
-                                row.get('CREATED_AT', '') or
-                                row.get('발부일', '') or
-                                row.get('작성일', '') or
-                                row.get('issue_date', '') or
-                                row.get('ISSUE_DATE', '') or
-                                row.get('등록일', '') or
-                                row.get('REG_DATE', '') or
-                                row.get('reg_date', ''))
+                created_at_str = (
+                    row_dict.get('created_at') or
+                    row_dict.get('CREATED_AT') or
+                    row_dict.get('발부일') or
+                    row_dict.get('작성일') or
+                    row_dict.get('issue_date') or
+                    row_dict.get('ISSUE_DATE') or
+                    row_dict.get('등록일') or
+                    row_dict.get('REG_DATE') or
+                    row_dict.get('reg_date') or
+                    ''
+                )
 
                 # 날짜 파싱
                 created_dt = None
@@ -969,26 +1120,20 @@ class PartnerDataManager:
             rows = []
             date_counters = {}  # Track counters for each date within this batch
             for idx, row in df.iterrows():
-                # 모든 데이터를 custom_data에 JSON으로 저장
-                row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
-                # 날짜 타입들을 안전하게 문자열로 변환 (GPT 지침에 따른 정확한 numpy 감지)
-                for k, v in row_dict.items():
-                    if isinstance(v, (pd.Timestamp, datetime, date)) or str(type(v)).endswith(("numpy.datetime64'>", "numpy.timedelta64'>")):
-                        row_dict[k] = str(v)
-                    elif pd.isna(v):
-                        row_dict[k] = None
+                row_dict = _prepare_row_custom_data(row)
                 custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
-                
-                # created_at 또는 작업일자 추출하여 FS 형식 번호 생성
-                # 외부 DB의 다양한 날짜 필드 확인
-                created_at_str = (row.get('created_at', '') or
-                                row.get('CREATED_AT', '') or
-                                row.get('작업일자', '') or
-                                row.get('work_date', '') or
-                                row.get('WORK_DATE', '') or
-                                row.get('등록일', '') or
-                                row.get('REG_DATE', '') or
-                                row.get('reg_date', ''))
+
+                created_at_str = (
+                    row_dict.get('created_at') or
+                    row_dict.get('CREATED_AT') or
+                    row_dict.get('작업일자') or
+                    row_dict.get('work_date') or
+                    row_dict.get('WORK_DATE') or
+                    row_dict.get('등록일') or
+                    row_dict.get('REG_DATE') or
+                    row_dict.get('reg_date') or
+                    ''
+                )
 
                 # 날짜 파싱 시도
                 created_dt = None
@@ -1042,9 +1187,12 @@ class PartnerDataManager:
                     work_req_no = f'FS{date_str}{new_counter:04d}'
                 except Exception as e:
                     # 번호 생성 실패시 원본 사용 또는 새 형식으로 생성
-                    work_req_no = (row.get('work_req_no', '') or
-                                  row.get('작업요청번호', '') or
-                                  row.get('work_request_number', ''))
+                    work_req_no = str(
+                        row_dict.get('work_req_no') or
+                        row_dict.get('작업요청번호') or
+                        row_dict.get('work_request_number') or
+                        ''
+                    ).strip()
                     if not work_req_no:
                         # 새 형식으로 fallback: FSYYMMDDNNNN
                         # idx가 크면 모듈로 연산으로 제한
@@ -1132,28 +1280,21 @@ class PartnerDataManager:
             rows = []
             date_counters = {}  # Track counters for each date within this batch
             for idx, row in df.iterrows():
-                # 모든 데이터를 custom_data에 JSON으로 저장
-                row_dict = row.to_dict() if hasattr(row, 'to_dict') else dict(row)
-                # 날짜 타입들을 안전하게 문자열로 변환 (GPT 지침에 따른 정확한 numpy 감지)
-                for k, v in row_dict.items():
-                    if isinstance(v, (pd.Timestamp, datetime, date)) or str(type(v)).endswith(("numpy.datetime64'>", "numpy.timedelta64'>")):
-                        row_dict[k] = str(v)
-                    elif pd.isna(v):
-                        row_dict[k] = None
+                row_dict = _prepare_row_custom_data(row)
 
-                # 원본 데이터 그대로 저장 (수동 업데이트로 변경)
                 custom_data = json.dumps(row_dict, ensure_ascii=False, default=str)
-                
-                # created_at 또는 평가일자 추출하여 FP 형식 번호 생성
-                # 외부 DB의 다양한 날짜 필드 확인
-                created_at_str = (row.get('created_at', '') or
-                                row.get('CREATED_AT', '') or
-                                row.get('평가일자', '') or
-                                row.get('process_date', '') or
-                                row.get('PROCESS_DATE', '') or
-                                row.get('등록일', '') or
-                                row.get('REG_DATE', '') or
-                                row.get('reg_date', ''))
+
+                created_at_str = (
+                    row_dict.get('created_at') or
+                    row_dict.get('CREATED_AT') or
+                    row_dict.get('평가일자') or
+                    row_dict.get('process_date') or
+                    row_dict.get('PROCESS_DATE') or
+                    row_dict.get('등록일') or
+                    row_dict.get('REG_DATE') or
+                    row_dict.get('reg_date') or
+                    ''
+                )
 
                 # 날짜 파싱 시도
                 try:
@@ -1206,9 +1347,12 @@ class PartnerDataManager:
                     fullprocess_number = f'FP{date_str}{new_counter:05d}'
                 except Exception as e:
                     # 번호 생성 실패시 원본 사용 또는 새 형식으로 생성
-                    fullprocess_number = (row.get('fullprocess_number', '') or
-                                         row.get('프로세스번호', '') or
-                                         row.get('process_number', ''))
+                    fullprocess_number = str(
+                        row_dict.get('fullprocess_number') or
+                        row_dict.get('프로세스번호') or
+                        row_dict.get('process_number') or
+                        ''
+                    ).strip()
                     if not fullprocess_number:
                         # 새 형식으로 fallback: FPYYMMDDNNNNN
                         # idx가 크면 모듈로 연산으로 제한
