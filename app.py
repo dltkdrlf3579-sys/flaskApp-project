@@ -3017,11 +3017,19 @@ def auto_upload_partner_files():
 
         default_suffix = '통합레포트'
         if description_input:
-            description_value = description_input
-            suffix_text = description_input
+            base_name = description_input
         else:
-            description_value = f"{company_name}_{year}년_{month}월_{default_suffix}"
-            suffix_text = default_suffix
+            base_name = f"{company_name}_{year}년_{month}월_{default_suffix}"
+        base_name = re.sub(r'[<>:"/\|?*%]', '_', str(base_name)).strip() or default_suffix
+        description_value = base_name
+
+        display_input = data.get('file_name') or data.get('display_name')
+        display_list = None
+        display_single = None
+        if isinstance(display_input, list):
+            display_list = [re.sub(r'[<>:"/\|?*%]', '_', str(item)).strip() for item in display_input]
+        elif display_input:
+            display_single = re.sub(r'[<>:"/\|?*%]', '_', str(display_input)).strip()
 
         # 기존 파일 삭제 ( 동일 description )
         deleted_count = 0
@@ -3057,7 +3065,7 @@ def auto_upload_partner_files():
             conn.rollback()
             deleted_count = 0
 
-        for file_path in file_paths:
+        for idx, file_path in enumerate(file_paths):
             try:
                 file_path = Path(file_path).expanduser().resolve()
                 if not file_path.exists():
@@ -3073,12 +3081,30 @@ def auto_upload_partner_files():
 
                 shutil.copy2(file_path, dest_path)
 
-                ext = Path(safe_name).suffix or '.html'
-                suffix_base = suffix_text.rsplit('.', 1)[0]
-                suffix_clean = re.sub(r'[<>:"/\\|?*%]', '_', suffix_base) or '자동업로드'
-                display_name = f"{company_name}_{year}년_{month}월_{suffix_clean}"
-                if not display_name.lower().endswith(ext.lower()):
-                    display_name = f"{display_name}{ext}"
+                if display_list:
+                    try:
+                        idx = file_paths.index(str(file_path))
+                    except ValueError:
+                        idx = 0
+                    base_candidate = display_list[idx] if idx < len(display_list) else display_list[-1]
+                elif display_single:
+                    base_candidate = display_single
+                else:
+                    base_candidate = description_value
+
+                base_candidate = re.sub(r'[<>:"/\|?*%]', '_', str(base_candidate)).strip() or description_value
+
+                original_ext = Path(base_candidate).suffix
+                fallback_ext = Path(safe_name).suffix or '.html'
+                ext = original_ext or fallback_ext
+
+                if original_ext and base_candidate.lower().endswith(original_ext.lower()):
+                    base_without_ext = base_candidate[:-len(original_ext)]
+                else:
+                    base_without_ext = base_candidate
+
+                base_without_ext = base_without_ext.rstrip('.') or description_value
+                display_name = f"{base_without_ext}{ext}"
 
                 cursor.execute(
                     """
@@ -3099,6 +3125,7 @@ def auto_upload_partner_files():
                 uploaded_files.append({
                     "original_path": str(file_path),
                     "uploaded_filename": new_filename,
+                    "display_name": display_name,
                     "file_size": dest_path.stat().st_size,
                 })
 
