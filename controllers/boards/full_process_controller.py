@@ -373,7 +373,7 @@ class FullProcessController(BoardController):
             if stored_total is not None:
                 item[col_key] = stored_total
                 if isinstance(custom_data, dict):
-                    custom_data[col_key] = json.dumps({'total': stored_total}, ensure_ascii=False)
+                    custom_data[col_key] = str(stored_total)
                 item.setdefault("__stored_totals__", {})[col_key] = stored_total
                 continue
 
