@@ -2849,7 +2849,7 @@ def _resolve_storage_path(file_path: str) -> Optional[str]:
     import re
     from flask import current_app
 
-    candidates: list[str] = []
+    candidates: List[str] = []
 
     def add_candidate(path: Optional[str]) -> None:
         if not path:
@@ -2887,7 +2887,7 @@ def _resolve_storage_path(file_path: str) -> Optional[str]:
         drive_letter = raw_path[0].lower()
         remainder = raw_path[2:].lstrip('\\/')
         remainder_for_wsl = remainder.replace('\\', '/')
-        wsl_candidate = f"/mnt/{drive_letter}/{remainder_for_wsl}"
+        wsl_candidate = '/mnt/{}/{}'.format(drive_letter, remainder_for_wsl)
         add_candidate(wsl_candidate)
 
     # 7. WSL 경로(/mnt/c/..) → Windows 경로(C:\..)
@@ -2896,7 +2896,7 @@ def _resolve_storage_path(file_path: str) -> Optional[str]:
         if len(parts) > 3:
             drive_letter = parts[2]
             remainder_windows = '\\'.join(parts[3:])
-            windows_candidate = f"{drive_letter.upper()}:\\{remainder_windows}"
+            windows_candidate = '{}:\\{}'.format(drive_letter.upper(), remainder_windows)
             add_candidate(windows_candidate)
 
     for candidate in candidates:
