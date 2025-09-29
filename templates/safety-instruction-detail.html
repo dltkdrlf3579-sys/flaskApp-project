@@ -258,7 +258,7 @@
                                             <input type="number" min="0" step="1"
                                                    class="scoring-input"
                                                    data-item="{{ it.id }}"
-                                                   data-score="{{ it.per_unit_delta }}"
+                                                   data-score="{{ it.per_unit_delta }}" data-delta="{{ it.per_unit_delta }}"
                                                    data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}"
                                                    value="{{ values[it.id] if values and it.id in values else 0 }}">
                                             {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}

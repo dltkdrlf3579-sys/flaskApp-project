@@ -254,7 +254,7 @@
                                             <input type="number" min="0" step="1"
                                                    class="scoring-input"
                                                    data-item="{{ it.id }}"
-                                                   data-score="{{ it.per_unit_delta }}"
+                                                   data-score="{{ it.per_unit_delta }}" data-delta="{{ it.per_unit_delta }}"
                                                    data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}"
                                                    value="">
                                             {% if sc.get('show_unit_hint', True) %}
