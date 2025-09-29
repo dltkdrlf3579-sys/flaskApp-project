@@ -86,7 +86,14 @@ function initScoringSystem() {
         }
     });
     
-    // 총점 계산
+    // 총점 계산 전에 기존 저장값을 기록
+    document.querySelectorAll('.total-score-display').forEach(display => {
+        if (display.dataset.storedTotal === undefined) {
+            display.dataset.storedTotal = display.value || '';
+            display.dataset.dirty = '0';
+        }
+    });
+
     calculateTotalScore();
 
     // 총점 박스를 관련 채점 그룹 옆으로 재배치 (같은 가족 느낌)
@@ -268,7 +275,9 @@ function calculateTotalScore() {
             scoreValue.className = 'score-value ' + (g.total >= 90 ? 'excellent' : g.total >= 70 ? 'good' : g.total >= 50 ? 'fair' : 'poor');
         }
         const hiddenInput = box.querySelector('input[type="hidden"]');
-        if (hiddenInput) {
+        const totalDisplay = box.querySelector('.total-score-display');
+        const isDirty = totalDisplay && totalDisplay.dataset.dirty === '1';
+        if (hiddenInput && isDirty) {
             hiddenInput.value = JSON.stringify({
                 total: g.total,
                 critical: g.critical,
@@ -308,19 +317,31 @@ function calculateTotalScore() {
 // 개선된 총점 계산 함수
 function calculateScoreTotal() {
     document.querySelectorAll('.score-total-field').forEach(field => {
-        // 먼저 include_keys 기반 계산 여부 확인
+        const totalDisplay = field.querySelector('.total-score-display');
+        const hiddenTotal = field.querySelector('input[type="hidden"][data-field]');
+        const stored = totalDisplay ? totalDisplay.dataset.storedTotal : undefined;
+        const isDirty = totalDisplay ? totalDisplay.dataset.dirty === '1' : true;
+
+        if (totalDisplay && !isDirty && stored !== undefined && stored !== '') {
+            totalDisplay.value = stored;
+            if (hiddenTotal) hiddenTotal.value = stored;
+            return;
+        }
+
         const cfg = parseJsonDeep(field.dataset.config || '{}', {});
         const include = Array.isArray(cfg.include_keys) ? cfg.include_keys : [];
+        const baseScore = typeof cfg.base_score === 'number'
+            ? cfg.base_score
+            : parseInt(field.dataset.baseScore || totalDisplay?.dataset.baseScore || '100', 10);
+        let total = baseScore;
+
         if (include.length > 0) {
-            const baseScore = typeof cfg.base_score === 'number' ? cfg.base_score : parseInt(field.dataset.baseScore || '100');
-            let total = baseScore;
             include.forEach(key => {
                 const group = document.querySelector(`.scoring-group[data-field="${key}"]`);
                 if (!group) return;
                 const scfg = parseJsonDeep(group.dataset.config || '{}', {});
                 const items = Array.isArray(scfg.items) ? scfg.items : [];
 
-                // hidden 대신 직접 scoring-input 값 읽기
                 const values = {};
                 group.querySelectorAll('input.scoring-input').forEach(inp => {
                     const itemId = inp.dataset.item;
@@ -330,7 +351,6 @@ function calculateScoreTotal() {
                 });
 
                 items.forEach(item => {
-                    // affects_score가 false면 총점 반영 제외
                     if (typeof item.affects_score === 'boolean' && !item.affects_score) return;
                     const count = Number(values[item.id] || 0);
                     let delta = Number(item.per_unit_delta || 0);
@@ -338,35 +358,37 @@ function calculateScoreTotal() {
                     total += count * delta;
                 });
             });
-            const totalDisplay = field.querySelector('.total-score-display');
-            if (totalDisplay) totalDisplay.value = total;
-            const hiddenTotal = field.querySelector('input[type="hidden"][data-field]');
-            if (hiddenTotal) hiddenTotal.value = JSON.stringify({ total });
-            // 가시적인 클론 타일의 표시값도 동기화
-            try {
-                const key = field.getAttribute('data-field');
-                if (key) {
-                    document.querySelectorAll(`.score-total-field.score-total-clone[data-field="${key}"] .total-score-display`).forEach(el => {
-                        el.value = total;
+        } else {
+            const fallbackInputs = field.querySelectorAll('.score-item-input.affects-score');
+            if (fallbackInputs.length > 0) {
+                fallbackInputs.forEach(input => {
+                    const value = parseInt(input.value || '0', 10);
+                    const isNegative = input.dataset.negative === 'true';
+                    total += isNegative ? -value : value;
+                });
+            } else {
+                const totalKey = cfg.total_key || 'default';
+                document.querySelectorAll('.scoring-group').forEach(group => {
+                    const scfg = parseJsonDeep(group.dataset.config || '{}', {});
+                    const groupKey = scfg.total_key || scfg.group || 'default';
+                    if (groupKey !== totalKey) return;
+                    const inputs = group.querySelectorAll('.scoring-input');
+                    inputs.forEach(input => {
+                        const value = parseInt(input.value || '0', 10);
+                        const score = parseInt(input.dataset.score || '0', 10);
+                        total += value * score;
                     });
-                }
-            } catch (e) { /* ignore */ }
-            return; // include_keys 모드에서는 기존 방식 생략
+                });
+            }
         }
 
-        // 기존 방식(로컬 박스 내 입력 합산) - 하위호환
-        const baseScore = parseInt(field.dataset.baseScore || '100');
-        let total = baseScore;
-        field.querySelectorAll('.score-item-input.affects-score').forEach(input => {
-            const value = parseInt(input.value || '0');
-            const isNegative = input.dataset.negative === 'true';
-            total += isNegative ? -value : value;
-        });
-        const totalDisplay = field.querySelector('.total-score-display');
-        if (totalDisplay) totalDisplay.value = total;
-        const hiddenInput = field.querySelector('input[type="hidden"]');
-        if (hiddenInput) hiddenInput.value = JSON.stringify({ total });
-        // 클론 타일 동기화
+        if (totalDisplay) {
+            totalDisplay.value = total;
+            totalDisplay.dataset.dirty = '1';
+            totalDisplay.dataset.storedTotal = total;
+        }
+        if (hiddenTotal) hiddenTotal.value = total;
+
         try {
             const key = field.getAttribute('data-field');
             if (key) {
@@ -502,6 +524,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (hidden) {
                     updateHidden();
                 }
+                document.querySelectorAll('.total-score-display').forEach(display => {
+                    display.dataset.dirty = '1';
+                });
                 // 기존 복잡한 함수 대신 간단한 함수 호출
                 simpleScoreCalculation();
                 // calculateTotalScore();
