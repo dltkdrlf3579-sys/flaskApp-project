@@ -343,6 +343,7 @@ class PartnerDataManager:
             df = execute_SQL(query)
             # 외부 DB 컬럼명이 대문자/혼합/한글일 수 있어 표준화 필요
             df = _normalize_df(df)
+            df = df.replace({'None': None, 'null': None, 'NULL': None})
             print(f"[INFO] 데이터 조회 완료: {len(df)} 건")
             try:
                 print(f"[DEBUG] Partners DataFrame columns: {list(df.columns)}")
@@ -1110,6 +1111,8 @@ class PartnerDataManager:
             # 외부 DB에서 데이터 조회
             print("[INFO] IQADB_CONNECT310을 사용하여 FullProcess 데이터 조회 시작...")
             df = execute_SQL(query)
+            df = _normalize_df(df)
+            df = df.replace({'None': None, 'null': None, 'NULL': None})
             print(f"[INFO] FullProcess 데이터 조회 완료: {len(df)} 건")
             
             if df.empty:

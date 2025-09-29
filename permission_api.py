@@ -1167,9 +1167,9 @@ def register_permission_routes(app):
             data = request.json or {}
 
             login_id = session.get('user_id')
-            user_name = session.get('name', '')
-            deptid = session.get('deptid', '')
-            dept_name = session.get('department', '')
+            user_name = (session.get('name') or session.get('user_name') or '').strip()
+            deptid = (session.get('deptid') or session.get('dept_id') or '').strip()
+            dept_name = (session.get('department') or session.get('deptname') or '').strip()
 
             if not login_id:
                 return jsonify({'error': '로그인이 필요합니다'}), 401
@@ -1215,6 +1215,29 @@ def register_permission_routes(app):
 
             conn = get_db_connection()
             cursor = conn.cursor()
+
+            if not user_name or not deptid or not dept_name:
+                try:
+                    cursor.execute("""
+                        SELECT user_name, dept_id, dept_name
+                        FROM system_users
+                        WHERE login_id = %s
+                    """, (login_id,))
+                    user_row = cursor.fetchone()
+                    if user_row:
+                        fetched_name, fetched_deptid, fetched_dept_name = user_row
+                        if not user_name and fetched_name:
+                            user_name = str(fetched_name).strip()
+                        if not deptid and fetched_deptid:
+                            deptid = str(fetched_deptid).strip()
+                        if not dept_name and fetched_dept_name:
+                            dept_name = str(fetched_dept_name).strip()
+                except Exception as exc:
+                    logging.debug("system_users lookup failed for %s: %s", login_id, exc)
+
+            user_name = user_name or ''
+            deptid = deptid or ''
+            dept_name = dept_name or ''
 
             created_ids = []
             created_menu_codes = []
