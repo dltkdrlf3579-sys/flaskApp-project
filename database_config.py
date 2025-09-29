@@ -197,7 +197,9 @@ def _apply_scoring_mappings(row_dict: dict) -> dict:
             total_value = _safe_float(row_dict.pop(candidate, None))
             total_key = info.get('total_key') or candidate
             if total_value is not None:
-                row_dict[total_key] = str(total_value)
+                if isinstance(total_value, float) and total_value.is_integer():
+                    total_value = int(total_value)
+                row_dict[total_key] = json.dumps({'total': total_value}, ensure_ascii=False)
             break
 
     return row_dict
