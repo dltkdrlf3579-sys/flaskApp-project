@@ -182,7 +182,7 @@
                                                id="{{ col.column_key }}_id"
                                                data-field="{{ col.column_key }}_id">
                                         <button class="btn btn-sm btn-primary"
-                                                onclick="alert('테이블 검색 기능은 구현되지 않았습니다.')">검색</button>
+                                                onclick="openTableSearch('{{ col.column_key }}')">검색</button>
                                     </div>
                                 {% else %}
                                     <input type="text"

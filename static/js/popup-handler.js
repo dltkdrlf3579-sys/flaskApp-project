@@ -507,3 +507,101 @@ window.receiveContractorSelection = function(fieldKey, data) {
 console.log('✅ Popup handler loaded');
 
 // 페이지 로드 후 초기화 (디버깅 코드 제거됨)
+window.openTableSearch = function openTableSearch(fieldKey) {
+    const input = document.getElementById(fieldKey);
+    if (!input) {
+        alert('필드를 찾을 수 없습니다.');
+        return;
+    }
+    const tableGroup = input.getAttribute('data-table-group');
+    window.currentTableSearchField = fieldKey;
+    window.currentTableSearchGroup = tableGroup;
+    const modal = document.getElementById('table-search-modal');
+    if (!modal) {
+        alert('검색 모달이 초기화되지 않았습니다.');
+        return;
+    }
+    modal.style.display = 'block';
+    document.getElementById('table-search-query').value = '';
+    document.getElementById('table-search-results').innerHTML = '';
+    document.getElementById('table-search-query').focus();
+}
+
+function closeTableSearch() {
+    const modal = document.getElementById('table-search-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    window.currentTableSearchField = null;
+    window.currentTableSearchGroup = null;
+}
+
+async function performTableSearch() {
+    const query = document.getElementById('table-search-query').value.trim();
+    if (!query) {
+        alert('검색어를 입력하세요.');
+        return;
+    }
+    const tableGroup = window.currentTableSearchGroup;
+    if (!tableGroup) {
+        alert('검색 그룹이 지정되지 않았습니다.');
+        return;
+    }
+    const modal = document.getElementById('table-search-modal');
+    const resultsContainer = document.getElementById('table-search-results');
+    resultsContainer.innerHTML = '<p>검색 중...</p>';
+    try {
+        const response = await fetch(`/api/table-search?group=${encodeURIComponent(tableGroup)}&q=${encodeURIComponent(query)}`);
+        if (!response.ok) {
+            throw new Error(`검색 API 오류 (${response.status})`);
+        }
+        const data = await response.json();
+        if (!Array.isArray(data) || data.length === 0) {
+            resultsContainer.innerHTML = '<p>검색 결과가 없습니다.</p>';
+            return;
+        }
+        resultsContainer.innerHTML = '';
+        data.forEach(row => {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'table-search-item';
+            const label = row.display_name || row.name || row.title || row.code || JSON.stringify(row);
+            item.textContent = label;
+            item.onclick = () => selectTableSearchResult(row);
+            resultsContainer.appendChild(item);
+        });
+    } catch (error) {
+        console.error('Table search error:', error);
+        resultsContainer.innerHTML = `<p>검색 중 오류가 발생했습니다: ${error.message}</p>`;
+    }
+}
+
+function selectTableSearchResult(selectedData) {
+    const fieldKey = window.currentTableSearchField;
+    if (!fieldKey) {
+        closeTableSearch();
+        return;
+    }
+    const tableGroup = window.currentTableSearchGroup;
+    const input = document.getElementById(fieldKey);
+    if (input) {
+        const label = selectedData.display_name || selectedData.name || selectedData.title || selectedData.code || JSON.stringify(selectedData);
+        input.value = label;
+    }
+    const hidden = document.getElementById(`${fieldKey}_id`);
+    if (hidden) {
+        hidden.value = selectedData.id || selectedData.code || selectedData.uid || '';
+    }
+    const details = {};
+    Object.keys(selectedData || {}).forEach(key => {
+        if (key !== 'display_name') {
+            details[key] = selectedData[key];
+        }
+    });
+    updateLinkedFieldsByTableGroup(fieldKey, details, tableGroup);
+    closeTableSearch();
+}
+
+window.performTableSearch = performTableSearch;
+window.closeTableSearch = closeTableSearch;
+window.selectTableSearchResult = selectTableSearchResult;

@@ -544,6 +544,17 @@ class SearchPopupService:
                 'error': str(e)
             }
         
+        # 키 대/소문자 동시 접근 가능하도록 보강
+        for result in results:
+            for key in list(result.keys()):
+                value = result[key]
+                lower = key.lower()
+                upper = key.upper()
+                if lower not in result:
+                    result[lower] = value
+                if upper not in result:
+                    result[upper] = value
+
         # person 타입의 경우 필드명 매핑 (기존 페이지들과의 호환성을 위해)
         if search_type == 'person':
             for result in results:

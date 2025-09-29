@@ -562,5 +562,47 @@
     <!-- 공통 팝업 핸들러 -->
     <script src="{{ url_for('static', filename='js/popup-handler.js') }}"></script>
     
+<!-- Table Search Modal -->
+<div id="table-search-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 600px;">
+        <div class="modal-header">
+            <h3>테이블 항목 검색</h3>
+            <span class="close" onclick="closeTableSearch()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <input type="text" id="table-search-query" class="password-field" placeholder="검색어를 입력하세요">
+            <div class="modal-buttons" style="margin-top: 10px;">
+                <button class="btn-confirm" onclick="performTableSearch()">검색</button>
+                <button class="btn-cancel" onclick="closeTableSearch()">취소</button>
+            </div>
+            <div id="table-search-results" style="margin-top: 15px; max-height: 300px; overflow-y: auto;"></div>
+        </div>
+    </div>
+</div>
 </body>
 </html>
+<style>
+#table-search-modal .modal-content {
+    width: 600px;
+}
+#table-search-results {
+    margin-top: 12px;
+    max-height: 320px;
+    overflow-y: auto;
+}
+.table-search-item {
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    background: white;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+.table-search-item:hover {
+    background-color: #f3f4f6;
+    border-color: #d1d5db;
+}
+</style>

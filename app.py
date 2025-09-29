@@ -3015,7 +3015,13 @@ def auto_upload_partner_files():
         month = korean_time.strftime("%m")
         company_name = (partner.get('company_name') if isinstance(partner, dict) else None) or '협력사'
 
-        description_value = description_input or f"{company_name}_{year}년_{month}월_자동업로드"
+        default_suffix = '통합레포트'
+        if description_input:
+            description_value = description_input
+            suffix_text = description_input
+        else:
+            description_value = f"{company_name}_{year}년_{month}월_{default_suffix}"
+            suffix_text = default_suffix
 
         # 기존 파일 삭제 ( 동일 description )
         deleted_count = 0
@@ -3067,7 +3073,12 @@ def auto_upload_partner_files():
 
                 shutil.copy2(file_path, dest_path)
 
-                display_name = f"{company_name}_{year}년_{month}월_{safe_name}"
+                ext = Path(safe_name).suffix or '.html'
+                suffix_base = suffix_text.rsplit('.', 1)[0]
+                suffix_clean = re.sub(r'[<>:"/\\|?*%]', '_', suffix_base) or '자동업로드'
+                display_name = f"{company_name}_{year}년_{month}월_{suffix_clean}"
+                if not display_name.lower().endswith(ext.lower()):
+                    display_name = f"{display_name}{ext}"
 
                 cursor.execute(
                     """
@@ -4326,6 +4337,106 @@ def admin_usage_dashboard():
 def admin_data_management():
     """데이터 관리 페이지"""
     return render_template('admin-data-management.html', menu=MENU_CONFIG)
+
+
+@app.route('/api/table-search')
+@login_required
+@admin_required
+def api_table_search():
+    group = request.args.get('group', '').strip()
+    query = request.args.get('q', '').strip()
+    if not group or not query:
+        return jsonify([])
+
+    cfg = configparser.ConfigParser()
+    try:
+        cfg.read('config.ini', encoding='utf-8')
+    except Exception as exc:
+        logging.warning(f"table-search config read error: {exc}")
+
+    def _config_query(key: str, fallback: str) -> str:
+        try:
+            base = cfg.get('MASTER_DATA_QUERIES', key, fallback=fallback)
+        except Exception:
+            base = fallback
+        base = base.strip().rstrip(';')
+        return base
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        if group == 'building':
+            base_query = _config_query('building_query', 'SELECT building_code, building_name, site, site_type FROM buildings')
+            wrapped = (
+                "SELECT * FROM (" + base_query + ") AS src "
+                "WHERE (src.building_name ILIKE %s OR src.building_code ILIKE %s) "
+                "ORDER BY src.building_name LIMIT 20"
+            )
+            cursor.execute(wrapped, (f'%{query}%', f'%{query}%'))
+        elif group == 'department':
+            base_query = _config_query('department_query', 'SELECT dept_id, dept_name, parent_dept_code FROM departments')
+            wrapped = (
+                "SELECT * FROM (" + base_query + ") AS src "
+                "WHERE (src.dept_name ILIKE %s OR src.dept_id ILIKE %s) "
+                "ORDER BY src.dept_name LIMIT 20"
+            )
+            cursor.execute(wrapped, (f'%{query}%', f'%{query}%'))
+        else:
+            return jsonify([])
+
+        rows = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+
+        def _value(row_dict, *candidates):
+            for key in candidates:
+                if key in row_dict:
+                    return row_dict[key]
+                lower = key.lower()
+                if lower in row_dict:
+                    return row_dict[lower]
+                upper = key.upper()
+                if upper in row_dict:
+                    return row_dict[upper]
+            return None
+
+        payload = []
+        for row in rows:
+            row_dict = {columns[idx]: row[idx] for idx in range(len(columns))}
+            if group == 'building':
+                code = _value(row_dict, 'building_code', 'code')
+                name = _value(row_dict, 'building_name', 'name', 'title')
+                site = _value(row_dict, 'site', 'site_name')
+                site_type = _value(row_dict, 'site_type', 'zone', 'region')
+                display = f"{name} ({code})" if name and code else (name or code)
+                payload.append({
+                    'id': code,
+                    'code': code,
+                    'name': name,
+                    'display_name': display,
+                    'site': site,
+                    'site_type': site_type,
+                })
+            else:
+                code = _value(row_dict, 'dept_id', 'dept_code', 'code')
+                name = _value(row_dict, 'dept_name', 'name', 'title')
+                parent = _value(row_dict, 'parent_dept_code', 'parent_code', 'parent_id')
+                display = f"{name} ({code})" if name and code else (name or code)
+                payload.append({
+                    'id': code,
+                    'code': code,
+                    'name': name,
+                    'display_name': display,
+                    'parent_dept_code': parent,
+                })
+        return jsonify(payload)
+    except Exception as exc:
+        logging.error(f"Table search error: {exc}")
+        return jsonify([]), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
 
 @app.route("/api/accidents/deleted")
 def get_deleted_accidents():
