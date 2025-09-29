@@ -2881,6 +2881,33 @@ def _resolve_storage_path(file_path: str) -> Optional[str]:
     if app_root:
         add_candidate(os.path.join(app_root, rel_fragment))
 
+    basename = os.path.basename(os.path.normpath(normalized_sep))
+    potential_dirs: List[str] = []
+
+    default_upload = os.path.join(os.getcwd(), 'uploads')
+    potential_dirs.append(default_upload)
+
+    if app_root:
+        potential_dirs.append(os.path.join(app_root, 'uploads'))
+
+    try:
+        cfg_upload = current_app.config.get('UPLOAD_FOLDER')
+    except Exception:
+        cfg_upload = None
+    if cfg_upload:
+        if not os.path.isabs(cfg_upload):
+            cfg_path = os.path.join(app_root or os.getcwd(), cfg_upload)
+        else:
+            cfg_path = cfg_upload
+        potential_dirs.append(cfg_path)
+
+    for folder in potential_dirs:
+        if not folder:
+            continue
+        normalized_folder = os.path.normpath(folder)
+        if basename:
+            add_candidate(os.path.join(normalized_folder, basename))
+
     # 6. Windows 드라이브 경로(C:\..) → WSL 경로(/mnt/c/..)
     drive_match = re.match(r'^[A-Za-z]:[\\/]', raw_path)
     if drive_match:
@@ -2903,6 +2930,7 @@ def _resolve_storage_path(file_path: str) -> Optional[str]:
         if candidate and os.path.exists(candidate):
             return candidate
 
+    logging.error('첨부파일 경로를 찾을 수 없습니다: raw=%s candidates=%s', raw_path, candidates)
     return None
 
 
