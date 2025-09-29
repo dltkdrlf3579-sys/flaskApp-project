@@ -8,6 +8,7 @@
 import psycopg2
 from flask import session, abort, g
 from functools import wraps
+from audit_logger import record_permission_event
 from datetime import datetime, timedelta
 import logging
 import json
@@ -177,19 +178,16 @@ class UnifiedPermissionSystem:
     def log_access(self, emp_id, menu_code, action, success, ip_address=None):
         """접근 로그 기록"""
         try:
-            conn = self.get_db_connection()
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                INSERT INTO access_audit_log
-                (emp_id, accessed_menu, action, success, ip_address, created_at)
-                VALUES (%s, %s, %s, %s, %s, NOW())
-            """, (emp_id, menu_code, action, success, ip_address))
-
-            conn.commit()
-            cursor.close()
-            conn.close()
-
+            record_permission_event(
+                action_type=action,
+                menu_code=menu_code,
+                permission_result='SUCCESS' if success else 'DENIED',
+                success=success,
+                details={'ip_address': ip_address} if ip_address else None,
+                emp_id_override=emp_id,
+                login_id_override=emp_id,
+                ip_address_override=ip_address,
+            )
         except Exception as e:
             logger.error(f"Error logging access: {e}")
 

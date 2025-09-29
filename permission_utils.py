@@ -6,6 +6,8 @@ from functools import wraps
 from flask import session, abort, g, jsonify, request
 from db_connection import get_db_connection
 import logging
+
+from audit_logger import record_permission_event
 from datetime import datetime, timedelta
 import json
 import configparser
@@ -248,31 +250,21 @@ class PermissionService:
     def _log_access(self, emp_id, action, menu_code, success, error_message=None):
         """접근 로그 기록"""
         try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-
-            ip_address = request.remote_addr if request else None
             resource_id = request.args.get('id') if request else None
+            details = {}
+            if resource_id:
+                details['resource_id'] = resource_id
+            if error_message:
+                details['error'] = error_message
 
-            cursor.execute("""
-                INSERT INTO access_audit_log
-                (emp_id, login_id, action, menu_code, resource_id, ip_address, success, error_message)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                emp_id,
-                session.get('user_id'),
-                action,
-                menu_code,
-                resource_id,
-                ip_address,
-                success,
-                error_message
-            ))
-
-            conn.commit()
-            cursor.close()
-            conn.close()
-
+            record_permission_event(
+                action_type=action,
+                menu_code=menu_code,
+                permission_result='SUCCESS' if success else 'DENIED',
+                success=success,
+                details=details or None,
+                error_message=error_message,
+            )
         except Exception as e:
             logger.error(f"Access log error: {e}")
 

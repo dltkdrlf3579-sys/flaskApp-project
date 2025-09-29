@@ -28,6 +28,13 @@ log_level = ERROR
 log_file = /var/log/portal/app.log
 log_db_backend = false
 
+[NOTIFICATION]
+chatbot_webhook_url = http://127.0.0.1:8000/webhook/portal-notification
+chatbot_auth_token = 
+chatbot_timeout = 5
+
+
+
 [PERMISSION]
 # 단계별 활성화 전략
 # Step 1: 완전 비활성화

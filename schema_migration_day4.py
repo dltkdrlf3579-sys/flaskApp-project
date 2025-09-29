@@ -210,6 +210,32 @@ class SchemaMigration:
             """)
             self.changes.append("Added ip_address column to access_audit_log")
 
+
+        required_columns = [
+            ("login_id", "VARCHAR(100)"),
+            ("action_scope", "VARCHAR(50)"),
+            ("action_type", "VARCHAR(50)"),
+            ("action", "VARCHAR(50)"),
+            ("request_path", "TEXT"),
+            ("object_type", "VARCHAR(50)"),
+            ("object_id", "VARCHAR(100)"),
+            ("object_name", "VARCHAR(255)"),
+            ("resource_id", "VARCHAR(100)"),
+            ("permission_result", "VARCHAR(50)"),
+            ("success", "BOOLEAN DEFAULT TRUE"),
+            ("ip_address", "VARCHAR(45)"),
+            ("user_agent", "TEXT"),
+            ("details", "JSONB"),
+            ("error_message", "TEXT")
+        ]
+
+        for column_name, column_def in required_columns:
+            if not self.check_column_exists('access_audit_log', column_name):
+                self.cursor.execute(
+                    f"ALTER TABLE access_audit_log ADD COLUMN IF NOT EXISTS {column_name} {column_def}"
+                )
+                self.changes.append(f"Added {column_name} column to access_audit_log")
+
     def create_missing_indexes(self):
         """누락된 인덱스 생성"""
         logger.info("Creating missing indexes...")

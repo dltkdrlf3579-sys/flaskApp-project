@@ -1049,7 +1049,7 @@ function updateDeleteButton() {
 
 // 비밀번호 확인 후 선택된 협력사 삭제
 function deleteSelectedWithPassword() {
-    PwModal.show(deleteSelected);
+    PwModal.show(deleteSelected, { boardType: 'partner' });
 }
 
 // 선택된 협력사 삭제

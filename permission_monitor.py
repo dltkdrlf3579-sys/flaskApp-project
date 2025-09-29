@@ -11,6 +11,7 @@ import psycopg2
 import json
 import os
 from collections import Counter, defaultdict
+from audit_logger import record_permission_event
 
 class PermissionMonitor:
     def __init__(self):
@@ -68,22 +69,21 @@ class PermissionMonitor:
         else:
             self.logger.warning(log_msg)
 
-        # DB 로그 (access_audit_log 테이블)
-        conn = self.get_db_connection()
-        if conn:
-            try:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO access_audit_log
-                    (emp_id, accessed_menu, action, success, ip_address, created_at)
-                    VALUES (%s, %s, %s, %s, %s, NOW())
-                """, (emp_id, route, 'ACCESS', granted, ip_address))
-                conn.commit()
-                cursor.close()
-            except Exception as e:
-                self.logger.error(f"DB logging failed: {e}")
-            finally:
-                conn.close()
+        try:
+            record_permission_event(
+                action_type='ACCESS',
+                action_scope='PERMISSION',
+                menu_code=role,
+                permission_result=status,
+                success=granted,
+                details={'role': role, 'route': route},
+                request_path=route,
+                emp_id_override=emp_id,
+                login_id_override=emp_id,
+                ip_address_override=ip_address,
+            )
+        except Exception as e:
+            self.logger.error(f"DB logging failed: {e}")
 
     def get_recent_denials(self, hours=24):
         """최근 거부된 접근 조회"""
@@ -94,7 +94,7 @@ class PermissionMonitor:
         try:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT emp_id, accessed_menu, created_at, ip_address
+                SELECT emp_id, COALESCE(menu_code, request_path) AS access_target, created_at, ip_address
                 FROM access_audit_log
                 WHERE success = false
                   AND created_at > NOW() - INTERVAL '%s hours'
@@ -149,18 +149,18 @@ class PermissionMonitor:
 
             # 가장 많이 접근한 메뉴
             cursor.execute("""
-                SELECT accessed_menu, COUNT(*) as cnt
+                SELECT COALESCE(menu_code, request_path) AS access_target, COUNT(*) as cnt
                 FROM access_audit_log
                 WHERE emp_id = %s
                   AND created_at > NOW() - INTERVAL '%s days'
-                GROUP BY accessed_menu
+                GROUP BY access_target
                 ORDER BY cnt DESC
                 LIMIT 5
             """, (emp_id, days))
 
             top_menus = []
-            for menu, count in cursor.fetchall():
-                top_menus.append({'menu': menu, 'count': count})
+            for target, count in cursor.fetchall():
+                top_menus.append({'menu': target, 'count': count})
 
             cursor.close()
             conn.close()
@@ -213,11 +213,11 @@ class PermissionMonitor:
 
             # 3. 가장 많이 거부된 라우트
             cursor.execute("""
-                SELECT accessed_menu, COUNT(*) as cnt
+                SELECT COALESCE(menu_code, request_path) AS access_target, COUNT(*) as cnt
                 FROM access_audit_log
                 WHERE DATE(created_at) = CURRENT_DATE
                   AND success = false
-                GROUP BY accessed_menu
+                GROUP BY access_target
                 ORDER BY cnt DESC
                 LIMIT 5
             """)
@@ -290,7 +290,7 @@ Denied: {denied} ({denied/total*100:.1f}% if total > 0 else 0%)
             # 최근 5분 내 5회 이상 거부된 사용자
             cursor.execute("""
                 SELECT emp_id, COUNT(*) as denial_count,
-                       array_agg(DISTINCT accessed_menu) as denied_routes
+                       array_agg(DISTINCT COALESCE(menu_code, request_path)) as denied_routes
                 FROM access_audit_log
                 WHERE success = false
                   AND created_at > NOW() - INTERVAL '5 minutes'

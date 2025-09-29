@@ -1244,7 +1244,7 @@ function updateDeleteButton() {
 
 // 비밀번호 확인 후 선택한 항목 삭제
 function deleteSelectedWithPassword() {
-    PwModal.show(deleteSelected);
+    PwModal.show(deleteSelected, { boardType: 'change_request' });
 }
 
 // 선택한 항목 삭제

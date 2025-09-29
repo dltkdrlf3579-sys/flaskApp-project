@@ -24,19 +24,63 @@ MENU_PERMISSION_MAP = {
     'partner-change-request': 'REFERENCE_CHANGE',
     'partner-change-request-detail': 'REFERENCE_CHANGE',
     'accident': 'ACCIDENT_MGT',
+    'accident-register': 'ACCIDENT_MGT',
+    'accident-detail': 'ACCIDENT_MGT',
+    'accident-update': 'ACCIDENT_MGT',
+    'partner-accident': 'ACCIDENT_MGT',
     'safety-instruction': 'SAFETY_INSTRUCTION',
+    'safety-instruction-register': 'SAFETY_INSTRUCTION',
+    'safety-instruction-detail': 'SAFETY_INSTRUCTION',
+    'safety-instruction-update': 'SAFETY_INSTRUCTION',
     'follow-sop': 'FOLLOW_SOP',
+    'follow-sop-register': 'FOLLOW_SOP',
+    'follow-sop-detail': 'FOLLOW_SOP',
+    'follow-sop-update': 'FOLLOW_SOP',
     'safe-workplace': 'SAFE_WORKPLACE',
+    'safe-workplace-register': 'SAFE_WORKPLACE',
+    'safe-workplace-detail': 'SAFE_WORKPLACE',
+    'safe-workplace-update': 'SAFE_WORKPLACE',
     'full-process': 'FULL_PROCESS',
+    'full-process-register': 'FULL_PROCESS',
+    'full-process-detail': 'FULL_PROCESS',
+    'full-process-update': 'FULL_PROCESS',
     'safety-council': 'SAFETY_COUNCIL',
 }
+
+_SUFFIXES = (
+    '-register',
+    '-detail',
+    '-update',
+    '-create',
+    '-edit',
+    '-view',
+    '-list',
+    '-delete',
+)
+
 def resolve_menu_code(slug: str) -> str:
     if not slug:
         return ''
     key = slug.strip('/').lower()
     if key in MENU_PERMISSION_MAP:
         return MENU_PERMISSION_MAP[key]
-    return key.replace('-', '_').upper()
+
+    trimmed = key
+    for suffix in _SUFFIXES:
+        if trimmed.endswith(suffix):
+            base = trimmed[: -len(suffix)]
+            if base in MENU_PERMISSION_MAP:
+                return MENU_PERMISSION_MAP[base]
+            trimmed = base
+            if trimmed in MENU_PERMISSION_MAP:
+                return MENU_PERMISSION_MAP[trimmed]
+    if trimmed in MENU_PERMISSION_MAP:
+        return MENU_PERMISSION_MAP[trimmed]
+
+    fallback = trimmed.replace('-', '_').upper()
+    if fallback == '':
+        return 'HOME'
+    return fallback
 
 def build_user_menu_config():
     try:

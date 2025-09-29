@@ -11,6 +11,7 @@ import logging
 import json
 from datetime import datetime, timedelta
 
+from audit_logger import record_permission_event
 # 로깅 설정
 logging.basicConfig(
     level=logging.INFO,
@@ -180,19 +181,21 @@ def create_delegation(delegator_id, delegate_id, menu_code, permissions, end_dat
 
         delegation_id = cursor.fetchone()[0]
 
-        # 감사 로그
-        cursor.execute("""
-            INSERT INTO access_audit_log
-            (emp_id, menu_code, action_type, request_path, permission_result, details)
-            VALUES (%s, %s, 'DELEGATION_CREATE', 'permission_delegation', 'SUCCESS', %s)
-        """, (delegator_id, menu_code, json.dumps({
-            'delegation_id': delegation_id,
-            'delegate_id': delegate_id,
-            'permissions': valid_permissions,
-            'end_date': end_date.isoformat()
-        })))
-
         conn.commit()
+
+        record_permission_event(
+            action_type='DELEGATION_CREATE',
+            menu_code=menu_code,
+            permission_result='SUCCESS',
+            details={
+                'delegation_id': delegation_id,
+                'delegate_id': delegate_id,
+                'permissions': valid_permissions,
+                'end_date': end_date.isoformat() if hasattr(end_date, 'isoformat') else str(end_date)
+            },
+            emp_id_override=delegator_id,
+            login_id_override=delegator_id,
+        )
         logger.info(f"✓ 권한 위임 생성: {delegation_id}")
 
         return delegation_id
@@ -302,18 +305,20 @@ def revoke_delegation(delegation_id, revoked_by):
             WHERE delegation_id = %s
         """, (revoked_by, delegation_id))
 
-        # 감사 로그
-        cursor.execute("""
-            INSERT INTO access_audit_log
-            (emp_id, menu_code, action_type, request_path, permission_result, details)
-            VALUES (%s, %s, 'DELEGATION_REVOKE', 'permission_delegation', 'SUCCESS', %s)
-        """, (revoked_by, delegation[2], json.dumps({
-            'delegation_id': delegation_id,
-            'delegator_id': delegation[0],
-            'delegate_id': delegation[1]
-        })))
-
         conn.commit()
+
+        record_permission_event(
+            action_type='DELEGATION_REVOKE',
+            menu_code=delegation[2],
+            permission_result='SUCCESS',
+            details={
+                'delegation_id': delegation_id,
+                'delegator_id': delegation[0],
+                'delegate_id': delegation[1]
+            },
+            emp_id_override=revoked_by,
+            login_id_override=revoked_by,
+        )
         logger.info(f"✓ 권한 위임 취소: {delegation_id}")
 
         return True
@@ -356,15 +361,25 @@ def cleanup_expired_delegations():
             # 감사 로그
             for (delegation_id,) in expired:
                 cursor.execute("""
-                    INSERT INTO access_audit_log
-                    (emp_id, menu_code, action_type, request_path,
-                     permission_result, details)
-                    SELECT delegator_id, menu_code, 'DELEGATION_EXPIRE',
-                           'permission_delegation', 'SUCCESS',
-                           json_build_object('delegation_id', delegation_id)
+                    SELECT delegator_id, menu_code, delegate_id
                     FROM permission_delegations
                     WHERE delegation_id = %s
                 """, (delegation_id,))
+                row = cursor.fetchone()
+                if not row:
+                    continue
+                delegator_id, menu_code, delegate_id = row
+                record_permission_event(
+                    action_type='DELEGATION_EXPIRE',
+                    menu_code=menu_code,
+                    permission_result='SUCCESS',
+                    details={
+                        'delegation_id': delegation_id,
+                        'delegate_id': delegate_id
+                    },
+                    emp_id_override=delegator_id,
+                    login_id_override=delegator_id,
+                )
 
         conn.commit()
         return len(expired) if expired else 0

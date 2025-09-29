@@ -31,8 +31,10 @@ from permission_helpers import (
     enforce_permission,
     resolve_menu_code,
 )
+from audit_logger import record_audit_log, record_board_action, record_menu_view, normalize_scope, normalize_action, normalize_result
+from notification_service import get_notification_service, NotificationError
 from permission_api import register_permission_routes
-from add_page_routes import follow_sop_bp, full_process_bp, safe_workplace_bp
+from add_page_routes import follow_sop_bp, full_process_bp, safe_workplace_bp, _response_info
 from boards.safety_instruction import safety_instruction_bp
 from controllers.boards.accident_controller import (
     AccidentController,
@@ -296,6 +298,46 @@ app.jinja_env.cache = {}
 # Scoring Service Import
 # =====================
 from scoring_service import calculate_score as _calc_score
+
+# =====================
+# Notification API
+# =====================
+@app.route('/api/notifications/send', methods=['POST'])
+def api_send_notification():
+    payload = request.get_json(silent=True)
+    if not payload:
+        return jsonify({'success': False, 'message': 'JSON 본문이 필요합니다.'}), 400
+
+    if not (session.get('admin_authenticated') or session.get('user_id')):
+        return jsonify({'success': False, 'message': '인증이 필요합니다.'}), 401
+
+    channel = (payload.get('channel') or 'chatbot').lower()
+    event = payload.get('event')
+    recipients = payload.get('recipients')
+    context = payload.get('context') or {}
+    metadata = payload.get('metadata') or None
+
+    if not event:
+        return jsonify({'success': False, 'message': 'event 값은 필수입니다.'}), 400
+    if not recipients:
+        return jsonify({'success': False, 'message': 'recipients 목록이 필요합니다.'}), 400
+
+    service = get_notification_service()
+    try:
+        result = service.send_event_notification(
+            channel=channel,
+            event=event,
+            recipients=recipients,
+            context=context,
+            metadata=metadata,
+        )
+        return jsonify({'success': True, 'result': result})
+    except NotificationError as exc:
+        return jsonify({'success': False, 'message': str(exc)}), 400
+    except Exception as exc:
+        logging.exception('Notification API error: %s', exc)
+        return jsonify({'success': False, 'message': '알림 전송 중 오류가 발생했습니다.'}), 500
+
 
 # =====================
 # Scoring API
@@ -879,7 +921,9 @@ def accident_route():
     guard = enforce_permission('ACCIDENT_MGT', 'view')
     if guard:
         return guard
-    return _accident_controller.list_view(request)
+    response = _accident_controller.list_view(request)
+    record_menu_view('ACCIDENT_MGT')
+    return response
 
 
 def _table_has_column(conn, table_name: str, column_name: str) -> bool:
@@ -1775,7 +1819,9 @@ def accident_register():
     guard = enforce_permission('ACCIDENT_MGT', 'write')
     if guard:
         return guard
-    return _accident_controller.register_view(request)
+    response = _accident_controller.register_view(request)
+    record_board_action('ACCIDENT_MGT', 'VIEW', object_type='ACCIDENT', object_name='register')
+    return response
 
 
 @app.route("/accident-detail/<accident_id>")
@@ -1784,7 +1830,16 @@ def accident_detail(accident_id):
     guard = enforce_permission('ACCIDENT_MGT', 'view')
     if guard:
         return guard
-    return _accident_controller.detail_view(request, accident_id)
+    response = _accident_controller.detail_view(request, accident_id)
+    success, _ = _response_info(response)
+    record_board_action(
+        'ACCIDENT_MGT',
+        'VIEW',
+        object_type='ACCIDENT',
+        object_id=accident_id,
+        success=success,
+    )
+    return response
 
 
 @app.route("/register-accident", methods=["POST"])
@@ -1793,7 +1848,18 @@ def register_accident():
     guard = enforce_permission('ACCIDENT_MGT', 'write', response_type='json')
     if guard:
         return guard
-    return _accident_controller.save(request)
+    response = _accident_controller.save(request)
+    success, payload = _response_info(response)
+    record_board_action(
+        'ACCIDENT_MGT',
+        'CREATE',
+        object_type='ACCIDENT',
+        object_id=(payload.get('accident_number') if isinstance(payload, dict) else None),
+        success=success,
+        details=payload if isinstance(payload, dict) else None,
+        error_message=(payload.get('message') if isinstance(payload, dict) and not success else None),
+    )
+    return response
 
 
 @app.route("/partner-accident")
@@ -2756,7 +2822,18 @@ def update_accident():
     guard = enforce_permission('ACCIDENT_MGT', 'write', response_type='json')
     if guard:
         return guard
-    return _accident_controller.update(request)
+    response = _accident_controller.update(request)
+    success, payload = _response_info(response)
+    record_board_action(
+        'ACCIDENT_MGT',
+        'UPDATE',
+        object_type='ACCIDENT',
+        object_id=(payload.get('accident_number') if isinstance(payload, dict) else None),
+        success=success,
+        details=payload if isinstance(payload, dict) else None,
+        error_message=(payload.get('message') if isinstance(payload, dict) and not success else None),
+    )
+    return response
 
 
 def _send_attachment_response(file_path: str, original_name: Optional[str], mime_type: Optional[str] = None):
@@ -2904,156 +2981,153 @@ def get_partner_attachments(business_number):
 @app.route("/api/auto-upload-partner-files", methods=['POST'])
 def auto_upload_partner_files():
     """협력사 사업자번호에 대한 HTML 파일 자동 생성 및 업로드"""
+    conn = None
+    cursor = None
     try:
-        data = request.get_json()
-        business_number = data.gedt('business_number')
-        file_paths = data.get('file_paths', [])
-        
+        data = request.get_json() or {}
+        business_number = (data.get('business_number') or '').strip()
+        file_paths = data.get('file_paths') or []
+        description_input = (data.get('description') or '').strip()
+
         if not business_number:
             return jsonify({"error": "business_number is required"}), 400
-            
         if not file_paths:
             return jsonify({"error": "file_paths is required"}), 400
-        
+
         # 협력사 정보 확인
         partner = partner_manager.get_partner_by_business_number(business_number)
         if not partner:
             return jsonify({"error": f"Partner not found: {business_number}"}), 404
-        
+
         # 업로드 폴더 (현재 작업 디렉토리 기준 상대경로)
         upload_folder = Path(os.getcwd()) / "uploads"
         upload_folder.mkdir(parents=True, exist_ok=True)
-        
+
         uploaded_files = []
         skipped = []  # 업로드 실패한 파일 추적
         conn = get_db_connection()
         cursor = conn.cursor()
-        
-        # 자동 업로드 설명 문구 정의
-        auto_upload_desc = "통합레포트 자동업로드(매월 삭제 및 최신월 레포트로 교체됩니다)"
-        
-        # 기존 파일들 삭제 (자동 업로드된 파일만 삭제)
+
+        from timezone_config import get_korean_time, get_korean_time_str
+
+        korean_time = get_korean_time()
+        year = korean_time.strftime("%Y")
+        month = korean_time.strftime("%m")
+        company_name = (partner.get('company_name') if isinstance(partner, dict) else None) or '협력사'
+
+        description_value = description_input or f"{company_name}_{year}년_{month}월_자동업로드"
+
+        # 기존 파일 삭제 ( 동일 description )
         deleted_count = 0
         try:
-            # 기존 자동 업로드 파일 정보 조회 (정확한 설명 문구만)
-            existing_files = cursor.execute("""
-                SELECT file_path FROM partner_attachments 
+            existing_files = cursor.execute(
+                """
+                SELECT file_path FROM partner_attachments
                 WHERE business_number = %s AND description = %s
-            """, (business_number, auto_upload_desc)).fetchall()
-            
-            # 파일 시스템에서 삭제
+                """,
+                (business_number, description_value)
+            ).fetchall()
+
             for file_row in existing_files:
                 old_file_path = Path(file_row['file_path'])
                 if old_file_path.exists():
                     try:
                         old_file_path.unlink()
                         logging.info(f"Deleted old file: {old_file_path}")
-                    except Exception as e:
-                        logging.warning(f"Failed to delete old file {old_file_path}: {e}")
-            
-            # DB에서 삭제 (정확한 설명 문구만)
-            cursor.execute("""
-                DELETE FROM partner_attachments 
+                    except Exception as exc:
+                        logging.warning(f"Failed to delete old file {old_file_path}: {exc}")
+
+            cursor.execute(
+                """
+                DELETE FROM partner_attachments
                 WHERE business_number = %s AND description = %s
-            """, (business_number, auto_upload_desc))
+                """,
+                (business_number, description_value)
+            )
             conn.commit()
             deleted_count = len(existing_files)
-            logging.info(f"Deleted {deleted_count} old files for {business_number}")
-            
-        except Exception as e:
-            logging.error(f"Error deleting old files: {e}")
-            # 기존 파일 삭제 실패해도 계속 진행
-        
+        except Exception as exc:
+            logging.error(f"Error deleting old files: {exc}")
+            conn.rollback()
+            deleted_count = 0
+
         for file_path in file_paths:
             try:
-                # 절대경로로 변환
                 file_path = Path(file_path).expanduser().resolve()
                 if not file_path.exists():
                     logging.warning(f"File not found: {file_path}")
                     skipped.append(str(file_path))
                     continue
-                
-                # 파일명 안전화 (한글 유지)
+
                 original_name = file_path.name
-                # 위험한 문자만 제거, 한글은 유지 (Windows 금지문자: <>:"/\|?*%)
-                safe_name = re.sub(r'[<>:"/\\|?*%]', '_', original_name) if original_name else "file"
+                safe_name = re.sub(r'[<>:"/\|?*%]', '_', original_name) if original_name else "file"
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 new_filename = f"{business_number}_{timestamp}_{safe_name}"
                 dest_path = upload_folder / new_filename
-                
-                # 파일 복사
-                shutil.copy2(file_path, dest_path)
-                
-                # DB에 저장 (기존 컬럼만 사용)
-                # 한국 시간으로 년도와 월 정보, 회사명 가져오기
-                korean_time = get_korean_time()
-                year = korean_time.strftime("%Y")
-                month = korean_time.strftime("%m")
-                try:
-                    company_name = partner['company_name'] or '협력사'
-                except (KeyError, TypeError):
-                    company_name = '협력사'
-                
-                # 표시용 한글 파일명 생성 (base64 인코딩 제거)
-                korean_filename = f"{company_name}_{year}년_{month}월_통합레포트.html"
-                auto_upload_desc = korean_filename
 
-                from timezone_config import get_korean_time_str
-                cursor.execute("""
+                shutil.copy2(file_path, dest_path)
+
+                display_name = f"{company_name}_{year}년_{month}월_{safe_name}"
+
+                cursor.execute(
+                    """
                     INSERT INTO partner_attachments
                     (business_number, file_name, file_path, file_size, upload_date, description)
                     VALUES (%s, %s, %s, %s, %s, %s)
-                """, (
-                    business_number,
-                    korean_filename,        # 한글 표시명 (인코딩 없이 그대로)
-                    str(dest_path),         # file_path (실제 파일 경로)
-                    dest_path.stat().st_size, # file_size
-                    get_korean_time_str(),  # upload_date (한국 시간)
-                    auto_upload_desc        # description (자동 업로드 설명)
-                ))
-                
+                    """,
+                    (
+                        business_number,
+                        display_name,
+                        str(dest_path),
+                        dest_path.stat().st_size,
+                        get_korean_time_str(),
+                        description_value,
+                    ),
+                )
+
                 uploaded_files.append({
                     "original_path": str(file_path),
                     "uploaded_filename": new_filename,
-                    "file_size": dest_path.stat().st_size
+                    "file_size": dest_path.stat().st_size,
                 })
-                
+
                 logging.info(f"File uploaded: {file_path.name} → {new_filename}")
-  
-            except Exception as e:
-                logging.error(f"Error processing file {file_path}: {str(e)}")
+
+            except Exception as exc:
+                logging.error(f"Error processing file {file_path}: {exc}")
                 skipped.append(str(file_path))
                 continue
-        
+
         conn.commit()
-        conn.close()
-        
-        # 응답 상태 코드 설정 (200: 모두 성공, 207: 일부 성공, 400: 모두 실패)
+
         status = 200 if uploaded_files and not skipped else (207 if uploaded_files and skipped else 400)
-        
+
         return jsonify({
             "success": bool(uploaded_files),
             "business_number": business_number,
+            "description": description_value,
             "uploaded_files": uploaded_files,
-            "skipped": skipped,  # 실패한 파일 목록
-            "deleted_count": deleted_count,  # 삭제된 기존 파일 개수
+            "skipped": skipped,
+            "deleted_count": deleted_count,
             "total_uploaded": len(uploaded_files),
             "total_skipped": len(skipped),
             "message": f"기존 {deleted_count}개 파일 삭제 후 {len(uploaded_files)}개 새 파일 업로드"
         }), status
-        
-    except Exception as e:
-        logging.error(f"Error in auto_upload_partner_files: {str(e)}")
-        return jsonify({"error": str(e)}), 500
 
+    except Exception as exc:
+        logging.error(f"Error in auto_upload_partner_files: {exc}")
+        return jsonify({"error": str(exc)}), 500
 
+    finally:
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
-# ===== Phase 1: 동적 컬럼 관리 API =====
-
-# 테스트용 간단한 라우트
-@app.route("/api/test-route")
-def test_route():
-    return jsonify({"message": "Test route works!"})
 
 @app.route("/api/accident-columns", methods=["GET"])
 def get_accident_columns():
@@ -7700,6 +7774,116 @@ def add_header(response):
     return response
 
 
+EXCLUDED_AUDIT_PATHS = {
+    '/api/admin/audit-logs',
+    '/api/admin/usage-dashboard',
+}
+
+
+@app.after_request
+def audit_request_activity(response):
+    """요청/응답 단위 감사 로그 기록"""
+    try:
+        path = request.path or ''
+        if not path or path.startswith('/static') or path.startswith('/favicon'):
+            return response
+        if request.method == 'OPTIONS':
+            return response
+        if path in EXCLUDED_AUDIT_PATHS:
+            return response
+
+        endpoint = request.endpoint or ''
+        scope = 'API'
+        if path.startswith('/api/admin') or endpoint.startswith('admin_'):
+            scope = 'SYSTEM'
+        elif 'permission' in endpoint or path.startswith('/api/permission'):
+            scope = 'PERMISSION'
+        elif not path.startswith('/api'):
+            scope = 'MENU'
+
+        slug_parts = path.strip('/').split('/')
+        primary = slug_parts[0] if slug_parts else ''
+        menu_code = resolve_menu_code(primary) if primary else None
+        if scope == 'SYSTEM' and menu_code and menu_code.upper().startswith('API'):
+            menu_code = 'SYSTEM'
+        elif scope == 'API' and not menu_code:
+            menu_code = resolve_menu_code(primary) or 'API'
+        elif scope == 'MENU' and not menu_code and primary:
+            menu_code = resolve_menu_code(primary) or primary.replace('-', '_').upper()
+        elif scope == 'MENU' and not menu_code:
+            menu_code = 'HOME'
+
+        lowered_endpoint = endpoint.lower()
+        lowered_path = path.lower()
+        action_hint = None
+
+        def _match_action(keywords, label):
+            nonlocal action_hint
+            if action_hint is not None:
+                return
+            for word in keywords:
+                if word in lowered_endpoint or word in lowered_path:
+                    action_hint = label
+                    return
+
+        _match_action(['register', 'create', 'new'], 'REGISTER')
+        _match_action(['detail', 'view'], 'DETAIL')
+        _match_action(['update', 'modify', 'edit'], 'UPDATE')
+        _match_action(['delete', 'remove'], 'DELETE')
+        _match_action(['list', 'index'], 'LIST')
+
+        if action_hint is None:
+            method = request.method.upper()
+            if method == 'POST':
+                action_hint = 'CREATE'
+            elif method in ('PUT', 'PATCH'):
+                action_hint = 'UPDATE'
+            elif method == 'DELETE':
+                action_hint = 'DELETE'
+            elif method == 'GET':
+                action_hint = 'VIEW'
+            else:
+                action_hint = method
+
+        status_code = response.status_code
+        success = status_code < 400
+        details = {
+            'method': request.method,
+            'endpoint': endpoint,
+            'status_code': status_code,
+        }
+        if request.args:
+            details['query'] = {
+                key: request.args.getlist(key) if len(request.args.getlist(key)) > 1 else request.args.get(key)
+                for key in request.args
+            }
+        if request.blueprint:
+            details['blueprint'] = request.blueprint
+        json_payload = None
+        try:
+            json_payload = request.get_json(silent=True)
+        except Exception:
+            json_payload = None
+        if isinstance(json_payload, dict):
+            details['json_keys'] = list(json_payload.keys())[:10]
+        elif json_payload is not None:
+            details['json_type'] = type(json_payload).__name__
+
+        record_audit_log(
+            action_scope=scope,
+            action_type=action_hint,
+            action=action_hint,
+            menu_code=menu_code,
+            request_path=path,
+            permission_result='SUCCESS' if success else 'FAILED',
+            success=success,
+            details=details,
+        )
+    except Exception as exc:
+        app.logger.debug('Audit logging skipped: %s', exc)
+    return response
+
+
 @app.route('/api/partner-change-request', methods=['POST'])
 def create_partner_change_request():
     """기준정보 변경요청 등록 API"""
@@ -8486,6 +8670,180 @@ def api_menus():
     return jsonify(flattened)
 
 
+@app.route('/api/admin/audit-logs')
+@require_admin_auth
+def api_admin_audit_logs():
+    """감사 로그 리스트"""
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+    per_page = max(1, min(per_page, 200))
+
+    start_date = request.args.get('start_date', '')
+    end_date = request.args.get('end_date', '')
+    action_type_param = request.args.get('action_type', '')
+    scope_param = request.args.get('scope', '')
+    menu_code_param = request.args.get('menu_code', '')
+    result_param = request.args.get('result', '')
+    success_param = request.args.get('success', '')
+    user_param = request.args.get('user', '')
+
+    normalized_action = normalize_action(action_type_param) if action_type_param else ''
+    normalized_scope = normalize_scope(scope_param) if scope_param else ''
+    normalized_result = normalize_result(result_param) if result_param else ''
+
+    success_filter = None
+    if success_param:
+        lowered = success_param.strip().lower()
+        if lowered in ('true', '1', 'yes', 'y'):
+            success_filter = True
+        elif lowered in ('false', '0', 'no', 'n'):
+            success_filter = False
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        query = """
+            SELECT
+                al.created_at,
+                al.emp_id,
+                u.user_name,
+                u.dept_name,
+                al.action_scope,
+                al.action_type,
+                al.action,
+                al.menu_code,
+                COALESCE(mn.menu_name, al.menu_code) AS menu_name,
+                al.request_path,
+                al.object_type,
+                al.object_id,
+                al.object_name,
+                al.success,
+                al.permission_result,
+                al.details,
+                al.ip_address,
+                al.error_message
+            FROM access_audit_log al
+            LEFT JOIN system_users u ON al.emp_id = u.login_id
+            LEFT JOIN menu_names mn ON mn.menu_code = al.menu_code
+            WHERE 1=1
+        """
+        params = []
+
+        if start_date:
+            query += " AND al.created_at >= %s"
+            params.append(start_date)
+        if end_date:
+            query += " AND al.created_at <= %s"
+            params.append(f"{end_date} 23:59:59")
+        if normalized_scope:
+            query += " AND al.action_scope = %s"
+            params.append(normalized_scope)
+        if normalized_action:
+            query += " AND al.action_type = %s"
+            params.append(normalized_action)
+        if menu_code_param:
+            query += " AND al.menu_code = %s"
+            params.append(menu_code_param)
+        if normalized_result:
+            query += " AND al.permission_result = %s"
+            params.append(normalized_result)
+        if success_filter is not None:
+            query += " AND al.success = %s"
+            params.append(success_filter)
+        if user_param:
+            query += " AND (al.emp_id LIKE %s OR u.user_name LIKE %s)"
+            like_value = f"%{user_param}%"
+            params.extend([like_value, like_value])
+
+        query += " ORDER BY al.created_at DESC LIMIT %s OFFSET %s"
+        params.extend([per_page, (page - 1) * per_page])
+        cursor.execute(query, params)
+        logs = cursor.fetchall()
+
+        count_query = "SELECT COUNT(*) FROM access_audit_log al WHERE 1=1"
+        count_params = []
+        if start_date:
+            count_query += " AND al.created_at >= %s"
+            count_params.append(start_date)
+        if end_date:
+            count_query += " AND al.created_at <= %s"
+            count_params.append(f"{end_date} 23:59:59")
+        if normalized_scope:
+            count_query += " AND al.action_scope = %s"
+            count_params.append(normalized_scope)
+        if normalized_action:
+            count_query += " AND al.action_type = %s"
+            count_params.append(normalized_action)
+        if menu_code_param:
+            count_query += " AND al.menu_code = %s"
+            count_params.append(menu_code_param)
+        if normalized_result:
+            count_query += " AND al.permission_result = %s"
+            count_params.append(normalized_result)
+        if success_filter is not None:
+            count_query += " AND al.success = %s"
+            count_params.append(success_filter)
+        if user_param:
+            count_query += " AND (al.emp_id LIKE %s OR EXISTS (SELECT 1 FROM system_users su WHERE su.login_id = al.emp_id AND su.user_name LIKE %s))"
+            like_value = f"%{user_param}%"
+            count_params.extend([like_value, like_value])
+        cursor.execute(count_query, count_params)
+        total_count = cursor.fetchone()[0] if cursor.rowcount != -1 else 0
+
+        def _safe_detail(value):
+            if value is None:
+                return None
+            if isinstance(value, (dict, list)):
+                return value
+            try:
+                import json
+                return json.loads(value)
+            except Exception:
+                return value
+
+        log_payload = []
+        for log in logs:
+            log_payload.append({
+                'created_at': log[0].isoformat() if log[0] else None,
+                'emp_id': log[1],
+                'user_name': log[2],
+                'dept_name': log[3],
+                'action_scope': log[4],
+                'action_type': log[5],
+                'action': log[6],
+                'menu_code': log[7],
+                'menu_name': log[8],
+                'request_path': log[9],
+                'object_type': log[10],
+                'object_id': log[11],
+                'object_name': log[12],
+                'success': log[13],
+                'permission_result': log[14],
+                'details': _safe_detail(log[15]),
+                'ip_address': log[16],
+                'error_message': log[17],
+            })
+
+        return jsonify({
+            'logs': log_payload,
+            'total': total_count,
+            'page': page,
+            'per_page': per_page,
+            'total_pages': (total_count + per_page - 1) // per_page if per_page else 0,
+        })
+    except Exception as exc:
+        logging.exception('Failed to fetch audit logs: %s', exc)
+        return jsonify({'success': False, 'message': str(exc)}), 500
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
+
+
 @app.route('/api/admin/usage-dashboard')
 @require_admin_auth
 def api_admin_usage_dashboard():
@@ -8978,7 +9336,7 @@ def auto_sso_redirect():
     # 제외 경로 (SSO, 정적 파일, API 등)
     excluded_paths = [
         '/SSO', '/sso', '/sso/diagnostics', '/sso/dev-login', '/acs', '/slo', '/static', '/uploads', '/api',
-        '/admin/login', '/debug-session',
+        '/admin/', '/admin/login', '/debug-session',
         # allow automation endpoints without SSO session
         '/admin/sync-now', '/admin/sync-now/', '/admin/cache-counts'
     ]

@@ -197,7 +197,7 @@ function updateDeleteButton() {
 }
 
 function deleteSelectedWithPassword() {
-    PwModal.show(deleteSelected);
+    PwModal.show(deleteSelected, { boardType: 'safe_workplace' });
 }
 
 function requestSafeWorkplaceFinalCheck() {

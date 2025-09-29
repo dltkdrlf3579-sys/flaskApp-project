@@ -883,7 +883,7 @@ function requestFullProcessFinalCheck() {
 
 // 비밀번호 확인 후 선택한 항목 삭제
 function deleteSelectedWithPassword() {
-    PwModal.show(deleteSelected);
+    PwModal.show(deleteSelected, { boardType: 'full_process' });
 }
 
 function markFullProcessFinalCheck() {

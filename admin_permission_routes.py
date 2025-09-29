@@ -12,6 +12,7 @@ import json
 from datetime import datetime, timedelta
 from functools import wraps
 import hashlib
+from audit_logger import record_permission_event, normalize_scope, normalize_action, normalize_result
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'
@@ -104,7 +105,7 @@ def permission_dashboard():
                 al.details,
                 al.permission_result
             FROM access_audit_log al
-            LEFT JOIN system_users u ON al.emp_id = u.emp_id
+            LEFT JOIN system_users u ON al.emp_id = u.login_id
             WHERE al.action_type IN ('PERMISSION_CHANGE', 'ROLE_CHANGE')
             ORDER BY al.created_at DESC
             LIMIT 10
@@ -323,8 +324,24 @@ def get_audit_logs():
     per_page = request.args.get('per_page', 20, type=int)
     start_date = request.args.get('start_date', '')
     end_date = request.args.get('end_date', '')
-    action_type = request.args.get('action_type', '')
+    action_type_param = request.args.get('action_type', '')
+    scope_param = request.args.get('scope', '')
+    menu_code_param = request.args.get('menu_code', '')
+    result_param = request.args.get('result', '')
+    success_param = request.args.get('success', '')
     user = request.args.get('user', '')
+
+    normalized_action = normalize_action(action_type_param) if action_type_param else ''
+    normalized_scope = normalize_scope(scope_param) if scope_param else ''
+    normalized_result = normalize_result(result_param) if result_param else ''
+
+    success_filter = None
+    if success_param:
+        lowered = success_param.strip().lower()
+        if lowered in ('true', '1', 'yes', 'y'):
+            success_filter = True
+        elif lowered in ('false', '0', 'no', 'n'):
+            success_filter = False
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -334,14 +351,24 @@ def get_audit_logs():
             al.created_at,
             al.emp_id,
             u.user_name,
+            u.dept_name,
+            al.action_scope,
             al.action_type,
+            al.action,
             al.menu_code,
+            COALESCE(mn.menu_name, al.menu_code) AS menu_name,
             al.request_path,
+            al.object_type,
+            al.object_id,
+            al.object_name,
+            al.success,
+            al.permission_result,
             al.details,
             al.ip_address,
-            al.permission_result
+            al.error_message
         FROM access_audit_log al
-        LEFT JOIN system_users u ON al.emp_id = u.emp_id
+        LEFT JOIN system_users u ON al.emp_id = u.login_id
+        LEFT JOIN menu_names mn ON mn.menu_code = al.menu_code
         WHERE 1=1
     """
 
@@ -355,9 +382,25 @@ def get_audit_logs():
         query += " AND al.created_at <= %s"
         params.append(f"{end_date} 23:59:59")
 
-    if action_type:
+    if normalized_scope:
+        query += " AND al.action_scope = %s"
+        params.append(normalized_scope)
+
+    if normalized_action:
         query += " AND al.action_type = %s"
-        params.append(action_type)
+        params.append(normalized_action)
+
+    if menu_code_param:
+        query += " AND al.menu_code = %s"
+        params.append(menu_code_param)
+
+    if normalized_result:
+        query += " AND al.permission_result = %s"
+        params.append(normalized_result)
+
+    if success_filter is not None:
+        query += " AND al.success = %s"
+        params.append(success_filter)
 
     if user:
         query += " AND (al.emp_id LIKE %s OR u.user_name LIKE %s)"
@@ -369,7 +412,6 @@ def get_audit_logs():
     cursor.execute(query, params)
     logs = cursor.fetchall()
 
-    # 전체 개수 조회
     count_query = "SELECT COUNT(*) FROM access_audit_log al WHERE 1=1"
     count_params = []
 
@@ -381,9 +423,29 @@ def get_audit_logs():
         count_query += " AND al.created_at <= %s"
         count_params.append(f"{end_date} 23:59:59")
 
-    if action_type:
+    if normalized_scope:
+        count_query += " AND al.action_scope = %s"
+        count_params.append(normalized_scope)
+
+    if normalized_action:
         count_query += " AND al.action_type = %s"
-        count_params.append(action_type)
+        count_params.append(normalized_action)
+
+    if menu_code_param:
+        count_query += " AND al.menu_code = %s"
+        count_params.append(menu_code_param)
+
+    if normalized_result:
+        count_query += " AND al.permission_result = %s"
+        count_params.append(normalized_result)
+
+    if success_filter is not None:
+        count_query += " AND al.success = %s"
+        count_params.append(success_filter)
+
+    if user:
+        count_query += " AND (al.emp_id LIKE %s OR EXISTS (SELECT 1 FROM system_users su WHERE su.login_id = al.emp_id AND su.user_name LIKE %s))"
+        count_params.extend([f'%{user}%', f'%{user}%'])
 
     cursor.execute(count_query, count_params)
     total_count = cursor.fetchone()[0]
@@ -391,24 +453,42 @@ def get_audit_logs():
     cursor.close()
     conn.close()
 
+    def _safe_detail(value):
+        if value is None:
+            return None
+        if isinstance(value, (dict, list)):
+            return value
+        try:
+            return json.loads(value)
+        except Exception:
+            return value
+
     return jsonify({
         'logs': [{
             'created_at': log[0].isoformat() if log[0] else None,
             'emp_id': log[1],
             'user_name': log[2],
-            'action_type': log[3],
-            'menu_code': log[4],
-            'request_path': log[5],
-            'details': log[6],
-            'ip_address': log[7],
-            'permission_result': log[8]
+            'dept_name': log[3],
+            'action_scope': log[4],
+            'action_type': log[5],
+            'action': log[6],
+            'menu_code': log[7],
+            'menu_name': log[8],
+            'request_path': log[9],
+            'object_type': log[10],
+            'object_id': log[11],
+            'object_name': log[12],
+            'success': log[13],
+            'permission_result': log[14],
+            'details': _safe_detail(log[15]),
+            'ip_address': log[16],
+            'error_message': log[17],
         } for log in logs],
         'total': total_count,
         'page': page,
         'per_page': per_page,
         'total_pages': (total_count + per_page - 1) // per_page
     })
-
 # API: 사용자 역할 변경
 @app.route('/api/admin/user/<emp_id>/role', methods=['POST'])
 @login_required
@@ -445,21 +525,22 @@ def change_user_role(emp_id):
                 VALUES (%s, %s)
             """, (emp_id, new_role))
 
-        # 감사 로그 기록
-        cursor.execute("""
-            INSERT INTO access_audit_log
-            (emp_id, action_type, menu_code, request_path, permission_result, details)
-            VALUES (%s, 'ROLE_CHANGE', 'permission_admin', '/api/admin/user/role',
-                    'SUCCESS', %s)
-        """, (session.get('emp_id'), json.dumps({
+        details = {
             'target_user': emp_id,
             'old_role': old_role[0] if old_role else None,
             'new_role': new_role
-        })))
+        }
 
         conn.commit()
         cursor.close()
         conn.close()
+
+        record_permission_event(
+            action_type='ROLE_CHANGE',
+            menu_code='permission_admin',
+            permission_result='SUCCESS',
+            details=details,
+        )
 
         return jsonify({'success': True, 'message': 'Role updated successfully'})
 
@@ -523,20 +604,19 @@ def update_permissions():
                 permissions.get('data_scope', 'own')
             ))
 
-        # 감사 로그
-        cursor.execute("""
-            INSERT INTO access_audit_log
-            (emp_id, action_type, menu_code, request_path, permission_result, details)
-            VALUES (%s, 'PERMISSION_CHANGE', %s, '/api/admin/permissions',
-                    'SUCCESS', %s)
-        """, (session.get('emp_id'), menu_code, json.dumps({
-            'role': role_code,
-            'permissions': permissions
-        })))
-
         conn.commit()
         cursor.close()
         conn.close()
+
+        record_permission_event(
+            action_type='PERMISSION_CHANGE',
+            menu_code=menu_code,
+            permission_result='SUCCESS',
+            details={
+                'role': role_code,
+                'permissions': permissions
+            },
+        )
 
         return jsonify({'success': True, 'message': 'Permissions updated successfully'})
 

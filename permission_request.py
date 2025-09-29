@@ -11,6 +11,8 @@ import logging
 import json
 from datetime import datetime
 
+from notification_service import get_notification_service, NotificationError
+
 # 로깅 설정
 logging.basicConfig(
     level=logging.INFO,
@@ -192,20 +194,19 @@ def create_permission_request(requester_id, request_type, target_value, permissi
             WHERE urm.role_id IN ('admin', 'super_admin', 'manager')
         """, (request_id, f"{requester_id}님이 {target_value} 권한을 요청했습니다."))
 
-        # 감사 로그
-        cursor.execute("""
-            INSERT INTO access_audit_log
-            (emp_id, menu_code, action_type, request_path, permission_result, details)
-            VALUES (%s, %s, 'PERMISSION_REQUEST', 'permission_request', 'SUCCESS', %s)
-        """, (requester_id, target_value if request_type == 'menu' else 'system',
-              json.dumps({
-                  'request_id': request_id,
-                  'request_type': request_type,
-                  'target': target_value,
-                  'priority': priority
-              })))
-
         conn.commit()
+
+        record_permission_event(
+            action_type='PERMISSION_REQUEST',
+            menu_code=target_value if request_type == 'menu' else 'system',
+            permission_result='SUCCESS',
+            details={
+                'request_id': request_id,
+                'request_type': request_type,
+                'target': target_value,
+                'priority': priority
+            },
+        )
         logger.info(f"✓ 권한 요청 생성: {request_id}")
 
         return request_id
@@ -281,13 +282,33 @@ def approve_request(request_id, approver_id, comments=None):
         """, (request_id,))
 
         pending_steps = cursor.fetchone()[0]
+        finalize_payload = None
 
         if pending_steps == 0:
             # 모든 승인 완료 - 권한 부여
             requester_id = request[0]
             request_type = request[1]
             target_value = request[2]
-            permissions = request[3]
+            permissions = request[3] or {}
+            if isinstance(permissions, str):
+                try:
+                    permissions = json.loads(permissions) if permissions else {}
+                except Exception:
+                    permissions = {}
+
+            requester_login_id = requester_id
+            requester_name = requester_id
+            try:
+                cursor.execute("SELECT user_id, user_name FROM system_users WHERE emp_id = %s", (requester_id,))
+                row = cursor.fetchone()
+                if row:
+                    if row[0]:
+                        requester_login_id = row[0]
+                    if len(row) > 1 and row[1]:
+                        requester_name = row[1]
+            except Exception:
+                requester_login_id = requester_id
+                requester_name = requester_id
 
             if request_type == 'role':
                 cursor.execute("""
@@ -340,6 +361,26 @@ def approve_request(request_id, approver_id, comments=None):
                         '요청하신 권한이 승인되었습니다.')
             """, (requester_id, request_id))
 
+            requester_login_id = requester_id
+            requester_name = requester_id
+            try:
+                cursor.execute("SELECT user_id, user_name FROM system_users WHERE emp_id = %s", (requester_id,))
+                row = cursor.fetchone()
+                if row:
+                    if row[0]:
+                        requester_login_id = row[0]
+                    if len(row) > 1 and row[1]:
+                        requester_name = row[1]
+            except Exception:
+                requester_login_id = requester_id
+                requester_name = requester_id
+
+            finalize_payload = {
+                'login_id': requester_login_id,
+                'requester_name': requester_name,
+                'permission_name': target_value,
+            }
+
             logger.info(f"✓ 권한 요청 최종 승인 및 부여: {request_id}")
 
         else:
@@ -356,14 +397,31 @@ def approve_request(request_id, approver_id, comments=None):
 
             logger.info(f"✓ 권한 요청 부분 승인: {request_id} ({pending_steps}단계 남음)")
 
-        # 감사 로그
-        cursor.execute("""
-            INSERT INTO access_audit_log
-            (emp_id, menu_code, action_type, request_path, permission_result, details)
-            VALUES (%s, 'system', 'REQUEST_APPROVE', 'permission_request', 'SUCCESS', %s)
-        """, (approver_id, json.dumps({'request_id': request_id})))
-
         conn.commit()
+
+        if finalize_payload:
+            try:
+                service = get_notification_service()
+                service.send_event_notification(
+                    channel='chatbot',
+                    event='permission_approved',
+                    recipients=[finalize_payload['login_id']],
+                    context={
+                        'requester_name': finalize_payload['requester_name'],
+                        'permission_name': finalize_payload['permission_name'],
+                    },
+                )
+            except NotificationError as exc:
+                logger.warning(f"챗봇 알림 실패(request_id={request_id}): {exc}")
+            except Exception as exc:
+                logger.exception(f"챗봇 알림 처리 중 오류(request_id={request_id})")
+
+        record_permission_event(
+            action_type='REQUEST_APPROVE',
+            menu_code='system',
+            permission_result='SUCCESS',
+            details={'request_id': request_id},
+        )
         return True
 
     except Exception as e:
@@ -420,17 +478,14 @@ def reject_request(request_id, approver_id, reason):
                     %s)
         """, (result[0], request_id, f"권한 요청이 거부되었습니다. 사유: {reason}"))
 
-        # 감사 로그
-        cursor.execute("""
-            INSERT INTO access_audit_log
-            (emp_id, menu_code, action_type, request_path, permission_result, details)
-            VALUES (%s, 'system', 'REQUEST_REJECT', 'permission_request', 'SUCCESS', %s)
-        """, (approver_id, json.dumps({
-            'request_id': request_id,
-            'reason': reason
-        })))
-
         conn.commit()
+
+        record_permission_event(
+            action_type='REQUEST_REJECT',
+            menu_code='system',
+            permission_result='REJECTED',
+            details={'request_id': request_id, 'reason': reason},
+        )
         logger.info(f"✓ 권한 요청 거부: {request_id}")
 
         return True

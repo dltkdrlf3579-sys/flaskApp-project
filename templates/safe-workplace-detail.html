@@ -143,6 +143,51 @@
                                 {% elif col.column_type == 'list' %}
                                     {% from 'includes/list_field_v3.html' import render_list_field %}
                                     {{ render_list_field(col, value, section, mode='edit') }}
+                                {% elif col.column_type == 'linked_text' %}
+                                    <input type="text"
+                                           id="{{ col.column_key }}"
+                                           class="{{ section.section_key|replace('_', '-') }}-input linked-field"
+                                           data-field="{{ col.column_key }}"
+                                           data-section="{{ section.section_key }}"
+                                           {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                           {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
+                                           value="{{ value }}"
+                                           readonly>
+                                {% elif col.column_type and col.column_type.startswith('popup') %}
+                                    <div class="input-group">
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
+                                               value="{{ value }}"
+                                               placeholder="클릭하여 선택"
+                                               readonly>
+                                        <button class="btn btn-sm btn-primary"
+                                                onclick="{% if col.column_type == 'popup_person' %}openPersonSearch('{{ col.column_key }}'){% elif col.column_type == 'popup_company' %}openCompanySearch('{{ col.column_key }}'){% elif col.column_type == 'popup_building' %}openBuildingSearch('{{ col.column_key }}'){% elif col.column_type == 'popup_department' %}openDepartmentSearch('{{ col.column_key }}'){% elif col.column_type == 'popup_contractor' %}openContractorSearch('{{ col.column_key }}'){% elif col.column_type == 'popup_division' %}openDivisionSearch('{{ col.column_key }}'){% else %}console.error('Unknown popup type: {{ col.column_type }}'){% endif %}">검색</button>
+                                    </div>
+                                {% elif col.column_type == 'table' or col.input_type == 'table' %}
+                                    <div class="input-group">
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
+                                               value="{{ value }}"
+                                               placeholder="검색하여 선택"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <input type="hidden"
+                                               id="{{ col.column_key }}_id"
+                                               data-field="{{ col.column_key }}_id"
+                                               value="{{ workplace.get(col.column_key ~ '_id') if workplace else '' }}">
+                                        <button class="btn btn-sm btn-primary"
+                                                onclick="alert('테이블 검색 기능은 구현되지 않았습니다.')">검색</button>
+                                    </div>
                                 {% else %}
                                     <input type="text"
                                            class="{{ section.section_key|replace('_', '-') }}-input"

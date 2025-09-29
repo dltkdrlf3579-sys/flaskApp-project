@@ -243,6 +243,61 @@ def ensure_table_permission_levels(cursor) -> None:
     )
 
 
+
+def ensure_table_access_audit(cursor) -> None:
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS access_audit_log (
+            id SERIAL PRIMARY KEY,
+            emp_id VARCHAR(100),
+            login_id VARCHAR(100),
+            action VARCHAR(50),
+            menu_code VARCHAR(50),
+            resource_id VARCHAR(100),
+            ip_address VARCHAR(45),
+            success BOOLEAN DEFAULT TRUE,
+            error_message TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    ensure_columns(
+        cursor,
+        "access_audit_log",
+        [
+            ("login_id", "VARCHAR(100)"),
+            ("action_scope", "VARCHAR(50)"),
+            ("action_type", "VARCHAR(50)"),
+            ("action", "VARCHAR(50)"),
+            ("request_path", "TEXT"),
+            ("object_type", "VARCHAR(50)"),
+            ("object_id", "VARCHAR(100)"),
+            ("object_name", "VARCHAR(255)"),
+            ("resource_id", "VARCHAR(100)"),
+            ("permission_result", "VARCHAR(50)"),
+            ("success", "BOOLEAN DEFAULT TRUE"),
+            ("ip_address", "VARCHAR(45)"),
+            ("user_agent", "TEXT"),
+            ("details", "JSONB"),
+            ("error_message", "TEXT")
+        ],
+    )
+
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_audit_scope_created
+        ON access_audit_log(action_scope, created_at DESC)
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_audit_menu_created
+        ON access_audit_log(menu_code, created_at DESC)
+        """
+    )
+
+
 def ensure_table_access_log(cursor) -> None:
     cursor.execute(
         """
@@ -272,6 +327,7 @@ def main() -> None:
         ensure_table_permission_requests(cursor)
         ensure_table_menu_names(cursor)
         ensure_table_permission_levels(cursor)
+        ensure_table_access_audit(cursor)
         ensure_table_access_log(cursor)
 
         conn.commit()
