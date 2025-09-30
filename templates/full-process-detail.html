@@ -438,7 +438,7 @@
                                                    data-item="{{ it.id }}"
                                                    data-score="{{ it.per_unit_delta }}" data-delta="{{ it.per_unit_delta }}"
                                                    data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}"
-                                                   value="{{ values[it.id] if values and it.id in values and values[it.id] else '' }}">
+                                                   value="{{ values[it.id] if values and it.id in values else '' }}">
                                             {% if sc.get('show_unit_hint', True) %}
                                             <small class="hint">{{ it.per_unit_delta }}점/건</small>
                                             {% endif %}

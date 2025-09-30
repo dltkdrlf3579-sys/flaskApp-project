@@ -382,6 +382,11 @@ class FullProcessController(BoardController):
                 item[col_key] = stored_total
                 if isinstance(custom_data, dict):
                     custom_data[col_key] = str(stored_total)
+                if col_key in item and isinstance(item[col_key], str):
+                    try:
+                        item[col_key] = float(item[col_key])
+                    except Exception:
+                        pass
                 item.setdefault("__stored_totals__", {})[col_key] = stored_total
                 continue
 

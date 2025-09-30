@@ -385,7 +385,7 @@ function calculateScoreTotal() {
         if (totalDisplay) {
             totalDisplay.value = total;
             totalDisplay.dataset.dirty = '1';
-            totalDisplay.dataset.storedTotal = total;
+            totalDisplay.dataset.storedTotal = String(total);
         }
         if (hiddenTotal) hiddenTotal.value = total;
 

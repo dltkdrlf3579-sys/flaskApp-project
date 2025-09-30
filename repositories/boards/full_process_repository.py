@@ -225,24 +225,12 @@ class FullProcessRepository:
                 stripped = value.strip()
                 if stripped.lower() in ('none', 'null'):
                     cleaned[key] = None
-                    continue
-                if stripped.startswith('{') and stripped.endswith('}'):
-                    try:
-                        parsed = json.loads(stripped)
-                        if isinstance(parsed, dict) and parsed.get('total') is not None:
-                            cleaned[key] = str(parsed.get('total'))
-                            continue
-                    except Exception:
-                        pass
-                if stripped == '':
+                elif stripped == '':
                     cleaned[key] = None
                 else:
                     cleaned[key] = stripped
             elif isinstance(value, dict):
-                if value.get('total') is not None and len(value) == 1:
-                    cleaned[key] = str(value.get('total'))
-                else:
-                    cleaned[key] = self._clean_custom_values(value)
+                cleaned[key] = self._clean_custom_values(value)
             else:
                 cleaned[key] = value
         return cleaned
