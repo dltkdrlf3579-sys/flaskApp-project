@@ -79,15 +79,33 @@
                                    placeholder="{{ col.column_name }} 입력">
                         
                         {% elif col.column_type == 'dropdown' %}
-                            <select class="dynamic-input" data-column-key="{{ col.column_key }}">
-                                <option value="">선택하세요</option>
+                            {% set is_multi = col.input_type == 'dropdown_multi' %}
+                            {% set selected_values = [] %}
+                            {% if is_multi %}
+                                {% if col_value is sequence and not (col_value is string) %}
+                                    {% set selected_values = col_value | map('string') | list %}
+                                {% elif col_value %}
+                                    {% set selected_values = [col_value|string] %}
+                                {% endif %}
+                            {% endif %}
+                            {% set single_value = col_value|string if col_value is not none else '' %}
+                            <select class="dynamic-input" data-column-key="{{ col.column_key }}" {% if is_multi %}multiple size="6" data-field-type="dropdown_multi"{% endif %}>
+                                {% if not is_multi %}<option value="">선택하세요</option>{% endif %}
                                 {% if col.dropdown_options_mapped %}
                                     {# 코드-값 매핑 방식 (DB dropdown_option_codes_v2 테이블 사용) #}
                                     {% for option in col.dropdown_options_mapped %}
-                                        <option value="{{ option.code }}" {% if col_value == option.code %}selected{% endif %}>{{ option.value }}</option>
+                                        <option value="{{ option.code }}"
+                                                {% if is_multi %}
+                                                    {% if option.code in selected_values %}selected{% endif %}
+                                                {% else %}
+                                                    {% if single_value == option.code %}selected{% endif %}
+                                                {% endif %}>{{ option.value }}</option>
                                     {% endfor %}
                                 {% endif %}
                             </select>
+                            {% if is_multi %}
+                            <small class="text-muted d-block mt-1">여러 값을 선택하려면 Ctrl(또는 ⌘) 키를 누른 채 클릭하세요.</small>
+                            {% endif %}
                         
                         {% elif col.column_type == 'date' %}
                             <input type="date" 

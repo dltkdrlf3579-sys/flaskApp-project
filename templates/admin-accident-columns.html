@@ -408,16 +408,16 @@
                             </div>
                         </div>
                         
-                        <!-- 텍스트 타입일 때 span 설정 -->
+                        <!-- 텍스트/드롭다운 span 설정 -->
                         <div class="mb-3" id="spanField" style="display: none;">
                             <label class="form-label">차지할 칸 수</label>
                             <div class="btn-group w-100" role="group">
-                                <input type="radio" class="btn-check" name="columnSpan" id="span1" value="1" checked>
+                                <input type="radio" class="btn-check" name="columnSpan" id="span1" value="1">
                                 <label class="btn btn-outline-primary" for="span1">
                                     <i class="bi bi-square"></i> 1칸
                                 </label>
 
-                                <input type="radio" class="btn-check" name="columnSpan" id="span2" value="2">
+                                <input type="radio" class="btn-check" name="columnSpan" id="span2" value="2" checked>
                                 <label class="btn btn-outline-primary" for="span2">
                                     <i class="bi bi-square"></i><i class="bi bi-square"></i> 2칸
                                 </label>
@@ -432,7 +432,6 @@
                                     <i class="bi bi-square-fill"></i> 전체 너비 (8칸)
                                 </label>
                             </div>
-                            <small class="text-muted">텍스트 필드가 차지할 너비를 선택하세요</small>
                         </div>
 
                         <!-- 숫자 설정 영역 (정수/실수) -->
@@ -488,9 +487,6 @@
                         
                         <div class="mb-3" id="optionsField" style="display: none;">
                             <label class="form-label">드롭다운 옵션</label>
-                            <div class="alert alert-info" style="font-size: 13px;">
-                                <i class="bi bi-info-circle"></i> 드롭다운 옵션은 코드 관리 페이지에서 설정합니다.
-                            </div>
                             
                             <!-- 현재 옵션 미리보기 -->
                             <div id="optionPreview" class="mb-3" style="display: none;">
@@ -506,7 +502,14 @@
                                     </tbody>
                                 </table>
                             </div>
-                            
+                            <div class="form-check form-switch mt-3" id="dropdownMultiToggleWrapper" style="display: none;">
+                                <input class="form-check-input" type="checkbox" id="dropdownMultiToggle" onchange="handleDropdownMultiToggleChange()">
+                                <label class="form-check-label" for="dropdownMultiToggle">여러 값을 동시에 선택 허용</label>
+                            </div>
+                            <small class="text-muted d-block mt-1" id="dropdownMultiHint" style="display: none;">
+                                사용자 화면에서는 다중 선택 드롭다운이 표시되며 선택한 값은 쉼표로 묶어 저장됩니다.
+                            </small>
+
                             <button type="button" class="btn btn-primary w-100" onclick="openCodeEditor()">
                                 <i class="bi bi-code-square"></i> 코드 편집기 열기
                             </button>
@@ -952,7 +955,7 @@ let editingId = null;
                         if (col.table_name) column._tableName = col.table_name;
                         
                         // column_span이 없으면 기본값 1 설정
-                        if (!column.column_span && column.column_type === 'text') {
+                        if (!column.column_span && (column.column_type === 'text' || column.column_type === 'dropdown')) {
                             column.column_span = 1;
                         }
                         
@@ -1212,13 +1215,15 @@ let editingId = null;
             document.getElementById('isActive').checked = true;
             document.getElementById('typeChangeWarning').style.display = 'none';
             document.getElementById('dropdownOptions').value = '';  // 드롭다운 옵션 초기화
-            // span 초기화
-            document.getElementById('span1').checked = true;
+            const multiToggle = document.getElementById('dropdownMultiToggle');
+            if (multiToggle) multiToggle.checked = false;
+            setSpan(2, { remember: true });
             toggleOptionsField();
             toggleTableField();
             toggleSpanField();
             toggleListField();
             toggleNumberField();
+            handleDropdownMultiToggleChange();
             
             // 기존 모달 인스턴스가 있으면 재사용, 없으면 새로 생성
             const modalElement = document.getElementById('columnModal');
@@ -1351,15 +1356,16 @@ let editingId = null;
             }
             
             // 텍스트 타입이고 span 값이 있으면 설정
-            if (column.column_type === 'text' && column.column_span) {
-                const spanRadio = document.getElementById(`span${column.column_span}`);
-                if (spanRadio) {
-                    spanRadio.checked = true;
-                }
+            if ((column.column_type === 'text' || column.column_type === 'dropdown') && column.column_span) {
+                setSpan(column.column_span, { remember: true });
             }
             
             // 드롭다운 타입일 때 옵션 처리
             if (column.column_type === 'dropdown') {
+                const multiToggle = document.getElementById('dropdownMultiToggle');
+                if (multiToggle) {
+                    multiToggle.checked = (column.input_type === 'dropdown_multi');
+                }
                 // 미리보기 로드
                 loadOptionPreview(column.column_key);
                 
@@ -1389,9 +1395,13 @@ let editingId = null;
                 } else {
                     document.getElementById('dropdownOptions').value = '';
                 }
+                handleDropdownMultiToggleChange();
             } else {
                 document.getElementById('dropdownOptions').value = '';
+                const multiToggle = document.getElementById('dropdownMultiToggle');
+                if (multiToggle) multiToggle.checked = false;
                 document.getElementById('optionPreview').style.display = 'none';
+                handleDropdownMultiToggleChange();
             }
             
             // 드롭다운 옵션 프리뷰 및 서브타입 복원
@@ -1446,12 +1456,70 @@ let editingId = null;
             }
         }
         
+        function setSpan(count, options = {}) {
+            const { remember = false } = options;
+            const radios = document.querySelectorAll('input[name="columnSpan"]');
+            radios.forEach(radio => {
+                const isMatch = String(radio.value) === String(count);
+                radio.checked = isMatch;
+                radio.defaultChecked = isMatch;
+            });
+            if (remember) {
+                const spanField = document.getElementById('spanField');
+                if (spanField) {
+                    spanField.dataset.previousSpan = String(count);
+                }
+            }
+        }
+
+        function initSpanRadios() {
+            const spanField = document.getElementById('spanField');
+            if (!spanField) {
+                return;
+            }
+            document.querySelectorAll('input[name="columnSpan"]').forEach(radio => {
+                radio.addEventListener('change', () => {
+                    if (radio.checked) {
+                        spanField.dataset.previousSpan = radio.value;
+                    }
+                });
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', initSpanRadios);
+
         function toggleOptionsField() {
             const type = document.getElementById('columnType').value;
-            document.getElementById('optionsField').style.display = 
-                type === 'dropdown' ? 'block' : 'none';
-            document.getElementById('tableSelectField').style.display = 
-                type === 'table_select' ? 'block' : 'none';
+            const optionsField = document.getElementById('optionsField');
+            const tableSelectField = document.getElementById('tableSelectField');
+            const multiWrapper = document.getElementById('dropdownMultiToggleWrapper');
+            const multiHint = document.getElementById('dropdownMultiHint');
+            const multiToggle = document.getElementById('dropdownMultiToggle');
+
+            if (optionsField) {
+                optionsField.style.display = type === 'dropdown' ? 'block' : 'none';
+            }
+            if (tableSelectField) {
+                tableSelectField.style.display = type === 'table_select' ? 'block' : 'none';
+            }
+
+            if (multiWrapper) {
+                if (type === 'dropdown') {
+                    multiWrapper.style.display = '';
+                    if (multiHint) multiHint.style.display = '';
+                } else {
+                    multiWrapper.style.display = 'none';
+                    if (multiHint) multiHint.style.display = 'none';
+                    if (multiToggle) multiToggle.checked = false;
+                }
+            }
+
+            handleDropdownMultiToggleChange();
+        }
+
+        function isDropdownMultiSelected() {
+            const toggle = document.getElementById('dropdownMultiToggle');
+            return !!(toggle && toggle.checked);
         }
         
         function toggleTableField() {
@@ -1461,9 +1529,26 @@ let editingId = null;
         }
         
         function toggleSpanField() {
+            const spanField = document.getElementById('spanField');
+            if (!spanField) {
+                return;
+            }
             const type = document.getElementById('columnType').value;
-            document.getElementById('spanField').style.display = 
-                type === 'text' ? 'block' : 'none';
+            const isMulti = (type === 'dropdown') && isDropdownMultiSelected();
+            const shouldShow = (type === 'text') || (type === 'dropdown' && !isMulti);
+            spanField.style.display = shouldShow ? 'block' : 'none';
+        }
+
+        function handleDropdownMultiToggleChange() {
+            const typeEl = document.getElementById('columnType');
+            const type = typeEl ? typeEl.value : '';
+            const isMulti = isDropdownMultiSelected();
+            if (isMulti) {
+                setSpan(8, { remember: true });
+            } else if (type === 'dropdown') {
+                setSpan(2, { remember: true });
+            }
+            toggleSpanField();
         }
         
         function toggleListField() {
@@ -1560,8 +1645,17 @@ let editingId = null;
         }
         
         function checkTypeChange() {
-            const currentType = document.getElementById('columnType').value;
-            const originalType = document.getElementById('columnType').dataset.originalType;
+            const typeSelect = document.getElementById('columnType');
+            const currentType = typeSelect ? typeSelect.value : '';
+            if (currentType === 'dropdown') {
+                if (isDropdownMultiSelected()) {
+                    setSpan(8, { remember: true });
+                } else {
+                    setSpan(2, { remember: true });
+                }
+            }
+
+            const originalType = typeSelect ? typeSelect.dataset.originalType : '';
             const warning = document.getElementById('typeChangeWarning');
             
             if (editingId && originalType && originalType !== currentType) {
@@ -1582,12 +1676,15 @@ let editingId = null;
             
             // 텍스트 타입일 때 span 값 가져오기
             let columnSpan = 1;
-            if (columnType === 'text') {
-                const selectedSpan = document.querySelector('input[name="columnSpan"]:checked');
-                if (selectedSpan) {
-                    columnSpan = parseInt(selectedSpan.value);
-                }
+        if (columnType === 'text' || columnType === 'dropdown') {
+            const selectedSpan = document.querySelector('input[name="columnSpan"]:checked');
+            if (selectedSpan) {
+                columnSpan = parseInt(selectedSpan.value);
             }
+        }
+        if (columnType === 'dropdown' && isDropdownMultiSelected()) {
+            columnSpan = 8;
+        }
             
             // 디버깅: disabled 상태에서도 값이 제대로 읽히는지 확인
             console.log('Column Type:', columnType, 'Disabled:', columnTypeElement.disabled);
@@ -1736,6 +1833,8 @@ let editingId = null;
                         const listSel = document.getElementById('listItemType');
                         const lit = listSel ? listSel.value : (existingColumn.list_item_type || 'partner_worker');
                         resolvedInputType = (lit === 'company') ? 'list_company' : 'list_partner_worker';
+                    } else if (newType === 'dropdown') {
+                        resolvedInputType = isDropdownMultiSelected() ? 'dropdown_multi' : null;
                     } else if (newType === 'number') {
                         const nsel = document.querySelector('input[name="numberType"]:checked');
                         const nt = nsel ? nsel.value : 'float';
@@ -1858,6 +1957,9 @@ let editingId = null;
                         column_order: maxOrderInSection + 1, // 섹션 내 순서로 설정
                         _isNew: true
                     };
+                    if (columnType === 'dropdown') {
+                        newColumn.input_type = isDropdownMultiSelected() ? 'dropdown_multi' : null;
+                    }
                     if (columnType === 'number') {
                         const nsel = document.querySelector('input[name="numberType"]:checked');
                         const nt = nsel ? nsel.value : 'float';
@@ -2146,13 +2248,8 @@ let editingId = null;
                             dropdown_options: column.dropdown_options,
                             column_order: column.column_order,
                             tab: column.tab || 'additional',  // 탭 정보 추가 (기본값: additional)
-                            // 입력 서브타입 설정 (table/list/number)
-                            input_type: (function(){
-                                if (column.column_type === 'table') return 'table';
-                                if (column.column_type === 'list') return (column.input_type || ((column.list_item_type === 'company') ? 'list_company' : 'list_partner_worker'));
-                                if (column.column_type === 'number') return (column.input_type || 'number_float');
-                                return null;
-                            })(),
+                            // 입력 서브타입 설정
+                            input_type: column.input_type || null,
                             // 테이블 정보도 저장 (메타데이터로)
                             table_group: column._tableGroup || null,
                             table_type: column._tableType || null,
@@ -2192,13 +2289,8 @@ let editingId = null;
                             dropdown_options: column.dropdown_options,
                             column_order: column.column_order,
                             tab: column.tab || 'additional',  // 탭 정보 추가 (기본값: additional)
-                            // 입력 서브타입 설정 (table/list/number)
-                            input_type: (function(){
-                                if (column.column_type === 'table') return 'table';
-                                if (column.column_type === 'list') return (column.input_type || ((column.list_item_type === 'company') ? 'list_company' : 'list_partner_worker'));
-                                if (column.column_type === 'number') return (column.input_type || 'number_float');
-                                return null;
-                            })(),
+                            // 입력 서브타입 설정
+                            input_type: column.input_type || null,
                             // 테이블 정보도 저장 (메타데이터로)
                             table_group: column._tableGroup || null,
                             table_type: column._tableType || null,

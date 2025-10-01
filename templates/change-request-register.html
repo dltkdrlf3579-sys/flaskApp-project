@@ -81,8 +81,9 @@
                                 </select>
                                 <input type="hidden" class="dynamic-input-hidden" data-column-key="{{ col.column_key }}" value="requested">
                             {% else %}
-                                <select class="dynamic-input" data-column-key="{{ col.column_key }}">
-                                    <option value="">선택하세요</option>
+                                {% set is_multi = col.input_type == 'dropdown_multi' %}
+                                <select class="dynamic-input" data-column-key="{{ col.column_key }}" {% if is_multi %}multiple size="6" data-field-type="dropdown_multi"{% endif %}>
+                                    {% if not is_multi %}<option value="">선택하세요</option>{% endif %}
                                     {% if col.dropdown_options_mapped %}
                                         {# 새로운 코드-값 매핑 방식 #}
                                         {% for option in col.dropdown_options_mapped %}
@@ -96,6 +97,9 @@
                                         {% endfor %}
                                     {% endif %}
                                 </select>
+                                {% if is_multi %}
+                                <small class="text-muted d-block mt-1">여러 값을 선택하려면 Ctrl(또는 ⌘) 키를 누른 채 클릭하세요.</small>
+                                {% endif %}
                             {% endif %}
                         
                         {% elif col.column_type == 'date' %}

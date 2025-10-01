@@ -96,7 +96,30 @@
           return;
         }
 
+        if (input.dataset.fieldType === 'dropdown_multi_hidden') {
+          const raw = input.value || '';
+          if (!raw) {
+            data[fieldKey] = [];
+            return;
+          }
+          try {
+            const parsed = JSON.parse(raw);
+            data[fieldKey] = Array.isArray(parsed) ? parsed : [];
+          } catch (e) {
+            data[fieldKey] = [];
+          }
+          return;
+        }
+
         let value = '';
+
+        if (input.tagName === 'SELECT' && input.multiple) {
+          const selected = Array.from(input.selectedOptions || [])
+            .map(opt => (opt && typeof opt.value !== 'undefined' ? String(opt.value) : ''))
+            .filter(val => val !== '');
+          data[fieldKey] = selected;
+          return;
+        }
 
         if (input.tagName === 'SELECT') {
           value = input.value;
@@ -239,6 +262,174 @@
     }
   }
 
+  const DROPDOWN_MULTI_STYLE_ID = 'dropdownMultiStyles';
+
+  function ensureDropdownStyles() {
+    if (document.getElementById(DROPDOWN_MULTI_STYLE_ID)) {
+      return;
+    }
+    const style = document.createElement('style');
+    style.id = DROPDOWN_MULTI_STYLE_ID;
+    style.textContent = `
+      .dropdown-multi-checkboxes {
+        border: 1px solid #ced4da;
+        border-radius: 6px;
+        padding: 8px 10px;
+        max-height: 136px;
+        overflow-y: auto;
+        background-color: #fff;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .dropdown-multi-option {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border: 1px solid #e9ecef;
+        border-radius: 6px;
+        background-color: #f8f9fa;
+        flex: 0 0 calc(25% - 6px);
+        box-sizing: border-box;
+        padding-left: 0 !important;
+        margin: 0 !important;
+      }
+      .dropdown-multi-option .form-check-label {
+        flex: 1 1 auto;
+        margin: 0;
+      }
+      .dropdown-multi-option .form-check-input {
+        margin-top: 0;
+        margin-left: 0 !important;
+        margin-right: 0.5rem;
+        background-repeat: no-repeat !important;
+        background-position: center center !important;
+        background-size: 12px 12px !important;
+        width: 14px !important;
+        height: 14px !important;
+        min-width: 0 !important;
+        min-height: 0 !important;
+        padding: 0 !important;
+        display: inline-block !important;
+        flex: 0 0 auto !important;
+        box-sizing: content-box !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function parseDropdownHiddenValue(hiddenEl) {
+    if (!hiddenEl || !hiddenEl.value) {
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(hiddenEl.value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+      return [];
+    }
+  }
+
+  function updateDropdownHidden(hiddenEl, codes) {
+    if (!hiddenEl) {
+      return;
+    }
+    if (!codes || !codes.length) {
+      hiddenEl.value = '';
+      return;
+    }
+    try {
+      hiddenEl.value = JSON.stringify(codes);
+    } catch (err) {
+      hiddenEl.value = '';
+    }
+  }
+
+  function updateDropdownSummary(summaryEl, labels) {
+    if (!summaryEl) {
+      return;
+    }
+    if (!labels || !labels.length) {
+      summaryEl.textContent = '-';
+      summaryEl.classList.add('text-muted');
+      summaryEl.dataset.hasSelection = '0';
+    } else {
+      summaryEl.textContent = labels.join(', ');
+      summaryEl.classList.remove('text-muted');
+      summaryEl.dataset.hasSelection = '1';
+    }
+  }
+
+  function initDropdownGroup(group) {
+    if (!group || group.dataset.multiInit === '1') {
+      return;
+    }
+
+    const container = group.closest('.info-cell') || document;
+    const fieldKey = group.dataset.checkboxFor || group.dataset.multiKey;
+    ensureDropdownStyles();
+
+    const hidden = container.querySelector(`.dropdown-multi-hidden-value[data-field="${fieldKey}"]`);
+    let summary = container.querySelector(`.dropdown-multi-summary[data-summary-for="${fieldKey}"]`);
+    if (!summary) {
+      summary = document.createElement('div');
+      summary.className = 'dropdown-multi-summary text-muted mb-1';
+      summary.dataset.summaryFor = fieldKey || '';
+      summary.textContent = '-';
+      group.parentElement.insertBefore(summary, group);
+    }
+
+    const checkboxes = Array.from(group.querySelectorAll('input[type="checkbox"]'));
+    const initialCodes = parseDropdownHiddenValue(hidden);
+    const selectedCodes = [];
+    const selectedLabels = [];
+
+    checkboxes.forEach(cb => {
+      const labelText = cb.nextElementSibling ? cb.nextElementSibling.textContent.trim() : '';
+      if (initialCodes.length) {
+        cb.checked = initialCodes.includes(cb.value);
+      }
+      if (cb.checked) {
+        selectedCodes.push(cb.value);
+        if (labelText) {
+          selectedLabels.push(labelText);
+        }
+      }
+    });
+
+    if (!initialCodes.length && selectedCodes.length) {
+      updateDropdownHidden(hidden, selectedCodes);
+    }
+    updateDropdownSummary(summary, selectedLabels);
+
+    checkboxes.forEach(cb => {
+      cb.addEventListener('change', () => {
+        const codes = [];
+        const labels = [];
+        checkboxes.forEach(box => {
+          if (box.checked) {
+            codes.push(box.value);
+            const text = box.nextElementSibling ? box.nextElementSibling.textContent.trim() : '';
+            if (text) {
+              labels.push(text);
+            }
+          }
+        });
+        updateDropdownHidden(hidden, codes);
+        updateDropdownSummary(summary, labels);
+      });
+    });
+
+    group.dataset.multiInit = '1';
+  }
+
+  function initDropdownMultiGroups(root) {
+    const scope = root || document;
+    const groups = scope.querySelectorAll('.dropdown-multi-checkboxes');
+    groups.forEach(initDropdownGroup);
+  }
+
   const BoardForm = {
     getEditorContent,
     collectDynamicFields,
@@ -249,6 +440,7 @@
     appendDeletedAttachments,
     appendSectionGroups,
     appendCustomData,
+    initDropdownMultiGroups,
   };
 
   if (typeof module !== 'undefined' && module.exports) {
@@ -256,4 +448,14 @@
   }
 
   global.BoardForm = BoardForm;
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('DOMContentLoaded', () => {
+      try {
+        initDropdownMultiGroups();
+      } catch (err) {
+        console.warn('[board-form] failed to initialize dropdown multi groups', err);
+      }
+    });
+  }
 })(typeof window !== 'undefined' ? window : globalThis);

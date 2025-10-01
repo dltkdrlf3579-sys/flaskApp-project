@@ -257,6 +257,88 @@ class FullProcessRepository:
         return {}
 
     # ------------------------------------------------------------------
+    # Scoring helpers
+
+    def _extract_total_score_value(self, value: Any) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
+        """Return a printable total_score and optional meta map."""
+
+        meta: Optional[Dict[str, Any]] = None
+
+        if value is None:
+            return None, None
+
+        if isinstance(value, (int, float)):
+            return str(value), None
+
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return '', None
+            try:
+                parsed = json.loads(stripped)
+            except Exception:
+                return stripped, None
+
+            if isinstance(parsed, (int, float)):
+                return str(parsed), None
+
+            if isinstance(parsed, dict):
+                meta = parsed
+                total = parsed.get('total')
+                if total is None:
+                    return '', meta
+                return str(total), meta
+
+            return stripped, None
+
+        if isinstance(value, dict):
+            meta = value
+            total = value.get('total')
+            if total is None:
+                return '', meta
+            return str(total), meta
+
+        try:
+            return str(value), None
+        except Exception:
+            return None, None
+
+    def _inject_score_totals(
+        self,
+        process: Dict[str, Any],
+        custom_data: Dict[str, Any],
+        dynamic_columns: Iterable[Dict[str, Any]],
+    ) -> None:
+        """Ensure score_total columns surface their stored totals for templates."""
+
+        if not isinstance(process, dict) or not isinstance(custom_data, dict):
+            return
+
+        totals_meta: Dict[str, Any] = {}
+
+        for column in dynamic_columns:
+            if column.get('column_type') != 'score_total':
+                continue
+            key = column.get('column_key')
+            if not key:
+                continue
+
+            raw_value = custom_data.get(key)
+            if raw_value is None and key in process:
+                raw_value = process.get(key)
+
+            display_value, meta = self._extract_total_score_value(raw_value)
+
+            if display_value is not None:
+                process[key] = display_value
+                custom_data[key] = display_value
+            if meta:
+                totals_meta[key] = meta
+
+        if totals_meta:
+            process.setdefault('_score_total_meta', {}).update(totals_meta)
+
+    # ------------------------------------------------------------------
     # Section / column metadata
 
     def ensure_default_sections(self) -> None:
@@ -491,6 +573,8 @@ class FullProcessRepository:
         custom_data = self._normalise_custom_data(process.get('custom_data'))
         if custom_data:
             process.update(custom_data)
+
+        self._inject_score_totals(process, custom_data, dynamic_columns)
         process['custom_data'] = custom_data
 
         detail_context = dict(base_context)

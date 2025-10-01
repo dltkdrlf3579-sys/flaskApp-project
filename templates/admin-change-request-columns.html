@@ -294,7 +294,14 @@
                                     </tbody>
                                 </table>
                             </div>
-                            
+                            <div class="form-check form-switch mt-3" id="dropdownMultiToggleWrapper" style="display: none;">
+                                <input class="form-check-input" type="checkbox" id="dropdownMultiToggle">
+                                <label class="form-check-label" for="dropdownMultiToggle">여러 값을 동시에 선택 허용</label>
+                            </div>
+                            <small class="text-muted d-block mt-1" id="dropdownMultiHint" style="display: none;">
+                                사용자 화면에서는 다중 선택 드롭다운이 표시되며 선택한 값은 쉼표로 묶어 저장됩니다.
+                            </small>
+
                             <button type="button" class="btn btn-primary w-100" onclick="openCodeEditor()">
                                 <i class="bi bi-code-square"></i> 코드 편집기 열기
                             </button>
@@ -601,6 +608,8 @@ let editingId = null;
             document.getElementById('isActive').checked = true;
             document.getElementById('typeChangeWarning').style.display = 'none';
             document.getElementById('dropdownOptions').value = '';  // 드롭다운 옵션 초기화
+            const multiToggle = document.getElementById('dropdownMultiToggle');
+            if (multiToggle) multiToggle.checked = false;
             toggleOptionsField();
             toggleTableField();
             
@@ -708,6 +717,10 @@ let editingId = null;
             
             // 드롭다운 타입일 때 옵션 처리
             if (column.column_type === 'dropdown') {
+                const multiToggle = document.getElementById('dropdownMultiToggle');
+                if (multiToggle) {
+                    multiToggle.checked = (column.input_type === 'dropdown_multi');
+                }
                 // 미리보기 로드
                 loadOptionPreview(column.column_key);
                 
@@ -739,6 +752,8 @@ let editingId = null;
                 }
             } else {
                 document.getElementById('dropdownOptions').value = '';
+                const multiToggle = document.getElementById('dropdownMultiToggle');
+                if (multiToggle) multiToggle.checked = false;
                 document.getElementById('optionPreview').style.display = 'none';
             }
             
@@ -759,10 +774,34 @@ let editingId = null;
         
         function toggleOptionsField() {
             const type = document.getElementById('columnType').value;
-            document.getElementById('optionsField').style.display = 
-                type === 'dropdown' ? 'block' : 'none';
-            document.getElementById('tableSelectField').style.display = 
-                type === 'table_select' ? 'block' : 'none';
+            const optionsField = document.getElementById('optionsField');
+            const tableSelectField = document.getElementById('tableSelectField');
+            const multiWrapper = document.getElementById('dropdownMultiToggleWrapper');
+            const multiHint = document.getElementById('dropdownMultiHint');
+            const multiToggle = document.getElementById('dropdownMultiToggle');
+
+            if (optionsField) {
+                optionsField.style.display = type === 'dropdown' ? 'block' : 'none';
+            }
+            if (tableSelectField) {
+                tableSelectField.style.display = type === 'table_select' ? 'block' : 'none';
+            }
+
+            if (multiWrapper) {
+                if (type === 'dropdown') {
+                    multiWrapper.style.display = '';
+                    if (multiHint) multiHint.style.display = '';
+                } else {
+                    multiWrapper.style.display = 'none';
+                    if (multiHint) multiHint.style.display = 'none';
+                    if (multiToggle) multiToggle.checked = false;
+                }
+            }
+        }
+
+        function isDropdownMultiSelected() {
+            const toggle = document.getElementById('dropdownMultiToggle');
+            return !!(toggle && toggle.checked);
         }
         
         function toggleTableField() {
@@ -935,6 +974,11 @@ let editingId = null;
                     const existingColumn = pendingColumns[index];
                     
                     // 테이블로 생성된 컬럼인 경우 테이블 정보 유지
+                    let nextInputType = existingColumn.input_type;
+                    if (columnType === 'dropdown') {
+                        nextInputType = isDropdownMultiSelected() ? 'dropdown_multi' : null;
+                    }
+
                     pendingColumns[index] = {
                         ...existingColumn,
                         column_name: columnName,
@@ -942,6 +986,7 @@ let editingId = null;
                         column_type: columnType,
                         is_active: isActive,
                         dropdown_options: dropdownOptions,
+                        input_type: nextInputType,
                         _modified: !existingColumn._isNew, // 새 컬럼이 아니면 수정됨 표시
                         // 테이블 관련 정보 유지
                         _tableGroup: existingColumn._tableGroup,
@@ -1013,6 +1058,9 @@ let editingId = null;
                         column_order: pendingColumns.length,
                         _isNew: true
                     };
+                    if (columnType === 'dropdown') {
+                        newColumn.input_type = isDropdownMultiSelected() ? 'dropdown_multi' : null;
+                    }
                     pendingColumns.push(newColumn);
                     
                     alert('변경사항이 저장 대기중입니다.\n"전체 변경사항 저장" 버튼을 눌러야 최종 반영됩니다.');

@@ -92,11 +92,35 @@ def smart_apply_mappings(data_list, board_type, dynamic_columns, db_path):
         # 1. 기본 필드 매핑
         for field, mapping in field_mappings.items():
             field_value = item.get(field)
-            if field_value:
+
+            if not field_value:
+                item[f'{field}_label'] = '-'
+                continue
+
+            normalized_values = None
+
+            if isinstance(field_value, list):
+                normalized_values = field_value
+            elif isinstance(field_value, str):
+                stripped = field_value.strip()
+                if stripped.startswith('[') and stripped.endswith(']'):
+                    try:
+                        parsed = json.loads(stripped)
+                        if isinstance(parsed, list):
+                            normalized_values = parsed
+                    except Exception:
+                        normalized_values = None
+                if normalized_values is None:
+                    normalized_values = [field_value]
+            else:
+                normalized_values = [field_value]
+
+            if normalized_values is not None:
+                mapped_list = [mapping.get(str(v), str(v)) for v in normalized_values if str(v)]
+                item[f'{field}_label'] = ', '.join(mapped_list) if mapped_list else '-'
+            else:
                 mapped_value = mapping.get(field_value, field_value)
                 item[f'{field}_label'] = mapped_value
-            else:
-                item[f'{field}_label'] = '-'
         
         # 2. 동적 컬럼 매핑 처리
         # custom_data가 이미 플래튼되어 있으므로, 동적 컬럼의 값은 item 최상위에 있음
@@ -115,16 +139,42 @@ def smart_apply_mappings(data_list, board_type, dynamic_columns, db_path):
                 # 드롭다운 타입이고 값이 있으면 매핑 시도
                 if value and col.get('column_type') == 'dropdown':
                     try:
-                        # 동적 컬럼용 코드 조회
                         col_codes = code_service.list(key)
-                        if col_codes:
-                            col_mapping = {c['option_code']: c['option_value'] for c in col_codes}
-                            custom_mapped[key] = col_mapping.get(value, value)
+                        mapping = {c['option_code']: c['option_value'] for c in col_codes} if col_codes else {}
+                        def map_single(v: str) -> str:
+                            return mapping.get(v, v)
+
+                        values_list = None
+                        if isinstance(value, list):
+                            values_list = value
+                        elif isinstance(value, str):
+                            stripped = value.strip()
+                            if stripped.startswith('[') and stripped.endswith(']'):
+                                try:
+                                    parsed = json.loads(stripped)
+                                    if isinstance(parsed, list):
+                                        values_list = parsed
+                                except Exception:
+                                    values_list = None
+                            if values_list is None:
+                                values_list = [value]
                         else:
-                            custom_mapped[key] = value
+                            values_list = [value]
+
+                        if values_list is not None:
+                            mapped_values = [map_single(str(v)) for v in values_list if str(v)]
+                            display = ', '.join(mapped_values) if mapped_values else '-'
+                            custom_mapped[key] = display
+                            item[key] = display
+                        else:
+                            mapped_value = map_single(str(value))
+                            custom_mapped[key] = mapped_value
+                            item[key] = mapped_value
                     except Exception as e:
                         logging.debug(f"동적 컬럼 {key} 매핑 실패: {e}")
-                        custom_mapped[key] = value
+                        display = value if isinstance(value, str) else ', '.join(map(str, value)) if isinstance(value, list) else value
+                        custom_mapped[key] = display
+                        item[key] = display
                 else:
                     # 드롭다운이 아니거나 값이 없으면 그대로
                     custom_mapped[key] = value if value else '-'

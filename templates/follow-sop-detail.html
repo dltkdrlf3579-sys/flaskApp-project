@@ -83,6 +83,15 @@
                                 {% else %}
                                     {% set span = 2 %}
                                 {% endif %}
+                            {% elif col.column_type == 'dropdown' %}
+                                {% if col.input_type == 'dropdown_multi' %}
+                                    {% set span = 8 %}
+                                {% elif col.column_span and col.column_span|int > 0 %}
+                                    {% set cs = col.column_span|int %}
+                                    {% set span = cs if cs >= 2 else 2 %}
+                                {% else %}
+                                    {% set span = 2 %}
+                                {% endif %}
                             {% elif col.column_span and col.column_span|int > 0 %}
                                 {% set cs = col.column_span|int %}
                                 {% set span = cs if cs >= 2 else 2 %}
@@ -162,27 +171,64 @@
                                 {% endif %}
                                 
                                 {% if col.column_type == 'dropdown' %}
-                                    <!-- 드롭다운 필드 -->
-                                    <select class="{{ section.section_key|replace('_', '-') }}-input" 
-                                            data-field="{{ col.column_key }}"
-                                            data-section="{{ section.section_key }}">
-                                        <option value="">선택하세요</option>
-                                        {% if col.column_key in basic_options %}
-                                            {% for opt in basic_options[col.column_key] %}
-                                            <option value="{{ opt.code }}" 
-                                                    {% if opt.code == col_value %}selected{% endif %}>
-                                                {{ opt.value }}
-                                            </option>
-                                            {% endfor %}
-                                        {% elif col.dropdown_options_mapped %}
-                                            {% for opt in col.dropdown_options_mapped %}
-                                            <option value="{{ opt.code }}"
-                                                    {% if opt.code == col_value %}selected{% endif %}>
-                                                {{ opt.value }}
-                                            </option>
-                                            {% endfor %}
+                                    {% set is_multi = col.input_type == 'dropdown_multi' %}
+                                    {% set options = [] %}
+                                    {% if col.column_key in basic_options %}
+                                        {% set options = basic_options[col.column_key] %}
+                                    {% elif col.dropdown_options_mapped %}
+                                        {% set options = col.dropdown_options_mapped %}
+                                    {% endif %}
+                                    {% if is_multi %}
+                                        {% set raw_values = [] %}
+                                        {% if col_value is sequence and not (col_value is string) %}
+                                            {% set raw_values = col_value | map('string') | list %}
+                                        {% elif col_value %}
+                                            {% set raw_values = [col_value|string] %}
                                         {% endif %}
-                                    </select>
+                                        {% set selected_codes = [] %}
+                                        {% set selected_labels = [] %}
+                                        {% for rv in raw_values %}
+                                            {% for opt in options %}
+                                                {% if opt.code == rv or opt.value == rv %}
+                                                    {% if opt.code not in selected_codes %}
+                                                        {% set selected_codes = selected_codes + [opt.code] %}
+                                                        {% set selected_labels = selected_labels + [opt.value] %}
+                                                    {% endif %}
+                                                {% endif %}
+                                            {% endfor %}
+                                        {% endfor %}
+                                        {% set display_values = selected_labels if selected_labels else raw_values %}
+                                        <div class="dropdown-multi-summary text-muted mb-1" data-summary-for="{{ col.column_key }}">{{ display_values|join(', ') if display_values else '-' }}</div>
+                                        <div class="dropdown-multi-checkboxes" data-checkbox-for="{{ col.column_key }}" data-section="{{ section.section_key }}">
+                                            {% for opt in options %}
+                                            <label class="dropdown-multi-option form-check">
+                                                <input type="checkbox"
+                                                       class="form-check-input me-2 dropdown-multi-checkbox"
+                                                       value="{{ opt.code }}"
+                                                       data-multi-key="{{ col.column_key }}"
+                                                       data-section="{{ section.section_key }}"
+                                                       {% if opt.code in selected_codes %}checked{% endif %}>
+                                                <span class="form-check-label flex-grow-1">{{ opt.value }}</span>
+                                            </label>
+                                            {% endfor %}
+                                        </div>
+                                        <input type="hidden"
+                                               class="dropdown-multi-hidden-value"
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-field-type="dropdown_multi_hidden"
+                                               value="{{ selected_codes|tojson if selected_codes else '' }}">
+                                    {% else %}
+                                        {% set single_value = col_value|string if col_value is not none else '' %}
+                                        <select class="{{ section.section_key|replace('_', '-') }}-input"
+                                                data-field="{{ col.column_key }}"
+                                                data-section="{{ section.section_key }}">
+                                            <option value="">선택하세요</option>
+                                            {% for opt in options %}
+                                            <option value="{{ opt.code }}" {% if opt.code == single_value %}selected{% endif %}>{{ opt.value }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    {% endif %}
                                     
                                 {% elif col.column_type == 'date' %}
                                     <!-- 날짜 필드 -->
