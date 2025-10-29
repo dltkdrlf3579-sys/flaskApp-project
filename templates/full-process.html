@@ -115,7 +115,11 @@
                                     {% set raw = item[col_key] if col_key in item else None %}
                                     {% if raw is string %}
                                         {% set obj = raw|from_json %}
-                                        {{ obj.total if obj and ('total' in obj) else raw }}
+                                        {% if obj is mapping %}
+                                            {{ obj.get('total', raw) }}
+                                        {% else %}
+                                            {{ raw }}
+                                        {% endif %}
                                     {% else %}
                                         {{ raw if raw is not none else '-' }}
                                     {% endif %}

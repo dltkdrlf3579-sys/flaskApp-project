@@ -20,6 +20,10 @@ class SectionConfigService:
             return 'full_process_sections'
         elif self.board_type == 'safe_workplace':
             return 'safe_workplace_sections'
+        elif self.board_type == 'subcontract_approval':
+            return 'subcontract_approval_sections'
+        elif self.board_type == 'subcontract_report':
+            return 'subcontract_report_sections'
         else:
             return 'section_config'
         
@@ -44,25 +48,34 @@ class SectionConfigService:
                 return False
 
         try:
-            # follow_sop과 full_process는 별도 테이블 사용
-            if self.board_type in ('follow_sop', 'full_process', 'safe_workplace'):
-                table = f"{self.board_type}_sections"
-                where = "is_active = 1"
+            table = self.table_name
+
+            if table != 'section_config':
+                where_clauses = []
+
+                if _col_exists(table, 'is_active'):
+                    where_clauses.append("is_active = 1")
                 if _col_exists(table, 'is_deleted'):
-                    where += " AND (is_deleted = 0 OR is_deleted IS NULL)"
-                cursor.execute(f"SELECT * FROM {table} WHERE {where} ORDER BY section_order")
+                    where_clauses.append("(is_deleted = 0 OR is_deleted IS NULL)")
+
+                sql = f"SELECT * FROM {table}"
+                if where_clauses:
+                    sql += " WHERE " + " AND ".join(where_clauses)
+
+                order_column = 'section_order' if _col_exists(table, 'section_order') else 'id'
+                sql += f" ORDER BY {order_column}"
+
+                cursor.execute(sql)
             else:
                 # safety_instruction 등은 기존 section_config 테이블 사용
-                where = "board_type = ? AND is_active = 1"
-                # section_config에는 is_deleted가 있을 수 있으므로 동적 확인
+                where = "board_type = ?"
+                if _col_exists('section_config', 'is_active'):
+                    where += " AND is_active = 1"
                 add_deleted = _col_exists('section_config', 'is_deleted')
                 if add_deleted:
                     where += " AND (is_deleted = 0 OR is_deleted IS NULL)"
                 sql = f"SELECT * FROM section_config WHERE {where} ORDER BY section_order"
-                if add_deleted:
-                    cursor.execute(sql, (self.board_type,))
-                else:
-                    cursor.execute(sql, (self.board_type,))
+                cursor.execute(sql, (self.board_type,))
 
             sections = [dict(row) for row in cursor.fetchall()]
             return sections
@@ -136,6 +149,14 @@ class SectionConfigService:
                 {'section_key': 'basic_info', 'section_name': '기본정보', 'section_order': 1},
                 {'section_key': 'work_info', 'section_name': '작업정보', 'section_order': 2},
                 {'section_key': 'additional', 'section_name': '추가기입정보', 'section_order': 3}
+            ]
+        if self.board_type == 'subcontract_approval':
+            return [
+                {'section_key': 'basic_info', 'section_name': '기본정보', 'section_order': 1},
+            ]
+        if self.board_type == 'subcontract_report':
+            return [
+                {'section_key': 'basic_info', 'section_name': '기본정보', 'section_order': 1},
             ]
         if self.board_type == 'full_process':
             return [

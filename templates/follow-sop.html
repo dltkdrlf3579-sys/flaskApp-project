@@ -4,6 +4,15 @@
 {% from 'includes/table_controls.html' import render_table_controls %}
 {% from 'includes/search_controls.html' import render_search_section, render_search_buttons %}
 
+{% set display_name = board_display_name or 'Follow SOP' %}
+{% set id_column = identifier_column or 'work_req_no' %}
+{% set id_label = identifier_label or '점검번호' %}
+{% set created_label = created_at_label or '등록일' %}
+{% set board_slug = board_slug or (board_type | replace('_', '-')) %}
+{% set board_type_value = board_type or 'follow_sop' %}
+{% set records = records if records is defined else [] %}
+{% set final_check_label = final_check_label or '검토완료 처리' %}
+
 {% block content %}
 <style>
 /* 페이지 헤더 - 기준정보 스타일과 통일 */
@@ -22,7 +31,7 @@
 </style>
 
 <div class="page-header">
-    <h2 class="page-title">Follow SOP</h2>
+    <h2 class="page-title">{{ display_name }}</h2>
 </div>
 
 <!-- 검색 영역 -->
@@ -54,8 +63,8 @@
         show_register=True,
         show_delete=True,
         show_final_check=True,
-        final_check_label='검토완료 처리',
-        final_check_callback='requestFollowSopFinalCheck()'
+        final_check_label=final_check_label,
+        final_check_callback='requestBoardFinalCheck()'
     ) }}
     <div class="table-wrapper">
         <table class="data-table">
@@ -63,29 +72,30 @@
                 <tr>
                     <th class="checkbox-column"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
                     <th class="fixed-col" style="width: 60px;">No</th>
-                    <!-- 하드코딩된 컬럼 헤더 (work_req_no, created_at) -->
-                    <th>점검번호</th>
-                    <th style="width: 120px;">등록일</th>
+                    <!-- Identifier / 등록일 기본 컬럼 -->
+                    <th>{{ id_label }}</th>
+                    <th style="width: 120px;">{{ created_label }}</th>
                     {% for col in display_columns %}
                         <th>{{ col['column_name'] }}</th>
                     {% endfor %}
                 </tr>
             </thead>
             <tbody>
-                {% for followsop in followsops %}
+                {% for record in records %}
                 <tr>
                     <td class="checkbox-column">
-                        <input type="checkbox" class="accident-checkbox" value="{{ followsop.work_req_no }}" onchange="updateDeleteButton()">
+                        <input type="checkbox" class="board-checkbox" value="{{ record[id_column] }}" onchange="updateDeleteButton()">
                     </td>
                     <td class="fixed-col" style="width: 60px;">
-                        {{ followsop.no }}
+                        {{ record.no }}
                     </td>
                     <!-- 하드코딩된 컬럼 (work_req_no, created_at) -->
                     <td>
-                        <a href="javascript:void(0)" class="company-link" onclick="openFollowSopModal('{{ followsop.work_req_no }}')">{{ followsop.work_req_no or '-' }}</a>
+                        {% set identifier_value = record[id_column] %}
+                        <a href="javascript:void(0)" class="company-link" onclick="openBoardModal('{{ identifier_value }}')">{{ identifier_value or '-' }}</a>
                     </td>
                     <td style="width: 120px;">
-                        {{ (followsop.created_at|date_only) if followsop.created_at else '-' }}
+                        {{ (record.created_at|date_only) if record.created_at else '-' }}
                     </td>
                     
                     {% for col in display_columns %}
@@ -93,31 +103,31 @@
                             {% if col['column_type'] == 'dropdown' %}
                                 {% set field_label = col['column_key'] + '_label' %}
                                 {% set col_key = col['column_key'] %}
-                                {% if followsop.custom_mapped and col_key in followsop.custom_mapped %}
-                                    {{ followsop.custom_mapped[col_key] or '-' }}
-                                {% elif field_label in followsop and followsop[field_label] %}
-                                    {{ followsop[field_label] }}
-                                {% elif col_key in followsop and followsop[col_key] %}
-                                    {{ followsop[col_key] }}
+                                {% if record.custom_mapped and col_key in record.custom_mapped %}
+                                    {{ record.custom_mapped[col_key] or '-' }}
+                                {% elif field_label in record and record[field_label] %}
+                                    {{ record[field_label] }}
+                                {% elif col_key in record and record[col_key] %}
+                                    {{ record[col_key] }}
                                 {% else %}
                                     -
                                 {% endif %}
                             {% elif col['column_type'] == 'list' %}
                                 {% set col_key = col['column_key'] %}
-                                {% if followsop.custom_mapped and col_key in followsop.custom_mapped %}
-                                    {% set list_data = followsop.custom_mapped[col_key] %}
+                                {% if record.custom_mapped and col_key in record.custom_mapped %}
+                                    {% set list_data = record.custom_mapped[col_key] %}
                                     {{ list_data | list_summary }}
-                                {% elif col_key in followsop %}
-                                    {{ followsop[col_key] | list_summary }}
+                                {% elif col_key in record %}
+                                    {{ record[col_key] | list_summary }}
                                 {% else %}
                                     -
                                 {% endif %}
                             {% else %}
                                 {% set col_key = col['column_key'] %}
-                                {% if followsop.custom_mapped and col_key in followsop.custom_mapped %}
-                                    {{ followsop.custom_mapped[col_key] or '-' }}
-                                {% elif col_key in followsop %}
-                                    {{ followsop[col_key] or '-' }}
+                                {% if record.custom_mapped and col_key in record.custom_mapped %}
+                                    {{ record.custom_mapped[col_key] or '-' }}
+                                {% elif col_key in record %}
+                                    {{ record[col_key] or '-' }}
                                 {% else %}
                                     -
                                 {% endif %}
@@ -149,13 +159,13 @@
         
         <!-- 이전 10페이지 -->
         {% if window_info.has_prev_window %}
-            <a href="{{ url_for('page_view', url='follow-sop', page=window_info.prev_window_start, **search_params) }}" class="page-btn">&laquo; 이전</a>
+            <a href="{{ url_for('page_view', url=board_slug, page=window_info.prev_window_start, **search_params) }}" class="page-btn">&laquo; 이전</a>
         {% endif %}
         
         <!-- 현재 윈도우의 페이지들 (최대 10개) -->
         {% for page in pagination.iter_pages() %}
             {% if page != pagination.page %}
-                <a href="{{ url_for('page_view', url='follow-sop', page=page, **search_params) }}" class="page-btn">{{ page }}</a>
+                <a href="{{ url_for('page_view', url=board_slug, page=page, **search_params) }}" class="page-btn">{{ page }}</a>
             {% else %}
                 <span class="page-btn active">{{ page }}</span>
             {% endif %}
@@ -163,7 +173,7 @@
         
         <!-- 다음 10페이지 -->
         {% if window_info.has_next_window %}
-            <a href="{{ url_for('page_view', url='follow-sop', page=window_info.next_window_start, **search_params) }}" class="page-btn">다음 &raquo;</a>
+            <a href="{{ url_for('page_view', url=board_slug, page=window_info.next_window_start, **search_params) }}" class="page-btn">다음 &raquo;</a>
         {% endif %}
     </div>
 </div>
@@ -540,12 +550,20 @@ td[data-col="list"] {
 </style>
 
 <script>
+const boardPageConfig = {
+    slug: "{{ board_slug }}",
+    boardType: "{{ board_type_value }}",
+    identifierColumn: "{{ id_column }}",
+    identifierLabel: "{{ id_label }}",
+    displayName: "{{ display_name }}",
+    finalCheckLabel: "{{ final_check_label }}",
+};
+
 function resetForm() {
     const form = document.querySelector('.search-form');
     const inputs = form.querySelectorAll('input');
     inputs.forEach(input => input.value = '');
-    
-    // URL에서 검색 파라미터 제거하고 리다이렉트
+
     const url = new URL(window.location);
     url.search = '';
     window.location.href = url.toString();
@@ -554,30 +572,36 @@ function resetForm() {
 function changePerPage(perPage) {
     const url = new URL(window.location);
     url.searchParams.set('per_page', perPage);
-    url.searchParams.delete('page'); // 페이지를 1페이지로 리셋
+    url.searchParams.delete('page');
     window.location.href = url.toString();
 }
 
-// Phase 1: 동적 컬럼 데이터 렌더링
 document.addEventListener('DOMContentLoaded', function() {
-    // 페이지 로드 시 삭제 버튼 숨기기 (초기 상태)
     const deleteBtn = document.querySelector('.btn-delete');
     if (deleteBtn) {
+        deleteBtn.dataset.defaultLabel = deleteBtn.dataset.defaultLabel || deleteBtn.textContent;
         deleteBtn.style.display = 'none';
     }
-    // 각 행의 custom_data 파싱하고 표시
+
+    const finalBtn = document.querySelector('.btn-final-check');
+    if (finalBtn) {
+        finalBtn.dataset.defaultLabel = finalBtn.dataset.defaultLabel || boardPageConfig.finalCheckLabel;
+        finalBtn.style.display = 'inline-block';
+        finalBtn.textContent = boardPageConfig.finalCheckLabel;
+    }
+
     document.querySelectorAll('tr').forEach(function(row) {
-        var customDataScript = row.querySelector('script');
+        const customDataScript = row.querySelector('script');
         if (customDataScript && typeof temp_custom !== 'undefined') {
-            var customData = temp_custom;
-            temp_custom = undefined; // 재사용 방지
-            
+            const customData = temp_custom;
+            temp_custom = undefined;
+
             row.querySelectorAll('.dynamic-col').forEach(function(cell) {
-                var columnKey = cell.dataset.columnKey;
-                var columnType = cell.dataset.columnType;
-                var value = customData[columnKey];
-                var displayText = '-';
-                
+                const columnKey = cell.dataset.columnKey;
+                const columnType = cell.dataset.columnType;
+                const value = customData[columnKey];
+                let displayText = '-';
+
                 if (value) {
                     if (columnType === 'popup_person' && typeof value === 'object') {
                         displayText = value.name + ' (' + value.department + ')';
@@ -587,21 +611,24 @@ document.addEventListener('DOMContentLoaded', function() {
                         displayText = value;
                     }
                 }
-                
-                cell.querySelector('.dynamic-value').textContent = displayText;
+
+                const target = cell.querySelector('.dynamic-value');
+                if (target) {
+                    target.textContent = displayText;
+                }
             });
         }
     });
+
+    updateDeleteButton();
 });
 
-// 사고 상세정보 팝업 윈도우 함수
-function openAccidentModal(accidentId) {
-    // 팝업 윈도우 옵션 설정
+function openBoardModal(identifier) {
     const width = 1400;
     const height = 900;
     const left = (screen.width - width) / 2;
     const top = (screen.height - height) / 2;
-    
+
     const popupOptions = [
         `width=${width}`,
         `height=${height}`,
@@ -614,64 +641,24 @@ function openAccidentModal(accidentId) {
         'location=no',
         'status=no'
     ].join(',');
-    
-    // 새 팝업 윈도우 열기
-    const popupUrl = '/accident-detail/' + accidentId + '?popup=1';
-    const popup = window.open(popupUrl, 'accidentDetail', popupOptions);
-    
-    // 팝업이 차단되었는지 확인
+
+    const popupUrl = `/${boardPageConfig.slug}-detail/${encodeURIComponent(identifier)}?popup=1`;
+    const popup = window.open(popupUrl, `${boardPageConfig.slug}Detail`, popupOptions);
+
     if (!popup || popup.closed || typeof popup.closed === 'undefined') {
         alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
         return;
     }
-    
-    // 팝업 포커스
+
     popup.focus();
 }
 
-// 환경안전 지시서 상세정보 팝업 윈도우 함수
-function openFollowSopModal(workReqNo) {
-    // 팝업 윈도우 옵션 설정
-    const width = 1400;
-    const height = 900;
-    const left = (screen.width - width) / 2;
-    const top = (screen.height - height) / 2;
-    
-    const popupOptions = [
-        `width=${width}`,
-        `height=${height}`,
-        `left=${left}`,
-        `top=${top}`,
-        'scrollbars=yes',
-        'resizable=yes',
-        'toolbar=no',
-        'menubar=no',
-        'location=no',
-        'status=no'
-    ].join(',');
-    
-    // 새 팝업 윈도우 열기
-    const popupUrl = '/follow-sop-detail/' + encodeURIComponent(workReqNo) + '?popup=1';
-    const popup = window.open(popupUrl, 'safetyInstructionDetail', popupOptions);
-    
-    // 팝업이 차단되었는지 확인
-    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
-        return;
-    }
-    
-    // 팝업 포커스
-    popup.focus();
-}
-
-// 지시서 등록 모달 열기
 function showRegisterModal() {
-    // 지시서 등록 페이지로 이동 또는 모달 표시
     const width = 1400;
     const height = 900;
     const left = (screen.width - width) / 2;
     const top = (screen.height - height) / 2;
-    
+
     const popupOptions = [
         `width=${width}`,
         `height=${height}`,
@@ -680,151 +667,35 @@ function showRegisterModal() {
         'scrollbars=yes',
         'resizable=yes'
     ].join(',');
-    
-    // 새 지시서 등록 페이지 열기
-    const popup = window.open('/follow-sop-register?popup=1', 'safetyInstructionRegister', popupOptions);
+
+    const popupUrl = `/${boardPageConfig.slug}-register?popup=1`;
+    const popup = window.open(popupUrl, `${boardPageConfig.slug}Register`, popupOptions);
     if (!popup) {
         alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
     }
 }
 
-// Excel Import 모달 - 임시 비활성화
-/*
-function showImportModal() {
-    // Import 모달 HTML 생성
-    const modalHtml = `
-        <div class="modal fade" id="importModal" tabindex="-1">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title">Excel Import</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body">
-                        <form id="importForm" enctype="multipart/form-data">
-                            <div class="mb-3">
-                                <label class="form-label">Excel 파일 선택</label>
-                                <input type="file" class="form-control" id="importFile" accept=".xlsx,.xls" required>
-                                <small class="text-muted">※ Excel 파일(.xlsx, .xls)만 가능합니다.</small>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Import 옵션</label>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="skipDuplicate" checked>
-                                    <label class="form-check-label" for="skipDuplicate">
-                                        중복 데이터 건너뛰기
-                                    </label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="validateData" checked>
-                                    <label class="form-check-label" for="validateData">
-                                        데이터 유효성 검사
-                                    </label>
-                                </div>
-                            </div>
-                        </form>
-                        <div class="alert alert-info">
-                            <i class="bi bi-info-circle"></i> Import 전 샘플 파일을 다운로드하여 형식을 확인하세요.
-                            <br>
-                            <a href="/api/follow-sop-export?template=true" class="btn btn-sm btn-outline-primary mt-2">
-                                <i class="bi bi-download"></i> 샘플 파일 다운로드
-                            </a>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
-                        <button type="button" class="btn btn-primary" onclick="importExcel()">Import 시작</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    // 모달이 이미 있으면 제거
-    const existingModal = document.getElementById('importModal');
-    if (existingModal) {
-        existingModal.remove();
-    }
-    
-    // 모달 추가 및 표시
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-    const modal = new bootstrap.Modal(document.getElementById('importModal'));
-    modal.show();
-}
-
-// Excel Import 실행
-function importExcel() {
-    const fileInput = document.getElementById('importFile');
-    const file = fileInput.files[0];
-    
-    if (!file) {
-        alert('파일을 선택해주세요.');
-        return;
-    }
-    
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('skip_duplicate', document.getElementById('skipDuplicate').checked);
-    formData.append('validate_data', document.getElementById('validateData').checked);
-    
-    // Loading 표시
-    const btn = event.target;
-    const originalText = btn.innerHTML;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 처리중...';
-    btn.disabled = true;
-    
-    fetch('/api/accident-import', {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            alert(`Import 완료!\n성공: ${data.success_count}건\n실패: ${data.error_count}건`);
-            location.reload();
-        } else {
-            alert('Import 실패: ' + data.message);
-        }
-    })
-    .catch(error => {
-        alert('Import 중 오류가 발생했습니다.');
-        console.error(error);
-    })
-    .finally(() => {
-        btn.innerHTML = originalText;
-        btn.disabled = false;
-    });
-}
-*/
-
-// Excel Export
 function exportToExcel() {
-    // 다운로드 확인 다이얼로그
     if (!confirm('엑셀 파일을 다운로드 하시겠습니까?')) {
         return;
     }
-    
-    // 현재 검색 조건 포함하여 Export
+
     const url = new URL(window.location);
     const params = new URLSearchParams(url.search);
-    
-    // Export API 호출
-    window.location.href = '/api/follow-sop-export?' + params.toString();
+    window.location.href = `/api/${boardPageConfig.slug}/export?` + params.toString();
 }
 
-// 전체 선택 토글
 function toggleSelectAll() {
     const selectAll = document.getElementById('selectAll');
-    const checkboxes = document.querySelectorAll('.accident-checkbox');
+    const checkboxes = document.querySelectorAll('.board-checkbox');
     checkboxes.forEach(checkbox => {
         checkbox.checked = selectAll.checked;
     });
     updateDeleteButton();
 }
 
-// 삭제 버튼 활성화/비활성화 업데이트
 function updateDeleteButton() {
-    const checkboxes = document.querySelectorAll('.accident-checkbox:checked');
+    const checkboxes = document.querySelectorAll('.board-checkbox:checked');
     const selectedCount = checkboxes.length;
 
     const deleteBtn = document.querySelector('.btn-delete');
@@ -841,7 +712,7 @@ function updateDeleteButton() {
 
     const finalBtn = document.querySelector('.btn-final-check');
     if (finalBtn) {
-        const baseLabel = finalBtn.dataset.defaultLabel || '검토완료 처리';
+        const baseLabel = finalBtn.dataset.defaultLabel || boardPageConfig.finalCheckLabel;
         finalBtn.style.display = 'inline-block';
         finalBtn.textContent = selectedCount > 0
             ? `${baseLabel} (${selectedCount}건)`
@@ -849,23 +720,22 @@ function updateDeleteButton() {
     }
 }
 
-// 비밀번호 확인 후 선택한 항목 삭제
 function deleteSelectedWithPassword() {
-    PwModal.show(deleteSelected, { boardType: 'follow_sop' });
+    PwModal.show(deleteSelected, { boardType: boardPageConfig.boardType });
 }
 
-function requestFollowSopFinalCheck() {
-    const checkboxes = document.querySelectorAll('.accident-checkbox:checked');
+function requestBoardFinalCheck() {
+    const checkboxes = document.querySelectorAll('.board-checkbox:checked');
     if (checkboxes.length === 0) {
         alert('처리할 항목을 선택해주세요.');
         return;
     }
 
-    PwModal.show(() => markFollowSopFinalCheck(), { boardType: 'follow_sop' });
+    PwModal.show(() => markBoardFinalCheck(), { boardType: boardPageConfig.boardType });
 }
 
-function markFollowSopFinalCheck() {
-    const checkboxes = document.querySelectorAll('.accident-checkbox:checked');
+function markBoardFinalCheck() {
+    const checkboxes = document.querySelectorAll('.board-checkbox:checked');
     const ids = Array.from(checkboxes).map(cb => cb.value);
 
     if (ids.length === 0) {
@@ -878,14 +748,14 @@ function markFollowSopFinalCheck() {
     }
 
     const finalBtn = document.querySelector('.btn-final-check');
-    const baseLabel = finalBtn ? (finalBtn.dataset.defaultLabel || '검토완료 처리') : '검토완료 처리';
+    const baseLabel = finalBtn ? (finalBtn.dataset.defaultLabel || boardPageConfig.finalCheckLabel) : boardPageConfig.finalCheckLabel;
 
     if (finalBtn) {
         finalBtn.disabled = true;
         finalBtn.textContent = '처리 중...';
     }
 
-    fetch('/api/follow-sop/final-check', {
+    fetch(`/api/${boardPageConfig.slug}/final-check`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -914,22 +784,21 @@ function markFollowSopFinalCheck() {
     });
 }
 
-// 선택한 항목 삭제
 function deleteSelected() {
-    const checkboxes = document.querySelectorAll('.accident-checkbox:checked');
+    const checkboxes = document.querySelectorAll('.board-checkbox:checked');
     const ids = Array.from(checkboxes).map(cb => cb.value);
-    
+
     if (ids.length === 0) {
         alert('삭제할 항목을 선택해주세요.');
         return;
     }
-    
-    if (!confirm(`선택한 ${ids.length}개의 Follow SOP를 삭제하시겠습니까?\n(삭제된 항목은 관리자 메뉴에서 복구 가능합니다)`)) {
+
+    if (!confirm(`선택한 ${ids.length}개의 ${boardPageConfig.displayName}을(를) 삭제하시겠습니까?
+(삭제된 항목은 관리자 메뉴에서 복구 가능합니다)`)) {
         return;
     }
-    
-    // 삭제 API 호출
-    fetch('/api/follow-sop/delete', {
+
+    fetch(`/api/${boardPageConfig.slug}/delete`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -951,7 +820,6 @@ function deleteSelected() {
     });
 }
 
-document.addEventListener('DOMContentLoaded', updateDeleteButton);
 </script>
 
 <!-- 비밀번호 모달 포함 -->

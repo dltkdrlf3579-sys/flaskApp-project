@@ -43,4 +43,3 @@ FROM (VALUES
 WHERE NOT EXISTS (
     SELECT 1 FROM safe_workplace_sections sws WHERE sws.section_key = seed.section_key
 );
-

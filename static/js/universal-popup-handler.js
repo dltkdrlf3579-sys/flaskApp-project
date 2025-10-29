@@ -53,6 +53,18 @@ class UniversalPopupManager {
         this.initializeCallbacks();
     }
 
+    _popupTypeToTable(popupType) {
+        const mapping = {
+            popup_person: 'person',
+            popup_company: 'company',
+            popup_department: 'department',
+            popup_building: 'building',
+            popup_contractor: 'contractor',
+            popup_division: 'division'
+        };
+        return mapping[popupType] || '';
+    }
+
     /**
      * 통합 팝업 열기
      * @param {string} fieldKey - 필드 키
@@ -69,7 +81,7 @@ class UniversalPopupManager {
         const { width, height, options } = this.config.popup;
         const left = (screen.width - width) / 2;
         const top = (screen.height - height) / 2;
-        
+
         const popupOptions = [
             `width=${width}`,
             `height=${height}`,
@@ -77,24 +89,34 @@ class UniversalPopupManager {
             `top=${top}`,
             ...options
         ].join(',');
-        
+
         const popupUrl = `/search-popup?type=${typeConfig.endpoint}&field=${fieldKey}`;
         const popup = window.open(popupUrl, typeConfig.windowName, popupOptions);
-        
-        if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-            alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+
+        if (!popup) {
+            console.warn('Popup blocked:', popupUrl);
+            const warning = document.querySelector('.popup-block-warning');
+            if (warning) {
+                warning.style.display = '';
+            }
             return;
         }
-        
+
+        // 성공적으로 열림: 차단 경고 숨김
+        const warning = document.querySelector('.popup-block-warning');
+        if (warning) {
+            warning.style.display = 'none';
+        }
+
         // 활성 팝업 추적
         this.activePopups.set(fieldKey, {
             popup: popup,
             type: popupType,
             fieldKey: fieldKey
         });
-        
+
         popup.focus();
-        
+
         // 팝업 종료 감지
         this.monitorPopupClose(fieldKey, popup);
     }
@@ -117,7 +139,7 @@ class UniversalPopupManager {
         }
         
         if (!fieldConfig || !fieldConfig.input_type_config) {
-            alert('테이블 설정을 찾을 수 없습니다.');
+            console.warn('테이블 설정을 찾을 수 없습니다:', fieldKey);
             return;
         }
         
@@ -138,7 +160,7 @@ class UniversalPopupManager {
         const popup = window.open(popupUrl, 'tableSearch', popupOptions);
         
         if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-            alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+            console.warn('Popup blocked: table search');
             return;
         }
         
@@ -244,11 +266,20 @@ class UniversalPopupManager {
             }
             
             mainField.value = mainValue;
+            try {
+                mainField.dispatchEvent(new Event('input', { bubbles: true }));
+                mainField.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch (err) {
+                console.warn('Failed to dispatch input event for popup field', fieldKey, err);
+            }
         }
-        
+
         // 연관 필드들 업데이트
         this.updateLinkedFields(fieldKey, data, popupType);
-        
+        if (mainField) {
+            this.updateLinkedFieldsByGroup(mainField, data, popupType);
+        }
+
         // 활성 팝업 정리
         this.activePopups.delete(fieldKey);
     }
@@ -298,6 +329,78 @@ class UniversalPopupManager {
             linkedField.value = value;
             linkedField.setAttribute('readonly', true);
             linkedField.style.backgroundColor = '#f8f9fa';
+            try {
+                linkedField.dispatchEvent(new Event('input', { bubbles: true }));
+                linkedField.dispatchEvent(new Event('change', { bubbles: true }));
+            } catch (err) {
+                console.warn('Failed to sync linked popup field', linkedField.id, err);
+            }
+        });
+    }
+
+    updateLinkedFieldsByGroup(mainField, selectedData, popupType) {
+        if (!mainField) return;
+        const tableGroup = mainField.getAttribute('data-table-group');
+        if (!tableGroup) return;
+        const tableType = mainField.getAttribute('data-table-type') || this._popupTypeToTable(popupType);
+        const targetRowIdx = mainField.getAttribute('data-row-index');
+        const linkedFields = document.querySelectorAll(`[data-table-group="${tableGroup}"]`);
+        linkedFields.forEach(field => {
+            if (field === mainField) {
+                return;
+            }
+            const fieldRowIdx = field.getAttribute('data-row-index');
+            if (targetRowIdx !== null && fieldRowIdx !== null && targetRowIdx !== fieldRowIdx) {
+                return;
+            }
+            const fieldKey = field.getAttribute('data-field') || field.id || '';
+            let value = '';
+
+            if (fieldKey.includes('_company')) {
+                value = selectedData.company_name || selectedData.company || '';
+            } else if (fieldKey.includes('_bizno') || fieldKey.includes('_business_number')) {
+                value = selectedData.business_number || selectedData.company_business_number || '';
+            } else if (fieldKey.includes('_dept') || fieldKey.includes('_department')) {
+                value = selectedData.department_name || selectedData.department || '';
+            } else if (fieldKey.includes('_division')) {
+                value = selectedData.division_name || selectedData.division || '';
+            } else if (fieldKey.includes('_parent')) {
+                value = selectedData.parent_division_code || selectedData.parent || '';
+            } else if (fieldKey.includes('_code')) {
+                if (tableType === 'building') {
+                    value = selectedData.building_code || selectedData.code || '';
+                } else if (tableType === 'department') {
+                    value = selectedData.dept_code || selectedData.department_code || selectedData.code || '';
+                } else if (tableType === 'division') {
+                    value = selectedData.division_code || selectedData.code || '';
+                } else {
+                    value = selectedData.code || '';
+                }
+            } else if (fieldKey.includes('_id')) {
+                if (tableType === 'contractor') {
+                    value = selectedData.worker_id || selectedData.contractor_id || selectedData.id || '';
+                } else if (tableType === 'company') {
+                    value = selectedData.company_id || selectedData.id || '';
+                } else if (tableType === 'building') {
+                    value = selectedData.building_id || selectedData.id || '';
+                } else {
+                    value = selectedData.id || '';
+                }
+            } else if (fieldKey.includes('_name')) {
+                value = selectedData.name || selectedData.employee_name || selectedData.contractor_name || selectedData.company_name || selectedData.building_name || '';
+            }
+
+            if (value !== undefined && value !== null) {
+                field.value = value;
+                field.setAttribute('readonly', true);
+                field.style.backgroundColor = '#f8f9fa';
+                try {
+                    field.dispatchEvent(new Event('input', { bubbles: true }));
+                    field.dispatchEvent(new Event('change', { bubbles: true }));
+                } catch (err) {
+                    console.warn('Failed to sync grouped field', field.id, err);
+                }
+            }
         });
     }
 
@@ -324,6 +427,7 @@ class UniversalPopupManager {
 
 // 전역 인스턴스 생성
 const popupManager = new UniversalPopupManager();
+window.popupManager = popupManager;
 
 // 편의 함수들 (기존 코드 호환성)
 function openUniversalPopup(fieldKey, popupType) {

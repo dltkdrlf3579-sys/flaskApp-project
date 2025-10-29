@@ -5,6 +5,8 @@ Common utilities for column type normalization across all boards.
 This module eliminates code duplication in board register/detail routes.
 """
 
+from list_schema_utils import resolve_child_schema, deserialize_list_rows
+
 def determine_linked_type(col):
     """
     table_group과 table_type을 활용하여 정확한 linked 타입 결정
@@ -117,6 +119,21 @@ def prepare_columns_for_template(columns, data_row=None):
             # Add linked field configuration
             prepared_col['is_linked'] = True
             prepared_col['linked_to'] = col.get('linked_columns', '')
+
+        elif col.get('column_type') == 'list':
+            # Resolve schema and pre-normalize list payload without breaking legacy usage.
+            schema, generated = resolve_child_schema(prepared_col)
+            prepared_col['child_schema'] = schema
+            if generated:
+                prepared_col['_child_schema_generated'] = True
+
+            list_info = deserialize_list_rows(prepared_col, schema, prepared_col.get('value'))
+            prepared_col['list_rows'] = list_info.get('rows', [])
+            prepared_col['list_raw'] = list_info.get('raw', [])
+            if list_info.get('warnings'):
+                prepared_col['list_warnings'] = list_info['warnings']
+            if list_info.get('errors'):
+                prepared_col['list_errors'] = list_info['errors']
 
         prepared_columns.append(prepared_col)
 

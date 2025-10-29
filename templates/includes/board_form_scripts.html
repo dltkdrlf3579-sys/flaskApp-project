@@ -1,3 +1,6 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/board-form.css') }}">
 <script src="{{ url_for('static', filename='js/board-form.js') }}"></script>
 <script src="{{ url_for('static', filename='js/board-detail.js') }}"></script>
+<script>
+  window.__BOARD_USER__ = window.__BOARD_USER__ || {{ board_user_context | default({'display':'','user_name':'','emp_id':'','login_id':''}) | tojson | safe }};
+</script>

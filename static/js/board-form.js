@@ -77,6 +77,146 @@
     const skipReadonly = options && options.skipReadonly;
     const data = {};
 
+    const parseListValue = (raw) => {
+      if (!raw) {
+        return [];
+      }
+      if (Array.isArray(raw)) {
+        return raw;
+      }
+      if (typeof raw === 'string') {
+        try {
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch (err) {
+          console.warn('[board-form] failed to parse list raw value', err);
+          return [];
+        }
+      }
+      return [];
+    };
+
+    const rebuildListRows = (fieldKey) => {
+      const selector = `[data-field-type="list_child"][data-list-key="${fieldKey}"]`;
+      const inputs = document.querySelectorAll(selector);
+      if (!inputs.length) {
+        return [];
+      }
+      const rowsByIndex = new Map();
+      inputs.forEach((input) => {
+        const idx = parseInt(input.getAttribute('data-row-index'), 10);
+        if (Number.isNaN(idx)) {
+          return;
+        }
+        const key = input.getAttribute('data-field');
+        if (!key) {
+          return;
+        }
+        let row = rowsByIndex.get(idx);
+        if (!row) {
+          row = {};
+          rowsByIndex.set(idx, row);
+        }
+        row[key] = input.value;
+      });
+    const sortedIndexes = Array.from(rowsByIndex.keys()).sort((a, b) => a - b);
+    return sortedIndexes.map((index) => rowsByIndex.get(index));
+  };
+
+  const isNoneString = (value) => typeof value === 'string' && value.trim().toLowerCase() === 'none';
+
+  const sanitizeScalar = (value) => (isNoneString(value) ? '' : value);
+
+  const sanitizeListRows = (rows) => {
+    if (!Array.isArray(rows)) {
+      return rows;
+    }
+    return rows.map((row) => {
+      if (!row || typeof row !== 'object') {
+        return row;
+      }
+      const clone = Array.isArray(row) ? row.slice() : { ...row };
+      Object.keys(clone).forEach((key) => {
+        const current = clone[key];
+        if (isNoneString(current)) {
+          clone[key] = '';
+        }
+      });
+      return clone;
+    });
+  };
+
+  const syncListFieldInputs = () => {
+    const results = {};
+    const registry = window.__LIST_FIELD_STATE__ || {};
+
+      const hiddenInputs = document.querySelectorAll('[data-field-type="list"]');
+      hiddenInputs.forEach((input) => {
+        const fieldKey = input.dataset.field;
+        if (!fieldKey) {
+          return;
+        }
+
+        let rows = null;
+
+        const regEntry = registry[fieldKey];
+        if (regEntry && typeof regEntry.getRows === 'function') {
+          try {
+            rows = regEntry.getRows();
+          } catch (err) {
+            console.warn('[board-form] list registry sync failed', fieldKey, err);
+          }
+        }
+
+        if (!Array.isArray(rows)) {
+          const getterName = `${input.id}_getListRows`;
+          if (typeof window[getterName] === 'function') {
+            try {
+              rows = window[getterName]();
+            } catch (err) {
+              console.warn('[board-form] list getter sync failed', getterName, err);
+            }
+          }
+        }
+
+        if (!Array.isArray(rows) || !rows.length) {
+          const globalDataName = `${fieldKey}_data`;
+          if (Array.isArray(window[globalDataName])) {
+            rows = window[globalDataName].map((row) => ({ ...row }));
+          }
+        }
+
+        if (!Array.isArray(rows) || !rows.length) {
+          rows = parseListValue(input.value);
+        }
+
+        if (!Array.isArray(rows) || !rows.length) {
+          const rebuilt = rebuildListRows(fieldKey);
+          if (rebuilt.length) {
+            rows = rebuilt;
+          }
+        }
+
+        if (!Array.isArray(rows)) {
+          rows = [];
+        }
+
+        rows = sanitizeListRows(rows);
+
+        try {
+          input.value = JSON.stringify(rows);
+        } catch (err) {
+          console.warn('[board-form] failed to sync list hidden input', fieldKey, err);
+        }
+
+        results[fieldKey] = rows;
+      });
+
+      return results;
+    };
+
+    const syncedListState = syncListFieldInputs();
+
     sections.forEach(section => {
       const selector = `[data-section="${section.section_key}"]`;
       const inputs = document.querySelectorAll(selector);
@@ -96,7 +236,13 @@
           return;
         }
 
-        if (input.dataset.fieldType === 'dropdown_multi_hidden') {
+        const fieldType = input.dataset.fieldType;
+
+        if (fieldType === 'list_child') {
+          return;
+        }
+
+        if (fieldType === 'dropdown_multi_hidden') {
           const raw = input.value || '';
           if (!raw) {
             data[fieldKey] = [];
@@ -108,6 +254,69 @@
           } catch (e) {
             data[fieldKey] = [];
           }
+          return;
+        }
+
+        if (fieldType === 'list') {
+          let rows = null;
+          const registry = window.__LIST_FIELD_STATE__;
+          if (registry && registry[fieldKey] && typeof registry[fieldKey].getRows === 'function') {
+            try {
+              rows = registry[fieldKey].getRows();
+            } catch (err) {
+              console.warn('[board-form] list registry getter failed', fieldKey, err);
+            }
+          }
+
+          if (!Array.isArray(rows)) {
+            const getterName = `${input.id}_getListRows`;
+            if (typeof window[getterName] === 'function') {
+              try {
+                rows = window[getterName]();
+              } catch (err) {
+                console.warn('[board-form] list getter failed', getterName, err);
+              }
+            }
+          }
+
+          if (!Array.isArray(rows) && syncedListState[fieldKey]) {
+            rows = syncedListState[fieldKey];
+          }
+
+          if (!Array.isArray(rows) || !rows.length) {
+            rows = parseListValue(input.value);
+          }
+
+          if (!Array.isArray(rows) || !rows.length) {
+            const rebuilt = rebuildListRows(fieldKey);
+            if (rebuilt.length) {
+              rows = rebuilt;
+            }
+          }
+
+          if (Array.isArray(rows)) {
+            rows = sanitizeListRows(rows);
+            try {
+              input.value = JSON.stringify(rows);
+            } catch (err) {
+              console.warn('[board-form] failed to serialize list rows for', fieldKey, err);
+            }
+            data[fieldKey] = rows;
+            return;
+          }
+
+          const hiddenParsed = sanitizeListRows(parseListValue(input.value));
+          if (hiddenParsed.length) {
+            data[fieldKey] = hiddenParsed;
+            try {
+              input.value = JSON.stringify(hiddenParsed);
+            } catch (err) {
+              console.warn('[board-form] failed to normalize hidden list value', fieldKey, err);
+            }
+            return;
+          }
+
+          data[fieldKey] = [];
           return;
         }
 
@@ -135,6 +344,8 @@
           value = input.value;
         }
 
+        value = sanitizeScalar(value);
+
         const isListField = input.getAttribute('data-field-type') === 'list'
           || (typeof value === 'string' && value.trim().startsWith('[') && value.trim().endsWith(']'));
 
@@ -152,6 +363,24 @@
     });
 
     return data;
+  }
+
+  function isPlaceholderNone(value) {
+    return typeof value === 'string' && ['none', 'null', 'undefined'].includes(value.trim().toLowerCase());
+  }
+
+  function cleanNonePlaceholders(root) {
+    const scope = root || document;
+    scope.querySelectorAll('input[type="text"], input[type="number"], textarea').forEach((el) => {
+      if (el && isPlaceholderNone(el.value || '')) {
+        el.value = '';
+      }
+    });
+    scope.querySelectorAll('.value, .readonly-highlight').forEach((el) => {
+      if (el && isPlaceholderNone(el.textContent || '')) {
+        el.textContent = '';
+      }
+    });
   }
 
   function groupFieldsBySection(dynamicData, sectionColumns) {
@@ -440,6 +669,7 @@
     appendDeletedAttachments,
     appendSectionGroups,
     appendCustomData,
+    cleanNonePlaceholders,
     initDropdownMultiGroups,
   };
 
@@ -451,6 +681,11 @@
 
   if (typeof document !== 'undefined') {
     document.addEventListener('DOMContentLoaded', () => {
+      try {
+        cleanNonePlaceholders();
+      } catch (err) {
+        console.warn('[board-form] failed to normalize placeholder values', err);
+      }
       try {
         initDropdownMultiGroups();
       } catch (err) {

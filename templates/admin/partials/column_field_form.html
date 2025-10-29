@@ -1,0 +1,204 @@
+{% set form_options = form_options or {} %}
+{% set show_section = form_options.get('show_section', True) %}
+{% set show_span = form_options.get('show_span', True) %}
+{% set show_table = form_options.get('show_table', True) %}
+{% set show_list_button = form_options.get('show_list_button', True) %}
+{% set show_number = form_options.get('show_number', True) %}
+{% set show_scoring = form_options.get('show_scoring', True) %}
+{% set show_active = form_options.get('show_active', True) %}
+
+<form id="columnForm">
+    <input type="hidden" id="columnId">
+
+    <div class="mb-3" id="columnNameWrapper">
+        <label class="form-label">컬럼명 <span class="text-danger">*</span></label>
+        <input type="text" class="form-control" id="columnName" required
+               oninput="validateColumnName(this)"
+               placeholder="예: 사고날짜, 발생위치">
+        <small class="text-muted">화면에 표시될 이름 (숫자로만 구성 불가)</small>
+        <div class="invalid-feedback" id="columnNameError"></div>
+    </div>
+
+    <div class="mb-3" id="columnKeyWrapper">
+        <label class="form-label">컬럼 키 <span class="text-danger">*</span></label>
+        <input type="text" class="form-control" id="columnKey" pattern="[a-z][a-z0-9_]*" required
+               oninput="validateColumnKey(this)"
+               placeholder="예: accident_date">
+        <small class="text-muted" style="display: block;">
+            <strong>반드시 컬럼명을 영어로 번역해주세요! (예: 사고날짜 → accident_date)</strong><br>
+            영문 소문자로 시작, 영문 소문자/숫자/언더스코어만 사용
+        </small>
+        <div class="invalid-feedback" id="columnKeyError"></div>
+    </div>
+
+    {% if show_section %}
+    <div class="mb-3" id="sectionField">
+        <label class="form-label">섹션 선택 <span class="text-danger">*</span></label>
+        <select class="form-select" id="columnSection" required>
+            <option value="">섹션을 선택하세요</option>
+        </select>
+        <small class="text-muted">컬럼이 표시될 섹션을 선택하세요</small>
+    </div>
+    {% else %}
+    <div class="mb-3 d-none" id="sectionField">
+        <label class="form-label">섹션 선택</label>
+        <select class="form-select" id="columnSection">
+            <option value="">섹션을 선택하세요</option>
+        </select>
+    </div>
+    {% endif %}
+
+    <div class="mb-3" id="columnTypeWrapper">
+        <label class="form-label">입력 타입 <span class="text-danger">*</span></label>
+        <select class="form-select" id="columnType" onchange="toggleOptionsField(); toggleTableField(); toggleSpanField(); toggleListField(); toggleNumberField(); toggleScoringField(); checkTypeChange();">
+            <option value="" disabled selected>타입을 선택하세요</option>
+            <option value="text">텍스트</option>
+            <option value="dropdown">드롭다운</option>
+            <option value="date">날짜</option>
+            <option value="time">시간</option>
+            <option value="number">숫자</option>
+            <option value="table">테이블</option>
+            {% if show_list_button %}
+            <option value="list">리스트</option>
+            {% endif %}
+            {% if show_scoring %}
+            <option value="scoring">채점</option>
+            <option value="score_total">총점(자동)</option>
+            {% endif %}
+        </select>
+        <div id="typeChangeWarning" class="alert alert-warning mt-2" style="display: none; font-size: 13px; padding: 8px 12px;">
+            <i class="bi bi-exclamation-triangle"></i> 타입 변경 시 기존 데이터가 삭제될 수 있습니다.
+        </div>
+    </div>
+
+    <div class="mb-3" id="spanField" style="display: none;">
+        <label class="form-label">차지할 칸 수</label>
+        <div class="btn-group w-100" role="group">
+            <input type="radio" class="btn-check" name="columnSpan" id="span1" value="1">
+            <label class="btn btn-outline-primary" for="span1">
+                <i class="bi bi-square"></i> 1칸
+            </label>
+
+            <input type="radio" class="btn-check" name="columnSpan" id="span2" value="2" checked>
+            <label class="btn btn-outline-primary" for="span2">
+                <i class="bi bi-square"></i><i class="bi bi-square"></i> 2칸
+            </label>
+
+            <input type="radio" class="btn-check" name="columnSpan" id="span4" value="4">
+            <label class="btn btn-outline-primary" for="span4">
+                <i class="bi bi-square"></i><i class="bi bi-square"></i><i class="bi bi-square"></i><i class="bi bi-square"></i> 4칸
+            </label>
+
+            <input type="radio" class="btn-check" name="columnSpan" id="span8" value="8">
+            <label class="btn btn-outline-primary" for="span8">
+                <i class="bi bi-square-fill"></i> 전체 너비 (8칸)
+            </label>
+        </div>
+    </div>
+
+    {% if show_table %}
+    <div class="mb-3" id="tableConfigField" style="display: none;">
+        <label class="form-label">테이블 설정</label>
+        <div class="d-flex gap-2 align-items-center">
+            <input type="text" class="form-control" id="selectedTableDisplay" readonly placeholder="테이블을 선택하세요">
+            <button type="button" class="btn btn-outline-primary" id="openTableConfigBtn" onclick="openTableConfigModal()">
+                설정
+            </button>
+        </div>
+        <input type="hidden" id="selectedTableConfig" value="">
+        <div id="tableColumnsPreview" class="mt-2" style="display: none;"></div>
+    </div>
+
+    <div class="mb-3" id="tableSelectField" style="display: none;">
+        <label class="form-label">테이블 선택</label>
+        <select class="form-select" id="tableSelect" onchange="updateMappingFields()">
+            <option value="">-- 선택 --</option>
+            <option value="employees">담당자 (employees)</option>
+            <option value="companies">업체 (companies)</option>
+            <option value="departments">부서 (departments)</option>
+        </select>
+
+        <div id="mappingFields" style="display: none; margin-top: 15px;">
+            <label class="form-label">연관 컬럼 매핑</label>
+            <div class="alert alert-info" style="font-size: 13px;">
+                <i class="bi bi-info-circle"></i> 선택 시 자동으로 채워질 컬럼들을 설정합니다.
+            </div>
+            <div id="mappingContainer"></div>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="mb-3" id="optionsField" style="display: none;">
+        <label class="form-label">드롭다운 옵션</label>
+        <div id="optionPreview" class="mb-3" style="display: none;">
+            <h6>현재 설정된 옵션:</h6>
+            <table class="table table-sm table-bordered">
+                <thead>
+                    <tr>
+                        <th width="40%">코드</th>
+                        <th>표시값</th>
+                    </tr>
+                </thead>
+                <tbody id="optionPreviewBody"></tbody>
+            </table>
+        </div>
+        <div class="form-check form-switch mt-3" id="dropdownMultiToggleWrapper" style="display: none;">
+            <input class="form-check-input" type="checkbox" id="dropdownMultiToggle" onchange="handleDropdownMultiToggleChange()">
+            <label class="form-check-label" for="dropdownMultiToggle">여러 값을 동시에 선택 허용</label>
+        </div>
+        <small class="text-muted d-block mt-1" id="dropdownMultiHint" style="display: none;">
+            사용자 화면에서는 다중 선택 드롭다운이 표시되며 선택한 값은 쉼표로 묶어 저장됩니다.
+        </small>
+
+        <button type="button" class="btn btn-primary w-100" id="openCodeEditorBtn" onclick="openCodeEditor()">
+            <i class="bi bi-code-square"></i> 코드 편집기 열기
+        </button>
+        <input type="hidden" id="dropdownOptions" />
+    </div>
+
+    {% if show_list_button %}
+    <div class="mb-3" id="listConfigField" style="display: none;">
+        <label class="form-label">리스트 자식 컬럼</label>
+        <div class="alert alert-secondary" style="font-size: 13px;">
+            <i class="bi bi-info-circle"></i> 자식 컬럼은 컬럼 카드 우측의 <i class="bi bi-layout-text-window-reverse"></i> 아이콘으로 편집합니다. 새 컬럼은 한 번 저장한 뒤 아이콘을 눌러주세요.
+        </div>
+    </div>
+    {% endif %}
+
+    {% if show_active %}
+    <div class="form-check mb-3" id="isActiveWrapper">
+        <input class="form-check-input" type="checkbox" id="isActive" checked>
+        <label class="form-check-label" for="isActive">활성화</label>
+    </div>
+    {% endif %}
+
+    {% if show_number %}
+    <div class="mb-3" id="numberConfigField" style="display: none;">
+        <label class="form-label">숫자 형식</label>
+        <div class="d-flex gap-3 align-items-center mb-2">
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="numberType" id="numberTypeInteger" value="integer" checked>
+                <label class="form-check-label" for="numberTypeInteger">정수</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="numberType" id="numberTypeFloat" value="float">
+                <label class="form-check-label" for="numberTypeFloat">실수</label>
+            </div>
+        </div>
+        <small class="text-muted">정수는 소수점을 허용하지 않습니다. 실수는 소수점 입력이 가능합니다.</small>
+    </div>
+    {% endif %}
+
+    {% if show_scoring %}
+    <div class="mb-3" id="scoringConfigField" style="display: none;">
+        <label class="form-label">채점 설정</label>
+        <div class="d-flex align-items-center gap-2">
+            <button type="button" class="btn btn-primary" id="openScoringModalBtn" onclick="openScoringModal()">
+                <i class="bi bi-pencil-square"></i> 채점표 편집
+            </button>
+            <span id="scoringPreviewLabel" class="text-muted">설정되지 않음</span>
+        </div>
+        <textarea class="form-control" id="scoringConfig" rows="3" style="display:none;"></textarea>
+    </div>
+    {% endif %}
+</form>

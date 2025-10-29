@@ -28,6 +28,14 @@ log_level = ERROR
 log_file = /var/log/portal/app.log
 log_db_backend = false
 
+[DASHBOARD]
+dashboard_enabled = true
+dashboard_url = https://your-dashboard.com
+primary_comp_id = 
+primary_dept_ids = 
+secondary_dashboard_url = https://your-alternate-dashboard.com
+fallback_dashboard_image = 
+
 [NOTIFICATION]
 chatbot_webhook_url = http://127.0.0.1:8000/webhook/portal-notification
 chatbot_auth_token = 

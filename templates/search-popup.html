@@ -33,6 +33,14 @@
         margin-bottom: 20px;
     }
 
+    .search-controls-multi {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 20px;
+        align-items: flex-end;
+    }
+
     .search-type-select {
         padding: 8px 12px;
         border: 1px solid #ddd;
@@ -46,6 +54,19 @@
     .search-input-wrapper {
         flex: 1;
         position: relative;
+    }
+
+    .search-input-wrapper.multi {
+        min-width: 200px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .search-input-wrapper.multi .multi-label {
+        font-size: 12px;
+        font-weight: 500;
+        color: #555;
     }
 
     .search-input {
@@ -74,9 +95,69 @@
         transition: all 0.2s;
     }
 
+    .search-actions {
+        display: flex;
+        align-items: center;
+    }
+
     .search-btn:hover {
         background: #0b5ed7;
         border-color: #0b5ed7;
+    }
+
+    .pagination-controls {
+        display: none;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        margin: 15px 0 0;
+    }
+
+    .pagination-btn {
+        padding: 6px 14px;
+        border-radius: 4px;
+        border: 1px solid #0d6efd;
+        background: #fff;
+        color: #0d6efd;
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .pagination-btn:hover:not(:disabled) {
+        background: #0d6efd;
+        color: #fff;
+    }
+
+    .pagination-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        background: #f1f3f5;
+        color: #adb5bd;
+        border-color: #ced4da;
+    }
+
+    .page-numbers {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .pagination-number-btn {
+        min-width: 32px;
+        padding: 6px 10px;
+    }
+
+    .pagination-number-btn.active {
+        background: #0d6efd;
+        color: #fff;
+        cursor: default;
+    }
+
+    .pagination-ellipsis {
+        color: #6c757d;
+        font-size: 13px;
+        padding: 0 4px;
     }
 
     /* 자동완성 드롭다운 */
@@ -282,6 +363,23 @@
             <h3 class="search-title">{{ search_title or '검색' }}</h3>
         </div>
         
+        {% if config.advanced_filters %}
+        <div class="search-controls-multi">
+            {% for filter in config.advanced_filters %}
+            <div class="search-input-wrapper multi">
+                <label class="multi-label" for="multi-input-{{ loop.index }}">{{ filter.label }}</label>
+                <input type="text"
+                       class="search-input multi-search-input"
+                       id="multi-input-{{ loop.index }}"
+                       data-field="{{ filter.field }}"
+                       placeholder="{{ filter.label }} 입력">
+            </div>
+            {% endfor %}
+            <div class="search-actions">
+                <button class="search-btn" onclick="performSearch()">검색</button>
+            </div>
+        </div>
+        {% else %}
         <div class="search-controls">
             <select class="search-type-select" id="searchType">
                 {% for option in search_options %}
@@ -300,6 +398,7 @@
             
             <button class="search-btn" onclick="performSearch()">검색</button>
         </div>
+        {% endif %}
     </div>
 
     <!-- 검색 결과 영역 -->
@@ -308,7 +407,7 @@
             <span class="result-title">검색 결과</span>
             <span class="result-count" id="resultCount">0건</span>
         </div>
-        
+
         <div class="loading" id="loading">
             <div class="spinner"></div>
             <p style="margin-top: 10px; color: #666;">검색 중...</p>
@@ -330,6 +429,12 @@
                 검색 결과가 없습니다.
             </div>
         </div>
+
+        <div class="pagination-controls" id="paginationControls">
+            <button type="button" class="pagination-btn" id="prevPageBtn" onclick="changePage(-1)" disabled>이전</button>
+            <div class="page-numbers" id="pageNumbers"></div>
+            <button type="button" class="pagination-btn" id="nextPageBtn" onclick="changePage(1)" disabled>다음</button>
+        </div>
     </div>
 
     <!-- 버튼 영역 -->
@@ -345,39 +450,82 @@ let searchConfig = {{ config|tojson|safe }};
 let selectedItem = null;
 let autocompleteItems = [];
 let currentAutocompleteIndex = -1;
+const isMultiFilter = Array.isArray(searchConfig['advanced_filters']) && searchConfig['advanced_filters'].length > 0;
+const PAGE_LIMIT = 15;
+let currentPage = 1;
+let lastHasMore = false;
+let currentResultsLength = 0;
+let totalCount = 0;
+let totalPages = 0;
+const MIN_PAGE_BUTTONS = 5;
+
+function collectAdvancedFilters() {
+    if (!isMultiFilter) {
+        return [];
+    }
+    const filters = [];
+    document.querySelectorAll('.multi-search-input').forEach(input => {
+        const field = input.dataset.field;
+        const value = (input.value || '').trim();
+        if (field && value) {
+            filters.push({ field, value });
+        }
+    });
+    return filters;
+}
 
 // 초기화
 document.addEventListener('DOMContentLoaded', function() {
-    // 검색 입력 이벤트 (자동완성 제거, Enter 키만 처리)
     const searchInput = document.getElementById('searchInput');
-    // searchInput.addEventListener('input', handleSearchInput); // 자동완성 비활성화
-    searchInput.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            performSearch();
-        }
-    });
-    
+    if (searchInput) {
+        // searchInput.addEventListener('input', handleSearchInput); // 자동완성 비활성화
+        searchInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                performSearch();
+            }
+        });
+    }
+
+    if (isMultiFilter) {
+        document.querySelectorAll('.multi-search-input').forEach(input => {
+            input.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    performSearch();
+                }
+            });
+        });
+    }
+
     // 클릭 외부 영역 처리
     document.addEventListener('click', function(e) {
         if (!e.target.closest('.search-input-wrapper')) {
             hideAutocomplete();
         }
     });
-    
+
     // 초기 테이블 헤더 설정
     updateTableHeaders();
-    
+
     // 검색 타입 변경 시
-    document.getElementById('searchType').addEventListener('change', function() {
-        document.getElementById('searchInput').value = '';
-        hideAutocomplete();
-        clearResults();
-    });
+    const searchTypeSelect = document.getElementById('searchType');
+    if (searchTypeSelect && searchInput) {
+        searchTypeSelect.addEventListener('change', function() {
+            searchInput.value = '';
+            hideAutocomplete();
+            clearResults();
+        });
+    }
+
+    updatePaginationControls();
 });
 
 // 자동완성 처리
 function handleSearchInput(e) {
+    if (isMultiFilter) {
+        return;
+    }
     const query = e.target.value.trim();
     
     if (query.length < 1) {
@@ -391,7 +539,13 @@ function handleSearchInput(e) {
 
 // 자동완성 데이터 가져오기
 async function fetchAutocomplete(query) {
-    const searchType = document.getElementById('searchType').value;
+    if (isMultiFilter) {
+        return;
+    }
+    const searchTypeSelect = document.getElementById('searchType');
+    const urlParams = new URLSearchParams(window.location.search);
+    const popupType = urlParams.get('type') || 'person';
+    const searchType = searchTypeSelect ? searchTypeSelect.value : popupType;
     
     try {
         const response = await fetch(`${searchConfig.autocompleteUrl}?type=${searchType}&query=${encodeURIComponent(query)}`);
@@ -431,14 +585,20 @@ function showAutocomplete(items) {
 
 // 자동완성 숨기기
 function hideAutocomplete() {
-    document.getElementById('autocompleteDropdown').classList.remove('show');
+    const dropdown = document.getElementById('autocompleteDropdown');
+    if (dropdown) {
+        dropdown.classList.remove('show');
+    }
     autocompleteItems = [];
     currentAutocompleteIndex = -1;
 }
 
 // 자동완성 아이템 선택
 function selectAutocompleteItem(item, index) {
-    document.getElementById('searchInput').value = item.main;
+    const input = document.getElementById('searchInput');
+    if (input) {
+        input.value = item.main;
+    }
     hideAutocomplete();
     performSearch();
 }
@@ -446,8 +606,7 @@ function selectAutocompleteItem(item, index) {
 // 키보드 이벤트 처리
 function handleKeyDown(e) {
     const dropdown = document.getElementById('autocompleteDropdown');
-    
-    if (!dropdown.classList.contains('show')) {
+    if (!dropdown || !dropdown.classList.contains('show')) {
         if (e.key === 'Enter') {
             performSearch();
         }
@@ -496,35 +655,72 @@ function updateAutocompleteSelection(items) {
 }
 
 // 검색 수행
-async function performSearch() {
-    const searchType = document.getElementById('searchType').value;
-    const query = document.getElementById('searchInput').value.trim();
-    
-    // 검색어가 비어있으면 검색하지 않음
-    if (!query) {
-        alert('검색어를 입력해주세요.');
-        return;
+async function performSearch(options = {}) {
+    const preservePage = !!options.preservePage;
+    if (!preservePage) {
+        currentPage = 1;
+        lastHasMore = false;
+        currentResultsLength = 0;
+        totalCount = 0;
+        totalPages = 0;
+        updatePaginationControls();
     }
-    
-    hideAutocomplete();
-    showLoading();
-    
-    // URL 파라미터에서 search_type 구하기
+    if (currentPage < 1) {
+        currentPage = 1;
+    }
+
     const urlParams = new URLSearchParams(window.location.search);
     const popupType = urlParams.get('type') || 'person';
-    
+    const params = new URLSearchParams();
+    params.set('type', popupType);
+    params.set('limit', String(PAGE_LIMIT));
+    params.set('page', String(currentPage));
+
+    const searchTypeSelect = document.getElementById('searchType');
+    const searchInput = document.getElementById('searchInput');
+
+    if (isMultiFilter) {
+        const filters = collectAdvancedFilters();
+        if (!filters.length) {
+            alert('최소 한 가지 검색 조건을 입력해주세요.');
+            return;
+        }
+        params.set('filters', JSON.stringify(filters));
+    } else {
+        const query = searchInput ? searchInput.value.trim() : '';
+        if (!query) {
+            alert('검색어를 입력해주세요.');
+            return;
+        }
+        if (searchTypeSelect) {
+            params.set('value', searchTypeSelect.value);
+        }
+        params.set('q', query);
+    }
+
+    hideAutocomplete();
+    showLoading();
+
     try {
-        const response = await fetch(`${searchConfig.searchUrl}?type=${popupType}&value=${searchType}&q=${encodeURIComponent(query)}`);
+        const response = await fetch(`${searchConfig.searchUrl}?${params.toString()}`);
         const data = await response.json();
-        
+
         if (data.success) {
-            displayResults(data.data || data.results || []);
+            if (typeof data.page === 'number') {
+                currentPage = data.page;
+            }
+            let results = data.data || data.results || [];
+            if (!Array.isArray(results)) {
+                results = [];
+            }
+            displayResults(results, data.has_more, data.total, data.total_pages);
         } else {
             showNoResults();
         }
     } catch (error) {
         console.error('Search error:', error);
         alert('검색 중 오류가 발생했습니다.');
+        showNoResults();
     } finally {
         hideLoading();
     }
@@ -541,7 +737,7 @@ function updateTableHeaders() {
 }
 
 // 검색 결과 표시
-function displayResults(results) {
+function displayResults(results, hasMore, total, totalPagesValue) {
     const table = document.getElementById('resultTable');
     const tbody = document.getElementById('tableBody');
     const noResults = document.getElementById('noResults');
@@ -552,8 +748,15 @@ function displayResults(results) {
         return;
     }
     
+    const totalValue = typeof total === 'number' && total >= 0 ? total : results.length;
+    totalCount = totalValue;
+    const derivedTotalPages = typeof totalPagesValue === 'number' && totalPagesValue > 0
+        ? totalPagesValue
+        : (totalValue > 0 ? Math.max(1, Math.ceil(totalValue / PAGE_LIMIT)) : 0);
+    totalPages = derivedTotalPages;
+
     // 결과 건수 표시
-    resultCount.textContent = `${results.length}건`;
+    resultCount.textContent = `${totalValue}건`;
     
     // 테이블 내용 생성
     tbody.innerHTML = '';
@@ -573,6 +776,19 @@ function displayResults(results) {
     // 테이블 표시
     table.style.display = 'table';
     noResults.style.display = 'none';
+
+    currentResultsLength = results.length;
+    if (totalPages > 0) {
+        if (currentPage > totalPages) {
+            currentPage = totalPages;
+        }
+        lastHasMore = currentPage < totalPages;
+    } else {
+        lastHasMore = typeof hasMore === 'boolean' ? hasMore : (results.length === PAGE_LIMIT);
+    }
+    selectedItem = null;
+    document.getElementById('confirmBtn').disabled = true;
+    updatePaginationControls();
 }
 
 // 검색 결과 선택
@@ -599,6 +815,13 @@ function showNoResults() {
     table.style.display = 'none';
     noResults.style.display = 'block';
     resultCount.textContent = '0건';
+    selectedItem = null;
+    document.getElementById('confirmBtn').disabled = true;
+    currentResultsLength = 0;
+    lastHasMore = false;
+    totalCount = 0;
+    totalPages = 0;
+    updatePaginationControls();
 }
 
 // 결과 초기화
@@ -614,18 +837,92 @@ function clearResults() {
     resultCount.textContent = '0건';
     selectedItem = null;
     document.getElementById('confirmBtn').disabled = true;
+    currentResultsLength = 0;
+    lastHasMore = false;
+    currentPage = 1;
+    totalCount = 0;
+    totalPages = 0;
+    updatePaginationControls();
 }
 
 // 로딩 표시
 function showLoading() {
     document.getElementById('loading').classList.add('show');
     document.getElementById('resultTableWrapper').style.display = 'none';
+    const prevBtn = document.getElementById('prevPageBtn');
+    const nextBtn = document.getElementById('nextPageBtn');
+    if (prevBtn) prevBtn.disabled = true;
+    if (nextBtn) nextBtn.disabled = true;
 }
 
 // 로딩 숨기기
 function hideLoading() {
     document.getElementById('loading').classList.remove('show');
     document.getElementById('resultTableWrapper').style.display = 'block';
+    updatePaginationControls();
+}
+
+function updatePaginationControls() {
+    const controls = document.getElementById('paginationControls');
+    if (!controls) {
+        return;
+    }
+    const prevBtn = document.getElementById('prevPageBtn');
+    const nextBtn = document.getElementById('nextPageBtn');
+    const pageNumbers = document.getElementById('pageNumbers');
+
+    if (!pageNumbers) {
+        return;
+    }
+
+    if (!totalCount || !totalPages || totalPages <= 1) {
+        controls.style.display = 'none';
+        pageNumbers.innerHTML = '';
+        if (prevBtn) prevBtn.disabled = true;
+        if (nextBtn) nextBtn.disabled = true;
+        return;
+    }
+
+    controls.style.display = 'flex';
+
+    if (prevBtn) {
+        prevBtn.disabled = currentPage <= 1;
+    }
+    if (nextBtn) {
+        nextBtn.disabled = currentPage >= totalPages;
+    }
+
+    const pageItems = buildPageNumberList(totalPages, currentPage);
+    pageNumbers.innerHTML = '';
+
+    pageItems.forEach(item => {
+        if (item === 'ellipsis') {
+            const span = document.createElement('span');
+            span.className = 'pagination-ellipsis';
+            span.textContent = '…';
+            pageNumbers.appendChild(span);
+            return;
+        }
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = String(item);
+        btn.className = 'pagination-btn pagination-number-btn';
+
+        if (item === currentPage) {
+            btn.classList.add('active');
+            btn.disabled = true;
+        } else {
+            btn.addEventListener('click', () => goToPage(item));
+        }
+
+        pageNumbers.appendChild(btn);
+    });
+}
+
+function changePage(delta) {
+    const target = currentPage + delta;
+    goToPage(target);
 }
 
 // 선택 확인
@@ -690,6 +987,62 @@ function confirmSelection() {
     }
     
     window.close();
+}
+
+function buildPageNumberList(totalPageCount, current) {
+    if (!Number.isInteger(totalPageCount) || totalPageCount <= 0) {
+        return [];
+    }
+
+    const numbers = new Set();
+    const minButtons = Math.max(MIN_PAGE_BUTTONS, 1);
+
+    for (let i = 1; i <= Math.min(totalPageCount, minButtons); i++) {
+        numbers.add(i);
+    }
+
+    for (let i = current - 1; i <= current + 1; i++) {
+        if (i >= 1 && i <= totalPageCount) {
+            numbers.add(i);
+        }
+    }
+
+    numbers.add(totalPageCount);
+
+    const sorted = Array.from(numbers).sort((a, b) => a - b);
+    const result = [];
+
+    for (let idx = 0; idx < sorted.length; idx++) {
+        const value = sorted[idx];
+        result.push(value);
+        const nextValue = sorted[idx + 1];
+        if (typeof nextValue === 'number' && nextValue - value > 1) {
+            result.push('ellipsis');
+        }
+    }
+
+    return result;
+}
+
+function goToPage(target) {
+    const pageNumber = Number(target);
+    if (!Number.isInteger(pageNumber) || pageNumber < 1) {
+        return;
+    }
+    if (totalPages && pageNumber > totalPages) {
+        return;
+    }
+    if (pageNumber === currentPage) {
+        return;
+    }
+
+    currentPage = pageNumber;
+    updatePaginationControls();
+    const prevBtn = document.getElementById('prevPageBtn');
+    const nextBtn = document.getElementById('nextPageBtn');
+    if (prevBtn) prevBtn.disabled = true;
+    if (nextBtn) nextBtn.disabled = true;
+    performSearch({ preservePage: true });
 }
 
 // 팝업 닫기

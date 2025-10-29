@@ -1,0 +1,524 @@
+{% if is_popup %}
+{% extends "popup-base.html" %}
+{% else %}
+{% extends "base.html" %}
+{% endif %}
+
+{% from 'includes/board_form/detail_content.html' import render_detail_content %}
+{% from 'includes/board_form/save_controls.html' import render_save_button %}
+
+{% block head %}
+    {{ super() }}
+    {% include 'includes/board_form_scripts.html' %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/scoring-system.css') }}">
+    <script src="{{ url_for('static', filename='js/scoring-system.js') }}"></script>
+{% endblock %}
+
+{% block title %}화관법 도급신고 등록{% endblock %}
+{% block popup_title %}화관법 도급신고 등록{% endblock %}
+{% block content %}
+
+{% set page_identifier_label = identifier_label|default('도급신고번호', true) %}
+
+{% if not is_popup %}
+<div class="page-header">
+    <h2 class="page-title">화관법 도급신고 등록</h2>
+    <div class="breadcrumb">
+        <a href="{{ url_for('page_view', url='subcontract-report') }}">화관법 도급신고</a>
+        <span class="separator">></span>
+        <span class="current">신규 등록</span>
+    </div>
+</div>
+{% endif %}
+
+<div class="accident-detail-container">
+    <!-- 디버깅: 섹션 개수 확인 -->
+    <!-- sections count: {{ sections|length }} -->
+    <!-- section_columns keys: {{ section_columns.keys()|list }} -->
+    
+    <!-- 동적 섹션 렌더링 -->
+{% set feature_toggles = feature_toggles or {} %}
+
+{% for section in sections %}
+    <div class="section {{ section.section_key|replace('_', '-') }}-section">
+        <div class="section-header">
+            <h3 class="section-title">{{ section.section_name }}</h3>
+            <button class="collapse-btn" onclick="BoardDetail.toggleSection('{{ section.section_key|replace('_', '-') }}', this)">
+                <span class="collapse-icon">▲</span>
+            </button>
+        </div>
+        <div class="section-content" id="{{ section.section_key|replace('_', '-') }}-content">
+            <div class="info-table">
+                <!-- 식별자와 등록일 추가 (첫 번째 섹션에만) -->
+                {% if loop.index == 1 %}
+                <div class="info-row">
+                    <div class="info-cell span-2">
+                        <label>{{ page_identifier_label }}</label>
+                        <div class="value readonly-highlight" style="font-style: italic;">자동으로 입력됩니다</div>
+                    </div>
+                    <div class="info-cell span-2">
+                        <label>등록일</label>
+                        <input type="date"
+                               class="form-input date-input readonly-highlight"
+                               name="created_at"
+                               data-field="created_at"
+                               value="{{ today_date }}"
+                               readonly>
+                    </div>
+                    <div class="info-cell span-2">
+                        <label>등록자</label>
+                        <input type="text"
+                               class="readonly-highlight"
+                               value="{{ current_user_display | default('SYSTEM', true) }}"
+                               readonly>
+                    </div>
+                    <div class="info-cell span-2">
+                        <label>수정일</label>
+                        <input type="date"
+                               class="form-input date-input readonly-highlight"
+                               value="{{ today_date }}"
+                               readonly>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% set all_columns = section_columns[section.section_key] %}
+                <!-- detailed_content, violation_content, report_number, created_at 제외 -->
+                {% set columns = [] %}
+                {% for col in all_columns %}
+                    {% if col.column_key not in ['detailed_content', 'violation_content', 'report_number', 'created_at'] %}
+                        {% set _ = columns.append(col) %}
+                    {% endif %}
+                {% endfor %}
+                {% set columns_per_row = 8 %}
+                
+                <!-- batch 방식으로 4개씩 묶어서 처리 -->
+                {% for chunk in columns | batch(columns_per_row, '') %}
+                <div class="info-row">
+                    {% for col in chunk %}
+                        {% if col %}
+                            {% if col.column_type == 'list' %}
+                                {% set span = 8 %}
+                            {% elif col.column_type == 'scoring' %}
+                                {% set span = 8 %}
+                            {% elif col.column_type == 'score_total' %}
+                                {% set prev_idx = loop.index0 - 1 %}
+                                {% set prev_col = chunk[prev_idx] if prev_idx >= 0 else None %}
+                                {% if prev_col and prev_col.column_type == 'scoring' %}
+                                    {% set span = 0 %}
+                                {% else %}
+                                    {% set span = 2 %}
+                                {% endif %}
+                            {% elif col.column_type == 'dropdown' %}
+                                {% if col.input_type == 'dropdown_multi' %}
+                                    {% set span = 8 %}
+                                {% elif col.column_span and col.column_span|int > 0 %}
+                                    {% set cs = col.column_span|int %}
+                                    {% set span = cs if cs >= 2 else 2 %}
+                                {% else %}
+                                    {% set span = 2 %}
+                                {% endif %}
+                            {% elif col.column_span and col.column_span|int > 0 %}
+                                {% set cs = col.column_span|int %}
+                                {% set span = cs if cs >= 2 else 2 %}
+                            {% else %}
+                                {% set span = 2 %}
+                            {% endif %}
+
+                            {% if span > 0 %}
+                            <div class="info-cell span-{{ span }}">
+                            {% if col.column_type not in ['scoring', 'score_total'] %}
+                                <label>{{ col.column_name }}</label>
+                            {% endif %}
+                                                        
+                                {% if col.column_key == 'report_number' %}
+                                    <!-- 신고번호는 자동 생성 -->
+                                    <div class="value readonly-highlight" style="font-style: italic;">자동으로 입력됩니다</div>
+                                    
+                                {% elif col.column_key == 'created_at' %}
+                                    <!-- 등록일은 자동 생성 -->
+                                    <div class="value readonly-highlight">{{ (col.default_value|date_only) if col.default_value else '자동 생성됩니다' }}</div>
+                                    
+                                {% elif col.is_readonly %}
+                                    <!-- 읽기 전용 필드 -->
+                                    <div class="value">{{ col.default_value if col.default_value else '-' }}</div>
+                                    
+                                {% elif col.column_type == 'dropdown' %}
+                                    {% set is_multi = col.input_type == 'dropdown_multi' %}
+                                    {% set options = [] %}
+                                    {% if col.column_key in basic_options %}
+                                        {% set options = basic_options[col.column_key] %}
+                                    {% elif col.dropdown_options_mapped %}
+                                        {% set options = col.dropdown_options_mapped %}
+                                    {% endif %}
+                                    {% if is_multi %}
+                                    <div class="dropdown-multi-summary text-muted mb-1" data-summary-for="{{ col.column_key }}">-</div>
+                                    <div class="dropdown-multi-checkboxes" data-checkbox-for="{{ col.column_key }}" data-section="{{ section.section_key }}">
+                                        {% for opt in options %}
+                                        <label class="dropdown-multi-option form-check">
+                                            <input type="checkbox"
+                                                   class="form-check-input me-2 dropdown-multi-checkbox"
+                                                   value="{{ opt.code }}"
+                                                   data-multi-key="{{ col.column_key }}"
+                                                   data-section="{{ section.section_key }}">
+                                            <span class="form-check-label flex-grow-1">{{ opt.value }}</span>
+                                        </label>
+                                        {% endfor %}
+                                    </div>
+                                    <input type="hidden"
+                                           class="dropdown-multi-hidden-value"
+                                           data-field="{{ col.column_key }}"
+                                           data-section="{{ section.section_key }}"
+                                           data-field-type="dropdown_multi_hidden"
+                                           value="">
+                                    {% else %}
+                                    <select id="{{ col.column_key }}" 
+                                            class="{{ section.section_key|replace('_', '-') }}-input" 
+                                            data-field="{{ col.column_key }}"
+                                            data-section="{{ section.section_key }}">
+                                        <option value="">선택하세요</option>
+                                        {% for opt in options %}
+                                        <option value="{{ opt.code }}">{{ opt.value }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    {% endif %}
+                                    
+                                {% elif col.column_type == 'date' %}
+                                    <!-- 날짜 필드 -->
+                                    <input type="date" 
+                                           id="{{ col.column_key }}" 
+                                           class="{{ section.section_key|replace('_', '-') }}-input" 
+                                           data-field="{{ col.column_key }}"
+                                           data-section="{{ section.section_key }}"
+                                           value="{{ (col.default_value|date_only) if col.default_value else (today_date if col.column_key == 'created_at' else '') }}"
+                                           {% if col.column_key == 'created_at' %}readonly{% endif %}>
+                                           
+                                {% elif col.column_type == 'number' %}
+                                    <!-- 숫자 필드 -->
+                                    {% set _nt = 'integer' if col.input_type == 'number_integer' else 'float' %}
+                                    <input type="number" 
+                                           id="{{ col.column_key }}" 
+                                           class="{{ section.section_key|replace('_', '-') }}-input" 
+                                           data-field="{{ col.column_key }}"
+                                           data-section="{{ section.section_key }}"
+                                           data-number-type="{{ _nt }}"
+                                           step="{% if _nt == 'integer' %}1{% else %}any{% endif %}"
+                                           oninput="validateNumberInput(this)"
+                                           onkeypress="return isNumberKey(event, this)"
+                                           placeholder="{{ col.column_name }} 입력">
+                                           
+                                {% elif col.column_type and col.column_type.startswith('linked_') %}
+                                    <!-- 연결된 필드 (읽기 전용) -->
+                                    <input type="text"
+                                           id="{{ col.column_key }}"
+                                           class="{{ section.section_key|replace('_', '-') }}-input linked-field"
+                                           data-field="{{ col.column_key }}"
+                                           data-section="{{ section.section_key }}"
+                                           data-linked-type="{{ col.column_type }}"
+                                           {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                           {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
+                                           readonly>
+                                           
+                                {% elif col.column_type and col.column_type.startswith('popup') %}
+                                    <!-- 팝업 필드 -->
+                                    <div class="input-group">
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
+                                               placeholder="클릭하여 선택"
+                                               readonly>
+                                        <button class="btn btn-sm btn-primary" 
+                                                onclick="{% if col.column_type == 'popup_person' %}openPersonSearch('{{ col.column_key }}'){% elif col.column_type == 'popup_company' %}openCompanySearch('{{ col.column_key }}'){% elif col.column_type == 'popup_building' %}openBuildingSearch('{{ col.column_key }}'){% elif col.column_type == 'popup_department' %}openDepartmentSearch('{{ col.column_key }}'){% elif col.column_type == 'popup_contractor' %}openContractorSearch('{{ col.column_key }}'){% elif col.column_type == 'popup_division' %}openDivisionSearch('{{ col.column_key }}'){% else %}console.error('Unknown popup type: {{ col.column_type }}'){% endif %}">
+                                            검색
+                                        </button>
+                                    </div>
+                                    
+                                {% elif col.column_type == 'table' or col.input_type == 'table' %}
+                                    <!-- 테이블 검색 필드 -->
+                                    <div class="input-group">
+                                        <input type="text"
+                                               id="{{ col.column_key }}"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               data-input-type="table"
+                                               {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
+                                               {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
+                                               placeholder="검색하여 선택"
+                                               readonly
+                                               style="background-color: #f8f9fa;">
+                                        <input type="hidden" 
+                                               id="{{ col.column_key }}_id" 
+                                               data-field="{{ col.column_key }}_id">
+                                        <button class="btn btn-sm btn-primary"
+                                                onclick="alert('테이블 검색 기능은 구현되지 않았습니다.')">
+                                            검색
+                                        </button>
+                                    </div>
+                                    
+                                {% elif col.column_type == 'scoring' %}
+                                    {# scoring 필드 #}
+                                    <label>{{ col.column_name }}</label>  {# 내부 라벨은 유지: full-process도 내부에서 라벨 표시 #}
+                                    {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}
+                                    {% set items = sc['items'] if sc and ('items' in sc) else [] %}
+                                    {# 이전 컬럼이 score_total인지 확인 #}
+                                    {% set prev_idx = loop.index0 - 1 %}
+                                    {% set prev_col = chunk[prev_idx] if prev_idx >= 0 else None %}
+                                    {% set has_prev_score_total = prev_col and prev_col.column_type == 'score_total' %}
+                                    {# 다음 컬럼이 score_total인지 확인 #}
+                                    {% set next_idx = loop.index0 + 1 %}
+                                    {% set next_col = chunk[next_idx] if next_idx < chunk|length else None %}
+                                    {% set has_score_total = next_col and next_col.column_type == 'score_total' %}
+
+                                    <div class="scoring-group scoring-columns" data-field="{{ col.column_key }}" data-config='{{ col.scoring_config|default("{}")|tojson }}' data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}">
+                                        {# score_total이 이전에 있으면 첫 번째로 포함 #}
+                                        {% if has_prev_score_total %}
+                                            {% set sc_total = (prev_col.scoring_config|from_json) if prev_col.scoring_config else {} %}
+                                            {% set base_score = sc_total.get('base_score') if sc_total and sc_total.get('base_score') else 100 %}
+                                            <div class="sc-col">
+                                                <label class="form-label">{{ prev_col.column_name }}</label>
+                                                <input type="number"
+                                                       id="{{ prev_col.column_key }}_display"
+                                                       class="total-score-display"
+                                                       data-field="{{ prev_col.column_key }}"
+                                                       data-config='{{ prev_col.scoring_config|default("{}")|tojson }}'
+                                                       data-base-score="{{ base_score }}"
+                                                       value="{{ base_score }}"
+                                                       readonly
+                                                       style="width: 100%; border: 1px solid #d1d5db; border-radius: 4px; padding: 6px 8px; font-weight: bold; text-align: center; background: #f8f9fa;">
+                                                <input type="hidden"
+                                                       id="{{ prev_col.column_key }}"
+                                                       class="{{ section.section_key|replace('_', '-') }}-input"
+                                                       data-field="{{ prev_col.column_key }}"
+                                                       data-section="{{ section.section_key }}"
+                                                       value="{{ base_score }}">
+                                            </div>
+                                        {% endif %}
+                                        {% for it in items %}
+                                        <div class="sc-col">
+                                            <label class="form-label">{{ it.name or it.label or '항목' }}</label>
+                                            <input type="number" min="0" step="1"
+                                                   class="scoring-input"
+                                                   data-item="{{ it.id }}"
+                                                   data-score="{{ it.per_unit_delta }}" data-delta="{{ it.per_unit_delta }}"
+                                                   data-group="{{ sc['total_key'] if sc and ('total_key' in sc) else 'default' }}"
+                                                   value="">
+                                            {% if sc.get('show_unit_hint', True) %}
+                                            <small class="hint">{{ it.per_unit_delta }}점/건</small>
+                                            {% endif %}
+                                        </div>
+                                        {% endfor %}
+
+                                        {# score_total이 다음에 있으면 같은 그룹에 포함 #}
+                                        {% if has_score_total %}
+                                            {% set sc_total = (next_col.scoring_config|from_json) if next_col.scoring_config else {} %}
+                                            {% set base_score = sc_total.get('base_score') if sc_total and sc_total.get('base_score') else 100 %}
+                                            <div class="sc-col">
+                                                <label class="form-label">{{ next_col.column_name }}</label>
+                                                <input type="number"
+                                                       id="{{ next_col.column_key }}_display"
+                                                       class="total-score-display"
+                                                       data-field="{{ next_col.column_key }}"
+                                                       data-config='{{ next_col.scoring_config|default("{}")|tojson }}'
+                                                       data-base-score="{{ base_score }}"
+                                                       value="{{ base_score }}"
+                                                       readonly
+                                                       style="text-align: center; background: #f8f9fa;">
+                                                <input type="hidden"
+                                                       id="{{ next_col.column_key }}"
+                                                       class="{{ section.section_key|replace('_', '-') }}-input"
+                                                       data-field="{{ next_col.column_key }}"
+                                                       data-section="{{ section.section_key }}"
+                                                       value="{{ base_score }}">
+                                            </div>
+                                        {% endif %}
+
+                                        <input type="hidden"
+                                               class="{{ section.section_key|replace('_', '-') }}-input"
+                                               data-field="{{ col.column_key }}"
+                                               data-section="{{ section.section_key }}"
+                                               value='{}'>
+                                    </div>
+                                {% elif col.column_type == 'score_total' %}
+                                    {# 이전 컬럼이 scoring이거나 다음 컬럼이 scoring이면 건너뛰기 #}
+                                    {% set prev_idx = loop.index0 - 1 %}
+                                    {% set prev_col = chunk[prev_idx] if prev_idx >= 0 else None %}
+                                    {% set next_idx = loop.index0 + 1 %}
+                                    {% set next_col = chunk[next_idx] if next_idx < chunk|length else None %}
+                                    {% if not (prev_col and prev_col.column_type == 'scoring') and not (next_col and next_col.column_type == 'scoring') %}
+                                        <!-- 총점 필드 (독립적으로 표시) -->
+                                        <label>{{ col.column_name }}</label>
+                                        {% set sc = (col.scoring_config|from_json) if col.scoring_config else {} %}
+                                        {% set base_score = sc.get('base_score') if sc and sc.get('base_score') else 100 %}
+                                        <div class="scoring-columns" style="grid-template-columns: repeat(1, minmax(0, 1fr));">
+                                            <div class="sc-col">
+                                                <label class="form-label">{{ col.column_name }}</label>
+                                                <input type="number"
+                                                       id="{{ col.column_key }}_display"
+                                                       class="total-score-display"
+                                                       data-field="{{ col.column_key }}"
+                                                       data-config='{{ col.scoring_config|default("{}")|tojson }}'
+                                                       data-base-score="{{ base_score }}"
+                                                       value="{{ base_score }}"
+                                                       readonly
+                                                       style="width: 100%; border: 1px solid #d1d5db; border-radius: 4px; padding: 6px 8px; font-weight: bold; text-align: center; background: #f8f9fa;">
+                                                <input type="hidden"
+                                                       id="{{ col.column_key }}"
+                                                       class="{{ section.section_key|replace('_', '-') }}-input"
+                                                       data-field="{{ col.column_key }}"
+                                                       data-section="{{ section.section_key }}"
+                                                       value="{{ base_score }}">
+                                            </div>
+                                        </div>
+                                    {% endif %}
+
+                                {% elif col.column_type == 'textarea' %}
+                                    <!-- 텍스트영역 필드 -->
+                                    <textarea id="{{ col.column_key }}" 
+                                            class="{{ section.section_key|replace('_', '-') }}-input" 
+                                            data-field="{{ col.column_key }}"
+                                            data-section="{{ section.section_key }}"
+                                            rows="4"
+                                            placeholder="{{ col.column_name }} 입력"></textarea>
+                                            
+                                {% elif col.column_type == 'list' %}
+                                    <!-- 리스트 필드 -->
+                                    {% from 'includes/list_field_v3.html' import render_list_field %}
+                                    {{ render_list_field(col, '', section, mode='register', feature_toggles=feature_toggles) }}
+                                           
+                                {% else %}
+                                    <!-- 기본 텍스트 필드 -->
+                                    <input type="text" 
+                                           id="{{ col.column_key }}" 
+                                           class="{{ section.section_key|replace('_', '-') }}-input" 
+                                           data-field="{{ col.column_key }}"
+                                           data-section="{{ section.section_key }}"
+                                           placeholder="{{ col.column_name }} 입력">
+                                {% endif %}
+                            </div>
+                            {% endif %}
+                        {% endif %}
+                    {% endfor %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+
+    <!-- 상세내용 영역 -->
+    <div class="section detail-content-section">
+        <div class="section-header">
+            <h3 class="section-title">상세내용</h3>
+        </div>
+        <div class="section-content">
+            <div class="content-editor">
+                <!-- CKEditor 5 -->
+                <textarea id="detailed-content"
+                          name="detailed_content"
+                          class="editable-content"
+                          data-ckeditor="true"
+                          placeholder="상세내용을 입력하세요."></textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- 첨부파일 영역 (공통 컴포넌트) -->
+{% from 'includes/attachment_section.html' import render_attachment_section %}
+{{ render_attachment_section([], 'subcontract_report') }}
+
+    <!-- 저장 버튼 영역 -->
+    <div class="save-section">
+        <button class="btn-save" onclick="registerSubcontractReport()">등록완료</button>
+    </div>
+</div>
+
+<!-- 스타일 -->
+
+<script>
+const sections = {{ sections | tojson | safe }};
+const sectionColumns = {{ section_columns | tojson | safe }};
+
+const registerSubcontractReport = BoardDetail.createUpdater({
+
+    endpoint: '/register-subcontract-report',
+
+    sections: sections,
+
+    sectionColumns: sectionColumns,
+
+    attachmentsSelector: '#attachments-tbody .table-row',
+
+    popupReload: {{ 'true' if is_popup else 'false' }},
+
+    successMessage: '화관법 도급신고가 성공적으로 등록되었습니다.',
+
+    failurePrefix: '등록 실패',
+
+    reloadCurrent: false,
+
+    onSuccess(data) {
+
+        {% if is_popup %}
+
+        if (window.opener && !window.opener.closed) {
+
+            window.opener.location.reload();
+
+        }
+
+        window.close();
+
+        {% else %}
+
+        window.location.href = '/subcontract-report';
+
+        {% endif %}
+
+    }
+
+});
+
+
+
+window.registerSubcontractReport = registerSubcontractReport;
+
+</script>
+<!-- 공통 첨부파일 스크립트와 스타일 import -->
+{% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
+{{ attachment_styles() }}
+{{ attachment_scripts() }}
+
+
+<!-- CKEditor 스크립트 -->
+<script src="/static/js/ckeditor-simple.js"></script>
+
+<script>
+// 숫자 입력 유효성 검사 함수들
+function isNumberKey(evt, inputEl) {
+    var charCode = (evt.which) ? evt.which : evt.keyCode;
+    var t = (inputEl && inputEl.getAttribute('data-number-type')) || 'float';
+    if (charCode > 31 && (charCode < 48 || charCode > 57)) {
+        if (t === 'float' && charCode === 46) return true;
+        return false;
+    }
+    return true;
+}
+
+function validateNumberInput(input) {
+    const t = input.getAttribute('data-number-type') || 'float';
+    const value = input.value;
+    const numericValue = t === 'integer' ? value.replace(/[^0-9]/g, '') : value.replace(/[^0-9.]/g, '');
+    if (value !== numericValue) {
+        input.value = numericValue;
+    }
+}
+</script>
+
+<!-- scoring-system.js는 head에서 로드됨; 별도 서버호출 계산 제거 (클라이언트 합산) -->
+
+{% endblock %}

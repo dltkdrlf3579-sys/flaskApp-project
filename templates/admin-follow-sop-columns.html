@@ -368,181 +368,7 @@
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <form id="columnForm">
-                        <input type="hidden" id="columnId">
-                        
-                        <div class="mb-3">
-                            <label class="form-label">컬럼명 <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="columnName" required 
-                                   oninput="validateColumnName(this)"
-                                   placeholder="예: 사고날짜, 발생위치">
-                            <small class="text-muted">화면에 표시될 이름 (숫자로만 구성 불가)</small>
-                            <div class="invalid-feedback" id="columnNameError"></div>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label class="form-label">컬럼 키 <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="columnKey" pattern="[a-z][a-z0-9_]*" required
-                                   oninput="validateColumnKey(this)"
-                                   placeholder="예: accident_date">
-                            <small class="text-muted" style="display: block;">
-                                <strong>반드시 컬럼명을 영어로 번역해주세요! (예: 사고날짜 → accident_date)</strong><br>
-                                영문 소문자로 시작, 영문 소문자/숫자/언더스코어만 사용
-                            </small>
-                            <div class="invalid-feedback" id="columnKeyError"></div>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label class="form-label">섹션 선택 <span class="text-danger">*</span></label>
-                            <select class="form-select" id="columnSection" required>
-                                <option value="">섹션을 선택하세요</option>
-                            </select>
-                            <small class="text-muted">컬럼이 표시될 섹션을 선택하세요</small>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label class="form-label">입력 타입 <span class="text-danger">*</span></label>
-                            <select class="form-select" id="columnType" onchange="toggleOptionsField(); toggleTableField(); toggleSpanField(); toggleListField(); toggleNumberField(); toggleScoringField(); checkTypeChange();">
-                                <option value="" disabled selected>타입을 선택하세요</option>
-                                <option value="text">텍스트</option>
-                                <option value="dropdown">드롭다운</option>
-                                <option value="date">날짜</option>
-                                <option value="time">시간</option>
-                                <option value="number">숫자</option>
-                                <option value="table">테이블</option>
-                                <option value="list">리스트</option>
-                                <option value="scoring">채점</option>
-                                <option value="score_total">총점(자동)</option>
-                            </select>
-                            <div id="typeChangeWarning" class="alert alert-warning mt-2" style="display: none; font-size: 13px; padding: 8px 12px;">
-                                <i class="bi bi-exclamation-triangle"></i> 타입 변경 시 기존 데이터가 삭제될 수 있습니다.
-                            </div>
-                        </div>
-                        
-        <!-- 텍스트 타입일 때 span 설정 -->
-                        <div class="mb-3" id="spanField" style="display: none;">
-                            <label class="form-label">차지할 칸 수</label>
-                            <div class="btn-group w-100" role="group">
-                                <input type="radio" class="btn-check" name="columnSpan" id="span1" value="1">
-                                <label class="btn btn-outline-primary" for="span1">
-                                    <i class="bi bi-square"></i> 1칸
-                                </label>
-
-                                <input type="radio" class="btn-check" name="columnSpan" id="span2" value="2" checked>
-                                <label class="btn btn-outline-primary" for="span2">
-                                    <i class="bi bi-square"></i><i class="bi bi-square"></i> 2칸
-                                </label>
-
-                                <input type="radio" class="btn-check" name="columnSpan" id="span4" value="4">
-                                <label class="btn btn-outline-primary" for="span4">
-                                    <i class="bi bi-square"></i><i class="bi bi-square"></i><i class="bi bi-square"></i><i class="bi bi-square"></i> 4칸
-                                </label>
-
-                                <input type="radio" class="btn-check" name="columnSpan" id="span8" value="8">
-                                <label class="btn btn-outline-primary" for="span8">
-                                    <i class="bi bi-square-fill"></i> 전체 너비 (8칸)
-                                </label>
-                            </div>
-                        </div>
-                        
-                        <!-- 테이블 설정 영역 -->
-                        <div class="mb-3" id="tableConfigField" style="display: none;">
-                            <label class="form-label">테이블 설정</label>
-                            <div class="d-flex gap-2 align-items-center">
-                                <input type="text" class="form-control" id="selectedTableDisplay" readonly placeholder="테이블을 선택하세요">
-                                <button type="button" class="btn btn-outline-primary" onclick="openTableConfigModal()">
-                                    설정
-                                </button>
-                            </div>
-                            <input type="hidden" id="selectedTableConfig" value="">
-                            <div id="tableColumnsPreview" class="mt-2" style="display: none;">
-                                <!-- 테이블 컬럼 미리보기 영역 -->
-                            </div>
-                        </div>
-                        
-                        <div class="mb-3" id="tableSelectField" style="display: none;">
-                            <label class="form-label">테이블 선택</label>
-                            <select class="form-select" id="tableSelect" onchange="updateMappingFields()">
-                                <option value="">-- 선택 --</option>
-                                <option value="employees">담당자 (employees)</option>
-                                <option value="companies">업체 (companies)</option>
-                                <option value="departments">부서 (departments)</option>
-                            </select>
-                            
-                            <div id="mappingFields" style="display: none; margin-top: 15px;">
-                                <label class="form-label">연관 컬럼 매핑</label>
-                                <div class="alert alert-info" style="font-size: 13px;">
-                                    <i class="bi bi-info-circle"></i> 선택 시 자동으로 채워질 컬럼들을 설정합니다.
-                                </div>
-                                <div id="mappingContainer">
-                                    <!-- 동적으로 생성됨 -->
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="mb-3" id="optionsField" style="display: none;">
-                            <label class="form-label">드롭다운 옵션</label>
-                            <!-- 현재 옵션 미리보기 -->
-                            <div id="optionPreview" class="mb-3" style="display: none;">
-                                <h6>현재 설정된 옵션:</h6>
-                                <table class="table table-sm table-bordered">
-                                    <thead>
-                                        <tr>
-                                            <th width="40%">코드</th>
-                                            <th>표시값</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="optionPreviewBody">
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div class="form-check form-switch mt-3" id="dropdownMultiToggleWrapper" style="display: none;">
-                                <input class="form-check-input" type="checkbox" id="dropdownMultiToggle" onchange="handleDropdownMultiToggleChange()">
-                                <label class="form-check-label" for="dropdownMultiToggle">여러 값을 동시에 선택 허용</label>
-                            </div>
-                            <small class="text-muted d-block mt-1" id="dropdownMultiHint" style="display: none;">
-                                사용자 화면에서는 다중 선택 드롭다운이 표시되며 선택한 값은 쉼표로 묶어 저장됩니다.
-                            </small>
-
-                            <button type="button" class="btn btn-primary w-100" onclick="openCodeEditor()">
-                                <i class="bi bi-code-square"></i> 코드 편집기 열기
-                            </button>
-                            <input type="hidden" id="dropdownOptions" />
-                        </div>
-                        
-                        <!-- 리스트 설정 영역 -->
-                        <div class="mb-3" id="listConfigField" style="display: none;">
-                            <label class="form-label">리스트 항목 설정</label>
-                            <div class="alert alert-info" style="font-size: 13px;">
-                                <i class="bi bi-info-circle"></i> 리스트에 포함될 항목을 설정합니다. (협력사 근로자/업체 지원)
-                            </div>
-                            <div class="d-flex gap-2 align-items-center">
-                                <select class="form-select" id="listItemType">
-                                    <option value="partner_worker">협력사 근로자</option>
-                                    <option value="company">업체</option>
-                                </select>
-                            </div>
-                            <div class="mt-2">
-                                <small class="text-muted">
-                                    리스트로 선택 시 다음 컬럼들이 자동 생성됩니다:
-                                    <ul style="margin-top: 5px;">
-                                        <li>성함 (팝업 검색)</li>
-                                        <li>ID (자동 연동)</li>
-                                        <li>소속업체 (자동 연동)</li>
-                                        <li>사업자번호 (자동 연동)</li>
-                                    </ul>
-                                </small>
-                            </div>
-                            <input type="hidden" id="listConfig" value="partner_worker">
-                        </div>
-                        
-                        <div class="form-check mb-3">
-                            <input class="form-check-input" type="checkbox" id="isActive" checked>
-                            <label class="form-check-label" for="isActive">
-                                활성화
-                            </label>
-                        </div>
-                    </form>
+                    {% include "admin/partials/column_field_form.html" %}
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">취소</button>
@@ -550,57 +376,8 @@
                 </div>
             </div>
         </div>
-
-        <!-- 숫자 설정 영역 (정수/실수 + 채점 가중치) -->
-        <div class="mb-3" id="numberConfigField" style="display: none;">
-            <label class="form-label">숫자 형식</label>
-            <div class="d-flex gap-3 align-items-center mb-2">
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="numberType" id="numberTypeInteger" value="integer" checked>
-                    <label class="form-check-label" for="numberTypeInteger">정수</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="numberType" id="numberTypeFloat" value="float">
-                    <label class="form-check-label" for="numberTypeFloat">실수</label>
-                </div>
-            </div>
-            <div class="row g-2 align-items-end">
-                <div class="col-auto">
-                    <label class="form-label mb-1">단위당 점수</label>
-                    <input type="number" class="form-control" id="numberPerUnit" placeholder="예: -10">
-                </div>
-                <div class="col-auto">
-                    <label class="form-label mb-1">등급</label>
-                    <select class="form-select" id="numberGrade">
-                        <option value="">자동</option>
-                        <option value="critical">Critical</option>
-                        <option value="major">Major</option>
-                        <option value="minor">Minor</option>
-                        <option value="bonus">Bonus</option>
-                    </select>
-                </div>
-                <div class="col-auto">
-                    <small class="text-muted">이 값들을 설정하면 이 숫자 컬럼이 총점 계산에 반영됩니다.</small>
-                </div>
-            </div>
-        </div>
-
-                <!-- 채점 설정 영역 -->
-        <div class="mb-3" id="scoringConfigField" style="display: none;">
-            <label class="form-label">채점 설정</label>
-            <div class="d-flex align-items-center gap-2">
-                <button type="button" class="btn btn-primary" onclick="openScoringModal()">
-                    <i class="bi bi-pencil-square"></i> 채점표 편집
-                </button>
-                <span id="scoringPreviewLabel" class="text-muted">설정되지 않음</span>
-            </div>
-            <textarea class="form-control" id="scoringConfig" rows="3" style="display:none;"></textarea>
-        </div>
-        </div>
     </div>
 </div>
-
-
 
 <!-- 채점 설정 모달 -->
 <div class="modal fade" id="scoringConfigModal" tabindex="-1" aria-hidden="true">
@@ -767,6 +544,8 @@
 <script src="/static/js/Sortable.min.js"></script>
 <!-- Sortable 초기화 헬퍼 -->
 <script src="/static/js/sortable-init.js"></script>
+<script src="/static/js/column-field-editor.js?v=20241001"></script>
+<script src="/static/js/list-child-support.js?v=20241001"></script>
 
 <script>
 // Sortable.js 로드 확인
@@ -790,6 +569,33 @@ let sectionsToAdd = [];  // 새로 추가할 섹션 추적
 let originalSections = JSON.parse(JSON.stringify({{ sections | tojson | safe }}));  // 원본 섹션 정보 보관
 let sectionChanges = {};  // 섹션 변경사항 추적
 let editingId = null;
+
+if (window.ColumnFieldEditor) {
+    window.ColumnFieldEditor.init({
+        showSection: true,
+        showSpan: true,
+        showTable: true,
+        showListButton: true,
+        showNumber: true,
+        showScoring: true,
+        showActive: true
+    });
+}
+
+if (window.ListChildSupport) {
+    window.ListChildSupport.init({
+        boardKey: 'follow_sop',
+        adminBase: '/admin/follow-sop-columns',
+        apiBase: '/api/follow-sop-columns',
+        getPendingColumns: () => pendingColumns,
+        getColumns: () => columns,
+        getEditingId: () => editingId,
+        reload: () => loadColumns && loadColumns()
+    });
+    if (typeof window.updateListBuilderButtonState === 'function') {
+        window.updateListBuilderButtonState();
+    }
+}
         
         // 컬럼명 실시간 유효성 검사
         function validateColumnName(input) {
@@ -1209,6 +1015,12 @@ let editingId = null;
                 // 섹션 내에서의 순서 번호
                 const sectionColumns = columns;
                 const orderInSection = sectionColumns.indexOf(column) + 1;
+                const isListType = (column.column_type === 'list') || ((column.input_type || '').toString().startsWith('list_'));
+                const listButtonDisabledAttr = (column._toDelete || column._isNew) ? 'disabled' : '';
+                const listButton = isListType ? `
+                                <button class="btn btn-sm btn-link p-0 text-info" onclick="openListChildBuilderFromCard('${column.id}', '${column.column_key}')" ${listButtonDisabledAttr} title="자식 컬럼 편집">
+                                    <i class="bi bi-layout-text-window-reverse" style="font-size: 14px;"></i>
+                                </button>` : '';
                 
                 card.innerHTML = `
                     <div class="column-number">${orderInSection}</div>
@@ -1224,6 +1036,7 @@ let editingId = null;
                                 <button class="btn btn-sm btn-link p-0" onclick="editColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''} title="편집">
                                     <i class="bi bi-pencil" style="font-size: 14px;"></i>
                                 </button>
+                                ${listButton}
                                 <button class="btn btn-sm btn-link p-0 text-danger" onclick="deleteColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''} title="삭제">
                                     <i class="bi bi-trash" style="font-size: 14px;"></i>
                                 </button>
@@ -1382,13 +1195,22 @@ let editingId = null;
             const multiToggle = document.getElementById('dropdownMultiToggle');
             if (multiToggle) multiToggle.checked = false;
             setSpan(2, { remember: true });
-            toggleOptionsField();
-            toggleTableField();
-            toggleScoringField();
-            toggleSpanField();
-            toggleListField();
-            toggleNumberField();
-            handleDropdownMultiToggleChange();
+            if (window.ColumnFieldEditor && typeof ColumnFieldEditor.handleTypeChange === 'function') {
+                ColumnFieldEditor.handleTypeChange();
+            } else {
+                toggleOptionsField();
+                toggleTableField();
+                toggleScoringField();
+                toggleSpanField();
+                toggleListField();
+                toggleNumberField();
+            }
+            if (typeof window.handleDropdownMultiToggleChange === 'function') {
+                window.handleDropdownMultiToggleChange();
+            }
+            if (typeof window.updateListBuilderButtonState === 'function') {
+                window.updateListBuilderButtonState();
+            }
             
             // 기존 모달 인스턴스가 있으면 재사용, 없으면 새로 생성
             const modalElement = document.getElementById('columnModal');
@@ -1611,11 +1433,7 @@ let editingId = null;
                 }
             })();
             
-            // 리스트/숫자 서브타입 복원
-            if (column.column_type === 'list') {
-                const listSel = document.getElementById('listItemType');
-                if (listSel) listSel.value = (column.input_type === 'list_company') ? 'company' : 'partner_worker';
-            }
+            // 숫자 서브타입 복원
             if (column.column_type === 'number') {
                 const isInt = (column.input_type === 'number_integer');
                 const intRadio = document.getElementById('numberTypeInteger');
@@ -1626,17 +1444,25 @@ let editingId = null;
                 }
             }
 
-            toggleOptionsField();
-            toggleSpanField();
-            
-            // linked 타입이 아닌 경우에만 toggleTableField 호출
-            if (column.column_type !== 'linked_text' && column.column_type !== 'linked_dept') {
-                toggleTableField();
+            if (window.ColumnFieldEditor && typeof ColumnFieldEditor.handleTypeChange === 'function') {
+                ColumnFieldEditor.handleTypeChange();
+            } else {
+                toggleOptionsField();
+                toggleSpanField();
+                if (column.column_type !== 'linked_text' && column.column_type !== 'linked_dept') {
+                    toggleTableField();
+                }
+                toggleListField();
+                toggleNumberField();
+                toggleScoringField();
             }
-            toggleListField();
-            toggleNumberField();
-            toggleScoringField();
-            
+            if (typeof window.handleDropdownMultiToggleChange === 'function') {
+                window.handleDropdownMultiToggleChange();
+            }
+            if (typeof window.updateListBuilderButtonState === 'function') {
+                window.updateListBuilderButtonState();
+            }
+
             const modalElement = document.getElementById('columnModal');
             let modalInstance = bootstrap.Modal.getInstance(modalElement);
             if (!modalInstance) {
@@ -2288,9 +2114,16 @@ let editingId = null;
                     if (newType === 'table') {
                         resolvedInputType = 'table';
                     } else if (newType === 'list') {
-                        const listSel = document.getElementById('listItemType');
-                        const lit = listSel ? listSel.value : (existingColumn.list_item_type || 'partner_worker');
-                        resolvedInputType = (lit === 'company') ? 'list_company' : 'list_partner_worker';
+                        const existingInput = (existingColumn.input_type || '').toString();
+                        if (existingInput.startsWith('list_')) {
+                            resolvedInputType = existingInput;
+                        } else if (existingColumn.list_item_type === 'company') {
+                            resolvedInputType = 'list_company';
+                        } else if (existingColumn.list_item_type === 'partner_worker') {
+                            resolvedInputType = 'list_partner_worker';
+                        } else {
+                            resolvedInputType = 'list_custom';
+                        }
                     } else if (newType === 'dropdown') {
                         resolvedInputType = isDropdownMultiSelected() ? 'dropdown_multi' : null;
                     } else if (newType === 'number') {
@@ -2326,6 +2159,8 @@ let editingId = null;
             } else {
                 scText = (document.getElementById('scoringConfig') || {}).value || existingColumn.scoring_config || null;
             }
+            let resolvedListItemType = null;
+
                     pendingColumns[index] = {
                         ...existingColumn,
                         column_name: columnName,
@@ -2337,6 +2172,7 @@ let editingId = null;
                         dropdown_options: dropdownOptions,
                         scoring_config: scText,
                         input_type: resolvedInputType,
+                        list_item_type: resolvedListItemType,
                         _modified: !existingColumn._isNew, // 새 컬럼이 아니면 수정됨 표시
                         // 테이블 관련 정보 유지/보강
                         _tableGroup: existingColumn._tableGroup || baseKey,
@@ -2351,8 +2187,7 @@ let editingId = null;
             } else {
                 // 새 컬럼 추가
                 if (columnType === 'list') {
-                    // 리스트 타입 처리
-                    const listItemType = document.getElementById('listItemType').value;
+                    // 리스트 타입 - 기본 자식 스키마 없이 시작
                     const newId = Date.now();
                     const baseOrder = pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete).length;
                     
@@ -2361,13 +2196,12 @@ let editingId = null;
                         column_name: columnName,
                         column_key: columnKey,
                         column_type: 'list',
-                        list_item_type: listItemType,
-                        input_type: (listItemType === 'company') ? 'list_company' : 'list_partner_worker',
+                        input_type: 'list_custom',
+                        list_item_type: null,
                         tab: selectedSection,
                         is_active: isActive,
                         column_order: baseOrder,
-                        _isNew: true,
-                        _listConfig: listItemType
+                        _isNew: true
                     };
                     
                     pendingColumns.push(newColumn);

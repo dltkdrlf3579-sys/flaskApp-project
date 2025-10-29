@@ -1,8 +1,79 @@
+
 (function (global) {
   'use strict';
 
   if (!global.BoardForm) {
     console.warn('[board-detail] BoardForm helpers are required but missing.');
+  }
+
+  const PLACEHOLDER_STRINGS = ['none', 'null', 'undefined'];
+
+  function resolveActorMeta() {
+    const meta = global.__BOARD_USER__ || {};
+    const userName = (meta && meta.user_name) || '';
+    const empId = (meta && (meta.emp_id || meta.userid || meta.user_id)) || '';
+    const loginId = (meta && (meta.login_id || meta.user_id)) || '';
+    let display = (meta && meta.display) || '';
+
+    if (!display || !display.trim()) {
+      if (userName && empId) {
+        display = `${userName}/${empId}`;
+      } else if (userName) {
+        display = userName;
+      } else if (empId) {
+        display = empId;
+      } else if (loginId) {
+        display = loginId;
+      } else {
+        display = '';
+      }
+    }
+
+    return {
+      display: display.trim(),
+      userName,
+      empId,
+      loginId,
+    };
+  }
+
+  function appendUserMetadata(formData) {
+    if (!(formData && typeof formData.append === 'function')) {
+      return;
+    }
+    const actor = resolveActorMeta();
+    const actorLabel = actor.display || 'SYSTEM';
+
+    if (actorLabel && !formData.has('created_by')) {
+      formData.append('created_by', actorLabel);
+    }
+    if (actorLabel) {
+      formData.append('updated_by', actorLabel);
+    }
+    if (actor.empId && !formData.has('user_id')) {
+      formData.append('user_id', actor.empId);
+    }
+    if (actor.userName && !formData.has('user_name')) {
+      formData.append('user_name', actor.userName);
+    }
+    if (actor.loginId && !formData.has('login_id')) {
+      formData.append('login_id', actor.loginId);
+    }
+  }
+
+  function cleanNonePlaceholders(root) {
+    const scope = root || document;
+    const shouldClear = (val) => typeof val === 'string' && PLACEHOLDER_STRINGS.includes(val.trim().toLowerCase());
+    scope.querySelectorAll('input[type="text"], input[type="number"], textarea').forEach((el) => {
+      if (el && shouldClear(el.value || '')) {
+        el.value = '';
+      }
+    });
+    scope.querySelectorAll('.value, .readonly-highlight').forEach((el) => {
+      if (el && shouldClear(el.textContent || '')) {
+        el.textContent = '';
+      }
+    });
   }
 
   const BoardDetail = {
@@ -82,6 +153,8 @@
           const attachmentMeta = global.BoardForm.buildAttachmentMeta({ rowSelector: attachmentsSelector });
           formData.append('attachment_data', JSON.stringify(attachmentMeta));
         }
+
+        appendUserMetadata(formData);
 
         fetch(endpoint, {
           method: 'POST',
@@ -163,4 +236,14 @@
   };
 
   global.BoardDetail = BoardDetail;
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('DOMContentLoaded', () => {
+      try {
+        cleanNonePlaceholders();
+      } catch (err) {
+        console.warn('[board-detail] failed to normalize placeholder values', err);
+      }
+    });
+  }
 })(window);

@@ -43,6 +43,32 @@ class SafeWorkplaceRepository:
         finally:
             conn.close()
 
+    def _resolve_actor_label(self, data: Mapping[str, Any]) -> str:
+        def _extract(keys):
+            for key in keys:
+                value = data.get(key)
+                if value not in (None, ''):
+                    return str(value)
+            return ''
+
+        primary = _extract(('updated_by', 'created_by', 'actor_label'))
+        if primary:
+            return primary
+
+        user_name = _extract(('user_name',))
+        emp_id = _extract(('user_id', 'emp_id', 'userid'))
+        login_id = _extract(('login_id', 'user_id'))
+
+        if user_name and emp_id:
+            return f"{user_name}/{emp_id}"
+        if user_name:
+            return user_name
+        if emp_id:
+            return emp_id
+        if login_id:
+            return login_id
+        return 'SYSTEM'
+
     # ------------------------------------------------------------------
     # Internal metadata helpers
 
@@ -516,7 +542,7 @@ class SafeWorkplaceRepository:
         filtered_columns = [
             col
             for col in dynamic_columns
-            if col.get('column_key') not in ['safeplace_no', 'created_at']
+            if col.get('column_key') not in ['safeplace_no', 'created_at', 'updated_by', 'updated_at']
         ]
 
         basic_fields = [
@@ -532,6 +558,24 @@ class SafeWorkplaceRepository:
             {
                 'column_key': 'created_at',
                 'column_name': '등록일',
+                'column_type': 'datetime',
+                'is_required': 0,
+                'is_readonly': 1,
+                'tab': 'basic_info',
+                'default_value': created_at,
+            },
+            {
+                'column_key': 'updated_by',
+                'column_name': '등록자',
+                'column_type': 'text',
+                'is_required': 0,
+                'is_readonly': 1,
+                'tab': 'basic_info',
+                'default_value': '',
+            },
+            {
+                'column_key': 'updated_at',
+                'column_name': '수정일',
                 'column_type': 'datetime',
                 'is_required': 0,
                 'is_readonly': 1,
@@ -583,7 +627,9 @@ class SafeWorkplaceRepository:
     def save_from_request(self, request) -> Any:
         data = request.form
         files: List[FileStorage] = request.files.getlist('files')
+        actor_label = self._resolve_actor_label(data)
         detailed_content = data.get('detailed_content', '')
+        actor_label = self._resolve_actor_label(data)
 
         if not data.get('sections'):
             sections_json: Dict[str, Any] = {}
@@ -633,8 +679,10 @@ class SafeWorkplaceRepository:
 
             if 'created_at' in table_columns:
                 upsert_data['created_at'] = created_at_dt.strftime('%Y-%m-%d %H:%M:%S')
-            if 'created_by' in table_columns:
-                upsert_data['created_by'] = data.get('created_by') or data.get('user_id', 'system')
+            if actor_label and 'created_by' in table_columns:
+                upsert_data['created_by'] = actor_label
+            if actor_label and 'updated_by' in table_columns:
+                upsert_data['updated_by'] = actor_label
             if 'is_deleted' in table_columns:
                 upsert_data['is_deleted'] = 0
 
@@ -669,7 +717,7 @@ class SafeWorkplaceRepository:
                     from board_services import AttachmentService
 
                     attachment_service = AttachmentService('safe_workplace', self._db_path, conn)
-                    uploaded_by = data.get('created_by') or data.get('user_id', 'system')
+                    uploaded_by = actor_label or data.get('user_id', 'system')
 
                     for index, file_info in enumerate(valid_files):
                         file_obj: FileStorage = file_info['file']
@@ -769,7 +817,7 @@ class SafeWorkplaceRepository:
                 upsert_data['updated_at'] = timestamp
                 update_cols.append('updated_at')
 
-            updated_by = data.get('updated_by') or data.get('user_id', 'system')
+            updated_by = actor_label or data.get('user_id', 'system')
             if 'updated_by' in table_columns:
                 upsert_data['updated_by'] = updated_by
                 update_cols.append('updated_by')

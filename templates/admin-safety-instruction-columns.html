@@ -416,7 +416,7 @@
                         
                         <div class="mb-3">
                             <label class="form-label">입력 타입 <span class="text-danger">*</span></label>
-                            <select class="form-select" id="columnType" onchange="toggleOptionsField(); toggleTableField(); toggleSpanField(); toggleListField(); toggleNumberField(); toggleScoringField(); checkTypeChange();">
+                            <select class="form-select" id="columnType" onchange="toggleOptionsField(); toggleTableField(); toggleSpanField(); toggleListField(); toggleNumberField(); toggleScoringField(); toggleTextareaToggle(); checkTypeChange();">
                                 <option value="" disabled selected>타입을 선택하세요</option>
                                 <option value="text">텍스트</option>
                                 <option value="dropdown">드롭다운</option>
@@ -457,6 +457,11 @@
                                     <i class="bi bi-square-fill"></i> 전체 너비 (8칸)
                                 </label>
                             </div>
+                        </div>
+
+                        <div class="form-check form-switch mt-2" id="textareaToggleWrapper" style="display: none;">
+                            <input class="form-check-input" type="checkbox" id="textareaToggle" onchange="handleTextareaToggleChange()">
+                            <label class="form-check-label" for="textareaToggle">여러 줄 텍스트 영역 허용</label>
                         </div>
                         
                         <!-- 테이블 설정 영역 -->
@@ -525,32 +530,45 @@
                             <input type="hidden" id="dropdownOptions" />
                         </div>
                         
-                        <!-- 리스트 설정 영역 -->
+                        <!-- 리스트 안내 영역 -->
                         <div class="mb-3" id="listConfigField" style="display: none;">
                             <label class="form-label">리스트 항목 설정</label>
                             <div class="alert alert-info" style="font-size: 13px;">
-                                <i class="bi bi-info-circle"></i> 리스트에 포함될 항목을 설정합니다. (협력사 근로자/업체 지원)
+                                <i class="bi bi-info-circle"></i>
+                                리스트 타입은 기본 필드만 생성되며, 세부 컬럼 구성은
+                                <strong>자식 컬럼 편집</strong> 버튼을 통해 관리합니다.
+                                먼저 리스트 컬럼을 저장한 뒤 카드에서 <em>자식 컬럼 편집</em>을 눌러 원하는 항목을 추가하세요.
                             </div>
-                            <div class="d-flex gap-2 align-items-center">
-                                <select class="form-select" id="listItemType">
-                                    <option value="partner_worker">협력사 근로자</option>
-                                    <option value="company">업체</option>
-                                </select>
-                            </div>
-                            <div class="mt-2">
-                                <small class="text-muted">
-                                    리스트로 선택 시 다음 컬럼들이 자동 생성됩니다:
-                                    <ul style="margin-top: 5px;">
-                                        <li>성함 (팝업 검색)</li>
-                                        <li>ID (자동 연동)</li>
-                                        <li>소속업체 (자동 연동)</li>
-                                        <li>사업자번호 (자동 연동)</li>
-                                    </ul>
-                                </small>
-                            </div>
-                            <input type="hidden" id="listConfig" value="partner_worker">
                         </div>
-                        
+
+                        <!-- 숫자 설정 영역 (정수/실수) -->
+                        <div class="mb-3" id="numberConfigField" style="display: none;">
+                            <label class="form-label">숫자 형식</label>
+                            <div class="d-flex gap-3 align-items-center">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="numberType" id="numberTypeInteger" value="integer" checked>
+                                    <label class="form-check-label" for="numberTypeInteger">정수</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="numberType" id="numberTypeFloat" value="float">
+                                    <label class="form-check-label" for="numberTypeFloat">실수</label>
+                                </div>
+                            </div>
+                            <small class="text-muted">정수는 소수점을 허용하지 않습니다. 실수는 소수점 입력이 가능합니다.</small>
+                        </div>
+
+                        <!-- 채점 설정 영역 -->
+                        <div class="mb-3" id="scoringConfigField" style="display: none;">
+                            <label class="form-label">채점 설정</label>
+                            <div class="d-flex align-items-center gap-2">
+                                <button type="button" class="btn btn-primary" onclick="openScoringModal()">
+                                    <i class="bi bi-pencil-square"></i> 채점표 편집
+                                </button>
+                                <span id="scoringPreviewLabel" class="text-muted">설정되지 않음</span>
+                            </div>
+                            <textarea class="form-control" id="scoringConfig" rows="3" style="display:none;"></textarea>
+                        </div>
+
                         <div class="form-check mb-3">
                             <input class="form-check-input" type="checkbox" id="isActive" checked>
                             <label class="form-check-label" for="isActive">
@@ -566,33 +584,6 @@
             </div>
         </div>
 
-        <!-- 숫자 설정 영역 (정수/실수) -->
-        <div class="mb-3" id="numberConfigField" style="display: none;">
-            <label class="form-label">숫자 형식</label>
-            <div class="d-flex gap-3 align-items-center">
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="numberType" id="numberTypeInteger" value="integer" checked>
-                    <label class="form-check-label" for="numberTypeInteger">정수</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="numberType" id="numberTypeFloat" value="float">
-                    <label class="form-check-label" for="numberTypeFloat">실수</label>
-                </div>
-            </div>
-            <small class="text-muted">정수는 소수점을 허용하지 않습니다. 실수는 소수점 입력이 가능합니다.</small>
-        </div>
-
-        <!-- 채점 설정 영역 -->
-        <div class="mb-3" id="scoringConfigField" style="display: none;">
-            <label class="form-label">채점 설정</label>
-            <div class="d-flex align-items-center gap-2">
-                <button type="button" class="btn btn-primary" onclick="openScoringModal()">
-                    <i class="bi bi-pencil-square"></i> 채점표 편집
-                </button>
-                <span id="scoringPreviewLabel" class="text-muted">설정되지 않음</span>
-            </div>
-            <textarea class="form-control" id="scoringConfig" rows="3" style="display:none;"></textarea>
-        </div>
     </div>
 </div>
 
@@ -834,6 +825,34 @@ let sectionsToAdd = [];  // 새로 추가할 섹션 추적
 let originalSections = JSON.parse(JSON.stringify({{ sections | tojson | safe }}));  // 원본 섹션 정보 보관
 let sectionChanges = {};  // 섹션 변경사항 추적
 let editingId = null;
+
+if (window.ColumnFieldEditor) {
+    window.ColumnFieldEditor.init({
+        showSection: true,
+        showSpan: true,
+        showTable: true,
+        showListButton: true,
+        showNumber: true,
+        showScoring: true,
+        showActive: true
+    });
+}
+
+if (window.ListChildSupport) {
+    window.ListChildSupport.init({
+        boardKey: 'safety_instruction',
+        adminBase: '/admin/safety-instruction-columns',
+        apiBase: '/api/safety-instruction-columns',
+        getPendingColumns: () => pendingColumns,
+        getColumns: () => columns,
+        getEditingId: () => editingId,
+        reload: () => loadColumns && loadColumns(),
+        forceFallback: true
+    });
+    if (typeof window.updateListBuilderButtonState === 'function') {
+        window.updateListBuilderButtonState();
+    }
+}
         
         // 컬럼명 실시간 유효성 검사
         function validateColumnName(input) {
@@ -1247,6 +1266,13 @@ let editingId = null;
                 const sectionColumns = columns;
                 const orderInSection = sectionColumns.indexOf(column) + 1;
                 
+                const isListType = (column.column_type === 'list') || ((column.input_type || '').toString().startsWith('list_'));
+                const listButtonDisabledAttr = column._toDelete ? 'disabled' : '';
+                const listButton = isListType ? `
+                                <button class="btn btn-sm btn-link p-0 text-info" onclick="openListChildBuilderFromCard('${column.id}', '${column.column_key}')" ${listButtonDisabledAttr} title="자식 컬럼 편집">
+                                    <i class="bi bi-layout-text-window-reverse" style="font-size: 14px;"></i>
+                                </button>` : '';
+
                 card.innerHTML = `
                     <div class="column-number">${orderInSection}</div>
                     <div class="column-content">
@@ -1261,6 +1287,7 @@ let editingId = null;
                                 <button class="btn btn-sm btn-link p-0" onclick="editColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''} title="편집">
                                     <i class="bi bi-pencil" style="font-size: 14px;"></i>
                                 </button>
+                                ${listButton}
                                 <button class="btn btn-sm btn-link p-0 text-danger" onclick="deleteColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''} title="삭제">
                                     <i class="bi bi-trash" style="font-size: 14px;"></i>
                                 </button>
@@ -1389,6 +1416,9 @@ window.addEventListener('error', function(ev){
                 'linked_dept': '연결-부서',
                 'linked_text': '연결-텍스트'
             };
+            if (type === 'textarea') {
+                return labels['text'];
+            }
             return labels[type] || type;
         }
         
@@ -1422,6 +1452,8 @@ window.addEventListener('error', function(ev){
             document.getElementById('dropdownOptions').value = '';  // 드롭다운 옵션 초기화
             const multiToggle = document.getElementById('dropdownMultiToggle');
             if (multiToggle) multiToggle.checked = false;
+            const textareaToggle = document.getElementById('textareaToggle');
+            if (textareaToggle) textareaToggle.checked = false;
             setSpan(2, { remember: true });
             toggleOptionsField();
             toggleTableField();
@@ -1430,6 +1462,7 @@ window.addEventListener('error', function(ev){
             toggleListField();
             toggleNumberField();
             handleDropdownMultiToggleChange();
+            toggleTextareaToggle();
             
             // 기존 모달 인스턴스가 있으면 재사용, 없으면 새로 생성
             const modalElement = document.getElementById('columnModal');
@@ -1543,15 +1576,26 @@ window.addEventListener('error', function(ev){
                 }
             } else {
                 const resolvedType = column.column_type; // 강제 고정 제거
-                typeSelectEl.value = resolvedType || '';
+                let baseSelectValue = resolvedType || '';
+                const textareaToggle = document.getElementById('textareaToggle');
+                if (resolvedType === 'textarea') {
+                    baseSelectValue = 'text';
+                    if (textareaToggle) {
+                        textareaToggle.checked = true;
+                    }
+                } else if (textareaToggle) {
+                    textareaToggle.checked = false;
+                }
+                typeSelectEl.value = baseSelectValue;
                 // 일반 컬럼은 타입 변경 가능
                 typeSelectEl.disabled = false;
                 if (resolvedType === 'table') {
                     document.getElementById('tableConfigField').style.display = 'block';
                 }
             }
-            
-            typeSelectEl.dataset.originalType = typeSelectEl.value || column.column_type || '';
+
+            typeSelectEl.dataset.originalType = column.column_type || typeSelectEl.value || '';
+            toggleTextareaToggle();
             document.getElementById('isActive').checked = column.is_active;
             
             // 섹션 선택 옵션 갱신 후 값 설정
@@ -1560,7 +1604,7 @@ window.addEventListener('error', function(ev){
             sectionSelect.value = column.tab || 'basic_info';
             
             // 텍스트 타입이고 span 값이 있으면 설정
-            if ((column.column_type === 'text' || column.column_type === 'dropdown') && column.column_span) {
+            if ((column.column_type === 'text' || column.column_type === 'dropdown' || column.column_type === 'textarea') && column.column_span) {
                 setSpan(column.column_span, { remember: true });
             }
             
@@ -1609,12 +1653,6 @@ window.addEventListener('error', function(ev){
                 handleDropdownMultiToggleChange();
             }
             
-            // 리스트/숫자 서브타입 복원
-            if (column.column_type === 'list') {
-                const listSel = document.getElementById('listItemType');
-                if (listSel) listSel.value = (column.input_type === 'list_company') ? 'company' : 'partner_worker';
-            }
-
             // 채점 설정 복원
             (function(){
                 const scArea = document.getElementById('scoringConfig');
@@ -1750,19 +1788,25 @@ window.addEventListener('error', function(ev){
             }
 
             handleDropdownMultiToggleChange();
+            toggleTextareaToggle();
         }
 
         function isDropdownMultiSelected() {
             const toggle = document.getElementById('dropdownMultiToggle');
             return !!(toggle && toggle.checked);
         }
-        
+
+        function isTextareaSelected() {
+            const toggle = document.getElementById('textareaToggle');
+            return !!(toggle && toggle.checked);
+        }
+
         function toggleTableField() {
             const type = document.getElementById('columnType').value;
             document.getElementById('tableConfigField').style.display = 
                 type === 'table' ? 'block' : 'none';
         }
-        
+
         function toggleSpanField() {
             const spanField = document.getElementById('spanField');
             if (!spanField) {
@@ -1770,7 +1814,8 @@ window.addEventListener('error', function(ev){
             }
             const type = document.getElementById('columnType').value;
             const isMulti = (type === 'dropdown') && isDropdownMultiSelected();
-            const shouldShow = (type === 'text') || (type === 'dropdown' && !isMulti);
+            const isTextarea = (type === 'text') && isTextareaSelected();
+            const shouldShow = (type === 'text' && !isTextarea) || (type === 'dropdown' && !isMulti);
             spanField.style.display = shouldShow ? 'block' : 'none';
         }
 
@@ -1784,6 +1829,47 @@ window.addEventListener('error', function(ev){
                 setSpan(2, { remember: true });
             }
             toggleSpanField();
+        }
+
+        function toggleTextareaToggle() {
+            const wrapper = document.getElementById('textareaToggleWrapper');
+            if (!wrapper) {
+                return;
+            }
+            const type = document.getElementById('columnType').value;
+            const toggle = document.getElementById('textareaToggle');
+            if (type === 'text') {
+                wrapper.style.display = '';
+            } else {
+                wrapper.style.display = 'none';
+                if (toggle) {
+                    toggle.checked = false;
+                }
+            }
+            handleTextareaToggleChange();
+        }
+
+        function handleTextareaToggleChange() {
+            const typeEl = document.getElementById('columnType');
+            const baseType = typeEl ? typeEl.value : '';
+            const textareaOn = (baseType === 'text') && isTextareaSelected();
+            if (baseType === 'text') {
+                setSpan(textareaOn ? 8 : 2, { remember: true });
+            }
+            toggleSpanField();
+            checkTypeChange();
+        }
+
+        function getResolvedColumnType() {
+            const typeEl = document.getElementById('columnType');
+            if (!typeEl) {
+                return '';
+            }
+            const baseType = typeEl.value;
+            if (baseType === 'text' && isTextareaSelected()) {
+                return 'textarea';
+            }
+            return baseType;
         }
         
         function toggleListField() {
@@ -1809,10 +1895,6 @@ window.addEventListener('error', function(ev){
                     if (btn) btn.style.display = '';
                     if (label) label.textContent = '설정되지 않음';
                     updateScoringPreview();
-                } else if (type === 'number') {
-                    el.style.display = 'block';
-                    if (btn) btn.style.display = 'none';
-                    if (label) label.textContent = '숫자 컬럼: 단위당 점수/등급 설정 사용';
                 } else {
                     el.style.display = 'none';
                 }
@@ -2095,7 +2177,7 @@ window.addEventListener('error', function(ev){
                 const optgroup = select.querySelector('optgroup');
                 let options = '';
                 pendingColumns.forEach(col => {
-                    if (!col._toDelete && col.column_type === 'text') {
+                    if (!col._toDelete && (col.column_type === 'text' || col.column_type === 'textarea')) {
                         options += `<option value="${col.column_key}">${col.column_name}</option>`;
                     }
                 });
@@ -2105,8 +2187,9 @@ window.addEventListener('error', function(ev){
         
         function checkTypeChange() {
             const typeSelect = document.getElementById('columnType');
-            const currentType = typeSelect ? typeSelect.value : '';
-            if (currentType === 'dropdown') {
+            const currentResolvedType = getResolvedColumnType();
+            const baseType = typeSelect ? typeSelect.value : '';
+            if (baseType === 'dropdown') {
                 if (isDropdownMultiSelected()) {
                     setSpan(8, { remember: true });
                 } else {
@@ -2117,7 +2200,7 @@ window.addEventListener('error', function(ev){
             const originalType = typeSelect ? typeSelect.dataset.originalType : '';
             const warning = document.getElementById('typeChangeWarning');
             
-            if (editingId && originalType && originalType !== currentType) {
+            if (editingId && originalType && originalType !== currentResolvedType) {
                 warning.style.display = 'block';
             } else {
                 warning.style.display = 'none';
@@ -2128,25 +2211,29 @@ window.addEventListener('error', function(ev){
             const columnName = document.getElementById('columnName').value.trim();
             const columnKey = document.getElementById('columnKey').value.trim();
             const columnTypeElement = document.getElementById('columnType');
-            const columnType = columnTypeElement.value;
+            const baseColumnType = columnTypeElement.value;
+            const resolvedColumnType = getResolvedColumnType();
             const originalType = columnTypeElement.dataset.originalType;
             const isActive = document.getElementById('isActive').checked;
             const selectedSection = document.getElementById('columnSection').value;
             
-            // 텍스트 타입일 때 span 값 가져오기
-            let columnSpan = 1;
-        if (columnType === 'text' || columnType === 'dropdown') {
+            // span 값 가져오기 (기본값 2)
+            let columnSpan = 2;
+        if (resolvedColumnType === 'text' || resolvedColumnType === 'dropdown') {
             const selectedSpan = document.querySelector('input[name="columnSpan"]:checked');
             if (selectedSpan) {
                 columnSpan = parseInt(selectedSpan.value);
             }
         }
-        if (columnType === 'dropdown' && isDropdownMultiSelected()) {
+        if (resolvedColumnType === 'dropdown' && isDropdownMultiSelected()) {
+            columnSpan = 8;
+        }
+        if (resolvedColumnType === 'textarea') {
             columnSpan = 8;
         }
             
             // 디버깅: disabled 상태에서도 값이 제대로 읽히는지 확인
-            console.log('Column Type:', columnType, 'Disabled:', columnTypeElement.disabled);
+            console.log('Column Type:', resolvedColumnType, 'Disabled:', columnTypeElement.disabled);
             
             if (!columnName || !columnKey) {
                 alert('컬럼명과 컬럼 키는 필수 입력 항목입니다.');
@@ -2159,7 +2246,7 @@ window.addEventListener('error', function(ev){
                 return;
             }
             
-            if (!columnType || columnType === '') {
+            if (!baseColumnType || baseColumnType === '') {
                 // linked 타입이나 popup 타입이 아닌 경우에만 타입 선택 요구
                 if (!columnTypeElement.disabled) {
                     alert('타입을 선택해주세요.');
@@ -2190,7 +2277,7 @@ window.addEventListener('error', function(ev){
             }
             
             // 타입 변경 시 경고
-            if (editingId && originalType && originalType !== columnType) {
+            if (editingId && originalType && originalType !== resolvedColumnType) {
                 const column = pendingColumns.find(c => String(c.id) === String(editingId));
                 if (column && !column._isNew) {
                     if (!confirm('⚠️ 주의: 타입을 변경하실 경우 기존 데이터가 전부 삭제될 수 있으니 신중히 변경 부탁드립니다.\n\n정말 타입을 변경하시겠습니까?')) {
@@ -2203,6 +2290,7 @@ window.addEventListener('error', function(ev){
             if (editingId) {
                 const existingColumn = pendingColumns.find(c => String(c.id) === String(editingId));
                 if (existingColumn && existingColumn.column_type && existingColumn.column_type.startsWith('linked_')) {
+                    // suffix 매칭으로 tableType 추론
                     let detected = null;
                     for (const [tKey, cfg] of Object.entries(tableColumnMappings)) {
                         for (let i = 1; i < cfg.columns.length; i++) {
@@ -2219,12 +2307,13 @@ window.addEventListener('error', function(ev){
                         const baseExists = pendingColumns.some(c => !c._toDelete && c.column_key === baseKey);
                         if (!baseExists) {
                             const baseOrder = Math.max(0, (pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete).map(c => c.column_order).reduce((a,b)=>Math.max(a,b), -1)) + 1);
+                            // 이름에서 마지막 토큰 제거하여 기본명 추정
                             let baseName = columnName;
                             const lastToken = detected.config.columns.find(c=>c.key_suffix===detected.suffix)?.name.split(' ').slice(-1)[0] || '';
                             if (lastToken && baseName.endsWith(' ' + lastToken)) {
                                 baseName = baseName.slice(0, -(' ' + lastToken).length);
                             }
-                            const baseType = detected.config.columns[0].type;
+                            const baseType = detected.config.columns[0].type; // popup_* 등
                             const newId = Date.now() + Math.floor(Math.random()*1000);
                             const newBase = {
                                 id: newId,
@@ -2247,7 +2336,7 @@ window.addEventListener('error', function(ev){
             }
             
             let dropdownOptions = null;
-            if (columnType === 'dropdown') {
+            if (resolvedColumnType === 'dropdown') {
                 const optionsText = document.getElementById('dropdownOptions').value;
                 if (optionsText) {
                     dropdownOptions = optionsText.split('\n').filter(o => o.trim());
@@ -2263,8 +2352,10 @@ window.addEventListener('error', function(ev){
                     // 테이블 컬럼 타입 보존/복원 로직
                     const suffixes = ['_id','_dept','_bizno','_code','_company'];
                     const isLinkedField = suffixes.some(s => (columnKey || '').endsWith(s));
+                    // 힌트 매핑 (기지 키 → 테이블 타입)
                     const baseKeyHints = { 'incharged_person': 'person', 'incharge': 'department', 'company_1cha': 'company', 'company_1st': 'company' };
                     const keyHint = baseKeyHints[existingColumn.column_key] || baseKeyHints[columnKey] || null;
+                    // 형제 컬럼으로 테이블 타입 추론
                     let siblingType = null;
                     const baseKey = (function(k){ let b=k||''; suffixes.forEach(s=>{ if(b.endsWith(s)) b=b.slice(0,-s.length);}); return b; })(columnKey || existingColumn.column_key || '');
                     const siblings = (pendingColumns||[]).filter(c => String(c.id)!==String(existingColumn.id));
@@ -2272,6 +2363,7 @@ window.addEventListener('error', function(ev){
                     else if (siblings.some(c => c.column_key === baseKey + '_code')) siblingType = 'department';
                     else if (siblings.some(c => c.column_key === baseKey + '_dept')) siblingType = 'person';
                     else if (siblings.some(c => c.column_key === baseKey + '_company')) siblingType = 'contractor';
+                    // 최종 테이블 타입 추정
                     const looksLikeTable = (
                         (existingColumn.column_type && (existingColumn.column_type.startsWith('popup_') || existingColumn.column_type.startsWith('linked_')))
                         || existingColumn.input_type === 'table'
@@ -2279,7 +2371,8 @@ window.addEventListener('error', function(ev){
                         || !!existingColumn.table_type
                     );
                     const tableTypeGuess = existingColumn._tableType || keyHint || siblingType || (looksLikeTable ? (existingColumn._tableType || null) : null);
-                    let newType = existingColumn._tableGroup ? existingColumn.column_type : columnType;
+                    // 최종 타입 결정
+                    let newType = existingColumn._tableGroup ? existingColumn.column_type : resolvedColumnType;
                     if (!isLinkedField && (!newType || newType === 'text') && tableTypeGuess) {
                         const popupMap = { person:'popup_person', department:'popup_department', company:'popup_company', building:'popup_building', contractor:'popup_contractor', division:'popup_division' };
                         newType = popupMap[tableTypeGuess] || newType || 'text';
@@ -2289,9 +2382,16 @@ window.addEventListener('error', function(ev){
                     if (newType === 'table') {
                         resolvedInputType = 'table';
                     } else if (newType === 'list') {
-                        const listSel = document.getElementById('listItemType');
-                        const lit = listSel ? listSel.value : (existingColumn.list_item_type || 'partner_worker');
-                        resolvedInputType = (lit === 'company') ? 'list_company' : 'list_partner_worker';
+                        const existingInput = (existingColumn.input_type || '').toString();
+                        if (existingInput.startsWith('list_')) {
+                            resolvedInputType = existingInput;
+                        } else if (existingColumn.list_item_type === 'company') {
+                            resolvedInputType = 'list_company';
+                        } else if (existingColumn.list_item_type === 'partner_worker') {
+                            resolvedInputType = 'list_partner_worker';
+                        } else {
+                            resolvedInputType = 'list_custom';
+                        }
                     } else if (newType === 'dropdown') {
                         resolvedInputType = isDropdownMultiSelected() ? 'dropdown_multi' : null;
                     } else if (newType === 'number') {
@@ -2300,8 +2400,8 @@ window.addEventListener('error', function(ev){
                         resolvedInputType = (nt === 'integer') ? 'number_integer' : 'number_float';
                     }
 
-                    // 숫자형 수정 시 간단 가중치/등급을 scoring_config로 반영
-                    if (columnType === 'number') {
+            // 숫자형 수정 시 간단 가중치/등급을 scoring_config로 반영
+            if (resolvedColumnType === 'number') {
                         const perEl = document.getElementById('numberPerUnit');
                         const gradeEl = document.getElementById('numberGrade');
                         const per = perEl ? parseFloat(perEl.value || '0') : 0;
@@ -2316,7 +2416,30 @@ window.addEventListener('error', function(ev){
                         const nt = nsel ? nsel.value : 'float';
                         resolvedInputType = (nt === 'integer') ? 'number_integer' : 'number_float';
                     }
-                    const scText = (document.getElementById('scoringConfig') || {}).value || pendingColumns[index].scoring_config || null;
+            // 채점/총점 타입은 인라인 편집 상태를 즉시 반영하여 저장 (별도 저장 버튼 누르지 않아도 됨)
+            let scText;
+            if (resolvedColumnType === 'scoring' || resolvedColumnType === 'score_total') {
+                try {
+                    scText = JSON.stringify(buildScoringConfig());
+                } catch (e) {
+                    scText = (document.getElementById('scoringConfig') || {}).value || existingColumn.scoring_config || null;
+                }
+            } else {
+                scText = (document.getElementById('scoringConfig') || {}).value || existingColumn.scoring_config || null;
+            }
+                    let resolvedListItemType = null;
+                    if (newType === 'list') {
+                        if (resolvedInputType === 'list_company') {
+                            resolvedListItemType = 'company';
+                        } else if (resolvedInputType === 'list_partner_worker') {
+                            resolvedListItemType = 'partner_worker';
+                        } else if (resolvedInputType && resolvedInputType.startsWith('list_') && resolvedInputType !== 'list_custom') {
+                            resolvedListItemType = resolvedInputType.slice(5);
+                        } else {
+                            resolvedListItemType = existingColumn.list_item_type || null;
+                        }
+                    }
+
                     pendingColumns[index] = {
                         ...existingColumn,
                         column_name: columnName,
@@ -2328,6 +2451,7 @@ window.addEventListener('error', function(ev){
                         dropdown_options: dropdownOptions,
                         scoring_config: scText,
                         input_type: resolvedInputType,
+                        list_item_type: resolvedListItemType,
                         _modified: !existingColumn._isNew, // 새 컬럼이 아니면 수정됨 표시
                         // 테이블 관련 정보 유지/보강
                         _tableGroup: existingColumn._tableGroup || baseKey,
@@ -2341,31 +2465,30 @@ window.addEventListener('error', function(ev){
                 }
             } else {
                 // 새 컬럼 추가
-                    if (columnType === 'list') {
-                    // 리스트 타입 처리
-                    const listItemType = document.getElementById('listItemType').value;
+                if (resolvedColumnType === 'list') {
+                    // 리스트 타입 - 기본 자식 스키마 없이 시작
                     const newId = Date.now();
                     const baseOrder = pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete).length;
+                    
                     const newColumn = {
                         id: newId,
                         column_name: columnName,
                         column_key: columnKey,
                         column_type: 'list',
-                        list_item_type: listItemType,
-                        input_type: (listItemType === 'company') ? 'list_company' : 'list_partner_worker',
+                        input_type: 'list_custom',
+                        list_item_type: null,
                         tab: selectedSection,
                         is_active: isActive,
                         column_order: baseOrder,
-                        _isNew: true,
-                        _listConfig: listItemType
+                        _isNew: true
                     };
                     
                     pendingColumns.push(newColumn);
                     console.log(`리스트 컬럼 생성:`, newColumn);
                     
-                    alert(`✅ 리스트 컬럼이 생성되었습니다:\n\n${columnName}\n\n"전체 변경사항 저장" 버튼을 눌러야 최종 반영됩니다.`);
-
-                } else if (columnType === 'table') {
+                    alert(`✅ 리스트 컬럼이 생성되었습니다:\n\n${columnName}\n\n"전체 변경사항 저장" 버튼을 누른 뒤 카드에서 "자식 컬럼 편집"을 통해 세부 항목을 구성하세요.`);
+                    
+                } else if (resolvedColumnType === 'table') {
                     // 테이블 타입: 선택된 테이블 설정 확인
                     const selectedTable = document.getElementById('selectedTableConfig').value;
                     if (!selectedTable) {
@@ -2416,13 +2539,8 @@ window.addEventListener('error', function(ev){
                 } else {
                     // 일반 타입
                     const newId = Date.now();
-                    
-                    // 선택된 섹션의 마지막 순서 계산
-                    const sectionColumns = pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete);
-                    const maxOrderInSection = sectionColumns.length > 0 ? Math.max(...sectionColumns.map(c => c.column_order)) : -1;
-                    
-                    // 숫자형은 간단 가중치/등급을 scoring_config로 저장
-                    if (columnType === 'number') {
+                    // 숫자형이면 간단 가중치/등급을 scoring_config로 반영
+                    if (resolvedColumnType === 'number') {
                         const perEl = document.getElementById('numberPerUnit');
                         const gradeEl = document.getElementById('numberGrade');
                         const per = perEl ? parseFloat(perEl.value || '0') : 0;
@@ -2432,12 +2550,23 @@ window.addEventListener('error', function(ev){
                         const ta = document.getElementById('scoringConfig');
                         if (ta) ta.value = JSON.stringify(conf);
                     }
-                    const scText = (document.getElementById('scoringConfig') || {}).value || null;
+                    let scText;
+                    if (resolvedColumnType === 'scoring' || resolvedColumnType === 'score_total') {
+                        try { scText = JSON.stringify(buildScoringConfig()); }
+                        catch(e){ scText = (document.getElementById('scoringConfig') || {}).value || null; }
+                    } else {
+                        scText = (document.getElementById('scoringConfig') || {}).value || null;
+                    }
+                    
+                    // 선택된 섹션의 마지막 순서 계산
+                    const sectionColumns = pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete);
+                    const maxOrderInSection = sectionColumns.length > 0 ? Math.max(...sectionColumns.map(c => c.column_order)) : -1;
+                    
                     const newColumn = {
                         id: newId,
                         column_name: columnName,
                         column_key: columnKey,
-                        column_type: columnType,
+                        column_type: resolvedColumnType,
                         column_span: columnSpan, // span 정보 추가
                         tab: selectedSection, // 섹션 정보 추가
                         is_active: isActive,
@@ -2446,8 +2575,14 @@ window.addEventListener('error', function(ev){
                         column_order: maxOrderInSection + 1, // 섹션 내 순서로 설정
                         _isNew: true
                     };
-                    if (columnType === 'dropdown') {
+                    if (resolvedColumnType === 'dropdown') {
                         newColumn.input_type = isDropdownMultiSelected() ? 'dropdown_multi' : null;
+                    }
+                    // 숫자 서브타입 저장
+                    if (resolvedColumnType === 'number') {
+                        const nsel = document.querySelector('input[name="numberType"]:checked');
+                        const nt = nsel ? nsel.value : 'float';
+                        newColumn.input_type = (nt === 'integer') ? 'number_integer' : 'number_float';
                     }
                     pendingColumns.push(newColumn);
                     
@@ -2842,54 +2977,57 @@ window.addEventListener('error', function(ev){
         
         // ==================== 테이블 설정 관련 함수 ====================
         let selectedTableType = null;
-        let tableColumnMappings = {
-            'person': {
-                name: '담당자',
-                columns: [
-                    { name: '담당자', key_suffix: '', type: 'popup_person' },
-                    { name: '담당자 ID', key_suffix: '_id', type: 'linked_text' },
-                    { name: '담당자 부서', key_suffix: '_dept', type: 'linked_dept' }
-                ]
-            },
-            'company': {
-                name: '업체',
-                columns: [
-                    { name: '업체명', key_suffix: '', type: 'popup_company' },
-                    { name: '사업자번호', key_suffix: '_bizno', type: 'linked_text' }
-                ]
-            },
-            'department': {
-                name: '부서',
-                columns: [
-                    { name: '부서명', key_suffix: '', type: 'popup_department' },
-                    { name: '부서코드', key_suffix: '_code', type: 'linked_text' }
-                ]
-            },
-            'building': {
-                name: '건물',
-                columns: [
-                    { name: '건물명', key_suffix: '', type: 'popup_building' },
-                    { name: '건물코드', key_suffix: '_code', type: 'linked_text' }
-                ]
-            },
-            'contractor': {
-                name: '협력사 근로자',
-                columns: [
-                    { name: '성함', key_suffix: '', type: 'popup_contractor' },
-                    { name: 'ID', key_suffix: '_id', type: 'linked_text' },
-                    { name: '소속업체', key_suffix: '_company', type: 'linked_text' },
-                    { name: '사업자번호', key_suffix: '_bizno', type: 'linked_text' }
-                ]
-            },
-            'division': {
-                name: '사업부',
-                columns: [
-                    { name: '사업부명', key_suffix: '', type: 'popup_division' },
-                    { name: '사업부코드', key_suffix: '_code', type: 'linked_text' },
-                    { name: '상위사업부', key_suffix: '_parent', type: 'linked_text' }
-                ]
-            }
-        };
+        let tableColumnMappings = {{ (table_mappings or {}) | tojson | safe }};
+        if (!tableColumnMappings || Object.keys(tableColumnMappings).length === 0) {
+            tableColumnMappings = {
+                'person': {
+                    name: '담당자',
+                    columns: [
+                        { name: '담당자', key_suffix: '', type: 'popup_person' },
+                        { name: '담당자 ID', key_suffix: '_id', type: 'linked_text' },
+                        { name: '담당자 부서', key_suffix: '_dept', type: 'linked_dept' }
+                    ]
+                },
+                'company': {
+                    name: '업체',
+                    columns: [
+                        { name: '업체명', key_suffix: '', type: 'popup_company' },
+                        { name: '사업자번호', key_suffix: '_bizno', type: 'linked_text' }
+                    ]
+                },
+                'department': {
+                    name: '부서',
+                    columns: [
+                        { name: '부서명', key_suffix: '', type: 'popup_department' },
+                        { name: '부서코드', key_suffix: '_code', type: 'linked_text' }
+                    ]
+                },
+                'building': {
+                    name: '건물',
+                    columns: [
+                        { name: '건물명', key_suffix: '', type: 'popup_building' },
+                        { name: '건물코드', key_suffix: '_code', type: 'linked_text' }
+                    ]
+                },
+                'contractor': {
+                    name: '협력사 근로자',
+                    columns: [
+                        { name: '성함', key_suffix: '', type: 'popup_contractor' },
+                        { name: 'ID', key_suffix: '_id', type: 'linked_text' },
+                        { name: '소속업체', key_suffix: '_company', type: 'linked_text' },
+                        { name: '사업자번호', key_suffix: '_bizno', type: 'linked_text' }
+                    ]
+                },
+                'division': {
+                    name: '사업부',
+                    columns: [
+                        { name: '사업부명', key_suffix: '', type: 'popup_division' },
+                        { name: '사업부코드', key_suffix: '_code', type: 'linked_text' },
+                        { name: '상위사업부', key_suffix: '_parent', type: 'linked_text' }
+                    ]
+                }
+            };
+        }
         
         function openTableConfigModal() {
             selectedTableType = null;
@@ -3072,47 +3210,124 @@ window.addEventListener('error', function(ev){
 <script src="/static/js/Sortable.min.js"></script>
 <!-- Sortable 초기화 헬퍼 -->
 <script src="/static/js/sortable-init.js"></script>
+<script src="/static/js/column-field-editor.js?v=20241001"></script>
+<script src="/static/js/list-child-support.js?v=20241001"></script>
 <script>
-// Fallback: 버튼 리스너 보강
-document.addEventListener('DOMContentLoaded', function() {
-    try {
-        const btn = document.getElementById('saveColumnBtn');
-        if (btn && typeof window.saveColumnToQueue === 'function') {
-            try {
-                const __origSave = window.saveColumnToQueue;
-                window.saveColumnToQueue = function() {
-                    try { return __origSave.apply(this, arguments); }
-                    catch(err){ alert('저장 처리 중 오류: ' + (err && err.message ? err.message : err)); }
-                } else if (columnType === 'number') {
-                    // 숫자 타입 추가 (정수/실수)
-                    const nsel = document.querySelector('input[name="numberType"]:checked');
-                    const nt = nsel ? nsel.value : 'float';
-                    const newId = Date.now();
-                    const baseOrder = pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete).length;
-                    const newColumn = {
-                        id: newId,
-                        column_name: columnName,
-                        column_key: columnKey,
-                        column_type: 'number',
-                        input_type: (nt === 'integer') ? 'number_integer' : 'number_float',
-                        tab: selectedSection,
-                        is_active: isActive,
-                        column_order: baseOrder,
-                        _isNew: true
-                    };
-                    pendingColumns.push(newColumn);
-                    alert(`✅ 숫자 컬럼이 생성되었습니다: ${columnName}`);
-                }
-            } catch(e) {}
-            btn.addEventListener('click', function(e) {
-                e.preventDefault();
-                try { window.saveColumnToQueue(); } catch (err) {
-                    alert('저장 처리 중 오류: ' + (err && err.message ? err.message : err));
-                }
-            });
-        }
-    } catch (e) {}
-});
-</script>
+(function() {
+  function collectTargets() {
+    const collections = [];
+    if (Array.isArray(window.pendingColumns)) {
+      collections.push(window.pendingColumns);
+    }
+    if (Array.isArray(window.columns) && window.columns !== window.pendingColumns) {
+      collections.push(window.columns);
+    }
+    return collections;
+  }
 
+  function findTarget(columnId, columnKey) {
+    const collections = collectTargets();
+    for (const collection of collections) {
+      if (!Array.isArray(collection)) {
+        continue;
+      }
+      const found = collection.find(col => {
+        if (!col) {
+          return false;
+        }
+        if (columnId != null && String(col.id) === String(columnId)) {
+          return true;
+        }
+        if (columnKey != null && String(col.column_key) === String(columnKey)) {
+          return true;
+        }
+        return false;
+      });
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  async function refreshColumns() {
+    try {
+      const response = await fetch('/api/safety-instruction-columns');
+      const data = await response.json();
+      if (!Array.isArray(data)) {
+        return;
+      }
+      window.columns = data.slice();
+      window.pendingColumns = data.map(col => ({
+        ...col,
+        _isNew: false,
+        _modified: false,
+        _toDelete: false
+      }));
+      if (typeof renderColumns === 'function') {
+        try {
+          renderColumns();
+        } catch (err) {
+          console.warn('[ListChildFallback] renderColumns 실패', err);
+        }
+      }
+    } catch (err) {
+      console.error('[ListChildFallback] 컬럼 새로고침 실패', err);
+    }
+  }
+
+  function openPopupForKey(columnKey) {
+    const key = columnKey ? String(columnKey).trim() : '';
+    if (!key) {
+      alert('유효한 컬럼 키를 찾을 수 없습니다. 잠시 후 다시 시도해주세요.');
+      return;
+    }
+    const width = 1100;
+    const height = 800;
+    const left = Math.max(0, Math.round((window.screen.width - width) / 2));
+    const top = Math.max(0, Math.round((window.screen.height - height) / 2));
+    const url = `/admin/safety-instruction-columns/${encodeURIComponent(key)}/list-builder`;
+    const features = [
+      `width=${width}`,
+      `height=${height}`,
+      `left=${left}`,
+      `top=${top}`,
+      'resizable=yes',
+      'scrollbars=yes',
+      'toolbar=no',
+      'menubar=no',
+      'location=no',
+      'status=no',
+      'noopener=yes'
+    ].join(',');
+    window.open(url, `listChildBuilder_${key}`, features);
+  }
+
+  async function handleOpen(columnId, columnKey) {
+    let target = findTarget(columnId, columnKey);
+    if (!target) {
+      await refreshColumns();
+      target = findTarget(columnId, columnKey);
+    }
+    if (!target) {
+      alert('컬럼 정보를 찾을 수 없습니다. 페이지를 새로고침한 후 다시 시도해주세요.');
+      return;
+    }
+    if (target._isNew) {
+      alert('자식 컬럼을 편집하려면 먼저 "전체 변경사항 저장"으로 컬럼을 저장해주세요.');
+      return;
+    }
+    if (target._toDelete) {
+      alert('삭제 예정인 컬럼은 자식 컬럼을 편집할 수 없습니다.');
+      return;
+    }
+    const key = target.column_key || columnKey;
+    openPopupForKey(key);
+  }
+
+  window.openListChildBuilderFromCard = function(columnId, columnKey) {
+    handleOpen(columnId, columnKey);
+  };
+})();
+</script>
 {% endblock %}

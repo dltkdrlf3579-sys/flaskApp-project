@@ -359,196 +359,7 @@
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <form id="columnForm">
-                        <input type="hidden" id="columnId">
-                        
-                        <div class="mb-3">
-                            <label class="form-label">컬럼명 <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="columnName" required 
-                                   oninput="validateColumnName(this)"
-                                   placeholder="예: 사고날짜, 발생위치">
-                            <small class="text-muted">화면에 표시될 이름 (숫자로만 구성 불가)</small>
-                            <div class="invalid-feedback" id="columnNameError"></div>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label class="form-label">컬럼 키 <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="columnKey" pattern="[a-z][a-z0-9_]*" required
-                                   oninput="validateColumnKey(this)"
-                                   placeholder="예: accident_date">
-                            <small class="text-muted" style="display: block;">
-                                <strong>반드시 컬럼명을 영어로 번역해주세요! (예: 사고날짜 → accident_date)</strong><br>
-                                영문 소문자로 시작, 영문 소문자/숫자/언더스코어만 사용
-                            </small>
-                            <div class="invalid-feedback" id="columnKeyError"></div>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label class="form-label">섹션 선택 <span class="text-danger">*</span></label>
-                            <select class="form-select" id="columnSection" required>
-                                <option value="">섹션을 선택하세요</option>
-                            </select>
-                            <small class="text-muted">컬럼이 표시될 섹션을 선택하세요</small>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label class="form-label">입력 타입 <span class="text-danger">*</span></label>
-                            <select class="form-select" id="columnType" onchange="toggleOptionsField(); toggleTableField(); toggleSpanField(); toggleListField(); toggleNumberField(); checkTypeChange();">
-                                <option value="" disabled selected>타입을 선택하세요</option>
-                                <option value="text">텍스트</option>
-                                <option value="dropdown">드롭다운</option>
-                                <option value="date">날짜</option>
-                                <option value="time">시간</option>
-                                <option value="number">숫자</option>
-                                <option value="table">테이블</option>
-                                <option value="list">리스트</option>
-                            </select>
-                            <div id="typeChangeWarning" class="alert alert-warning mt-2" style="display: none; font-size: 13px; padding: 8px 12px;">
-                                <i class="bi bi-exclamation-triangle"></i> 타입 변경 시 기존 데이터가 삭제될 수 있습니다.
-                            </div>
-                        </div>
-                        
-                        <!-- 텍스트/드롭다운 span 설정 -->
-                        <div class="mb-3" id="spanField" style="display: none;">
-                            <label class="form-label">차지할 칸 수</label>
-                            <div class="btn-group w-100" role="group">
-                                <input type="radio" class="btn-check" name="columnSpan" id="span1" value="1">
-                                <label class="btn btn-outline-primary" for="span1">
-                                    <i class="bi bi-square"></i> 1칸
-                                </label>
-
-                                <input type="radio" class="btn-check" name="columnSpan" id="span2" value="2" checked>
-                                <label class="btn btn-outline-primary" for="span2">
-                                    <i class="bi bi-square"></i><i class="bi bi-square"></i> 2칸
-                                </label>
-
-                                <input type="radio" class="btn-check" name="columnSpan" id="span4" value="4">
-                                <label class="btn btn-outline-primary" for="span4">
-                                    <i class="bi bi-square"></i><i class="bi bi-square"></i><i class="bi bi-square"></i><i class="bi bi-square"></i> 4칸
-                                </label>
-
-                                <input type="radio" class="btn-check" name="columnSpan" id="span8" value="8">
-                                <label class="btn btn-outline-primary" for="span8">
-                                    <i class="bi bi-square-fill"></i> 전체 너비 (8칸)
-                                </label>
-                            </div>
-                        </div>
-
-                        <!-- 숫자 설정 영역 (정수/실수) -->
-                        <div class="mb-3" id="numberConfigField" style="display: none;">
-                            <label class="form-label">숫자 형식</label>
-                            <div class="d-flex gap-3 align-items-center">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="numberType" id="numberTypeInteger" value="integer" checked>
-                                    <label class="form-check-label" for="numberTypeInteger">정수</label>
-                                </div>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="numberType" id="numberTypeFloat" value="float">
-                                    <label class="form-check-label" for="numberTypeFloat">실수</label>
-                                </div>
-                            </div>
-                            <small class="text-muted">정수는 소수점을 허용하지 않습니다. 실수는 소수점 입력이 가능합니다.</small>
-                        </div>
-                        
-                        <!-- 테이블 설정 영역 -->
-                        <div class="mb-3" id="tableConfigField" style="display: none;">
-                            <label class="form-label">테이블 설정</label>
-                            <div class="d-flex gap-2 align-items-center">
-                                <input type="text" class="form-control" id="selectedTableDisplay" readonly placeholder="테이블을 선택하세요">
-                                <button type="button" class="btn btn-outline-primary" onclick="openTableConfigModal()">
-                                    설정
-                                </button>
-                            </div>
-                            <input type="hidden" id="selectedTableConfig" value="">
-                            <div id="tableColumnsPreview" class="mt-2" style="display: none;">
-                                <!-- 테이블 컬럼 미리보기 영역 -->
-                            </div>
-                        </div>
-                        
-                        <div class="mb-3" id="tableSelectField" style="display: none;">
-                            <label class="form-label">테이블 선택</label>
-                            <select class="form-select" id="tableSelect" onchange="updateMappingFields()">
-                                <option value="">-- 선택 --</option>
-                                <option value="employees">담당자 (employees)</option>
-                                <option value="companies">업체 (companies)</option>
-                                <option value="departments">부서 (departments)</option>
-                            </select>
-                            
-                            <div id="mappingFields" style="display: none; margin-top: 15px;">
-                                <label class="form-label">연관 컬럼 매핑</label>
-                                <div class="alert alert-info" style="font-size: 13px;">
-                                    <i class="bi bi-info-circle"></i> 선택 시 자동으로 채워질 컬럼들을 설정합니다.
-                                </div>
-                                <div id="mappingContainer">
-                                    <!-- 동적으로 생성됨 -->
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="mb-3" id="optionsField" style="display: none;">
-                            <label class="form-label">드롭다운 옵션</label>
-                            
-                            <!-- 현재 옵션 미리보기 -->
-                            <div id="optionPreview" class="mb-3" style="display: none;">
-                                <h6>현재 설정된 옵션:</h6>
-                                <table class="table table-sm table-bordered">
-                                    <thead>
-                                        <tr>
-                                            <th width="40%">코드</th>
-                                            <th>표시값</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="optionPreviewBody">
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div class="form-check form-switch mt-3" id="dropdownMultiToggleWrapper" style="display: none;">
-                                <input class="form-check-input" type="checkbox" id="dropdownMultiToggle" onchange="handleDropdownMultiToggleChange()">
-                                <label class="form-check-label" for="dropdownMultiToggle">여러 값을 동시에 선택 허용</label>
-                            </div>
-                            <small class="text-muted d-block mt-1" id="dropdownMultiHint" style="display: none;">
-                                사용자 화면에서는 다중 선택 드롭다운이 표시되며 선택한 값은 쉼표로 묶어 저장됩니다.
-                            </small>
-
-                            <button type="button" class="btn btn-primary w-100" onclick="openCodeEditor()">
-                                <i class="bi bi-code-square"></i> 코드 편집기 열기
-                            </button>
-                            <input type="hidden" id="dropdownOptions" />
-                        </div>
-                        
-                        <!-- 리스트 설정 영역 -->
-                        <div class="mb-3" id="listConfigField" style="display: none;">
-                            <label class="form-label">리스트 항목 설정</label>
-                            <div class="alert alert-info" style="font-size: 13px;">
-                                <i class="bi bi-info-circle"></i> 리스트에 포함될 항목을 설정합니다. (협력사 근로자/업체 지원)
-                            </div>
-                            <div class="d-flex gap-2 align-items-center">
-                                <select class="form-select" id="listItemType">
-                                    <option value="partner_worker">협력사 근로자</option>
-                                    <option value="company">업체</option>
-                                </select>
-                            </div>
-                            <div class="mt-2">
-                                <small class="text-muted">
-                                    리스트로 선택 시 다음 컬럼들이 자동 생성됩니다:
-                                    <ul style="margin-top: 5px;">
-                                        <li>성함 (팝업 검색)</li>
-                                        <li>ID (자동 연동)</li>
-                                        <li>소속업체 (자동 연동)</li>
-                                        <li>사업자번호 (자동 연동)</li>
-                                    </ul>
-                                </small>
-                            </div>
-                            <input type="hidden" id="listConfig" value="partner_worker">
-                        </div>
-                        
-                        <div class="form-check mb-3">
-                            <input class="form-check-input" type="checkbox" id="isActive" checked>
-                            <label class="form-check-label" for="isActive">
-                                활성화
-                            </label>
-                        </div>
-                    </form>
+                    {% include "admin/partials/column_field_form.html" %}
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">취소</button>
@@ -597,6 +408,12 @@
     </div>
 </div>
 
+<!-- Sortable.js 및 관련 스크립트는 inline 스크립트 이전에 로드 -->
+<script src="/static/js/Sortable.min.js"></script>
+<script src="/static/js/sortable-init.js"></script>
+<script src="/static/js/column-field-editor.js?v=20241001"></script>
+<script src="/static/js/list-child-support.js?v=20241001"></script>
+
 <script>
 let columns = [];
 let pendingColumns = []; // 모든 변경사항을 담는 단순 배열
@@ -604,6 +421,33 @@ let sections = {{ sections | tojson | safe }};  // 섹션 정보
 let originalSections = JSON.parse(JSON.stringify({{ sections | tojson | safe }}));  // 원본 섹션 정보 보관
 let sectionChanges = {};  // 섹션 변경사항 추적
 let editingId = null;
+
+if (window.ColumnFieldEditor) {
+    window.ColumnFieldEditor.init({
+        showSection: true,
+        showSpan: true,
+        showTable: true,
+        showListButton: true,
+        showNumber: true,
+        showScoring: true,
+        showActive: true
+    });
+}
+
+if (window.ListChildSupport) {
+    window.ListChildSupport.init({
+        boardKey: 'accident',
+        adminBase: '/admin/accident-columns',
+        apiBase: '/api/accident-columns',
+        getPendingColumns: () => pendingColumns,
+        getColumns: () => columns,
+        getEditingId: () => editingId,
+        reload: () => loadColumns && loadColumns()
+    });
+    if (typeof window.updateListBuilderButtonState === 'function') {
+        window.updateListBuilderButtonState();
+    }
+}
         
         // 컬럼명 실시간 유효성 검사
         function validateColumnName(input) {
@@ -1028,6 +872,13 @@ let editingId = null;
                 const sectionColumns = columns;
                 const orderInSection = sectionColumns.indexOf(column) + 1;
                 
+                const isListType = (column.column_type === 'list') || ((column.input_type || '').toString().startsWith('list_'));
+                const listButtonDisabledAttr = column._toDelete ? 'disabled' : '';
+                const listButton = isListType ? `
+                                <button class="btn btn-sm btn-link p-0 text-info" onclick="openListChildBuilderFromCard('${column.id}', '${column.column_key}')" ${listButtonDisabledAttr} title="자식 컬럼 편집">
+                                    <i class="bi bi-layout-text-window-reverse" style="font-size: 14px;"></i>
+                                </button>` : '';
+                
                 card.innerHTML = `
                     <div class="column-number">${orderInSection}</div>
                     <div class="column-content">
@@ -1038,11 +889,12 @@ let editingId = null;
                         <div class="column-key">${column.column_key}</div>
                         <div class="column-controls">
                             <span class="column-type-badge">${getTypeLabel(column.column_type)}</span>
-                            <div style="display: flex; gap: 5px;">
-                                <button class="btn btn-sm btn-link p-0" onclick="editColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''}>
+                            <div style="display: flex; gap: 5px; align-items: center;">
+                                <button class="btn btn-sm btn-link p-0" onclick="editColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''} title="편집">
                                     <i class="bi bi-pencil" style="font-size: 14px;"></i>
                                 </button>
-                                <button class="btn btn-sm btn-link p-0 text-danger" onclick="deleteColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''}>
+                                ${listButton}
+                                <button class="btn btn-sm btn-link p-0 text-danger" onclick="deleteColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''} title="삭제">
                                     <i class="bi bi-trash" style="font-size: 14px;"></i>
                                 </button>
                                 <div class="form-check form-switch" style="margin: 0;">
@@ -1184,6 +1036,9 @@ let editingId = null;
                 'linked_dept': '연결-부서',
                 'linked_text': '연결-텍스트'
             };
+            if (type === 'textarea') {
+                return labels['text'];
+            }
             return labels[type] || type;
         }
         
@@ -1217,6 +1072,8 @@ let editingId = null;
             document.getElementById('dropdownOptions').value = '';  // 드롭다운 옵션 초기화
             const multiToggle = document.getElementById('dropdownMultiToggle');
             if (multiToggle) multiToggle.checked = false;
+            const textareaToggle = document.getElementById('textareaToggle');
+            if (textareaToggle) textareaToggle.checked = false;
             setSpan(2, { remember: true });
             toggleOptionsField();
             toggleTableField();
@@ -1224,6 +1081,10 @@ let editingId = null;
             toggleListField();
             toggleNumberField();
             handleDropdownMultiToggleChange();
+            toggleTextareaToggle();
+            if (typeof window.updateListBuilderButtonState === 'function') {
+                window.updateListBuilderButtonState();
+            }
             
             // 기존 모달 인스턴스가 있으면 재사용, 없으면 새로 생성
             const modalElement = document.getElementById('columnModal');
@@ -1333,15 +1194,26 @@ let editingId = null;
                 }
             } else {
                 const resolvedType = (column.column_type === 'table' || column.input_type === 'table' || column._tableType || column.table_type) ? 'table' : column.column_type;
-                typeSelectEl.value = resolvedType || '';
+                let baseSelectValue = resolvedType || '';
+                const textareaToggle = document.getElementById('textareaToggle');
+                if (resolvedType === 'textarea') {
+                    baseSelectValue = 'text';
+                    if (textareaToggle) {
+                        textareaToggle.checked = true;
+                    }
+                } else if (textareaToggle) {
+                    textareaToggle.checked = false;
+                }
+                typeSelectEl.value = baseSelectValue;
                 // 일반 컬럼은 타입 변경 가능
                 typeSelectEl.disabled = false;
                 if (resolvedType === 'table') {
                     document.getElementById('tableConfigField').style.display = 'block';
                 }
             }
-            
-            typeSelectEl.dataset.originalType = typeSelectEl.value || column.column_type || '';
+
+            typeSelectEl.dataset.originalType = column.column_type || typeSelectEl.value || '';
+            toggleTextareaToggle();
             document.getElementById('isActive').checked = column.is_active;
             
             // 섹션 선택 옵션 갱신 후 값 설정(옵션에 없는 탭이면 기본값)
@@ -1356,7 +1228,7 @@ let editingId = null;
             }
             
             // 텍스트 타입이고 span 값이 있으면 설정
-            if ((column.column_type === 'text' || column.column_type === 'dropdown') && column.column_span) {
+            if ((column.column_type === 'text' || column.column_type === 'dropdown' || column.column_type === 'textarea') && column.column_span) {
                 setSpan(column.column_span, { remember: true });
             }
             
@@ -1408,11 +1280,6 @@ let editingId = null;
             toggleOptionsField();
             toggleSpanField();
             toggleListField();
-            // 리스트/숫자 서브타입 복원
-            if (column.column_type === 'list') {
-                const listSel = document.getElementById('listItemType');
-                if (listSel) listSel.value = (column.input_type === 'list_company') ? 'company' : 'partner_worker';
-            }
             if (column.column_type === 'number') {
                 const isInt = (column.input_type === 'number_integer');
                 const intRadio = document.getElementById('numberTypeInteger');
@@ -1428,6 +1295,9 @@ let editingId = null;
                 toggleTableField();
             }
             toggleNumberField();
+            if (typeof window.updateListBuilderButtonState === 'function') {
+                window.updateListBuilderButtonState();
+            }
             
             const modalElement = document.getElementById('columnModal');
             let modalInstance = bootstrap.Modal.getInstance(modalElement);
@@ -1515,13 +1385,60 @@ let editingId = null;
             }
 
             handleDropdownMultiToggleChange();
+            toggleTextareaToggle();
         }
 
         function isDropdownMultiSelected() {
             const toggle = document.getElementById('dropdownMultiToggle');
             return !!(toggle && toggle.checked);
         }
-        
+
+        function toggleTextareaToggle() {
+            const wrapper = document.getElementById('textareaToggleWrapper');
+            if (!wrapper) {
+                return;
+            }
+            const type = document.getElementById('columnType').value;
+            const toggle = document.getElementById('textareaToggle');
+            if (type === 'text') {
+                wrapper.style.display = '';
+            } else {
+                wrapper.style.display = 'none';
+                if (toggle) {
+                    toggle.checked = false;
+                }
+            }
+            handleTextareaToggleChange();
+        }
+
+        function handleTextareaToggleChange() {
+            const typeEl = document.getElementById('columnType');
+            const baseType = typeEl ? typeEl.value : '';
+            const textareaOn = (baseType === 'text') && isTextareaSelected();
+            if (baseType === 'text') {
+                setSpan(textareaOn ? 8 : 2, { remember: true });
+            }
+            toggleSpanField();
+            checkTypeChange();
+        }
+
+        function getResolvedColumnType() {
+            const typeEl = document.getElementById('columnType');
+            if (!typeEl) {
+                return '';
+            }
+            const baseType = typeEl.value;
+            if (baseType === 'text' && isTextareaSelected()) {
+                return 'textarea';
+            }
+            return baseType;
+        }
+
+        function isTextareaSelected() {
+            const toggle = document.getElementById('textareaToggle');
+            return !!(toggle && toggle.checked);
+        }
+
         function toggleTableField() {
             const type = document.getElementById('columnType').value;
             document.getElementById('tableConfigField').style.display = 
@@ -1535,7 +1452,8 @@ let editingId = null;
             }
             const type = document.getElementById('columnType').value;
             const isMulti = (type === 'dropdown') && isDropdownMultiSelected();
-            const shouldShow = (type === 'text') || (type === 'dropdown' && !isMulti);
+            const isTextarea = (type === 'text') && isTextareaSelected();
+            const shouldShow = (type === 'text' && !isTextarea) || (type === 'dropdown' && !isMulti);
             spanField.style.display = shouldShow ? 'block' : 'none';
         }
 
@@ -1552,9 +1470,15 @@ let editingId = null;
         }
         
         function toggleListField() {
-            const type = document.getElementById('columnType').value;
-            document.getElementById('listConfigField').style.display = 
-                type === 'list' ? 'block' : 'none';
+            const typeSelect = document.getElementById('columnType');
+            const listField = document.getElementById('listConfigField');
+            if (!typeSelect || !listField) {
+                return;
+            }
+            listField.style.display = typeSelect.value === 'list' ? 'block' : 'none';
+            if (typeof window.updateListBuilderButtonState === 'function') {
+                setTimeout(() => window.updateListBuilderButtonState(), 0);
+            }
         }
 
         function toggleNumberField() {
@@ -1636,7 +1560,7 @@ let editingId = null;
                 const optgroup = select.querySelector('optgroup');
                 let options = '';
                 pendingColumns.forEach(col => {
-                    if (!col._toDelete && col.column_type === 'text') {
+                    if (!col._toDelete && (col.column_type === 'text' || col.column_type === 'textarea')) {
                         options += `<option value="${col.column_key}">${col.column_name}</option>`;
                     }
                 });
@@ -1646,8 +1570,9 @@ let editingId = null;
         
         function checkTypeChange() {
             const typeSelect = document.getElementById('columnType');
-            const currentType = typeSelect ? typeSelect.value : '';
-            if (currentType === 'dropdown') {
+            const currentResolvedType = getResolvedColumnType();
+            const baseType = typeSelect ? typeSelect.value : '';
+            if (baseType === 'dropdown') {
                 if (isDropdownMultiSelected()) {
                     setSpan(8, { remember: true });
                 } else {
@@ -1658,7 +1583,7 @@ let editingId = null;
             const originalType = typeSelect ? typeSelect.dataset.originalType : '';
             const warning = document.getElementById('typeChangeWarning');
             
-            if (editingId && originalType && originalType !== currentType) {
+            if (editingId && originalType && originalType !== currentResolvedType) {
                 warning.style.display = 'block';
             } else {
                 warning.style.display = 'none';
@@ -1669,25 +1594,29 @@ let editingId = null;
             const columnName = document.getElementById('columnName').value.trim();
             const columnKey = document.getElementById('columnKey').value.trim();
             const columnTypeElement = document.getElementById('columnType');
-            const columnType = columnTypeElement.value;
+            const baseColumnType = columnTypeElement.value;
+            const resolvedColumnType = getResolvedColumnType();
             const originalType = columnTypeElement.dataset.originalType;
             const isActive = document.getElementById('isActive').checked;
             const selectedSection = document.getElementById('columnSection').value;
             
-            // 텍스트 타입일 때 span 값 가져오기
-            let columnSpan = 1;
-        if (columnType === 'text' || columnType === 'dropdown') {
+            // span 값 가져오기 (기본값 2)
+            let columnSpan = 2;
+        if (resolvedColumnType === 'text' || resolvedColumnType === 'dropdown') {
             const selectedSpan = document.querySelector('input[name="columnSpan"]:checked');
             if (selectedSpan) {
                 columnSpan = parseInt(selectedSpan.value);
             }
         }
-        if (columnType === 'dropdown' && isDropdownMultiSelected()) {
+        if (resolvedColumnType === 'dropdown' && isDropdownMultiSelected()) {
+            columnSpan = 8;
+        }
+        if (resolvedColumnType === 'textarea') {
             columnSpan = 8;
         }
             
             // 디버깅: disabled 상태에서도 값이 제대로 읽히는지 확인
-            console.log('Column Type:', columnType, 'Disabled:', columnTypeElement.disabled);
+            console.log('Column Type:', resolvedColumnType, 'Disabled:', columnTypeElement.disabled);
             
             if (!columnName || !columnKey) {
                 alert('컬럼명과 컬럼 키는 필수 입력 항목입니다.');
@@ -1700,7 +1629,7 @@ let editingId = null;
                 return;
             }
             
-            if (!columnType || columnType === '') {
+            if (!baseColumnType || baseColumnType === '') {
                 // linked 타입이나 popup 타입이 아닌 경우에만 타입 선택 요구
                 if (!columnTypeElement.disabled) {
                     alert('타입을 선택해주세요.');
@@ -1731,7 +1660,7 @@ let editingId = null;
             }
             
             // 타입 변경 시 경고
-            if (editingId && originalType && originalType !== columnType) {
+            if (editingId && originalType && originalType !== resolvedColumnType) {
                 const column = pendingColumns.find(c => String(c.id) === String(editingId));
                 if (column && !column._isNew) {
                     if (!confirm('⚠️ 주의: 타입을 변경하실 경우 기존 데이터가 전부 삭제될 수 있으니 신중히 변경 부탁드립니다.\n\n정말 타입을 변경하시겠습니까?')) {
@@ -1744,6 +1673,7 @@ let editingId = null;
             if (editingId) {
                 const existingColumn = pendingColumns.find(c => String(c.id) === String(editingId));
                 if (existingColumn && existingColumn.column_type && existingColumn.column_type.startsWith('linked_')) {
+                    // suffix 매칭으로 tableType 추론
                     let detected = null;
                     for (const [tKey, cfg] of Object.entries(tableColumnMappings)) {
                         for (let i = 1; i < cfg.columns.length; i++) {
@@ -1760,12 +1690,13 @@ let editingId = null;
                         const baseExists = pendingColumns.some(c => !c._toDelete && c.column_key === baseKey);
                         if (!baseExists) {
                             const baseOrder = Math.max(0, (pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete).map(c => c.column_order).reduce((a,b)=>Math.max(a,b), -1)) + 1);
+                            // 이름에서 마지막 토큰 제거하여 기본명 추정
                             let baseName = columnName;
                             const lastToken = detected.config.columns.find(c=>c.key_suffix===detected.suffix)?.name.split(' ').slice(-1)[0] || '';
                             if (lastToken && baseName.endsWith(' ' + lastToken)) {
                                 baseName = baseName.slice(0, -(' ' + lastToken).length);
                             }
-                            const baseType = detected.config.columns[0].type;
+                            const baseType = detected.config.columns[0].type; // popup_* 등
                             const newId = Date.now() + Math.floor(Math.random()*1000);
                             const newBase = {
                                 id: newId,
@@ -1788,7 +1719,7 @@ let editingId = null;
             }
             
             let dropdownOptions = null;
-            if (columnType === 'dropdown') {
+            if (resolvedColumnType === 'dropdown') {
                 const optionsText = document.getElementById('dropdownOptions').value;
                 if (optionsText) {
                     dropdownOptions = optionsText.split('\n').filter(o => o.trim());
@@ -1804,8 +1735,10 @@ let editingId = null;
                     // 테이블 컬럼 타입 보존/복원 로직
                     const suffixes = ['_id','_dept','_bizno','_code','_company'];
                     const isLinkedField = suffixes.some(s => (columnKey || '').endsWith(s));
-                    const baseKeyHints = { 'incharged_person': 'person', 'incharge': 'department', 'company_1cha': 'company', 'company_2cha': 'company' };
+                    // 힌트 매핑 (기지 키 → 테이블 타입)
+                    const baseKeyHints = { 'incharged_person': 'person', 'incharge': 'department', 'company_1cha': 'company', 'company_1st': 'company' };
                     const keyHint = baseKeyHints[existingColumn.column_key] || baseKeyHints[columnKey] || null;
+                    // 형제 컬럼으로 테이블 타입 추론
                     let siblingType = null;
                     const baseKey = (function(k){ let b=k||''; suffixes.forEach(s=>{ if(b.endsWith(s)) b=b.slice(0,-s.length);}); return b; })(columnKey || existingColumn.column_key || '');
                     const siblings = (pendingColumns||[]).filter(c => String(c.id)!==String(existingColumn.id));
@@ -1813,6 +1746,7 @@ let editingId = null;
                     else if (siblings.some(c => c.column_key === baseKey + '_code')) siblingType = 'department';
                     else if (siblings.some(c => c.column_key === baseKey + '_dept')) siblingType = 'person';
                     else if (siblings.some(c => c.column_key === baseKey + '_company')) siblingType = 'contractor';
+                    // 최종 테이블 타입 추정
                     const looksLikeTable = (
                         (existingColumn.column_type && (existingColumn.column_type.startsWith('popup_') || existingColumn.column_type.startsWith('linked_')))
                         || existingColumn.input_type === 'table'
@@ -1820,19 +1754,27 @@ let editingId = null;
                         || !!existingColumn.table_type
                     );
                     const tableTypeGuess = existingColumn._tableType || keyHint || siblingType || (looksLikeTable ? (existingColumn._tableType || null) : null);
-                    let newType = existingColumn._tableGroup ? existingColumn.column_type : columnType;
+                    // 최종 타입 결정
+                    let newType = existingColumn._tableGroup ? existingColumn.column_type : resolvedColumnType;
                     if (!isLinkedField && (!newType || newType === 'text') && tableTypeGuess) {
                         const popupMap = { person:'popup_person', department:'popup_department', company:'popup_company', building:'popup_building', contractor:'popup_contractor', division:'popup_division' };
                         newType = popupMap[tableTypeGuess] || newType || 'text';
                     }
-                    // 입력 서브타입 결정
+                    // 입력 서브타입 계산 (table/list/number)
                     let resolvedInputType = null;
                     if (newType === 'table') {
                         resolvedInputType = 'table';
                     } else if (newType === 'list') {
-                        const listSel = document.getElementById('listItemType');
-                        const lit = listSel ? listSel.value : (existingColumn.list_item_type || 'partner_worker');
-                        resolvedInputType = (lit === 'company') ? 'list_company' : 'list_partner_worker';
+                        const existingInput = (existingColumn.input_type || '').toString();
+                        if (existingInput.startsWith('list_')) {
+                            resolvedInputType = existingInput;
+                        } else if (existingColumn.list_item_type === 'company') {
+                            resolvedInputType = 'list_company';
+                        } else if (existingColumn.list_item_type === 'partner_worker') {
+                            resolvedInputType = 'list_partner_worker';
+                        } else {
+                            resolvedInputType = 'list_custom';
+                        }
                     } else if (newType === 'dropdown') {
                         resolvedInputType = isDropdownMultiSelected() ? 'dropdown_multi' : null;
                     } else if (newType === 'number') {
@@ -1841,6 +1783,45 @@ let editingId = null;
                         resolvedInputType = (nt === 'integer') ? 'number_integer' : 'number_float';
                     }
 
+            // 숫자형 수정 시 간단 가중치/등급을 scoring_config로 반영
+            if (resolvedColumnType === 'number') {
+                        const perEl = document.getElementById('numberPerUnit');
+                        const gradeEl = document.getElementById('numberGrade');
+                        const per = perEl ? parseFloat(perEl.value || '0') : 0;
+                        const grade = gradeEl ? (gradeEl.value || '') : '';
+                        const conf = { per_unit_delta: per };
+                        if (grade) conf.grade = grade;
+                        const ta = document.getElementById('scoringConfig');
+                        if (ta) ta.value = JSON.stringify(conf);
+
+                        // 숫자 타입이면 resolvedInputType도 설정
+                        const nsel = document.querySelector('input[name="numberType"]:checked');
+                        const nt = nsel ? nsel.value : 'float';
+                        resolvedInputType = (nt === 'integer') ? 'number_integer' : 'number_float';
+                    }
+            // 채점/총점 타입은 인라인 편집 상태를 즉시 반영하여 저장 (별도 저장 버튼 누르지 않아도 됨)
+            let scText;
+            if (resolvedColumnType === 'scoring' || resolvedColumnType === 'score_total') {
+                try {
+                    scText = JSON.stringify(buildScoringConfig());
+                } catch (e) {
+                    scText = (document.getElementById('scoringConfig') || {}).value || existingColumn.scoring_config || null;
+                }
+            } else {
+                scText = (document.getElementById('scoringConfig') || {}).value || existingColumn.scoring_config || null;
+            }
+            let resolvedListItemType = null;
+            if (newType === 'list') {
+                if (resolvedInputType === 'list_company') {
+                    resolvedListItemType = 'company';
+                } else if (resolvedInputType === 'list_partner_worker') {
+                    resolvedListItemType = 'partner_worker';
+                } else if (resolvedInputType && resolvedInputType.startsWith('list_') && resolvedInputType !== 'list_custom') {
+                    resolvedListItemType = resolvedInputType.slice(5);
+                } else {
+                    resolvedListItemType = existingColumn.list_item_type || null;
+                }
+            }
                     pendingColumns[index] = {
                         ...existingColumn,
                         column_name: columnName,
@@ -1850,11 +1831,13 @@ let editingId = null;
                         tab: selectedSection, // 섹션 정보 추가
                         is_active: isActive,
                         dropdown_options: dropdownOptions,
+                        scoring_config: scText,
                         input_type: resolvedInputType,
+                        list_item_type: resolvedListItemType,
                         _modified: !existingColumn._isNew, // 새 컬럼이 아니면 수정됨 표시
-                        // 테이블 관련 정보 유지
-                        _tableGroup: existingColumn._tableGroup,
-                        _tableType: existingColumn._tableType,
+                        // 테이블 관련 정보 유지/보강
+                        _tableGroup: existingColumn._tableGroup || baseKey,
+                        _tableType: existingColumn._tableType || tableTypeGuess || null,
                         _tableName: existingColumn._tableName
                     };
                     try { renderColumns(); } catch(e) {}
@@ -1864,9 +1847,8 @@ let editingId = null;
                 }
             } else {
                 // 새 컬럼 추가
-                if (columnType === 'list') {
-                    // 리스트 타입 처리
-                    const listItemType = document.getElementById('listItemType').value;
+                if (resolvedColumnType === 'list') {
+                    // 리스트 타입 - 기본 자식 스키마 없이 시작
                     const newId = Date.now();
                     const baseOrder = pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete).length;
                     
@@ -1875,21 +1857,20 @@ let editingId = null;
                         column_name: columnName,
                         column_key: columnKey,
                         column_type: 'list',
-                        list_item_type: listItemType,
-                        input_type: (listItemType === 'company') ? 'list_company' : 'list_partner_worker',
+                        input_type: 'list_custom',
+                        list_item_type: null,
                         tab: selectedSection,
                         is_active: isActive,
                         column_order: baseOrder,
-                        _isNew: true,
-                        _listConfig: listItemType
+                        _isNew: true
                     };
                     
                     pendingColumns.push(newColumn);
                     console.log(`리스트 컬럼 생성:`, newColumn);
                     
                     alert(`✅ 리스트 컬럼이 생성되었습니다:\n\n${columnName}\n\n"전체 변경사항 저장" 버튼을 눌러야 최종 반영됩니다.`);
-                
-                } else if (columnType === 'table') {
+                    
+                } else if (resolvedColumnType === 'table') {
                     // 테이블 타입: 선택된 테이블 설정 확인
                     const selectedTable = document.getElementById('selectedTableConfig').value;
                     if (!selectedTable) {
@@ -1940,6 +1921,24 @@ let editingId = null;
                 } else {
                     // 일반 타입
                     const newId = Date.now();
+                    // 숫자형이면 간단 가중치/등급을 scoring_config로 반영
+                    if (resolvedColumnType === 'number') {
+                        const perEl = document.getElementById('numberPerUnit');
+                        const gradeEl = document.getElementById('numberGrade');
+                        const per = perEl ? parseFloat(perEl.value || '0') : 0;
+                        const grade = gradeEl ? (gradeEl.value || '') : '';
+                        const conf = { per_unit_delta: per };
+                        if (grade) conf.grade = grade;
+                        const ta = document.getElementById('scoringConfig');
+                        if (ta) ta.value = JSON.stringify(conf);
+                    }
+                    let scText;
+                    if (resolvedColumnType === 'scoring' || resolvedColumnType === 'score_total') {
+                        try { scText = JSON.stringify(buildScoringConfig()); }
+                        catch(e){ scText = (document.getElementById('scoringConfig') || {}).value || null; }
+                    } else {
+                        scText = (document.getElementById('scoringConfig') || {}).value || null;
+                    }
                     
                     // 선택된 섹션의 마지막 순서 계산
                     const sectionColumns = pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete);
@@ -1949,18 +1948,20 @@ let editingId = null;
                         id: newId,
                         column_name: columnName,
                         column_key: columnKey,
-                        column_type: columnType,
+                        column_type: resolvedColumnType,
                         column_span: columnSpan, // span 정보 추가
                         tab: selectedSection, // 섹션 정보 추가
                         is_active: isActive,
                         dropdown_options: dropdownOptions,
+                        scoring_config: scText,
                         column_order: maxOrderInSection + 1, // 섹션 내 순서로 설정
                         _isNew: true
                     };
-                    if (columnType === 'dropdown') {
+                    if (resolvedColumnType === 'dropdown') {
                         newColumn.input_type = isDropdownMultiSelected() ? 'dropdown_multi' : null;
                     }
-                    if (columnType === 'number') {
+                    // 숫자 서브타입 저장
+                    if (resolvedColumnType === 'number') {
                         const nsel = document.querySelector('input[name="numberType"]:checked');
                         const nt = nsel ? nsel.value : 'float';
                         newColumn.input_type = (nt === 'integer') ? 'number_integer' : 'number_float';
@@ -2456,54 +2457,57 @@ let editingId = null;
         
         // ==================== 테이블 설정 관련 함수 ====================
         let selectedTableType = null;
-        let tableColumnMappings = {
-            'person': {
-                name: '담당자',
-                columns: [
-                    { name: '담당자', key_suffix: '', type: 'popup_person' },
-                    { name: '담당자 ID', key_suffix: '_id', type: 'linked_text' },
-                    { name: '담당자 부서', key_suffix: '_dept', type: 'linked_dept' }
-                ]
-            },
-            'company': {
-                name: '업체',
-                columns: [
-                    { name: '업체명', key_suffix: '', type: 'popup_company' },
-                    { name: '사업자번호', key_suffix: '_bizno', type: 'linked_text' }
-                ]
-            },
-            'department': {
-                name: '부서',
-                columns: [
-                    { name: '부서명', key_suffix: '', type: 'popup_department' },
-                    { name: '부서코드', key_suffix: '_code', type: 'linked_text' }
-                ]
-            },
-            'building': {
-                name: '건물',
-                columns: [
-                    { name: '건물명', key_suffix: '', type: 'popup_building' },
-                    { name: '건물코드', key_suffix: '_code', type: 'linked_text' }
-                ]
-            },
-            'contractor': {
-                name: '협력사 근로자',
-                columns: [
-                    { name: '성함', key_suffix: '', type: 'popup_contractor' },
-                    { name: 'ID', key_suffix: '_id', type: 'linked_text' },
-                    { name: '소속업체', key_suffix: '_company', type: 'linked_text' },
-                    { name: '사업자번호', key_suffix: '_bizno', type: 'linked_text' }
-                ]
-            },
-            'division': {
-                name: '사업부',
-                columns: [
-                    { name: '사업부명', key_suffix: '', type: 'popup_division' },
-                    { name: '사업부코드', key_suffix: '_code', type: 'linked_text' },
-                    { name: '상위사업부', key_suffix: '_parent', type: 'linked_text' }
-                ]
-            }
-        };
+        let tableColumnMappings = {{ (table_mappings or {}) | tojson | safe }};
+        if (!tableColumnMappings || Object.keys(tableColumnMappings).length === 0) {
+            tableColumnMappings = {
+                'person': {
+                    name: '담당자',
+                    columns: [
+                        { name: '담당자', key_suffix: '', type: 'popup_person' },
+                        { name: '담당자 ID', key_suffix: '_id', type: 'linked_text' },
+                        { name: '담당자 부서', key_suffix: '_dept', type: 'linked_dept' }
+                    ]
+                },
+                'company': {
+                    name: '업체',
+                    columns: [
+                        { name: '업체명', key_suffix: '', type: 'popup_company' },
+                        { name: '사업자번호', key_suffix: '_bizno', type: 'linked_text' }
+                    ]
+                },
+                'department': {
+                    name: '부서',
+                    columns: [
+                        { name: '부서명', key_suffix: '', type: 'popup_department' },
+                        { name: '부서코드', key_suffix: '_code', type: 'linked_text' }
+                    ]
+                },
+                'building': {
+                    name: '건물',
+                    columns: [
+                        { name: '건물명', key_suffix: '', type: 'popup_building' },
+                        { name: '건물코드', key_suffix: '_code', type: 'linked_text' }
+                    ]
+                },
+                'contractor': {
+                    name: '협력사 근로자',
+                    columns: [
+                        { name: '성함', key_suffix: '', type: 'popup_contractor' },
+                        { name: 'ID', key_suffix: '_id', type: 'linked_text' },
+                        { name: '소속업체', key_suffix: '_company', type: 'linked_text' },
+                        { name: '사업자번호', key_suffix: '_bizno', type: 'linked_text' }
+                    ]
+                },
+                'division': {
+                    name: '사업부',
+                    columns: [
+                        { name: '사업부명', key_suffix: '', type: 'popup_division' },
+                        { name: '사업부코드', key_suffix: '_code', type: 'linked_text' },
+                        { name: '상위사업부', key_suffix: '_parent', type: 'linked_text' }
+                    ]
+                }
+            };
+        }
         
         function openTableConfigModal() {
             selectedTableType = null;
@@ -2681,10 +2685,4 @@ let editingId = null;
             }
         });
 </script>
-
-<!-- Sortable.js CDN 추가 -->
-<script src="/static/js/Sortable.min.js"></script>
-<!-- Sortable 초기화 헬퍼 -->
-<script src="/static/js/sortable-init.js"></script>
-
 {% endblock %}

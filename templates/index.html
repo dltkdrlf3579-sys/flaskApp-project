@@ -50,24 +50,44 @@ body {
     color: #666;
     font-size: 16px;
 }
+
+.dashboard-fallback-image {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+    background: #fff;
+}
 </style>
 {% endblock %}
 
 {% block content %}
 <!-- container 클래스 제거하여 전체 화면 사용 -->
 <div class="dashboard-wrapper" id="dashboardWrapper">
-    {% if dashboard_config.enabled %}
-        <!-- 로딩 메시지 -->
-        <div class="loading-msg" id="loadingMsg">대시보드를 불러오는 중...</div>
-        
+    {% if dashboard_config.enabled and dashboard_config.mode == 'iframe' %}
+        {% if dashboard_config.show_loader %}
+            <!-- 로딩 메시지 -->
+            <div class="loading-msg" id="loadingMsg">대시보드를 불러오는 중...</div>
+        {% endif %}
+
         <!-- 스팟파이어 대시보드 iframe -->
         <iframe 
             id="dashboardFrame"
             class="dashboard-iframe" 
             src="{{ dashboard_config.url }}"
             title="EHS 대시보드"
-            onload="document.getElementById('loadingMsg').style.display='none';"
+            onload="var loader = document.getElementById('loadingMsg'); if (loader) { loader.style.display='none'; }"
         ></iframe>
+    {% elif dashboard_config.enabled and dashboard_config.mode == 'image' and dashboard_config.image %}
+        <img 
+            src="{{ dashboard_config.image }}" 
+            alt="대시보드 대체 이미지" 
+            class="dashboard-fallback-image"
+        >
+    {% elif dashboard_config.enabled %}
+        <div class="loading-msg">
+            대시보드 구성이 올바르지 않습니다.
+        </div>
     {% else %}
         <!-- 대시보드 비활성화 시 메시지 -->
         <div class="loading-msg">

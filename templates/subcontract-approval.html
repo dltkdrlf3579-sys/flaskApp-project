@@ -1,0 +1,828 @@
+{% extends "base.html" %}
+{% block title %}산안법 도급승인{% endblock %}
+
+{% from 'includes/table_controls.html' import render_table_controls %}
+{% from 'includes/search_controls.html' import render_search_section, render_search_buttons %}
+
+{% set display_name = board_display_name or '산안법 도급승인' %}
+{% set id_column = identifier_column or 'approval_number' %}
+{% set id_label = identifier_label|default('도급승인번호', true) %}
+{% set created_label = created_at_label or '등록일' %}
+{% set board_slug = board_slug or 'subcontract-approval' %}
+{% set board_type_value = board_type or 'subcontract_approval' %}
+{% set records = records if records is defined else (subcontract_approvals if subcontract_approvals is defined else []) %}
+{% set final_check_label = final_check_label or '검토완료 처리' %}
+
+{% block content %}
+<style>
+/* 페이지 헤더 - 기준정보 스타일과 통일 */
+.page-header {
+    background: #fff;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #2f5fd3;
+}
+.page-title {
+    color: #333;
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0;
+}
+</style>
+
+<div class="page-header">
+    <h2 class="page-title">{{ display_name }}</h2>
+</div>
+
+<!-- 검색 영역 -->
+<div class="search-section">
+    <form method="GET" class="search-form">
+        <div class="search-fields">
+            <div class="search-group">
+                <label>협력사명</label>
+                <input type="text" name="company_name" value="{{ request.args.get('company_name', '') }}" placeholder="협력사명을 입력하세요">
+            </div>
+            <div class="search-group">
+                <label>사업자번호</label>
+                <input type="text" name="business_number" value="{{ request.args.get('business_number', '') }}" placeholder="사업자번호를 입력하세요">
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- 검색 버튼 영역 -->
+<div class="search-buttons-section">
+    {{ render_search_buttons() }}
+</div>
+
+<!-- 목록 테이블 -->
+<div class="table-section">
+    {{ render_table_controls(
+        total_count,
+        show_excel=True,
+        show_register=True,
+        show_delete=True,
+        show_final_check=True,
+        final_check_label=final_check_label,
+        final_check_callback='requestBoardFinalCheck()'
+    ) }}
+    <div class="table-wrapper">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th class="checkbox-column"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
+                    <th class="fixed-col" style="width: 60px;">No</th>
+                    <!-- Identifier / 등록일 기본 컬럼 -->
+                    <th>{{ id_label }}</th>
+                    <th style="width: 120px;">{{ created_label }}</th>
+                    {% for col in display_columns %}
+                        <th>{{ col['column_name'] }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for record in records %}
+                <tr>
+                    <td class="checkbox-column">
+                        <input type="checkbox" class="board-checkbox" value="{{ record[id_column] }}" onchange="updateDeleteButton()">
+                    </td>
+                    <td class="fixed-col" style="width: 60px;">
+                        {{ record.no }}
+                    </td>
+                    <!-- 하드코딩된 컬럼 (work_req_no, created_at) -->
+                    <td>
+                        {% set identifier_value = record[id_column] %}
+                        <a href="javascript:void(0)" class="company-link" onclick="openBoardModal('{{ identifier_value }}')">{{ identifier_value or '-' }}</a>
+                    </td>
+                    <td style="width: 120px;">
+                        {{ (record.created_at|date_only) if record.created_at else '-' }}
+                    </td>
+                    
+                    {% for col in display_columns %}
+                        <td {% if col['column_type'] == 'list' %}data-col="list"{% endif %}>
+                            {% if col['column_type'] == 'dropdown' %}
+                                {% set field_label = col['column_key'] + '_label' %}
+                                {% set col_key = col['column_key'] %}
+                                {% if record.custom_mapped and col_key in record.custom_mapped %}
+                                    {{ record.custom_mapped[col_key] or '-' }}
+                                {% elif field_label in record and record[field_label] %}
+                                    {{ record[field_label] }}
+                                {% elif col_key in record and record[col_key] %}
+                                    {{ record[col_key] }}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            {% elif col['column_type'] == 'list' %}
+                                {% set col_key = col['column_key'] %}
+                                {% if record.custom_mapped and col_key in record.custom_mapped %}
+                                    {% set list_data = record.custom_mapped[col_key] %}
+                                    {{ list_data | list_summary }}
+                                {% elif col_key in record %}
+                                    {{ record[col_key] | list_summary }}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            {% else %}
+                                {% set col_key = col['column_key'] %}
+                                {% if record.custom_mapped and col_key in record.custom_mapped %}
+                                    {{ record.custom_mapped[col_key] or '-' }}
+                                {% elif col_key in record %}
+                                    {{ record[col_key] or '-' }}
+                                {% else %}
+                                    -
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                    {% endfor %}
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="100" class="no-data">검색 결과가 없습니다.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 페이지네이션 -->
+{% if pagination.pages > 1 %}
+<div class="pagination-section">
+    <div class="pagination">
+        {% set search_params = {} %}
+        {% for key, value in request.args.items() %}
+            {% if key != 'page' %}
+                {% set _ = search_params.update({key: value}) %}
+            {% endif %}
+        {% endfor %}
+        {% set window_info = pagination.get_window_info() %}
+        
+        <!-- 이전 10페이지 -->
+        {% if window_info.has_prev_window %}
+            <a href="{{ url_for('page_view', url=board_slug, page=window_info.prev_window_start, **search_params) }}" class="page-btn">&laquo; 이전</a>
+        {% endif %}
+        
+        <!-- 현재 윈도우의 페이지들 (최대 10개) -->
+        {% for page in pagination.iter_pages() %}
+            {% if page != pagination.page %}
+                <a href="{{ url_for('page_view', url=board_slug, page=page, **search_params) }}" class="page-btn">{{ page }}</a>
+            {% else %}
+                <span class="page-btn active">{{ page }}</span>
+            {% endif %}
+        {% endfor %}
+        
+        <!-- 다음 10페이지 -->
+        {% if window_info.has_next_window %}
+            <a href="{{ url_for('page_view', url=board_slug, page=window_info.next_window_start, **search_params) }}" class="page-btn">다음 &raquo;</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<style>
+/* 검색 영역 */
+.search-section {
+    background: #f8f9fa;
+    padding: 20px;
+    margin-bottom: 20px;
+    border-radius: 4px;
+    border: 1px solid #e5e7eb;
+}
+.search-form {
+    width: 100%;
+}
+.search-fields {
+    display: flex;
+    gap: 32px;
+    flex-wrap: wrap;
+}
+.search-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 0 0 auto;
+}
+.search-group label {
+    font-weight: 600;
+    color: #333;
+    font-size: 14px;
+    white-space: nowrap;
+    width: 80px;
+    flex-shrink: 0;
+    text-align: left;
+}
+
+/* 모든 입력 요소의 공통 스타일 */
+.search-group input[type="text"],
+.search-group input[type="date"] {
+    height: 40px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 14px;
+    box-sizing: border-box;
+    width: 200px;
+    padding: 0 12px;
+}
+
+.search-group input:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+
+/* 범위 검색 그룹 */
+.range-group .range-inputs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 200px;
+    flex-shrink: 0;
+    height: 40px;
+}
+.range-inputs input[type="date"] {
+    width: 120px;
+    height: 40px;
+    padding: 0 6px;
+    flex-shrink: 0;
+}
+.range-separator {
+    font-weight: 600;
+    color: #666;
+    flex-shrink: 0;
+    font-size: 14px;
+}
+
+/* 검색 버튼 영역 */
+.search-buttons-section {
+    margin-bottom: 20px;
+}
+.search-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+.btn-reset, .btn-search {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.btn-reset {
+    background: #6b7280;
+    color: white;
+}
+.btn-reset:hover {
+    background: #4b5563;
+}
+.btn-search {
+    background: #2f5fd3;
+    color: white;
+}
+.btn-search:hover {
+    background: #1d4ed8;
+}
+
+/* 테이블 영역 */
+.table-section {
+    background: white;
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.table-header {
+    padding: 12px 16px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* 왼쪽 컨트롤 영역 */
+.left-controls {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+/* 액션 버튼 그룹 */
+.action-buttons {
+    display: flex;
+    align-items: center;
+    gap: 0;
+}
+
+.action-buttons .btn {
+    padding: 6px 12px;
+    font-size: 13px;
+    border: 1px solid #ddd;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.2s;
+    background: white;
+    color: #333;
+}
+
+/* 엑셀 업로드 버튼 (첫번째) */
+.btn-excel-upload {
+    border-radius: 4px 0 0 4px;
+    border-right: none;
+}
+
+.btn-excel-upload:hover {
+    background-color: #f0f0f0;
+}
+
+/* 엑셀 다운로드 버튼 (두번째) */
+.btn-excel-download {
+    border-radius: 0 4px 4px 0;
+    margin-right: 10px;
+}
+
+.btn-excel-download:hover {
+    background-color: #f0f0f0;
+}
+
+/* 등록 버튼 (마지막) */
+.btn-register {
+    background-color: #198754 !important;
+    color: white !important;
+    border-color: #198754 !important;
+    border-radius: 4px;
+}
+
+.btn-register:hover {
+    background-color: #157347 !important;
+}
+.total-count {
+    font-weight: 600;
+    color: #374151;
+}
+.per-page-selector {
+    display: inline-flex;
+    align-items: center;
+}
+.per-page-selector select {
+    padding: 4px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 13px;
+    background: white;
+    margin-left: 5px;
+}
+
+/* 가로 스크롤 래퍼 */
+.table-wrapper {
+    overflow-x: auto;
+    position: relative;
+}
+.table-wrapper::-webkit-scrollbar {
+    height: 8px;
+}
+.table-wrapper::-webkit-scrollbar-track {
+    background: #f1f5f9;
+}
+.table-wrapper::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+.table-wrapper::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+.data-table {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: collapse;
+}
+.data-table th {
+    background: #f1f5f9;
+    padding: 12px 16px;
+    text-align: left;
+    font-weight: 600;
+    color: #374151;
+    border-bottom: 2px solid #e5e7eb;
+    white-space: nowrap;
+    min-width: 120px;
+}
+.data-table th.fixed-col {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: #f1f5f9;
+    box-shadow: 2px 0 4px rgba(0,0,0,0.05);
+    min-width: 60px;
+    width: 60px;
+}
+.data-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #f1f5f9;
+    color: #4b5563;
+    white-space: nowrap;
+    min-width: 120px;
+}
+.data-table td.fixed-col {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: white;
+    box-shadow: 2px 0 4px rgba(0,0,0,0.05);
+    min-width: 60px;
+    width: 60px;
+}
+.data-table tbody tr:hover {
+    background: #f9fafb;
+}
+.data-table tbody tr:hover td.fixed-col {
+    background: #f9fafb;
+}
+.company-link {
+    color: #2f5fd3;
+    text-decoration: none;
+    font-weight: 600;
+}
+.company-link:hover {
+    text-decoration: underline;
+}
+.no-data {
+    text-align: center;
+    padding: 40px;
+    color: #9ca3af;
+    font-style: italic;
+}
+
+/* 페이지네이션 */
+.pagination-section {
+    margin-top: 20px;
+    display: flex;
+    justify-content: center;
+}
+.pagination {
+    display: flex;
+    gap: 4px;
+}
+.page-btn {
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    background: white;
+    color: #374151;
+    text-decoration: none;
+    border-radius: 4px;
+    font-size: 14px;
+}
+.page-btn:hover:not(.active):not(.dots) {
+    background: #f3f4f6;
+}
+.page-btn.active {
+    background: #2f5fd3;
+    color: white;
+    border-color: #2f5fd3;
+}
+.page-btn.dots {
+    border: none;
+    background: none;
+    cursor: default;
+}
+
+/* 반응형 */
+@media (max-width: 768px) {
+    .search-fields {
+        flex-direction: column;
+        gap: 16px;
+    }
+    .search-group {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+    .search-group label {
+        min-width: unset;
+    }
+    .search-group input {
+        width: 100%;
+    }
+    .search-buttons {
+        justify-content: stretch;
+    }
+    .btn-reset, .btn-search {
+        flex: 1;
+    }
+    .data-table {
+        font-size: 13px;
+    }
+    .data-table th,
+    .data-table td {
+        padding: 8px 12px;
+    }
+}
+
+/* 체크박스 컬럼 전용 스타일 */
+.checkbox-column {
+    width: 30px !important;
+    min-width: 30px !important;
+    max-width: 30px !important;
+    padding: 4px !important;
+    text-align: center !important;
+}
+
+/* 긴 컬럼 CSS 제한 추가 (data-col 속성) */
+td[data-col="list"] {
+    max-width: 120px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 리스트 타입 컬럼 폭/높이 제한 */
+.data-table td[data-col="list"] {
+    max-width: 120px;
+    max-height: 50px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+</style>
+
+<script>
+const boardPageConfig = {
+    slug: "{{ board_slug }}",
+    boardType: "{{ board_type_value }}",
+    identifierColumn: "{{ id_column }}",
+    identifierLabel: "{{ id_label }}",
+    displayName: "{{ display_name }}",
+    finalCheckLabel: "{{ final_check_label }}",
+};
+
+function resetForm() {
+    const form = document.querySelector('.search-form');
+    const inputs = form.querySelectorAll('input');
+    inputs.forEach(input => input.value = '');
+
+    const url = new URL(window.location);
+    url.search = '';
+    window.location.href = url.toString();
+}
+
+function changePerPage(perPage) {
+    const url = new URL(window.location);
+    url.searchParams.set('per_page', perPage);
+    url.searchParams.delete('page');
+    window.location.href = url.toString();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const deleteBtn = document.querySelector('.btn-delete');
+    if (deleteBtn) {
+        deleteBtn.dataset.defaultLabel = deleteBtn.dataset.defaultLabel || deleteBtn.textContent;
+        deleteBtn.style.display = 'none';
+    }
+
+    const finalBtn = document.querySelector('.btn-final-check');
+    if (finalBtn) {
+        finalBtn.dataset.defaultLabel = finalBtn.dataset.defaultLabel || boardPageConfig.finalCheckLabel;
+        finalBtn.style.display = 'inline-block';
+        finalBtn.textContent = boardPageConfig.finalCheckLabel;
+    }
+
+    document.querySelectorAll('tr').forEach(function(row) {
+        const customDataScript = row.querySelector('script');
+        if (customDataScript && typeof temp_custom !== 'undefined') {
+            const customData = temp_custom;
+            temp_custom = undefined;
+
+            row.querySelectorAll('.dynamic-col').forEach(function(cell) {
+                const columnKey = cell.dataset.columnKey;
+                const columnType = cell.dataset.columnType;
+                const value = customData[columnKey];
+                let displayText = '-';
+
+                if (value) {
+                    if (columnType === 'popup_person' && typeof value === 'object') {
+                        displayText = value.name + ' (' + value.department + ')';
+                    } else if (columnType === 'popup_company' && typeof value === 'object') {
+                        displayText = value.name;
+                    } else {
+                        displayText = value;
+                    }
+                }
+
+                const target = cell.querySelector('.dynamic-value');
+                if (target) {
+                    target.textContent = displayText;
+                }
+            });
+        }
+    });
+
+    updateDeleteButton();
+});
+
+function openBoardModal(identifier) {
+    const width = 1400;
+    const height = 900;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes',
+        'toolbar=no',
+        'menubar=no',
+        'location=no',
+        'status=no'
+    ].join(',');
+
+    const popupUrl = `/${boardPageConfig.slug}-detail/${encodeURIComponent(identifier)}?popup=1`;
+    const popup = window.open(popupUrl, `${boardPageConfig.slug}Detail`, popupOptions);
+
+    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        return;
+    }
+
+    popup.focus();
+}
+
+function showRegisterModal() {
+    const width = 1400;
+    const height = 900;
+    const left = (screen.width - width) / 2;
+    const top = (screen.height - height) / 2;
+
+    const popupOptions = [
+        `width=${width}`,
+        `height=${height}`,
+        `left=${left}`,
+        `top=${top}`,
+        'scrollbars=yes',
+        'resizable=yes'
+    ].join(',');
+
+    const popupUrl = `/${boardPageConfig.slug}-register?popup=1`;
+    const popup = window.open(popupUrl, `${boardPageConfig.slug}Register`, popupOptions);
+    if (!popup) {
+        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+    }
+}
+
+function exportToExcel() {
+    if (!confirm('엑셀 파일을 다운로드 하시겠습니까?')) {
+        return;
+    }
+
+    const url = new URL(window.location);
+    const params = new URLSearchParams(url.search);
+    window.location.href = `/api/${boardPageConfig.slug}/export?` + params.toString();
+}
+
+function toggleSelectAll() {
+    const selectAll = document.getElementById('selectAll');
+    const checkboxes = document.querySelectorAll('.board-checkbox');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = selectAll.checked;
+    });
+    updateDeleteButton();
+}
+
+function updateDeleteButton() {
+    const checkboxes = document.querySelectorAll('.board-checkbox:checked');
+    const selectedCount = checkboxes.length;
+
+    const deleteBtn = document.querySelector('.btn-delete');
+    if (deleteBtn) {
+        const baseLabel = deleteBtn.dataset.defaultLabel || '선택 삭제';
+        if (selectedCount > 0) {
+            deleteBtn.style.display = 'inline-block';
+            deleteBtn.textContent = `${baseLabel} (${selectedCount}건)`;
+        } else {
+            deleteBtn.style.display = 'none';
+            deleteBtn.textContent = baseLabel;
+        }
+    }
+
+    const finalBtn = document.querySelector('.btn-final-check');
+    if (finalBtn) {
+        const baseLabel = finalBtn.dataset.defaultLabel || boardPageConfig.finalCheckLabel;
+        finalBtn.style.display = 'inline-block';
+        finalBtn.textContent = selectedCount > 0
+            ? `${baseLabel} (${selectedCount}건)`
+            : baseLabel;
+    }
+}
+
+function deleteSelectedWithPassword() {
+    PwModal.show(deleteSelected, { boardType: boardPageConfig.boardType });
+}
+
+function requestBoardFinalCheck() {
+    const checkboxes = document.querySelectorAll('.board-checkbox:checked');
+    if (checkboxes.length === 0) {
+        alert('처리할 항목을 선택해주세요.');
+        return;
+    }
+
+    PwModal.show(() => markBoardFinalCheck(), { boardType: boardPageConfig.boardType });
+}
+
+function markBoardFinalCheck() {
+    const checkboxes = document.querySelectorAll('.board-checkbox:checked');
+    const ids = Array.from(checkboxes).map(cb => cb.value);
+
+    if (ids.length === 0) {
+        alert('처리할 항목을 선택해주세요.');
+        return;
+    }
+
+    if (!confirm(`선택한 ${ids.length}건의 상태를 '검토완료'로 변경하시겠습니까?`)) {
+        return;
+    }
+
+    const finalBtn = document.querySelector('.btn-final-check');
+    const baseLabel = finalBtn ? (finalBtn.dataset.defaultLabel || boardPageConfig.finalCheckLabel) : boardPageConfig.finalCheckLabel;
+
+    if (finalBtn) {
+        finalBtn.disabled = true;
+        finalBtn.textContent = '처리 중...';
+    }
+
+    fetch(`/api/${boardPageConfig.slug}/final-check`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ids: ids, status: '검토완료' })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message || '처리가 완료되었습니다.');
+            location.reload();
+        } else {
+            alert(data.message || '처리 중 오류가 발생했습니다.');
+        }
+    })
+    .catch(error => {
+        console.error(error);
+        alert('처리 중 오류가 발생했습니다.');
+    })
+    .finally(() => {
+        if (finalBtn) {
+            finalBtn.disabled = false;
+            finalBtn.textContent = baseLabel;
+            updateDeleteButton();
+        }
+    });
+}
+
+function deleteSelected() {
+    const checkboxes = document.querySelectorAll('.board-checkbox:checked');
+    const ids = Array.from(checkboxes).map(cb => cb.value);
+
+    if (ids.length === 0) {
+        alert('삭제할 항목을 선택해주세요.');
+        return;
+    }
+
+    if (!confirm(`선택한 ${ids.length}개의 ${boardPageConfig.displayName}을(를) 삭제하시겠습니까?
+(삭제된 항목은 관리자 메뉴에서 복구 가능합니다)`)) {
+        return;
+    }
+
+    fetch(`/api/${boardPageConfig.slug}/delete`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ids: ids })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert(`${data.deleted_count}건이 삭제되었습니다.`);
+            location.reload();
+        } else {
+            alert('삭제 실패: ' + data.message);
+        }
+    })
+    .catch(error => {
+        alert('삭제 중 오류가 발생했습니다.');
+        console.error(error);
+    });
+}
+
+</script>
+
+<!-- 비밀번호 모달 포함 -->
+{% include 'includes/password_modal.html' %}
+
+{% endblock %}

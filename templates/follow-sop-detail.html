@@ -31,6 +31,8 @@
 
 <div class="safety-sop-detail-container">
     <!-- 동적 섹션 렌더링 -->
+    {% set feature_toggles = feature_toggles or {} %}
+    {% set list_payloads = list_payloads or {} %}
     {% for section in sections %}
     <div class="section {% if section.section_key == 'basic_info' %}basic-info{% elif section.section_key == 'violation_info' %}violation-info{% elif section.section_key == 'additional' %}additional{% else %}{{ section.section_key|replace('_', '-') }}{% endif %}-section">
         <div class="section-header">
@@ -44,6 +46,8 @@
             <div class="info-table">
                 <!-- 점검번호와 등록일 추가 (첫 번째 섹션에만) -->
                 {% if loop.index == 1 %}
+                {% set registrar_value = sop.updated_by or sop.created_by %}
+                {% set updated_stamp = sop.updated_at or sop.created_at %}
                 <div class="info-row">
                     <div class="info-cell span-2">
                         <label>점검번호</label>
@@ -52,6 +56,14 @@
                     <div class="info-cell span-2">
                         <label>등록일</label>
                         <input type="text" value="{{ (sop.created_at|date_only) if sop.created_at else '-' }}" readonly class="readonly-highlight">
+                    </div>
+                    <div class="info-cell span-2">
+                        <label>등록자</label>
+                        <input type="text" value="{{ registrar_value | default('-', true) }}" readonly class="readonly-highlight">
+                    </div>
+                    <div class="info-cell span-2">
+                        <label>수정일</label>
+                        <input type="text" value="{{ (updated_stamp|date_only) if updated_stamp else '-' }}" readonly class="readonly-highlight">
                     </div>
                 </div>
                 {% endif %}
@@ -168,6 +180,7 @@
                                     {% else %}
                                         {% set col_value = (sop_val if sop_val not in (None, '') else (custom_data.get(col.column_key) if custom_data else '')) %}
                                     {% endif %}
+                                    
                                 {% endif %}
                                 
                                 {% if col.column_type == 'dropdown' %}
@@ -303,7 +316,8 @@
                                 {% elif col.column_type == 'list' %}
                                     <!-- 리스트 필드 -->
                                     {% from 'includes/list_field_v3.html' import render_list_field %}
-                                    {{ render_list_field(col, col_value, section, mode='edit') }}
+                                    {% set _list_payload = list_payloads[col.column_key]|default(None, true) if list_payloads else None %}
+                                    {{ render_list_field(col, col_value, section, mode='edit', payload=_list_payload, feature_toggles=feature_toggles) }}
                                 {% elif col.column_type == 'textarea' %}
                                     <!-- 텍스트영역 필드 -->
                                     <textarea class="{{ section.section_key|replace('_', '-') }}-input" 

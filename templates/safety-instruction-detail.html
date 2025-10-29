@@ -34,6 +34,8 @@
 <div class="safety-instruction-detail-container">
     {# 리스트 타입 필드가 섹션별 중복 등록되어도 한 번만 렌더링하도록 추적 #}
     {% set rendered_list_keys = [] %}
+    {% set feature_toggles = feature_toggles or {} %}
+    {% set list_payloads = list_payloads or {} %}
     <!-- 동적 섹션 렌더링 -->
     {% for section in sections %}
     <div class="section {% if section.section_key == 'basic_info' %}basic-info{% elif section.section_key == 'violation_info' %}violation-info{% elif section.section_key == 'additional' %}additional{% else %}{{ section.section_key|replace('_', '-') }}{% endif %}-section">
@@ -49,6 +51,8 @@
                 
                 <!-- safety_instruction_id와 created_at 추가 (첫 번째 섹션에만) -->
                 {% if loop.index == 1 %}
+                {% set registrar_value = instruction.updated_by or instruction.created_by %}
+                {% set updated_stamp = instruction.updated_at or instruction.created_at %}
                 <div class="info-row">
                     <div class="info-cell span-2">
                         <label>발부번호</label>
@@ -57,6 +61,14 @@
                     <div class="info-cell span-2">
                         <label>등록일</label>
                         <input type="text" value="{{ (instruction.created_at|date_only) if instruction.created_at else '-' }}" readonly class="readonly-highlight">
+                    </div>
+                    <div class="info-cell span-2">
+                        <label>등록자</label>
+                        <input type="text" value="{{ registrar_value | default('-', true) }}" readonly class="readonly-highlight">
+                    </div>
+                    <div class="info-cell span-2">
+                        <label>수정일</label>
+                        <input type="text" value="{{ (updated_stamp|date_only) if updated_stamp else '-' }}" readonly class="readonly-highlight">
                     </div>
                 </div>
                 {% endif %}
@@ -283,7 +295,8 @@
                                     <!-- 리스트 필드는 라벨을 외부에서 출력하지 않고 컴포넌트 내부 제목만 사용 -->
                                     {% set col_value = custom_data.get(col.column_key, '[]') if custom_data else '[]' %}
                                     {% from 'includes/list_field_v3.html' import render_list_field %}
-                                    {{ render_list_field(col, col_value, section, mode='edit') }}
+                                    {% set _list_payload = list_payloads[col.column_key]|default(None, true) if list_payloads else None %}
+                                    {{ render_list_field(col, col_value, section, mode='edit', payload=_list_payload, feature_toggles=feature_toggles) }}
                                     {% endif %}
                                     
                                 {% elif col.column_type == 'textarea' %}

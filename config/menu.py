@@ -22,6 +22,13 @@ MENU_CONFIG = [
         ],
     },
     {
+        "title": "적격성평가",
+        "submenu": [
+            {"title": "산안법 도급승인", "url": "subcontract-approval"},
+            {"title": "화관법 도급신고", "url": "subcontract-report"},
+        ],
+    },
+    {
         "title": "안전문화",
         "submenu": [
             {"title": "FullProcess", "url": "full-process"},

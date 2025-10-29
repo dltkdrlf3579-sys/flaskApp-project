@@ -1,571 +1,798 @@
-{# 리스트 필드 - V3 (CSS 그리드 호환) #}
+{# 리스트 필드 - V3 (카드형 렌더러) #}
 
-{% macro render_list_field(col, col_value, section, mode='view') %}
+{% macro render_list_field(col, col_value, section, mode='view', payload=None, feature_toggles=None) %}
 {% if col.column_type == 'list' %}
-    {# 리스트 유형 결정: 기본은 협력사 근로자, input_type이 'list_company'이면 업체 리스트 #}
+    {% set _feature_toggles = feature_toggles or {} %}
+    {% set _payload = payload if payload else None %}
     {% set _list_input_type = (col.input_type or col.list_item_type or '') %}
-    {% if _list_input_type == 'list_company' or _list_input_type == 'company' %}
+    {% if _list_input_type in ['list_company', 'company'] %}
         {% set list_type = 'company' %}
+    {% elif _list_input_type in ['list_custom', 'custom'] %}
+        {% set list_type = 'custom' %}
     {% else %}
         {% set list_type = 'partner_worker' %}
     {% endif %}
-    {% if col_value %}
-        {% if col_value is string %}
-            {% set list_data = [] %}
-            <!-- 문자열을 JavaScript에서 파싱 -->
-        {% else %}
-            {% set list_data = col_value %}
-        {% endif %}
-    {% else %}
-        {% set list_data = [] %}
+
+    {% set schema_data = _payload.schema if _payload and _payload.schema else col.child_schema %}
+    {% set child_fields = schema_data.childFields if schema_data and schema_data.childFields else [] %}
+
+    {% set normalized_rows = [] %}
+    {% if _payload and _payload.rows %}
+        {% set normalized_rows = _payload.rows %}
+    {% elif col.list_rows is defined and col.list_rows %}
+        {% set normalized_rows = col.list_rows %}
+    {% elif col_value and (col_value is sequence) %}
+        {% set normalized_rows = col_value %}
     {% endif %}
-    
-    <!-- 리스트 필드 전체 컨테이너 -->
-    <div class="list-field-container-{{ col.column_key }}">
-        <!-- DEBUG: 필드 정보 확인 및 데이터 설정 -->
-        <script>
-            // 초기 데이터를 JavaScript 변수로 설정
-            var {{ col.column_key }}_initialData = {{ col_value | tojson | safe if col_value else '[]' }};
-            
-            console.log('🏗️ 리스트 필드 생성:', {
-                column_key: '{{ col.column_key }}',
-                section_key: '{{ section.section_key }}',
-                col_value_type: '{{ col_value.__class__.__name__ if col_value else "None" }}',
-                col_value_length: {{ col_value|length if col_value else 0 }},
-                col_value: {{ col.column_key }}_initialData
-            });
-            
-            // DOM 로드 후 hidden input에 값 설정
-            document.addEventListener('DOMContentLoaded', function() {
-                var hiddenInput = document.getElementById('{{ col.column_key }}');
-                if (hiddenInput && {{ col.column_key }}_initialData) {
-                    hiddenInput.value = JSON.stringify({{ col.column_key }}_initialData);
-                    console.log('🔧 {{ col.column_key }} hidden input 초기값 설정 완료:', hiddenInput.value.length, '문자');
-                }
-            });
-        </script>
-        
-        <!-- Hidden input for data storage -->
-        <input type="hidden" 
-               id="{{ col.column_key }}" 
+    {% if normalized_rows is string %}
+        {% set normalized_rows = normalized_rows|from_json %}
+    {% endif %}
+    {% if normalized_rows is none %}
+        {% set normalized_rows = [] %}
+    {% endif %}
+
+    {% set raw_json = None %}
+    {% if _payload and _payload.raw %}
+        {% set raw_json = _payload.raw %}
+    {% elif col_value is string %}
+        {% set raw_json = col_value %}
+    {% elif col_value %}
+        {% set raw_json = col_value|tojson %}
+    {% elif col.list_raw is defined and col.list_raw %}
+        {% set raw_json = col.list_raw|tojson %}
+    {% else %}
+        {% set raw_json = '[]' %}
+    {% endif %}
+    {% if raw_json is not string %}
+        {% set raw_json = raw_json|tojson %}
+    {% endif %}
+    {% if raw_json is none %}
+        {% set raw_json = '[]' %}
+    {% endif %}
+
+    {% set warnings = _payload.warnings if _payload and _payload.warnings else [] %}
+    {% set errors = _payload.errors if _payload and _payload.errors else [] %}
+
+    <div class="lfc-container" data-list-key="{{ col.column_key }}">
+        <input type="hidden"
+               id="{{ col.column_key }}"
                name="{{ col.column_key }}"
-               class="{{ section.section_key }}-input" 
+               class="{{ section.section_key }}-input"
                data-field="{{ col.column_key }}"
                data-field-type="list"
-               data-section="{{ section.section_key }}">
-        
-        <!-- 제목과 추가 버튼 -->
-        <div class="list-field-header-{{ col.column_key }}">
-            <h6 class="list-field-title-{{ col.column_key }}">{{ col.column_name }}</h6>
-            {% if mode == 'edit' or mode == 'register' %}
-            <button type="button" 
-                    class="list-field-add-btn-{{ col.column_key }}"
-                    onclick="addWorker_{{ col.column_key }}()">
-                {% if list_type == 'company' %}+ 업체 추가{% else %}+ 협력사 근로자 추가{% endif %}
-            </button>
+               data-section="{{ section.section_key }}"
+               value="{{ raw_json|e }}">
+
+        {% if child_fields %}
+        <div class="lfc-card-shell" id="{{ col.column_key }}_wrapper">
+            <div class="lfc-header">
+                <div class="lfc-header-left">
+                    <h6 class="lfc-title">{{ col.column_name }}</h6>
+                    <span class="lfc-count-label">총 <span id="{{ col.column_key }}_count">0</span>개 항목</span>
+                </div>
+                {% if mode in ['edit', 'register'] %}
+                <button type="button" class="btn btn-sm btn-primary lfc-add-btn" id="{{ col.column_key }}_addRowBtn">
+                    <i class="bi bi-plus-circle"></i> 추가
+                </button>
+                {% endif %}
+            </div>
+            <div class="lfc-body" id="{{ col.column_key }}_schemaCards"></div>
+            {% if warnings %}
+            <div class="lfc-alert lfc-alert-warning">
+                <strong>경고</strong>
+                <ul>
+                    {% for warn in warnings %}
+                    <li>{{ warn }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+            {% if errors %}
+            <div class="lfc-alert lfc-alert-error">
+                <strong>오류</strong>
+                <ul>
+                    {% for err in errors %}
+                    <li>{{ err }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
             {% endif %}
         </div>
-        
-        <!-- 데이터 테이블 -->
-        <div class="list-field-table-wrapper-{{ col.column_key }}">
-            <table class="list-field-table-{{ col.column_key }}">
-                <thead>
-                    <tr>
-                        <th>No.</th>
-                        {% if list_type == 'company' %}
-                            <th>업체</th>
-                            <th>사업자번호</th>
-                            {% if mode == 'edit' or mode == 'register' %}
-                            <th>관리</th>
-                            {% endif %}
-                        {% else %}
+        {% else %}
+        <div class="lfc-legacy-table">
+            <div class="lfc-header">
+                <div class="lfc-header-left">
+                    <h6 class="lfc-title">{{ col.column_name }}</h6>
+                </div>
+            </div>
+            <div class="lfc-table-wrapper">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th style="width: 60px;">No.</th>
                             <th>성함</th>
                             <th>ID</th>
                             <th>소속업체</th>
                             <th>사업자번호</th>
-                            {% if mode == 'edit' or mode == 'register' %}
-                            <th>관리</th>
-                            {% endif %}
-                        {% endif %}
-                    </tr>
-                </thead>
-                <tbody id="{{ col.column_key }}_tbody">
-                    {% if list_data and list_data|length > 0 %}
-                        {% for item in list_data %}
-                        <tr>
-                            <td>{{ loop.index }}</td>
-                            {% if list_type == 'company' %}
-                                <td>{{ item.name or '-' }}</td>
-                                <td>{{ item.bizno or '-' }}</td>
-                            {% else %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% set _list_data = normalized_rows if normalized_rows else [] %}
+                        {% if _list_data %}
+                            {% for item in _list_data %}
+                            <tr>
+                                <td>{{ loop.index }}</td>
                                 <td>{{ item.name or '-' }}</td>
                                 <td>{{ item.id or '-' }}</td>
                                 <td>{{ item.company or '-' }}</td>
                                 <td>{{ item.bizno or '-' }}</td>
-                            {% endif %}
-                            {% if mode == 'edit' or mode == 'register' %}
-                            <td>
-                                <button type="button" 
-                                        class="list-field-remove-btn-{{ col.column_key }}"
-                                        onclick="removeItem_{{ col.column_key }}({{ loop.index0 }})">
-                                    삭제
-                                </button>
-                            </td>
-                            {% endif %}
-                        </tr>
-                        {% endfor %}
-                    {% else %}
-                        <tr id="{{ col.column_key }}_empty_row">
-                            <td colspan="{% if list_type == 'company' %}{% if mode == 'edit' or mode == 'register' %}4{% else %}3{% endif %}{% else %}{% if mode == 'edit' or mode == 'register' %}6{% else %}5{% endif %}{% endif %}">
-                                {% if list_type == 'company' %}등록된 업체가 없습니다.{% else %}등록된 협력사 근로자가 없습니다.{% endif %}
-                            </td>
-                        </tr>
-                    {% endif %}
-                </tbody>
-            </table>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center text-muted">등록된 항목이 없습니다.</td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
         </div>
-        
-        <!-- 총 인원수 -->
-        <div class="list-field-count-{{ col.column_key }}">
-            총 <span id="{{ col.column_key }}_count">{{ list_data|length if list_data else 0 }}</span>{% if list_type == 'company' %}개{% else %}명{% endif %}
-        </div>
+        {% endif %}
     </div>
-    
-    <style>
-    /* 리스트 필드 컨테이너 - 그리드 호환 */
-    .list-field-container-{{ col.column_key }} {
-        grid-column: 1 / -1; /* 전체 그리드 열 사용 */
-        margin: 20px 0;
-        background: #fff;
-        border: 1px solid #dee2e6;
-        border-radius: 8px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        overflow: hidden;
-    }
-    
-    /* 헤더 */
-    .list-field-header-{{ col.column_key }} {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 15px 20px;
-        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-        border-bottom: 1px solid #dee2e6;
-    }
-    
-    .list-field-title-{{ col.column_key }} {
-        margin: 0;
-        font-size: 16px;
-        font-weight: 600;
-        color: #495057;
-    }
-    
-    .list-field-add-btn-{{ col.column_key }} {
-        background: #007bff;
-        color: white;
-        border: none;
-        padding: 8px 16px;
-        border-radius: 4px;
-        font-size: 14px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        box-shadow: 0 2px 4px rgba(0,123,255,0.2);
-    }
-    
-    .list-field-add-btn-{{ col.column_key }}:hover {
-        background: #0056b3;
-        transform: translateY(-1px);
-        box-shadow: 0 4px 8px rgba(0,123,255,0.3);
-    }
-    
-    /* 테이블 래퍼 */
-    .list-field-table-wrapper-{{ col.column_key }} {
-        overflow-x: auto;
-        max-width: 100%;
-    }
-    
-    /* 테이블 스타일 */
-    .list-field-table-{{ col.column_key }} {
-        width: 100%;
-        border-collapse: collapse;
-        table-layout: fixed; /* 고정 레이아웃으로 컬럼 너비 강제 고정 */
-        min-width: 800px; /* 최소 너비 */
-    }
-    
-    .list-field-table-{{ col.column_key }} th {
-        background: #f1f3f4;
-        padding: 12px 10px;
-        text-align: left;
-        font-size: 14px;
-        font-weight: 600;
-        color: #495057;
-        border-bottom: 2px solid #dee2e6;
-        white-space: nowrap;
-    }
-    
-    .list-field-table-{{ col.column_key }} th:nth-child(1) { width: 8%; text-align: center; min-width: 50px; } /* No. */
-    .list-field-table-{{ col.column_key }} th:nth-child(2) { width: 100px !important; min-width: 100px !important; } /* 성함 */
-    .list-field-table-{{ col.column_key }} th:nth-child(3) { width: 17%; min-width: 100px; } /* ID */
-    .list-field-table-{{ col.column_key }} th:nth-child(4) { width: 40%; min-width: 200px; } /* 소속업체 */
-    .list-field-table-{{ col.column_key }} th:nth-child(5) { width: 140px !important; min-width: 140px !important; } /* 사업자번호 */
-    .list-field-table-{{ col.column_key }} th:nth-child(6) { width: 5%; text-align: center; min-width: 60px; } /* 관리 */
-    
-    .list-field-table-{{ col.column_key }} td {
-        padding: 12px 8px;
-        font-size: 14px;
-        color: #495057;
-        border-bottom: 1px solid #e9ecef;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    
-    .list-field-table-{{ col.column_key }} td:nth-child(1) {
-        width: 8%; text-align: center; min-width: 50px;
-        font-weight: 600;
-    }
-    
-    .list-field-table-{{ col.column_key }} td:nth-child(2) {
-        width: 100px !important; min-width: 100px !important; max-width: 100px;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    
-    .list-field-table-{{ col.column_key }} td:nth-child(3) {
-        width: 17%; min-width: 100px; max-width: 120px;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    
-    .list-field-table-{{ col.column_key }} td:nth-child(4) {
-        width: 40%; min-width: 200px; max-width: 300px;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    
-    .list-field-table-{{ col.column_key }} td:nth-child(5) {
-        width: 140px !important; min-width: 140px !important; max-width: 140px;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    
-    .list-field-table-{{ col.column_key }} td:nth-child(6) {
-        width: 5%; text-align: center; min-width: 60px;
-    }
-    
-    .list-field-table-{{ col.column_key }} tbody tr:hover {
-        background: #f8f9fa;
-    }
-    
-    .list-field-table-{{ col.column_key }} tbody tr:nth-child(even) {
-        background: #fdfdfd;
-    }
-    
-    .list-field-table-{{ col.column_key }} tbody tr:nth-child(even):hover {
-        background: #f8f9fa;
-    }
-    
-    /* 삭제 버튼 */
-    .list-field-remove-btn-{{ col.column_key }} {
-        background: #dc3545;
-        color: white;
-        border: none;
-        padding: 4px 8px;
-        border-radius: 3px;
-        font-size: 12px;
-        cursor: pointer;
-        transition: all 0.2s ease;
-    }
-    
-    .list-field-remove-btn-{{ col.column_key }}:hover {
-        background: #c82333;
-        transform: scale(1.05);
-    }
-    
-    /* 빈 상태 */
-    .list-field-table-{{ col.column_key }} #{{ col.column_key }}_empty_row td {
-        text-align: center;
-        padding: 40px;
-        color: #6c757d;
-        font-style: italic;
-        background: #f8f9fa;
-    }
-    
-    /* 카운트 */
-    .list-field-count-{{ col.column_key }} {
-        padding: 10px 20px;
-        font-size: 14px;
-        color: #6c757d;
-        background: #f8f9fa;
-        border-top: 1px solid #e9ecef;
-        text-align: right;
-    }
-    
-    .list-field-count-{{ col.column_key }} span {
-        font-weight: 600;
-        color: #007bff;
-    }
-    </style>
-    
+
     <script>
     (function() {
-        // 로컬 스코프로 격리
-        var {{ col.column_key }}_data = [];
+        var columnKey = {{ col.column_key|tojson }};
+        var mode = {{ mode|tojson }};
+        var listType = {{ list_type|tojson }};
+        var featureToggles = {{ _feature_toggles|tojson|safe }} || {};
+        var childFields = {{ child_fields|tojson|safe }} || [];
+        var initialRows = {{ normalized_rows|tojson|safe }} || [];
 
-        // 렌더링 함수를 먼저 정의
-        function renderTable_{{ col.column_key }}() {
-            var tbody = document.getElementById('{{ col.column_key }}_tbody');
-            var html = '';
-            
-            if ({{ col.column_key }}_data.length === 0) {
-                html = '<tr id="{{ col.column_key }}_empty_row">' +
-                       '<td colspan="{% if list_type == "company" %}{% if mode == "edit" or mode == "register" %}4{% else %}3{% endif %}{% else %}{% if mode == "edit" or mode == "register" %}6{% else %}5{% endif %}{% endif %}">'
-                       + ({% if list_type == 'company' %}'등록된 업체가 없습니다.'{% else %}'등록된 협력사 근로자가 없습니다.'{% endif %})
-                       + '</td></tr>';
-            } else {
-                {{ col.column_key }}_data.forEach(function(item, index) {
-                    html += '<tr>' +
-                           '<td>' + (index + 1) + '</td>' +
-                           {% if list_type == 'company' %}
-                           '<td>' + (item.name || '-') + '</td>' +
-                           '<td>' + (item.bizno || '-') + '</td>' +
-                           {% else %}
-                           '<td>' + (item.name || '-') + '</td>' +
-                           '<td>' + (item.id || '-') + '</td>' +
-                           '<td>' + (item.company || '-') + '</td>' +
-                           '<td>' + (item.bizno || '-') + '</td>' +
-                           {% endif %}
-                           {% if mode == 'edit' or mode == 'register' %}
-                           '<td>' +
-                           '<button type="button" class="list-field-remove-btn-{{ col.column_key }}" ' +
-                           'onclick="removeItem_{{ col.column_key }}(' + index + ')">삭제</button>' +
-                           '</td>' +
-                           {% endif %}
-                           '</tr>';
-                });
-            }
-            
-            tbody.innerHTML = html;
-            
-            // Update count
-            document.getElementById('{{ col.column_key }}_count').textContent = {{ col.column_key }}_data.length;
-            
-            // Update hidden input - 중요! 전체 데이터를 확실히 저장
-            var jsonData = JSON.stringify({{ col.column_key }}_data);
-            var hiddenInput = document.getElementById('{{ col.column_key }}');
-            if (hiddenInput) {
-                hiddenInput.value = jsonData;
-                console.log('{{ col.column_key }} hidden input 업데이트 완료');
-                console.log('  - 데이터 개수:', {{ col.column_key }}_data.length);
-                console.log('  - JSON 길이:', jsonData.length);
-                console.log('  - hidden input value 확인:', hiddenInput.value.length, '문자');
-                
-                // 데이터 무결성 검증
-                try {
-                    var verifyData = JSON.parse(hiddenInput.value);
-                    if (verifyData.length !== {{ col.column_key }}_data.length) {
-                        console.error('{{ col.column_key }} 데이터 무결성 오류! 메모리:', {{ col.column_key }}_data.length, ', hidden:', verifyData.length);
-                    } else {
-                        console.log('{{ col.column_key }} 데이터 무결성 검증 통과');
-                    }
-                } catch(e) {
-                    console.error('{{ col.column_key }} 데이터 무결성 검증 실패:', e);
-                }
-            } else {
-                console.error('{{ col.column_key }} hidden input을 찾을 수 없습니다!');
-            }
+        var hiddenInput = document.getElementById(columnKey);
+        var cardsContainer = document.getElementById(columnKey + '_schemaCards');
+        var addBtn = document.getElementById(columnKey + '_addRowBtn');
+        var countDisplay = document.getElementById(columnKey + '_count');
+        var legacyPopupHandlers = {
+            popup_person: { handler: 'openPersonSearch', endpoint: 'person', window: 'personSearch' },
+            popup_company: { handler: 'openCompanySearch', endpoint: 'company', window: 'companySearch' },
+            popup_department: { handler: 'openDepartmentSearch', endpoint: 'department', window: 'departmentSearch' },
+            popup_building: { handler: 'openBuildingSearch', endpoint: 'building', window: 'buildingSearch' },
+            popup_contractor: { handler: 'openContractorSearch', endpoint: 'contractor', window: 'contractorSearch' },
+            popup_partner_worker: { handler: 'openContractorSearch', endpoint: 'contractor', window: 'contractorSearch' },
+            popup_worker: { handler: 'openContractorSearch', endpoint: 'contractor', window: 'contractorSearch' },
+            popup_vendor: { handler: 'openContractorSearch', endpoint: 'contractor', window: 'contractorSearch' },
+            popup_division: { handler: 'openDivisionSearch', endpoint: 'division', window: 'divisionSearch' }
+        };
+        var lookupToPopupType = {
+            person: 'popup_person',
+            employee: 'popup_person',
+            contractor: 'popup_contractor',
+            contractor_worker: 'popup_partner_worker',
+            partner_worker: 'popup_partner_worker',
+            worker: 'popup_worker',
+            vendor: 'popup_vendor',
+            company: 'popup_company',
+            organization: 'popup_company',
+            department: 'popup_department',
+            division: 'popup_division',
+            building: 'popup_building',
+            facility: 'popup_building'
+        };
+
+        if (!hiddenInput || !cardsContainer) {
+            return;
         }
-        
-        // 초기 데이터 로드 - JavaScript 변수 사용
-        function loadInitialData_{{ col.column_key }}() {
-            console.log('🔄 {{ col.column_key }} 초기 데이터 로드 시작');
+
+        injectCardStyles();
+
+        function injectCardStyles() {
+            if (document.getElementById('list-field-card-styles')) {
+                return;
+            }
+            var style = document.createElement('style');
+            style.id = 'list-field-card-styles';
+            style.textContent = `
+.lfc-container { margin: 16px 0; }
+.lfc-card-shell { border: 1px solid #dee2e6; border-radius: 12px; background: #ffffff; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08); overflow: hidden; }
+.lfc-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #dee2e6; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); }
+.lfc-header-left { display: flex; align-items: center; gap: 12px; }
+.lfc-title { margin: 0; font-size: 16px; font-weight: 600; color: #374151; }
+.lfc-count-label { font-size: 13px; color: #6b7280; }
+.lfc-add-btn i { margin-right: 4px; }
+.lfc-body { padding: 16px; display: grid; gap: 16px; }
+.lfc-card { border: 1px solid #e5e7eb; border-radius: 12px; background: #ffffff; box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06); }
+.lfc-card-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; background: #f8fafc; }
+.lfc-card-index { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 999px; background: #e0e7ff; color: #3730a3; font-weight: 600; font-size: 13px; }
+.lfc-card-body { padding: 16px; display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 14px 18px; }
+.lfc-field { display: flex; flex-direction: column; gap: 6px; }
+.lfc-field label { font-size: 13px; font-weight: 600; color: #475569; }
+.lfc-field input[type="text"],
+.lfc-field input[type="number"],
+.lfc-field input[type="date"],
+.lfc-field input[type="time"],
+.lfc-field input[type="email"],
+.lfc-field textarea,
+.lfc-field select { font-size: 13px; }
+.lfc-field textarea { resize: vertical; }
+.lfc-input-group { display: flex; gap: 6px; }
+.lfc-input-group .btn { white-space: nowrap; }
+.lfc-footer { padding: 10px 18px; text-align: right; font-size: 13px; color: #6c757d; border-top: 1px solid #e9ecef; background: #f8f9fa; }
+.lfc-empty { padding: 32px; text-align: center; color: #6b7280; border: 1px dashed #d1d5db; border-radius: 8px; background: #f9fafb; }
+.lfc-alert { margin: 12px 18px 18px; padding: 12px 16px; border-radius: 8px; font-size: 13px; }
+.lfc-alert-warning { background: #fff7ed; border: 1px solid #fcd34d; color: #92400e; }
+.lfc-alert-error { background: #fef2f2; border: 1px solid #fca5a5; color: #991b1b; }
+.lfc-legacy-table { border: 1px solid #dee2e6; border-radius: 8px; background: #fff; }
+.lfc-table-wrapper { padding: 0 18px 18px; }
+@media (max-width: 992px) {
+  .lfc-card-body { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 768px) {
+  .lfc-card-body { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 576px) {
+  .lfc-card-body { grid-template-columns: 1fr; }
+}
+`;
+            document.head.appendChild(style);
+        }
+
+        function inferLegacyPopupType(popupType) {
+            if (!popupType) {
+                return null;
+            }
+            if (legacyPopupHandlers[popupType]) {
+                return popupType;
+            }
+            if (popupType.indexOf('popup_') === 0) {
+                var baseKey = 'popup_' + popupType.slice(6).split('_')[0];
+                if (legacyPopupHandlers[baseKey]) {
+                    return baseKey;
+                }
+            }
+            return null;
+        }
+
+        function normalizeLookupKey(value) {
+            if (!value) {
+                return '';
+            }
+            var key = String(value).trim().toLowerCase();
+            key = key.replace(/[-\s]+/g, '_');
+            return key;
+        }
+
+        function resolvePopupType(popupType, lookupTypeRaw) {
+            var lookupType = normalizeLookupKey(lookupTypeRaw);
+            if (popupType && popupType !== 'popup') {
+                return popupType;
+            }
+            if (lookupType && lookupToPopupType[lookupType]) {
+                return lookupToPopupType[lookupType];
+            }
+            if (popupType && popupType.indexOf('popup_') === 0 && popupType.length > 6) {
+                return popupType;
+            }
+            return 'popup_person';
+        }
+
+        function openPopupWindow(fieldId, popupType, lookupType) {
+            popupType = resolvePopupType(popupType, lookupType);
+            if (!popupType) {
+                return false;
+            }
+
+            var legacyKey = inferLegacyPopupType(popupType);
+            var legacyConfig = legacyKey ? legacyPopupHandlers[legacyKey] : null;
+
+            // 1) 기존 전역 함수가 있으면 그대로 사용
+            if (legacyConfig && legacyConfig.handler && typeof window[legacyConfig.handler] === 'function') {
+                try {
+                    window[legacyConfig.handler](fieldId);
+                    return true;
+                } catch (err) {
+                    console.warn('[list-field] legacy popup handler failed, fallback to direct open', legacyConfig.handler, err);
+                }
+            }
+
+            // 2) 통합 팝업 매니저가 있으면 사용
+            if (window.popupManager && typeof window.popupManager.openPopup === 'function') {
+                window.popupManager.openPopup(fieldId, popupType);
+                return true;
+            }
+
+            if (popupType === 'popup_table' && window.popupManager && typeof window.popupManager.openTablePopup === 'function') {
+                window.popupManager.openTablePopup(fieldId);
+                return true;
+            }
+
+            if (typeof window.openUniversalPopup === 'function') {
+                window.openUniversalPopup(fieldId, popupType);
+                return true;
+            }
+
+            // 3) 마지막 수단: 직접 window.open 수행
+            var endpoint = '';
+            var normalizedLookup = normalizeLookupKey(lookupType);
+            if (legacyConfig && legacyConfig.endpoint) {
+                endpoint = legacyConfig.endpoint;
+            } else if (normalizedLookup) {
+                endpoint = normalizedLookup;
+            } else {
+                endpoint = popupType.replace(/^popup_/, '');
+            }
+            if (!endpoint) {
+                return false;
+            }
+
+            var width = 1000;
+            var height = 600;
+            var left = (window.screen.width - width) / 2;
+            var top = (window.screen.height - height) / 2;
+            var windowName = (legacyConfig && legacyConfig.window) ? legacyConfig.window : endpoint + 'Search';
+            var options = [
+                'width=' + width,
+                'height=' + height,
+                'left=' + left,
+                'top=' + top,
+                'scrollbars=yes',
+                'resizable=yes',
+                'toolbar=no',
+                'menubar=no',
+                'location=no',
+                'status=no'
+            ].join(',');
+
+            var popupUrl = '/search-popup?type=' + encodeURIComponent(endpoint) + '&field=' + encodeURIComponent(fieldId);
+            var popup = window.open(popupUrl, windowName, options);
+            if (!popup) {
+                console.warn('[list-field] popup blocked', popupUrl);
+                return false;
+            }
+            popup.focus();
+            return true;
+        }
+
+        function escapeHtml(value) {
+            if (value === null || value === undefined) {
+                return '';
+            }
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function escapeAttr(value) {
+            if (value === null || value === undefined) {
+                return '';
+            }
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
+
+        function cloneRow(row) {
+            if (!row || typeof row !== 'object') {
+                return {};
+            }
             try {
-                // JavaScript 변수에서 직접 가져오기 (HTML 파싱 문제 해결)
-                if (typeof {{ col.column_key }}_initialData !== 'undefined' && Array.isArray({{ col.column_key }}_initialData)) {
-                    {{ col.column_key }}_data = [...{{ col.column_key }}_initialData];  // 복사본 생성
-                    console.log('✅ {{ col.column_key }} JavaScript 변수에서 초기 데이터 로드 성공');
-                    console.log('📊 {{ col.column_key }} 초기 데이터:', {{ col.column_key }}_data);
-                    console.log('📏 {{ col.column_key }} 초기 데이터 길이:', {{ col.column_key }}_data.length);
-                    
-                    // 항상 테이블 렌더링하여 데이터 동기화
-                    console.log('🔄 {{ col.column_key }} 초기 데이터로 테이블 렌더링 시작 (데이터:', {{ col.column_key }}_data.length, '개)');
-                    renderTable_{{ col.column_key }}();
-                } else {
-                    console.log('⚠️ {{ col.column_key }} 초기 데이터 없음 또는 유효하지 않음');
-                    // 기존 메모리 데이터가 있으면 유지, 없으면 빈 배열로 초기화
-                    if (!{{ col.column_key }}_data) {
-                        {{ col.column_key }}_data = [];
-                        console.log('🆕 {{ col.column_key }} 메모리 데이터 새로 초기화');
-                    } else {
-                        console.log('💾 {{ col.column_key }} 기존 메모리 데이터 유지:', {{ col.column_key }}_data.length, '개 항목');
-                    }
-                }
-            } catch(e) {
-                console.error('❌ {{ col.column_key }} 초기 데이터 로드 실패:', e);
-                // 오류 발생 시에도 기존 메모리 데이터 유지
-                if (!{{ col.column_key }}_data) {
-                    {{ col.column_key }}_data = [];
-                    console.log('🛠️ {{ col.column_key }} 오류로 인한 메모리 데이터 새로 초기화');
-                } else {
-                    console.log('🛡️ {{ col.column_key }} 오류 상황에서도 기존 메모리 데이터 유지');
-                }
+                return JSON.parse(JSON.stringify(row));
+            } catch (err) {
+                var clone = {};
+                Object.keys(row).forEach(function(key) {
+                    clone[key] = row[key];
+                });
+                return clone;
             }
-        }
-        
-        // DOM이 완전히 로드된 후 초기 데이터 로드 - 더 안전하게
-        function safeInitialize_{{ col.column_key }}() {
-            // 여러 번 시도하여 안전하게 초기화
-            var retryCount = 0;
-            var maxRetries = 5;
-            
-            function attemptLoad() {
-                try {
-                    var hiddenInput = document.getElementById('{{ col.column_key }}');
-                    if (!hiddenInput) {
-                        if (retryCount < maxRetries) {
-                            retryCount++;
-                            console.log('{{ col.column_key }} hidden input 찾기 재시도:', retryCount);
-                            setTimeout(attemptLoad, 100);
-                            return;
-                        } else {
-                            console.error('{{ col.column_key }} hidden input을 찾을 수 없습니다 (최대 재시도 초과)');
-                            return;
-                        }
-                    }
-                    
-                    loadInitialData_{{ col.column_key }}();
-                } catch(e) {
-                    console.error('{{ col.column_key }} 초기화 실패:', e);
-                    if (retryCount < maxRetries) {
-                        retryCount++;
-                        setTimeout(attemptLoad, 100);
-                    }
-                }
-            }
-            
-            attemptLoad();
-        }
-        
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', safeInitialize_{{ col.column_key }});
-        } else if (document.readyState === 'interactive' || document.readyState === 'complete') {
-            safeInitialize_{{ col.column_key }}();
-        } else {
-            // 최후의 수단
-            window.addEventListener('load', safeInitialize_{{ col.column_key }});
-        }
-        
-        // 현재 데이터를 항상 동기화하는 함수
-        function syncData_{{ col.column_key }}() {
-            var hiddenInput = document.getElementById('{{ col.column_key }}');
-            if (!hiddenInput) return;
-            
-            var currentValue = hiddenInput.value;
-            if (currentValue && currentValue !== '[]') {
-                try {
-                    var parsedData = JSON.parse(currentValue);
-                    if (Array.isArray(parsedData)) {
-                        {{ col.column_key }}_data = parsedData;
-                        console.log('{{ col.column_key }} 데이터 동기화 완료:', {{ col.column_key }}_data.length, '개 항목');
-                        return true;
-                    }
-                } catch(e) {
-                    console.error('{{ col.column_key }} 데이터 동기화 실패:', e);
-                }
-            }
-            return false;
         }
 
-        // 바로 검색 팝업 띄우기
-        window.addWorker_{{ col.column_key }} = function() {
-            console.log('🚀 {{ col.column_key }} 팝업 열기 시작');
-            console.log('📊 {{ col.column_key }} 팝업 열기 전 메모리 데이터:', {
-                length: {{ col.column_key }}_data ? {{ col.column_key }}_data.length : 0,
-                data: {{ col.column_key }}_data
-            });
-            
-            // hidden input 현재 값 확인 (동기화는 하지 않음)
-            var hiddenInput = document.getElementById('{{ col.column_key }}');
-            if (hiddenInput) {
-                console.log('💾 {{ col.column_key }} hidden input 현재 값:', hiddenInput.value);
-                console.log('💾 {{ col.column_key }} hidden input 길이:', hiddenInput.value ? hiddenInput.value.length : 0);
+        function isNoneString(value) {
+            return typeof value === 'string' && value.trim().toLowerCase() === 'none';
+        }
+
+        function coerceValue(field, value) {
+            var type = (field.type || '').toLowerCase();
+            var metadata = field.metadata || {};
+            if (type === 'checkbox') {
+                return value === true || value === 'true' || value === 1 || value === '1';
             }
-            
-            // 동기화는 하지 않고 현재 메모리 데이터 신뢰
-            console.log('✅ {{ col.column_key }} 현재 메모리 데이터를 신뢰하고 팝업 진행');
-            console.log('📋 {{ col.column_key }} 최종 확인 - 현재 데이터:', {{ col.column_key }}_data.length, '개 항목');
-            
-            var callbackName = 'workerCallback_{{ col.column_key }}_' + Date.now();
-            console.log('{{ col.column_key }} 검색 팝업 열기');
-            console.log('현재 {{ col.column_key }}_data:', {{ col.column_key }}_data);
-            console.log('현재 {{ col.column_key }}_data 길이:', {{ col.column_key }}_data.length);
-            
-            window[callbackName] = function(data) {
-                console.log('🎯 {{ col.column_key }} 팝업에서 선택된 데이터:', data);
-                console.log('🔍 {{ col.column_key }} 콜백 실행 전 기존 데이터 상태:', {
-                    length: {{ col.column_key }}_data.length,
-                    items: {{ col.column_key }}_data
-                });
-                
-                // 중복 체크
-                var isDuplicate = (function(){
-                    var t = '{{ list_type }}';
-                    if (t === 'company') {
-                        return {{ col.column_key }}_data.some(function(item){ return item.bizno && data.business_number && String(item.bizno) === String(data.business_number); });
+            if (type === 'dropdown' && (field.dropdown_multi || metadata.dropdownMulti)) {
+                if (Array.isArray(value)) {
+                    return value.map(function(item) { return String(item); });
+                }
+                if (typeof value === 'string' && value.trim()) {
+                    try {
+                        var parsed = JSON.parse(value);
+                        if (Array.isArray(parsed)) {
+                            return parsed.map(function(item) { return String(item); });
+                        }
+                    } catch (err) {
+                        return value.split(',').map(function(item) { return item.trim(); }).filter(Boolean);
                     }
-                    return {{ col.column_key }}_data.some(function(item){ return item.id && data.worker_id && String(item.id) === String(data.worker_id); });
-                })();
-                
-                if (isDuplicate) {
-                    alert('이미 추가된 근로자입니다.');
-                    delete window[callbackName];
+                }
+                return [];
+            }
+            if (value === null || value === undefined || isNoneString(value)) {
+                return '';
+            }
+            return String(value);
+        }
+
+        function normalizeRow(row) {
+            var normalized = {};
+            childFields.forEach(function(field) {
+                var key = field.key;
+                if (!key) {
                     return;
                 }
-                
-                console.log('✅ {{ col.column_key }} 중복 체크 통과, 새 항목 추가 진행');
-                
-                // 데이터 추가
-                var newItem;
-                if ('{{ list_type }}' === 'company') {
-                    newItem = {
-                        name: data.company_name || '',
-                        id: '',
-                        company: '',
-                        bizno: data.business_number || ''
-                    };
-                } else {
-                    newItem = {
-                        name: data.worker_name || data.name || '',
-                        id: data.worker_id || data.id || '',
-                        company: data.company_name || '',
-                        bizno: data.business_number || ''
-                    };
+                var current = row && Object.prototype.hasOwnProperty.call(row, key) ? row[key] : '';
+                normalized[key] = coerceValue(field, current);
+            });
+            return normalized;
+        }
+
+        function resolveGridSpan(field) {
+            if (!field) {
+                return 2;
+            }
+            var metadata = field.metadata || {};
+            var candidates = [
+                field.gridSpan,
+                field.grid_span,
+                field.span,
+                metadata.gridSpan,
+                metadata.grid_span,
+                metadata.span
+            ];
+
+            for (var i = 0; i < candidates.length; i += 1) {
+                var candidate = candidates[i];
+                var value = NaN;
+                if (typeof candidate === 'number') {
+                    value = candidate;
+                } else if (typeof candidate === 'string') {
+                    var match = candidate.match(/\d+/);
+                    if (match) {
+                        value = parseInt(match[0], 10);
+                    }
                 }
-                
-                console.log('📝 {{ col.column_key }} 추가할 새 항목:', newItem);
-                {{ col.column_key }}_data.push(newItem);
-                
-                console.log('✅ {{ col.column_key }} 추가 완료! 최종 데이터:', {{ col.column_key }}_data);
-                console.log('📊 {{ col.column_key }} 최종 데이터 길이:', {{ col.column_key }}_data.length);
-                console.log('🔄 {{ col.column_key }} 테이블 렌더링 시작');
-                
-                renderTable_{{ col.column_key }}();
-                
-                console.log('💾 {{ col.column_key }} hidden input 값 확인:', document.getElementById('{{ col.column_key }}').value);
-                
-                delete window[callbackName];
+                if (value > 0) {
+                    if (value > 8) {
+                        return 8;
+                    }
+                    return value;
+                }
+            }
+
+            return 2;
+        }
+
+        var state = {
+            rows: Array.isArray(initialRows) ? initialRows.map(normalizeRow) : []
+        };
+
+        function syncHiddenInput() {
+            if (!hiddenInput) {
+                return;
+            }
+            try {
+                hiddenInput.value = JSON.stringify(state.rows);
+            } catch (err) {
+                console.warn('[list-field] hidden input sync failed', columnKey, err);
+            }
+        }
+
+        function createEmptyRow() {
+            var row = {};
+            childFields.forEach(function(field) {
+                var type = (field.type || '').toLowerCase();
+                var metadata = field.metadata || {};
+                if (type === 'checkbox') {
+                    row[field.key] = false;
+                } else if (type === 'dropdown' && (field.dropdown_multi || metadata.dropdownMulti)) {
+                    row[field.key] = [];
+                } else {
+                    row[field.key] = '';
+                }
+            });
+            return row;
+        }
+
+        function ensureRowIndex(rowIndex) {
+            if (!Array.isArray(state.rows)) {
+                state.rows = [];
+            }
+            if (rowIndex >= state.rows.length) {
+                for (var i = state.rows.length; i <= rowIndex; i += 1) {
+                    state.rows.push(createEmptyRow());
+                }
+            }
+        }
+
+        function buildField(field, row, rowIndex) {
+            var key = field.key || '';
+            var label = field.label || key;
+            var type = (field.type || 'text').toLowerCase();
+            var metadata = field.metadata || {};
+            var span = resolveGridSpan(field);
+            var baseId = columnKey + '__' + rowIndex + '__' + key;
+            var value = row && Object.prototype.hasOwnProperty.call(row, key) ? row[key] : '';
+            var attrs = [
+                'id="' + escapeAttr(baseId) + '"',
+                'data-field="' + escapeAttr(key) + '"',
+                'data-field-type="list_child"',
+                'data-list-key="' + escapeAttr(columnKey) + '"',
+                'data-row-index="' + rowIndex + '"'
+            ];
+            if (metadata.tableGroup) {
+                attrs.push('data-table-group="' + escapeAttr(metadata.tableGroup) + '"');
+            }
+            if (metadata.tableType) {
+                attrs.push('data-table-type="' + escapeAttr(metadata.tableType) + '"');
+            }
+            if (metadata.lookupType) {
+                attrs.push('data-lookup-type="' + escapeAttr(metadata.lookupType) + '"');
+            }
+            if (metadata.linkedType) {
+                attrs.push('data-linked-type="' + escapeAttr(metadata.linkedType) + '"');
+            }
+            if (metadata.autocomplete) {
+                attrs.push('autocomplete="' + escapeAttr(metadata.autocomplete) + '"');
+            }
+
+            var readOnly = metadata.readOnly || mode === 'view';
+            if (metadata.tableGroup && metadata.readOnly !== false && type !== 'checkbox' && type !== 'dropdown') {
+                readOnly = true;
+            }
+            var isLinkedText = type === 'linked_text';
+            if (isLinkedText) {
+                readOnly = true;
+            }
+            var isPopupType = type.indexOf('popup') === 0 || !!metadata.lookupType;
+            var isLinkedField = isLinkedText || !!metadata.linkedField || !!metadata.tableGroup || !!metadata.linkedType;
+
+            var cssClasses = ['form-control', 'form-control-sm'];
+            if (metadata.inputClass) {
+                cssClasses = cssClasses.concat(String(metadata.inputClass).split(/\s+/).filter(Boolean));
+            }
+            if (Array.isArray(metadata.classes)) {
+                metadata.classes.forEach(function(cls) {
+                    if (cls) {
+                        cssClasses.push(cls);
+                    }
+                });
+            }
+            if (isLinkedField && !isPopupType) {
+                cssClasses.push('linked-field');
+            }
+            if (isPopupType) {
+                cssClasses.push('popup-main-field');
+            }
+            var cssClass = cssClasses.join(' ').trim();
+
+            var dropdownMulti = (type === 'dropdown' && (field.dropdown_multi || metadata.dropdownMulti));
+            var placeholderAttr = metadata.placeholder ? ' placeholder="' + escapeAttr(metadata.placeholder) + '"' : '';
+            if (!placeholderAttr && isPopupType && mode !== 'view') {
+                placeholderAttr = ' placeholder="클릭하여 선택"';
+            }
+            var maxLengthAttr = metadata.maxLength ? ' maxlength="' + escapeAttr(metadata.maxLength) + '"' : '';
+            var minAttr = metadata.min ? ' min="' + escapeAttr(metadata.min) + '"' : '';
+            var maxAttr = metadata.max ? ' max="' + escapeAttr(metadata.max) + '"' : '';
+
+            var inputHtml = '';
+
+            if (type === 'textarea') {
+                inputHtml = '<textarea ' + attrs.join(' ') + ' class="' + escapeAttr(cssClass) + '" rows="3"' + placeholderAttr + maxLengthAttr + (readOnly ? ' readonly' : '') + '>' + escapeHtml(value) + '</textarea>';
+            } else if (type === 'number') {
+                inputHtml = '<input type="number" ' + attrs.join(' ') + ' class="' + escapeAttr(cssClass) + '" value="' + escapeAttr(value) + '"' + minAttr + maxAttr + placeholderAttr + (readOnly ? ' readonly' : '') + '>';
+            } else if (type === 'date') {
+                inputHtml = '<input type="date" ' + attrs.join(' ') + ' class="' + escapeAttr(cssClass) + '" value="' + escapeAttr(value) + '"' + minAttr + maxAttr + placeholderAttr + (readOnly ? ' readonly' : '') + '>';
+            } else if (type === 'time') {
+                inputHtml = '<input type="time" ' + attrs.join(' ') + ' class="' + escapeAttr(cssClass) + '" value="' + escapeAttr(value) + '"' + placeholderAttr + (readOnly ? ' readonly' : '') + '>';
+            } else if (type === 'checkbox') {
+                inputHtml = '<div class="form-check"><input type="checkbox" ' + attrs.join(' ') + ' class="form-check-input"' + (value ? ' checked' : '') + (readOnly ? ' disabled' : '') + '></div>';
+            } else if (dropdownMulti) {
+                attrs.push('data-list-multi="1"');
+                inputHtml = '<select ' + attrs.join(' ') + ' class="form-select form-select-sm" multiple' + (readOnly ? ' disabled' : '') + '>';
+                var selectedValues = Array.isArray(value) ? value.map(String) : [];
+                if (Array.isArray(field.options)) {
+                    inputHtml += field.options.map(function(option) {
+                        var code = option.code || option.value || '';
+                        var optionLabel = option.value || option.label || code;
+                        var selected = selectedValues.indexOf(String(code)) !== -1 ? ' selected' : '';
+                        return '<option value="' + escapeAttr(code) + '"' + selected + '>' + escapeHtml(optionLabel) + '</option>';
+                    }).join('');
+                }
+                inputHtml += '</select>';
+            } else if (type === 'dropdown' && Array.isArray(field.options)) {
+                inputHtml = '<select ' + attrs.join(' ') + ' class="form-select form-select-sm"' + (readOnly ? ' disabled' : '') + '>';
+                inputHtml += '<option value="">선택하세요</option>';
+                inputHtml += field.options.map(function(option) {
+                    var code = option.code || option.value || '';
+                    var optionLabel = option.value || option.label || code;
+                    var selected = String(code) === String(value) ? ' selected' : '';
+                    return '<option value="' + escapeAttr(code) + '"' + selected + '>' + escapeHtml(optionLabel) + '</option>';
+                }).join('');
+                inputHtml += '</select>';
+            } else if (isPopupType) {
+                var resolvedLookupRaw = metadata.lookupType || metadata.lookup || '';
+                var resolvedLookup = normalizeLookupKey(resolvedLookupRaw);
+                var popupType = (function() {
+                    if (type === 'popup' && resolvedLookup) {
+                        return 'popup_' + resolvedLookup;
+                    }
+                    if (type === 'popup') {
+                        return 'popup_person';
+                    }
+                    if (type.indexOf('popup_') === 0) {
+                        return type;
+                    }
+                    return 'popup_' + (resolvedLookup || 'person');
+                })();
+                var popupAttrs = attrs.slice();
+                popupAttrs.push('style="background-color: #f8f9fa;"');
+                inputHtml = '<div class="input-group lfc-input-group">';
+                inputHtml += '<input type="text" ' + popupAttrs.join(' ') + ' class="' + escapeAttr(cssClass) + '" value="' + escapeAttr(value) + '"' + placeholderAttr + ' readonly data-input-type="' + escapeAttr(popupType) + '">';
+                if (mode !== 'view') {
+                    if (resolvedLookup) {
+                        inputHtml += '<button type="button" class="btn btn-sm btn-primary" data-action="open-popup" data-target-id="' + escapeAttr(baseId) + '" data-popup-type="' + escapeAttr(popupType) + '" data-popup-lookup="' + escapeAttr(resolvedLookup) + '">검색</button>';
+                    } else {
+                        inputHtml += '<button type="button" class="btn btn-sm btn-primary" data-action="open-popup" data-target-id="' + escapeAttr(baseId) + '" data-popup-type="' + escapeAttr(popupType) + '">검색</button>';
+                    }
+                }
+                inputHtml += '</div>';
+            } else if (isLinkedText) {
+                inputHtml = '<input type="text" ' + attrs.join(' ') + ' class="' + escapeAttr(cssClass) + '" value="' + escapeAttr(value) + '"' + placeholderAttr + maxLengthAttr + ' readonly>';
+            } else {
+                inputHtml = '<input type="text" ' + attrs.join(' ') + ' class="' + escapeAttr(cssClass) + '" value="' + escapeAttr(value) + '"' + placeholderAttr + maxLengthAttr + (readOnly ? ' readonly' : '') + '>';
+            }
+
+            var fieldHtml = '<div class="lfc-field" style="grid-column: span ' + span + ';" data-field-key="' + escapeAttr(key) + '">';
+            fieldHtml += '<label for="' + escapeAttr(baseId) + '">' + escapeHtml(label) + '</label>';
+            fieldHtml += inputHtml;
+            fieldHtml += '</div>';
+            return fieldHtml;
+        }
+
+        function renderCard(row, rowIndex) {
+            var fieldsHtml = childFields.map(function(field) {
+                return buildField(field, row, rowIndex);
+            }).join('');
+            var controls = '';
+            if (mode !== 'view') {
+                controls = '<button type="button" class="btn btn-sm btn-link text-danger" data-action="remove-row" data-row-index="' + rowIndex + '"><i class="bi bi-trash"></i></button>';
+            }
+            var cardHtml = '<div class="lfc-card" data-row-index="' + rowIndex + '">';
+            cardHtml += '<div class="lfc-card-header">';
+            cardHtml += '<span class="lfc-card-index">' + (rowIndex + 1) + '</span>';
+            cardHtml += controls;
+            cardHtml += '</div>';
+            cardHtml += '<div class="lfc-card-body">' + fieldsHtml + '</div>';
+            cardHtml += '</div>';
+            return cardHtml;
+        }
+
+        function render() {
+            if (!Array.isArray(state.rows) || !state.rows.length) {
+                cardsContainer.innerHTML = '<div class="lfc-empty">등록된 항목이 없습니다.</div>';
+            } else {
+                var html = state.rows.map(function(row, idx) {
+                    return renderCard(row, idx);
+                }).join('');
+                cardsContainer.innerHTML = html;
+            }
+
+            if (countDisplay) {
+                countDisplay.textContent = Array.isArray(state.rows) ? state.rows.length : 0;
+            }
+
+            syncHiddenInput();
+
+            var inputs = cardsContainer.querySelectorAll('[data-field-type="list_child"]');
+            inputs.forEach(function(input) {
+                input.addEventListener('input', handleInputChange);
+                input.addEventListener('change', handleInputChange);
+            });
+
+            if (mode !== 'view') {
+                var removeButtons = cardsContainer.querySelectorAll('[data-action="remove-row"]');
+                removeButtons.forEach(function(btn) {
+                    btn.addEventListener('click', function(evt) {
+                        var idx = parseInt(btn.getAttribute('data-row-index'), 10);
+                        if (Number.isNaN(idx) || idx < 0 || idx >= state.rows.length) {
+                            return;
+                        }
+                        if (!confirm('이 항목을 삭제하시겠습니까?')) {
+                            return;
+                        }
+                        state.rows.splice(idx, 1);
+                        render();
+                    });
+                });
+
+                var popupButtons = cardsContainer.querySelectorAll('[data-action="open-popup"]');
+                popupButtons.forEach(function(btn) {
+                    btn.addEventListener('click', function(evt) {
+                        evt.preventDefault();
+                        var targetId = btn.getAttribute('data-target-id');
+                        var popupType = btn.getAttribute('data-popup-type');
+                        var popupLookup = btn.getAttribute('data-popup-lookup');
+                        if (!targetId || !popupType) {
+                            return;
+                        }
+                        if (!openPopupWindow(targetId, popupType, popupLookup)) {
+                            alert('팝업을 열 수 없습니다. 브라우저 팝업 차단 설정을 확인해주세요.');
+                        }
+                    });
+                });
+            }
+        }
+
+        function handleInputChange(evt) {
+            var input = evt.currentTarget;
+            var idx = parseInt(input.getAttribute('data-row-index'), 10);
+            var key = input.getAttribute('data-field');
+            if (Number.isNaN(idx) || !key) {
+                return;
+            }
+            ensureRowIndex(idx);
+            var field = childFields.find(function(f) { return f.key === key; });
+            if (!field) {
+                return;
+            }
+            var type = (field.type || '').toLowerCase();
+            var value;
+            if (type === 'checkbox') {
+                value = input.checked;
+            } else if (input.dataset.listMulti === '1') {
+                value = Array.from(input.options).filter(function(option) { return option.selected; }).map(function(option) { return option.value; });
+            } else {
+                value = input.value;
+            }
+            state.rows[idx][key] = value;
+            syncHiddenInput();
+        }
+
+        function registerListState() {
+            var registry = window.__LIST_FIELD_STATE__ = window.__LIST_FIELD_STATE__ || {};
+            registry[columnKey] = {
+                getRows: function() {
+                    return state.rows.map(function(row) { return cloneRow(row); });
+                },
+                setRows: function(rows) {
+                    if (!Array.isArray(rows)) {
+                        return;
+                    }
+                    state.rows = rows.map(normalizeRow);
+                    render();
+                },
+                addRow: function(row) {
+                    if (row && typeof row === 'object') {
+                        state.rows.push(normalizeRow(row));
+                    } else {
+                        state.rows.push(createEmptyRow());
+                    }
+                    render();
+                }
             };
-            
-            // 검색 팝업 열기
-            var searchType = ('{{ list_type }}' === 'company') ? 'company' : 'contractor';
-            window.open('/search-popup?type=' + searchType + '&callback=' + callbackName, 
-                       'workerPopup', 'width=900,height=600,scrollbars=yes');
-        };
-        
-        // removeItem 함수를 전역으로 노출
-        window.removeItem_{{ col.column_key }} = function(index) {
-            console.log('{{ col.column_key }} 삭제 인덱스:', index);
-            {{ col.column_key }}_data.splice(index, 1);
-            console.log('{{ col.column_key }} 삭제 후 데이터:', {{ col.column_key }}_data);
-            renderTable_{{ col.column_key }}();
-        };
+        }
+
+        if (mode !== 'view' && addBtn) {
+            addBtn.addEventListener('click', function(evt) {
+                evt.preventDefault();
+                state.rows.push(createEmptyRow());
+                render();
+            });
+        }
+
+        registerListState();
+        render();
     })();
     </script>
 {% endif %}

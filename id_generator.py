@@ -179,6 +179,30 @@ def generate_fullprocess_number(db_path, base_datetime=None):
     )
 
 
+def generate_subcontract_approval_number(db_path, base_datetime=None):
+    """산안법 도급승인 번호 생성 (SAyyMMdd### - 3자리 순번)"""
+    return generate_unique_id(
+        'SA',
+        db_path,
+        'subcontract_approval',
+        'approval_number',
+        base_datetime,
+        counter_digits=3,
+    )
+
+
+def generate_subcontract_report_number(db_path, base_datetime=None):
+    """화관법 도급신고 번호 생성 (SRyyMMdd### - 3자리 순번)"""
+    return generate_unique_id(
+        'SR',
+        db_path,
+        'subcontract_report',
+        'report_number',
+        base_datetime,
+        counter_digits=3,
+    )
+
+
 def generate_safeplace_number(db_path, base_datetime=None):
     """Safe Workplace 점검번호 생성 (SPYYMMDDNNNN - 4자리 순번)
 

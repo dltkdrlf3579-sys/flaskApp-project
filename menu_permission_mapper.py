@@ -9,6 +9,8 @@ MENU_PERMISSION_MAP = {
     'accident': 'ACCIDENT_MGT',
     'safety-instruction': 'SAFETY_INSTRUCTION',
     'follow-sop': 'FOLLOW_SOP',
+    'subcontract-approval': 'SUBCONTRACT_APPROVAL',
+    'subcontract-report': 'SUBCONTRACT_REPORT',
     'safe-workplace': 'SAFE_WORKPLACE',  # 안전한 일터 추가
     'full-process': 'FULL_PROCESS',
     'safety-council': 'SAFETY_COUNCIL'  # 안전보건 협의체도 추가

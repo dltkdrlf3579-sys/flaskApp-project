@@ -59,6 +59,20 @@
                                class="form-input date-input readonly-highlight"
                                name="created_at"
                                data-field="created_at"
+                              value="{{ today_date }}"
+                              readonly>
+                    </div>
+                    <div class="info-cell span-2">
+                        <label>등록자</label>
+                        <input type="text"
+                               class="readonly-highlight"
+                               value="{{ current_user_display | default('SYSTEM', true) }}"
+                               readonly>
+                    </div>
+                    <div class="info-cell span-2">
+                        <label>수정일</label>
+                        <input type="date"
+                               class="form-input date-input readonly-highlight"
                                value="{{ today_date }}"
                                readonly>
                     </div>
@@ -194,13 +208,14 @@
                                            onkeypress="return isNumberKey(event, this)"
                                            placeholder="{{ col.column_name }} 입력">
                                            
-                                {% elif col.column_type == 'linked_text' %}
+                                {% elif col.column_type and col.column_type.startswith('linked_') %}
                                     <!-- 연결된 필드 (읽기 전용) -->
                                     <input type="text"
                                            id="{{ col.column_key }}"
                                            class="{{ section.section_key|replace('_', '-') }}-input linked-field"
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
+                                           data-linked-type="{{ col.column_type }}"
                                            {% if col.table_group %}data-table-group="{{ col.table_group }}"{% endif %}
                                            {% if col.table_type %}data-table-type="{{ col.table_type }}"{% endif %}
                                            readonly>

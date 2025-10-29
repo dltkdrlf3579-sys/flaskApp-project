@@ -30,6 +30,7 @@
 {% endif %}
 
 <div class="accident-detail-container">
+    {% set feature_toggles = feature_toggles or {} %}
     <!-- 동적 섹션 렌더링 -->
     {% for section in sections %}
     <div class="section {{ section.section_key|replace('_', '-') }}-section">
@@ -52,6 +53,20 @@
                     <div class="info-cell span-2">
                         <label>등록일</label>
                         <input type="date" value="{{ today_date }}" readonly>
+                    </div>
+                    <div class="info-cell span-2">
+                        <label>등록자</label>
+                        <input type="text"
+                               class="readonly-highlight"
+                               value="{{ current_user_display | default('SYSTEM', true) }}"
+                               readonly>
+                    </div>
+                    <div class="info-cell span-2">
+                        <label>수정일</label>
+                        <input type="date"
+                               value="{{ today_date }}"
+                               readonly
+                               class="readonly-highlight">
                     </div>
                 </div>
                 {% endif %}
@@ -162,7 +177,7 @@
                                            onkeypress="return isNumberKey(event, this)"
                                            placeholder="{{ col.column_name }} 입력">
                                            
-                                {% elif col.column_type == 'linked_text' %}
+                                {% elif col.column_type and col.column_type.startswith('linked_') %}
                                     <!-- 연결된 필드 (읽기 전용) -->
                                     <input type="text"
                                            id="{{ col.column_key }}"
@@ -381,7 +396,7 @@
                                 {% elif col.column_type == 'list' %}
                                     <!-- 리스트 필드 -->
                                     {% from 'includes/list_field_v3.html' import render_list_field %}
-                                    {{ render_list_field(col, '', section, mode='register') }}
+                                    {{ render_list_field(col, '', section, mode='register', feature_toggles=feature_toggles) }}
                                     
                                 {% elif col.column_type == 'number' %}
                                     <!-- 숫자 필드 -->
@@ -397,7 +412,7 @@
                                            onkeypress="return isNumberKey(event, this)"
                                            placeholder="숫자만 입력하세요">
                                            
-                                {% elif col.column_type == 'linked_text' %}
+                                {% elif col.column_type and col.column_type.startswith('linked_') %}
                                     <!-- 연결된 필드 (읽기 전용) -->
                                     <input type="text"
                                            id="{{ col.column_key }}"

@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from contextlib import contextmanager
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
-
-import sqlite3
 
 from werkzeug.datastructures import FileStorage
 
@@ -17,6 +16,8 @@ from section_service import SectionConfigService
 from utils.sql_filters import sql_is_active_true, sql_is_deleted_false
 from upload_utils import validate_uploaded_files
 from timezone_config import get_korean_time
+from list_schema_utils import resolve_child_schema, deserialize_list_rows
+
 class AccidentRepository:
     """Encapsulates database operations used by the accident controller."""
 
@@ -27,10 +28,35 @@ class AccidentRepository:
     def db_path(self) -> str:
         return self._db_path
 
+    def _resolve_actor_label(self, data: Mapping[str, Any]) -> str:
+        def _extract(keys):
+            for key in keys:
+                value = data.get(key)
+                if value not in (None, ''):
+                    return str(value)
+            return ''
+
+        primary = _extract(('updated_by', 'created_by', 'actor_label'))
+        if primary:
+            return primary
+
+        user_name = _extract(('user_name',))
+        emp_id = _extract(('user_id', 'emp_id', 'userid'))
+        login_id = _extract(('login_id', 'user_id'))
+
+        if user_name and emp_id:
+            return f"{user_name}/{emp_id}"
+        if user_name:
+            return user_name
+        if emp_id:
+            return emp_id
+        if login_id:
+            return login_id
+        return 'SYSTEM'
+
     @contextmanager
     def connection(self):
         conn = get_db_connection(self._db_path)
-        conn.row_factory = sqlite3.Row
         try:
             yield conn
         finally:
@@ -84,6 +110,9 @@ class AccidentRepository:
                 'pagination': pagination_obj,
                 'total_count': total_count,
                 'search_params': dict(filters),
+                'feature_toggles': {
+                    'child_schema_renderer': self._is_child_schema_renderer_enabled(),
+                },
             }
 
     # ------------------------------------------------------------------
@@ -112,6 +141,7 @@ class AccidentRepository:
             accident = mapped[0] if mapped else accident
 
             accident_dict = DictAsAttr(accident)
+            list_payloads = self._build_list_payloads(dynamic_columns, custom_data)
 
             return {
                 'accident': accident_dict,
@@ -121,6 +151,10 @@ class AccidentRepository:
                 'attachments': attachments,
                 'basic_options': basic_options,
                 'is_popup': is_popup,
+                'list_payloads': list_payloads,
+                'feature_toggles': {
+                    'child_schema_renderer': self._is_child_schema_renderer_enabled(),
+                },
             }
 
     # ------------------------------------------------------------------
@@ -145,11 +179,16 @@ class AccidentRepository:
                 'basic_options': basic_options,
                 'today_date': today_date,
                 'is_popup': is_popup,
+                'feature_toggles': {
+                    'child_schema_renderer': self._is_child_schema_renderer_enabled(),
+                },
             }
 
     def save_from_request(self, request) -> Any:
         data = request.form
         files: List[FileStorage] = request.files.getlist('files')
+        actor_label = self._resolve_actor_label(data)
+        actor_label = self._resolve_actor_label(request.form)
 
         valid_files, validation_errors = validate_uploaded_files(files)
         if validation_errors:
@@ -174,7 +213,7 @@ class AccidentRepository:
                 'accidents_cache',
                 payload,
                 conflict_cols=['accident_number'],
-                update_cols=['accident_name', 'workplace', 'accident_grade', 'major_category', 'injury_form', 'injury_type', 'accident_date', 'created_at', 'report_date', 'day_of_week', 'building', 'floor', 'location_category', 'location_detail', 'custom_data']
+                update_cols=['accident_name', 'workplace', 'accident_grade', 'major_category', 'injury_form', 'injury_type', 'accident_date', 'created_at', 'updated_at', 'report_date', 'day_of_week', 'building', 'floor', 'location_category', 'location_detail', 'custom_data', 'created_by', 'updated_by']
             )
 
             safe_upsert(
@@ -202,7 +241,7 @@ class AccidentRepository:
                 from board_services import AttachmentService
 
                 attachment_service = AttachmentService('accident', self.db_path, conn)
-                uploaded_by = request.form.get('created_by') or request.form.get('user_id', 'system')
+                uploaded_by = actor_label or request.form.get('user_id', 'system')
 
                 for index, file_info in enumerate(valid_files):
                     file_obj: FileStorage = file_info['file']
@@ -289,6 +328,9 @@ class AccidentRepository:
             'location_detail': pick('location_detail'),
             'custom_data': json.dumps(custom_data, ensure_ascii=False),
         }
+        payload['updated_at'] = get_korean_time().strftime('%Y-%m-%d')
+        if actor_label:
+            payload['updated_by'] = actor_label
 
         deleted_raw = data.get('deleted_attachments', '[]')
         try:
@@ -324,7 +366,7 @@ class AccidentRepository:
                 update_cols=[
                     'accident_name', 'workplace', 'accident_grade', 'major_category', 'injury_form',
                     'injury_type', 'accident_date', 'report_date', 'day_of_week', 'building', 'floor',
-                    'location_category', 'location_detail', 'custom_data'
+                    'location_category', 'location_detail', 'custom_data', 'updated_at', 'updated_by'
                 ],
             )
 
@@ -365,7 +407,7 @@ class AccidentRepository:
                 meta for meta in attachment_meta
                 if isinstance(meta, dict) and (not meta.get('id') or meta.get('isNew'))
             ])
-            uploaded_by = data.get('updated_by') or data.get('user_id', 'system')
+            uploaded_by = actor_label or data.get('user_id', 'system')
             for file_info in valid_files:
                 file_obj: FileStorage = file_info['file']
                 meta: Dict[str, Any] = {}
@@ -415,7 +457,25 @@ class AccidentRepository:
             ORDER BY column_order
             """
         ).fetchall()
-        return [dict(row) for row in rows]
+        columns: List[Dict[str, Any]] = []
+        for row in rows:
+            column_dict = dict(row)
+            dropdown_raw = column_dict.get('dropdown_options')
+            if isinstance(dropdown_raw, str) and dropdown_raw.strip():
+                try:
+                    column_dict['dropdown_options'] = json.loads(dropdown_raw)
+                except json.JSONDecodeError:
+                    column_dict['dropdown_options'] = []
+
+            if column_dict.get('column_type') == 'list':
+                schema, generated = resolve_child_schema(column_dict)
+                if schema is not None:
+                    column_dict['child_schema'] = schema
+                if generated:
+                    column_dict['_child_schema_generated'] = True
+
+            columns.append(column_dict)
+        return columns
 
     def _normalise_column_order(self, dynamic_columns: List[Dict[str, Any]], sections: Iterable[Mapping[str, Any]]):
         try:
@@ -1035,6 +1095,62 @@ class AccidentRepository:
             for row in rows
         ]
 
+    def _build_list_payloads(
+        self,
+        dynamic_columns: Iterable[Mapping[str, Any]],
+        custom_data: Optional[Mapping[str, Any]],
+    ) -> Dict[str, Any]:
+        if not isinstance(custom_data, Mapping):
+            return {}
+
+        payloads: Dict[str, Any] = {}
+        for column in dynamic_columns or []:
+            if not column or column.get('column_type') != 'list':
+                continue
+            key = column.get('column_key')
+            if not key:
+                continue
+
+            schema, generated = resolve_child_schema(column)
+            if schema is not None:
+                column['child_schema'] = schema
+            if generated:
+                column['_child_schema_generated'] = True
+
+            raw_value = custom_data.get(key)
+            info = deserialize_list_rows(column, column.get('child_schema'), raw_value)
+
+            payloads[key] = {
+                'raw': self._ensure_raw_json(raw_value),
+                'rows': info.get('rows', []),
+                'raw_list': info.get('raw', []),
+                'schema': column.get('child_schema'),
+                'preset': info.get('preset'),
+                'warnings': info.get('warnings', []),
+                'errors': info.get('errors', []),
+                'generated_schema': bool(column.get('_child_schema_generated')),
+            }
+
+        return payloads
+
+    @staticmethod
+    def _ensure_raw_json(value: Any) -> str:
+        if value is None:
+            return '[]'
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return '[]'
+
+    @staticmethod
+    def _is_child_schema_renderer_enabled() -> bool:
+        flag = os.getenv('USE_CHILD_SCHEMA_RENDERER', '')
+        if flag:
+            return flag.lower() in {'1', 'true', 'y', 'yes'}
+        return True
+
     def _prepare_save_payload(self, request, cursor) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
         accident_number = ''
         custom_data_raw = request.form.get('custom_data', '{}')
@@ -1058,6 +1174,9 @@ class AccidentRepository:
 
         accident_number = _get_field('accident_number') or self._generate_accident_number(cursor)
 
+        current_date = get_korean_time().strftime('%Y-%m-%d')
+        actor_label = self._resolve_actor_label(request.form)
+
         payload = {
             'accident_number': accident_number,
             'accident_name': _get_field('accident_name'),
@@ -1067,8 +1186,9 @@ class AccidentRepository:
             'injury_form': _get_field('injury_form'),
             'injury_type': _get_field('injury_type'),
             'accident_date': _get_field('accident_date'),
-            'created_at': get_korean_time().strftime('%Y-%m-%d'),
-            'report_date': _get_field('report_date', get_korean_time().strftime('%Y-%m-%d')),
+            'created_at': current_date,
+            'updated_at': current_date,
+            'report_date': _get_field('report_date', current_date),
             'day_of_week': _get_field('day_of_week'),
             'building': _get_field('building'),
             'floor': _get_field('floor'),
@@ -1076,6 +1196,9 @@ class AccidentRepository:
             'location_detail': _get_field('location_detail'),
             'custom_data': json.dumps(custom_data, ensure_ascii=False),
         }
+        if actor_label:
+            payload['created_by'] = actor_label
+            payload['updated_by'] = actor_label
 
         return accident_number, payload, custom_data
 

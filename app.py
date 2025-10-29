@@ -1,9 +1,10 @@
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 from pathlib import Path
 import shutil
+import json
 from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, Response, send_from_directory, abort
 import configparser
 from timezone_config import KST, get_korean_time, get_korean_time_str
@@ -18,6 +19,7 @@ from typing import Any, Dict, List, Optional
 from board_services import CodeService, ItemService
 from repositories.common.column_config_repository import ColumnConfigRepository
 from column_service import ColumnConfigService
+from table_mappings import get_table_mappings
 from search_popup_service import SearchPopupService
 from column_sync_service import ColumnSyncService
 from db_connection import get_db_connection
@@ -35,7 +37,14 @@ from permission_helpers import (
 from audit_logger import record_audit_log, record_board_action, record_menu_view, normalize_scope, normalize_action, normalize_result
 from notification_service import get_notification_service, NotificationError
 from permission_api import register_permission_routes
-from add_page_routes import follow_sop_bp, full_process_bp, safe_workplace_bp, _response_info
+from add_page_routes import (
+    follow_sop_bp,
+    full_process_bp,
+    safe_workplace_bp,
+    subcontract_approval_bp,
+    subcontract_report_bp,
+    _response_info,
+)
 from boards.safety_instruction import safety_instruction_bp
 from controllers.boards.accident_controller import (
     AccidentController,
@@ -49,6 +58,7 @@ from controllers.boards.safety_instruction_controller import (
 from repositories.boards.safety_instruction_repository import SafetyInstructionRepository
 from utils.sql_filters import sql_is_active_true, sql_is_deleted_false
 from typing import List
+import threading
 import schedule
 import threading
 import time
@@ -102,16 +112,60 @@ app.register_blueprint(follow_sop_bp)
 app.register_blueprint(full_process_bp)
 app.register_blueprint(safety_instruction_bp)
 app.register_blueprint(safe_workplace_bp)
+app.register_blueprint(subcontract_approval_bp)
+app.register_blueprint(subcontract_report_bp)
 register_permission_routes(app)
+
+
+def _build_board_user_context():
+    """Return a dictionary with the current user's identity info for templates/JS."""
+    try:
+        user_name = session.get('user_name', '') or ''
+    except Exception:
+        user_name = ''
+    try:
+        emp_id = session.get('emp_id', '') or session.get('userid', '') or ''
+    except Exception:
+        emp_id = ''
+    try:
+        login_id = session.get('login_id', '') or session.get('user_id', '') or ''
+    except Exception:
+        login_id = ''
+
+    display = ''
+    if user_name and emp_id:
+        display = f"{user_name}/{emp_id}"
+    elif user_name:
+        display = user_name
+    elif emp_id:
+        display = emp_id
+    elif login_id:
+        display = login_id
+    else:
+        display = 'SYSTEM'
+
+    return {
+        'user_name': user_name,
+        'emp_id': emp_id,
+        'login_id': login_id,
+        'display': display,
+    }
 
 
 @app.context_processor
 def inject_user_menu():
     try:
-        return {'user_menu': build_user_menu_config()}
+        menu_config = build_user_menu_config()
     except Exception as exc:
         logging.debug('inject_user_menu failed: %s', exc)
-        return {'user_menu': MENU_CONFIG}
+        menu_config = MENU_CONFIG
+
+    identity = _build_board_user_context()
+    return {
+        'user_menu': menu_config,
+        'board_user_context': identity,
+        'current_user_display': identity.get('display', ''),
+    }
 
 # Jinja2 템플릿 필터 정의
 @app.template_filter('date_only')
@@ -649,6 +703,11 @@ def init_sample_data():
 from flask import current_app
 
 boot_sync_done = False
+_master_sync_enabled = False
+_master_sync_target_hour = 3  # KST hour when daily sync allowed
+_master_sync_last_run_date = None
+_master_sync_last_check_ts = datetime.min
+_master_sync_lock = threading.Lock()
 
 def boot_sync_once():
     """
@@ -690,12 +749,18 @@ def boot_sync_once():
         if not db_config.config.has_section('CONTENT_DATA_QUERIES'):
             current_app.logger.info("[BOOT] CONTENT_DATA_QUERIES section not found (skip content one-time sync)")
 
+        global _master_sync_enabled, _master_sync_target_hour, _master_sync_last_run_date, _master_sync_last_check_ts
         if ext_on and init_on:
+            _master_sync_enabled = db_config.config.getboolean('DATABASE', 'MASTER_DATA_DAILY', fallback=True)
+            _master_sync_target_hour = db_config.config.getint('DATABASE', 'MASTER_DATA_SYNC_HOUR', fallback=3)
             # 1) 마스터: 매일 체크 → 필요 시 동기화
-            if db_config.config.getboolean('DATABASE', 'MASTER_DATA_DAILY', fallback=True):
+            if _master_sync_enabled:
                 current_app.logger.info("[BOOT] Master daily sync check...")
                 maybe_daily_sync_master(force=False)  # 24시간 경과 시에만
                 current_app.logger.info("[BOOT] Master daily sync done/kept")
+                now_kst = get_korean_time()
+                _master_sync_last_run_date = now_kst.date()
+                _master_sync_last_check_ts = datetime.utcnow()
 
             # 2) 컨텐츠: 최초 1회만
             if db_config.config.getboolean('DATABASE', 'CONTENT_DATA_ONCE', fallback=True):
@@ -714,6 +779,41 @@ def check_first_request():
         app._first_request_done = True
         boot_sync_once()
 
+
+@app.before_request
+def ensure_periodic_master_sync():
+    if not _master_sync_enabled:
+        return
+    now_utc = datetime.utcnow()
+    if (now_utc - _master_sync_last_check_ts) < timedelta(minutes=10):
+        return
+
+    now_kst = get_korean_time()
+    if _master_sync_last_run_date == now_kst.date():
+        _master_sync_last_check_ts = now_utc
+        return
+    if now_kst.hour < max(0, min(23, _master_sync_target_hour)):
+        _master_sync_last_check_ts = now_utc
+        return
+
+    with _master_sync_lock:
+        global _master_sync_last_check_ts, _master_sync_last_run_date
+        now_utc = datetime.utcnow()
+        if (now_utc - _master_sync_last_check_ts) < timedelta(minutes=10):
+            return
+        try:
+            from database_config import maybe_daily_sync_master
+            maybe_daily_sync_master(force=False)
+            current_app.logger.debug("[MASTER SYNC] Periodic check executed.")
+            _master_sync_last_run_date = get_korean_time().date()
+        except Exception as exc:
+            try:
+                current_app.logger.error(f"[MASTER SYNC] periodic sync failed: {exc}")
+            except Exception:
+                pass
+        finally:
+            _master_sync_last_check_ts = now_utc
+
 @app.route("/api/test-simple")
 def test_simple():
     return jsonify({"status": "ok"})
@@ -725,18 +825,53 @@ def api_search_popup():
     search_type = request.args.get('type', 'company')
     search_field = request.args.get('value', '')  # 검색할 필드
     query = request.args.get('q', '')  # 검색어
-    limit = int(request.args.get('limit', '50'))
-    
+    limit_raw = request.args.get('limit', '50')
+    page_raw = request.args.get('page', '1')
+    filters_param = request.args.get('filters')
+
+    try:
+        limit = int(limit_raw)
+    except (TypeError, ValueError):
+        limit = 50
+    if limit < 1:
+        limit = 1
+
+    try:
+        page = int(page_raw)
+    except (TypeError, ValueError):
+        page = 1
+    if page < 1:
+        page = 1
+
+    filters = None
+    if filters_param:
+        try:
+            parsed = json.loads(filters_param)
+            if isinstance(parsed, list):
+                filters = parsed
+        except json.JSONDecodeError:
+            filters = None
+
     try:
         # SearchPopupService 사용
         search_service = SearchPopupService(DB_PATH)
-        result = search_service.search(search_type, query, search_field, limit)
-        
+        result = search_service.search(
+            search_type,
+            query,
+            search_field,
+            limit,
+            page,
+            filters,
+        )
+
         return jsonify({
             'success': True,
             'results': result['results'],
             'total': result.get('total', len(result['results'])),
-            'config': result.get('config', {})
+            'config': result.get('config', {}),
+            'page': result.get('page', page),
+            'has_more': result.get('has_more', False),
+            'total_pages': result.get('total_pages', 0),
         })
     except Exception as e:
         logging.error(f"Search popup API error: {e}")
@@ -3621,6 +3756,36 @@ def admin_follow_sop_codes():
                          menu=MENU_CONFIG)
 
 
+@app.route("/admin/subcontract-approval-codes")
+@require_admin_auth
+def admin_subcontract_approval_codes():
+    """산안법 도급승인 코드 관리 임베디드 페이지"""
+    column_key = request.args.get('column_key', '')
+    embedded = request.args.get('embedded', 'false') == 'true'
+
+    return render_template(
+        'admin-subcontract-approval-codes.html',
+        column_key=column_key,
+        embedded=embedded,
+        menu=MENU_CONFIG,
+    )
+
+
+@app.route("/admin/subcontract-report-codes")
+@require_admin_auth
+def admin_subcontract_report_codes():
+    """화관법 도급신고 코드 관리 임베디드 페이지"""
+    column_key = request.args.get('column_key', '')
+    embedded = request.args.get('embedded', 'false') == 'true'
+
+    return render_template(
+        'admin-subcontract-report-codes.html',
+        column_key=column_key,
+        embedded=embedded,
+        menu=MENU_CONFIG,
+    )
+
+
 @app.route("/admin/safe-workplace-codes")
 @require_admin_auth
 def admin_safe_workplace_codes():
@@ -3687,6 +3852,108 @@ def delete_follow_sop_column(column_id):
         logging.error(f"Follow SOP 컬럼 삭제 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
+
+@app.route("/api/subcontract-approval-columns", methods=["GET"])
+def get_subcontract_approval_columns():
+    """산안법 도급승인 페이지 동적 컬럼 설정 조회"""
+    try:
+        column_service = ColumnConfigService('subcontract_approval', DB_PATH)
+        columns = column_service.list_columns()
+        return jsonify(columns)
+    except Exception as e:
+        logging.error(f"산안법 도급승인 컬럼 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/subcontract-approval-columns", methods=["POST"])
+def add_subcontract_approval_column():
+    """산안법 도급승인 페이지 동적 컬럼 추가"""
+    try:
+        if not request.json:
+            return jsonify({"success": False, "message": "JSON data required"}), 400
+
+        column_service = ColumnConfigService('subcontract_approval', DB_PATH)
+        result = column_service.add_column(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"산안법 도급승인 컬럼 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/subcontract-approval-columns/<int:column_id>", methods=["PUT"])
+def update_subcontract_approval_column(column_id):
+    """산안법 도급승인 페이지 동적 컬럼 수정"""
+    try:
+        column_service = ColumnConfigService('subcontract_approval', DB_PATH)
+        result = column_service.update_column(column_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"산안법 도급승인 컬럼 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/subcontract-approval-columns/<int:column_id>", methods=["DELETE"])
+def delete_subcontract_approval_column(column_id):
+    """산안법 도급승인 페이지 동적 컬럼 삭제"""
+    try:
+        column_service = ColumnConfigService('subcontract_approval', DB_PATH)
+        result = column_service.delete_column(column_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"산안법 도급승인 컬럼 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/subcontract-report-columns", methods=["GET"])
+def get_subcontract_report_columns():
+    """화관법 도급신고 페이지 동적 컬럼 설정 조회"""
+    try:
+        column_service = ColumnConfigService('subcontract_report', DB_PATH)
+        columns = column_service.list_columns()
+        return jsonify(columns)
+    except Exception as e:
+        logging.error(f"화관법 도급신고 컬럼 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/subcontract-report-columns", methods=["POST"])
+def add_subcontract_report_column():
+    """화관법 도급신고 페이지 동적 컬럼 추가"""
+    try:
+        if not request.json:
+            return jsonify({"success": False, "message": "JSON data required"}), 400
+
+        column_service = ColumnConfigService('subcontract_report', DB_PATH)
+        result = column_service.add_column(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"화관법 도급신고 컬럼 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/subcontract-report-columns/<int:column_id>", methods=["PUT"])
+def update_subcontract_report_column(column_id):
+    """화관법 도급신고 페이지 동적 컬럼 수정"""
+    try:
+        column_service = ColumnConfigService('subcontract_report', DB_PATH)
+        result = column_service.update_column(column_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"화관법 도급신고 컬럼 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/subcontract-report-columns/<int:column_id>", methods=["DELETE"])
+def delete_subcontract_report_column(column_id):
+    """화관법 도급신고 페이지 동적 컬럼 삭제"""
+    try:
+        column_service = ColumnConfigService('subcontract_report', DB_PATH)
+        result = column_service.delete_column(column_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"화관법 도급신고 컬럼 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
 # Follow SOP Sections API 엔드포인트
 @app.route("/api/follow-sop-sections", methods=["GET"])
 def get_follow_sop_sections():
@@ -3746,6 +4013,136 @@ def reorder_follow_sop_sections():
         return jsonify(result)
     except Exception as e:
         logging.error(f"Follow SOP 섹션 순서 변경 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/subcontract-approval-sections", methods=["GET"])
+def get_subcontract_approval_sections():
+    """산안법 도급승인 섹션 목록 조회"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('subcontract_approval', DB_PATH)
+        sections = section_service.get_sections()
+        return jsonify({"success": True, "sections": sections})
+    except Exception as e:
+        logging.error(f"산안법 도급승인 섹션 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/subcontract-approval-sections", methods=["POST"])
+def add_subcontract_approval_section():
+    """산안법 도급승인 섹션 추가"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('subcontract_approval', DB_PATH)
+        result = section_service.add_section(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"산안법 도급승인 섹션 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/subcontract-approval-sections/<int:section_id>", methods=["PUT"])
+def update_subcontract_approval_section(section_id):
+    """산안법 도급승인 섹션 수정"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('subcontract_approval', DB_PATH)
+        result = section_service.update_section(section_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"산안법 도급승인 섹션 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/subcontract-approval-sections/<int:section_id>", methods=["DELETE"])
+def delete_subcontract_approval_section(section_id):
+    """산안법 도급승인 섹션 삭제"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('subcontract_approval', DB_PATH)
+        result = section_service.delete_section(section_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"산안법 도급승인 섹션 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/subcontract-approval-sections/reorder", methods=["POST"])
+def reorder_subcontract_approval_sections():
+    """산안법 도급승인 섹션 순서 변경"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('subcontract_approval', DB_PATH)
+        result = section_service.reorder_sections(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"산안법 도급승인 섹션 순서 변경 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/subcontract-report-sections", methods=["GET"])
+def get_subcontract_report_sections():
+    """화관법 도급신고 섹션 목록 조회"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('subcontract_report', DB_PATH)
+        sections = section_service.get_sections()
+        return jsonify({"success": True, "sections": sections})
+    except Exception as e:
+        logging.error(f"화관법 도급신고 섹션 조회 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/subcontract-report-sections", methods=["POST"])
+def add_subcontract_report_section():
+    """화관법 도급신고 섹션 추가"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('subcontract_report', DB_PATH)
+        result = section_service.add_section(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"화관법 도급신고 섹션 추가 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/subcontract-report-sections/<int:section_id>", methods=["PUT"])
+def update_subcontract_report_section(section_id):
+    """화관법 도급신고 섹션 수정"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('subcontract_report', DB_PATH)
+        result = section_service.update_section(section_id, request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"화관법 도급신고 섹션 수정 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/subcontract-report-sections/<int:section_id>", methods=["DELETE"])
+def delete_subcontract_report_section(section_id):
+    """화관법 도급신고 섹션 삭제"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('subcontract_report', DB_PATH)
+        result = section_service.delete_section(section_id)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"화관법 도급신고 섹션 삭제 중 오류: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/subcontract-report-sections/reorder", methods=["POST"])
+def reorder_subcontract_report_sections():
+    """화관법 도급신고 섹션 순서 변경"""
+    try:
+        from section_service import SectionConfigService
+        section_service = SectionConfigService('subcontract_report', DB_PATH)
+        result = section_service.reorder_sections(request.json)
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"화관법 도급신고 섹션 순서 변경 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
 # Safe Workplace API 엔드포인트
@@ -3983,6 +4380,39 @@ def admin_safety_instruction_columns():
                          menu=MENU_CONFIG,
                          sections=sections)
 
+
+def _render_list_builder(board_type: str, board_label: str, column_key: str):
+    from werkzeug.exceptions import NotFound
+    service = ColumnConfigService(board_type, DB_PATH)
+    column = service.get_column_by_key(column_key)
+    if not column:
+        raise NotFound('리스트 컬럼을 찾을 수 없습니다.')
+    api_prefix = board_type.replace('_', '-')
+    api_endpoint = f"/api/{api_prefix}-columns/{column['id']}"
+    return render_template(
+        'admin-follow-sop-list-builder.html',
+        menu=MENU_CONFIG,
+        board_label=board_label,
+        column=column,
+        api_endpoint=api_endpoint,
+        table_mappings=get_table_mappings(board_type),
+    )
+
+
+@app.route("/admin/follow-sop-columns/<column_key>/list-builder")
+@require_admin_auth
+def admin_follow_sop_list_builder(column_key):
+    return _render_list_builder('follow_sop', 'Follow SOP', column_key)
+
+
+@app.route("/admin/safety-instruction-columns/<column_key>/list-builder")
+@require_admin_auth
+def admin_safety_instruction_list_builder(column_key):
+    return _render_list_builder('safety_instruction', '환경안전 지시서', column_key)
+
+
+
+
 @app.route("/admin/follow-sop-columns")
 @require_admin_auth
 def admin_follow_sop_columns():
@@ -3996,6 +4426,38 @@ def admin_follow_sop_columns():
                          menu=MENU_CONFIG,
                          section_columns=section_columns,
                          sections=section_columns)  # 하위 호환성
+
+
+@app.route("/admin/subcontract-approval-columns")
+@require_admin_auth
+def admin_subcontract_approval_columns():
+    """산안법 도급승인 컬럼 관리 페이지"""
+    from section_service import SectionConfigService
+    section_service = SectionConfigService('subcontract_approval', DB_PATH)
+    section_columns = section_service.get_sections_with_columns()
+
+    return render_template(
+        'admin-subcontract-approval-columns.html',
+        menu=MENU_CONFIG,
+        section_columns=section_columns,
+        sections=section_columns,
+    )
+
+
+@app.route("/admin/subcontract-report-columns")
+@require_admin_auth
+def admin_subcontract_report_columns():
+    """화관법 도급신고 컬럼 관리 페이지"""
+    from section_service import SectionConfigService
+    section_service = SectionConfigService('subcontract_report', DB_PATH)
+    section_columns = section_service.get_sections_with_columns()
+
+    return render_template(
+        'admin-subcontract-report-columns.html',
+        menu=MENU_CONFIG,
+        section_columns=section_columns,
+        sections=section_columns,
+    )
 
 @app.route("/admin/fullprocess-columns")
 def redirect_fullprocess_columns():
@@ -8816,6 +9278,8 @@ def page_view(url):
         'follow-sop': 'follow_sop.follow_sop_route',
         'full-process': 'full_process.full_process_route',
         'safe-workplace': 'safe_workplace.safe_workplace_route',
+        'subcontract-approval': 'subcontract_approval.subcontract_approval_route',
+        'subcontract-report': 'subcontract_report.subcontract_report_route',
         'partner-standards': 'partner_standards_route',
         # 구 라우트 호환: /change-request -> /partner-change-request
         'change-request': 'partner_change_request_route',

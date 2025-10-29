@@ -31,6 +31,32 @@ class FullProcessRepository:
     def db_path(self) -> str:
         return self._db_path
 
+    def _resolve_actor_label(self, data: Mapping[str, Any]) -> str:
+        def _extract(keys):
+            for key in keys:
+                value = data.get(key)
+                if value not in (None, ''):
+                    return str(value)
+            return ''
+
+        primary = _extract(('updated_by', 'created_by', 'actor_label'))
+        if primary:
+            return primary
+
+        user_name = _extract(('user_name',))
+        emp_id = _extract(('user_id', 'emp_id', 'userid'))
+        login_id = _extract(('login_id', 'user_id'))
+
+        if user_name and emp_id:
+            return f"{user_name}/{emp_id}"
+        if user_name:
+            return user_name
+        if emp_id:
+            return emp_id
+        if login_id:
+            return login_id
+        return 'SYSTEM'
+
     # ------------------------------------------------------------------
     # Connection helpers
 
@@ -779,10 +805,14 @@ class FullProcessRepository:
                 'custom_data': custom_data_json,
             }
 
+            actor_label = self._resolve_actor_label(data)
+
             if 'created_at' in table_columns:
                 upsert_data['created_at'] = created_at_dt.strftime('%Y-%m-%d %H:%M:%S')
-            if 'created_by' in table_columns:
-                upsert_data['created_by'] = data.get('created_by') or data.get('user_id', 'system')
+            if actor_label and 'created_by' in table_columns:
+                upsert_data['created_by'] = actor_label
+            if actor_label and 'updated_by' in table_columns:
+                upsert_data['updated_by'] = actor_label
             if 'is_deleted' in table_columns:
                 upsert_data['is_deleted'] = 0
 
@@ -817,7 +847,7 @@ class FullProcessRepository:
                     from board_services import AttachmentService
 
                     attachment_service = AttachmentService('full_process', self._db_path, conn)
-                    uploaded_by = data.get('created_by') or data.get('user_id', 'system')
+                    uploaded_by = actor_label or data.get('user_id', 'system')
 
                     for index, file_info in enumerate(valid_files):
                         file_obj: FileStorage = file_info['file']
@@ -921,16 +951,34 @@ class FullProcessRepository:
                 logging.debug("[FULL_PROCESS] update detail logging skipped", exc_info=True)
 
             table = self._resolve_table_name(conn)
+            table_columns = set(self._get_columns(conn, table))
+            actor_label = self._resolve_actor_label(data)
+            timestamp = get_korean_time().strftime('%Y-%m-%d %H:%M:%S')
+
+            upsert_data = {
+                'fullprocess_number': fullprocess_number,
+                'custom_data': custom_data_json,
+            }
+            update_cols = ['custom_data']
+
+            if 'updated_at' in table_columns:
+                upsert_data['updated_at'] = timestamp
+                update_cols.append('updated_at')
+
+            if actor_label:
+                if 'updated_by' in table_columns:
+                    upsert_data['updated_by'] = actor_label
+                    update_cols.append('updated_by')
+                elif 'created_by' in table_columns and 'updated_by' not in table_columns:
+                    upsert_data['created_by'] = actor_label
+                    update_cols.append('created_by')
 
             safe_upsert(
                 conn,
                 table,
-                {
-                    'fullprocess_number': fullprocess_number,
-                    'custom_data': custom_data_json,
-                },
+                upsert_data,
                 conflict_cols=['fullprocess_number'],
-                update_cols=['custom_data'],
+                update_cols=update_cols,
             )
 
             safe_upsert(
@@ -970,7 +1018,7 @@ class FullProcessRepository:
                 meta for meta in attachment_meta
                 if isinstance(meta, dict) and (not meta.get('id') or meta.get('isNew'))
             ])
-            uploaded_by = data.get('updated_by') or data.get('user_id', 'system')
+            uploaded_by = actor_label or data.get('user_id', 'system')
             for file_info in valid_files:
                 file_obj: FileStorage = file_info['file']
                 meta: Dict[str, Any] = {}

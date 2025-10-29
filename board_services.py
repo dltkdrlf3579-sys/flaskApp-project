@@ -4,12 +4,13 @@
 """
 import json
 import logging
-from datetime import datetime
-from typing import List, Dict, Any, Optional
 import sqlite3
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 from db_connection import get_db_connection
 from db.upsert import safe_upsert
+from list_schema_utils import resolve_child_schema, dump_child_schema
 from upload_utils import sanitize_filename, validate_uploaded_files
 from repositories.common.board_config import BOARD_CONFIGS, get_board_config
 
@@ -62,7 +63,21 @@ class ColumnService:
         columns = conn.execute(query).fetchall()
         conn.close()
 
-        return [dict(col) for col in columns]
+        results = []
+        for col in columns:
+            column_dict = dict(col)
+            raw_schema, generated = resolve_child_schema(column_dict)
+            column_dict['child_schema'] = raw_schema
+            if generated:
+                column_dict['_child_schema_generated'] = True
+            if column_dict.get('dropdown_options'):
+                try:
+                    column_dict['dropdown_options'] = json.loads(column_dict['dropdown_options'])
+                except json.JSONDecodeError:
+                    column_dict['dropdown_options'] = []
+            results.append(column_dict)
+
+        return results
 
     @staticmethod
     def _is_protected_key(column_key: str) -> bool:
@@ -98,7 +113,12 @@ class ColumnService:
             values.append(json.dumps(data.get('dropdown_options', [])))
         else:
             values.append(None)
-        
+
+        child_schema_json = dump_child_schema(data.get('child_schema'))
+        if 'child_schema' in existing_columns:
+            columns.append('child_schema')
+            values.append(child_schema_json)
+
         # table_name과 table_type이 테이블에 있는지 확인
         # PostgreSQL: information_schema를 통해 컬럼 정보 조회
         cursor.execute("""
@@ -169,6 +189,10 @@ class ColumnService:
         if 'dropdown_options' in data:
             update_fields.append("dropdown_options = %s")
             params.append(json.dumps(data['dropdown_options']))
+
+        if 'child_schema' in data and 'child_schema' in existing_columns:
+            update_fields.append("child_schema = %s")
+            params.append(dump_child_schema(data['child_schema']))
         
         if 'is_active' in data:
             update_fields.append("is_active = %s")
@@ -520,7 +544,9 @@ class AttachmentService:
         'follow_sop': 'work_req_no',
         'full_process': 'fullprocess_number',
         'change_request': 'request_number',
-        'safe_workplace': 'safeplace_no'
+        'safe_workplace': 'safeplace_no',
+        'subcontract_approval': 'approval_number',
+        'subcontract_report': 'report_number',
     }
     
     def __init__(self, board_type: str, db_path: str, conn=None):

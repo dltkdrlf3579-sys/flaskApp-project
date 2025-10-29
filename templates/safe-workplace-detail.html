@@ -77,6 +77,17 @@
                                     <input type="hidden" name="safeplace_no" value="{{ workplace.safeplace_no }}">
                                 {% elif col.column_key == 'created_at' %}
                                     <input type="text" value="{{ (workplace.created_at|date_only) if workplace.created_at else '-' }}" readonly class="readonly-highlight">
+                                {% elif col.column_key == 'updated_by' %}
+                                    <input type="text"
+                                           value="{{ (workplace.updated_by or workplace.created_by) | default('-', true) }}"
+                                           readonly
+                                           class="readonly-highlight">
+                                {% elif col.column_key == 'updated_at' %}
+                                    {% set updated_stamp = workplace.updated_at or workplace.created_at %}
+                                    <input type="text"
+                                           value="{{ (updated_stamp|date_only) if updated_stamp else '-' }}"
+                                           readonly
+                                           class="readonly-highlight">
                                 {% elif col.column_type == 'dropdown' %}
                                     {% set is_multi = col.input_type == 'dropdown_multi' %}
                                     {% if is_multi %}

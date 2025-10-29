@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from contextlib import contextmanager
+import os
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 import sqlite3
@@ -16,6 +17,7 @@ from db.upsert import safe_upsert
 from upload_utils import validate_uploaded_files
 from utils.sql_filters import sql_is_active_true, sql_is_deleted_false
 from column_utils import normalize_column_types
+from list_schema_utils import resolve_child_schema, deserialize_list_rows
 from section_service import SectionConfigService
 from timezone_config import get_korean_time
 
@@ -42,6 +44,32 @@ class SafetyInstructionRepository:
             yield conn
         finally:
             conn.close()
+
+    def _resolve_actor_label(self, data: Mapping[str, Any]) -> str:
+        def _extract(keys):
+            for key in keys:
+                value = data.get(key)
+                if value not in (None, ''):
+                    return str(value)
+            return ''
+
+        primary = _extract(('updated_by', 'created_by', 'actor_label'))
+        if primary:
+            return primary
+
+        user_name = _extract(('user_name',))
+        emp_id = _extract(('user_id', 'emp_id', 'userid'))
+        login_id = _extract(('login_id', 'user_id'))
+
+        if user_name and emp_id:
+            return f"{user_name}/{emp_id}"
+        if user_name:
+            return user_name
+        if emp_id:
+            return emp_id
+        if login_id:
+            return login_id
+        return 'SYSTEM'
 
     # ------------------------------------------------------------------
     # Metadata helpers
@@ -132,6 +160,7 @@ class SafetyInstructionRepository:
         with self.connection() as conn:
             sections = self._load_sections(conn)
             dynamic_columns = normalize_column_types(self._load_dynamic_columns(conn))
+            self._attach_list_child_schemas(conn, dynamic_columns)
             section_columns = self._build_section_columns(dynamic_columns, sections)
 
             total_count, items = self._fetch_rows(conn, filters, page, per_page)
@@ -162,6 +191,7 @@ class SafetyInstructionRepository:
         with self.connection() as conn:
             sections = self._load_sections(conn)
             dynamic_columns = normalize_column_types(self._load_dynamic_columns(conn))
+            self._attach_list_child_schemas(conn, dynamic_columns)
             section_columns = self._build_section_columns(dynamic_columns, sections)
             basic_options = self._load_basic_options(conn)
 
@@ -170,16 +200,25 @@ class SafetyInstructionRepository:
                 return {}
 
             attachments = self._load_attachments(conn, issue_number)
+            custom_data = instruction.get('custom_data', {}) or {}
+            list_payloads = self._build_list_payloads(dynamic_columns, custom_data)
 
-            return {
+            context = {
                 'instruction': instruction,
-                'custom_data': instruction.get('custom_data', {}),
+                'custom_data': custom_data,
                 'sections': sections,
                 'section_columns': section_columns,
                 'attachments': attachments,
                 'basic_options': basic_options,
                 'is_popup': is_popup,
+                'feature_toggles': {
+                    'child_schema_renderer': self._is_child_schema_renderer_enabled(),
+                },
             }
+            if list_payloads:
+                context['list_payloads'] = list_payloads
+
+            return context
 
     # ------------------------------------------------------------------
     # Register context
@@ -188,6 +227,7 @@ class SafetyInstructionRepository:
         with self.connection() as conn:
             dynamic_columns = normalize_column_types(self._load_dynamic_columns(conn))
             sections = self._load_sections(conn)
+            self._attach_list_child_schemas(conn, dynamic_columns)
             section_columns = self._build_section_columns(dynamic_columns, sections)
             basic_options = self._load_basic_options(conn)
 
@@ -203,6 +243,9 @@ class SafetyInstructionRepository:
                 'basic_options': basic_options,
                 'today_date': today_date,
                 'is_popup': is_popup,
+                'feature_toggles': {
+                    'child_schema_renderer': self._is_child_schema_renderer_enabled(),
+                },
             }
 
     # ------------------------------------------------------------------
@@ -211,13 +254,36 @@ class SafetyInstructionRepository:
     def save_from_request(self, request) -> Any:
         data = request.form
         files: List[FileStorage] = request.files.getlist('files')
+        actor_label = self._resolve_actor_label(data)
+        actor_label = self._resolve_actor_label(data)
+        custom_data_raw = request.form.get('custom_data', '{}')
+
+        try:
+            if isinstance(custom_data_raw, dict):
+                custom_data = dict(custom_data_raw)
+            else:
+                custom_data = json.loads(custom_data_raw) if custom_data_raw else {}
+        except Exception:
+            custom_data = {}
 
         valid_files, validation_errors = validate_uploaded_files(files)
         if validation_errors:
             return {'success': False, 'message': validation_errors[0], 'errors': validation_errors}, 400
 
         with self.connection() as conn:
-            payload = self._prepare_save_payload(request)
+            normalized_custom_data, list_errors = self._normalize_list_custom_data(conn, custom_data)
+            if list_errors:
+                try:
+                    conn.rollback()
+                except Exception:
+                    logging.debug("[SAFETY_INSTRUCTION] rollback after list validation failed", exc_info=True)
+                return {
+                    'success': False,
+                    'message': list_errors[0],
+                    'errors': list_errors,
+                }, 400
+
+            payload = self._prepare_save_payload(request, custom_data_override=normalized_custom_data)
             issue_number = payload['issue_number']
 
             table_columns = set(self._get_table_columns(conn, 'safety_instructions'))
@@ -305,7 +371,7 @@ class SafetyInstructionRepository:
                 from board_services import AttachmentService
 
                 attachment_service = AttachmentService('safety_instruction', self.db_path, conn)
-                uploaded_by = request.form.get('created_by') or request.form.get('user_id', 'system')
+                uploaded_by = actor_label or request.form.get('user_id', 'system')
 
                 for index, file_info in enumerate(valid_files):
                     file_obj: FileStorage = file_info['file']
@@ -373,6 +439,19 @@ class SafetyInstructionRepository:
             deleted_attachment_ids = []
 
         with self.connection() as conn:
+            normalized_custom_data, list_errors = self._normalize_list_custom_data(conn, custom_data)
+            if list_errors:
+                try:
+                    conn.rollback()
+                except Exception:
+                    logging.debug("[SAFETY_INSTRUCTION] rollback after list validation failed (update)", exc_info=True)
+                return {
+                    'success': False,
+                    'message': list_errors[0],
+                    'errors': list_errors,
+                }, 400
+            custom_data = normalized_custom_data
+
             is_postgres = getattr(conn, 'is_postgres', False)
             timestamp_expr = 'NOW()' if is_postgres else "datetime('now')"
 
@@ -384,7 +463,7 @@ class SafetyInstructionRepository:
                 set_parts.append('custom_data = %s')
                 params.append(json.dumps(custom_data, ensure_ascii=False))
 
-            updated_by = request.form.get('updated_by') or request.form.get('user_id', 'system')
+            updated_by = actor_label or request.form.get('user_id', 'system')
             if 'updated_by' in table_columns:
                 set_parts.append('updated_by = %s')
                 params.append(updated_by)
@@ -446,7 +525,7 @@ class SafetyInstructionRepository:
 
                 if valid_files:
                     new_meta = [m for m in attachment_meta if isinstance(m, dict) and m.get('isNew')]
-                    uploaded_by = data.get('updated_by') or data.get('user_id', 'system')
+                    uploaded_by = actor_label or data.get('user_id', 'system')
                     for idx, file_info in enumerate(valid_files):
                         file_obj: FileStorage = file_info['file']
                         meta: Dict[str, Any] = {}
@@ -472,6 +551,190 @@ class SafetyInstructionRepository:
 
     # ------------------------------------------------------------------
     # Internal helpers (list)
+
+    def _load_list_columns(self, conn) -> Dict[str, Dict[str, Any]]:
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            where_active = sql_is_active_true('is_active', conn)
+            where_deleted = sql_is_deleted_false('is_deleted', conn)
+            cursor.execute(
+                f"""
+                SELECT *
+                FROM safety_instruction_column_config
+                WHERE {where_active}
+                  AND {where_deleted}
+                  AND LOWER(COALESCE(column_type, '')) = 'list'
+                ORDER BY column_order
+                """
+            )
+            rows = [dict(row) for row in cursor.fetchall()]
+        except Exception:
+            logging.debug("[SAFETY_INSTRUCTION] list column lookup failed", exc_info=True)
+            return {}
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+
+        list_columns: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            key = row.get('column_key')
+            if not key:
+                continue
+            schema, generated = resolve_child_schema(row)
+            if schema is not None:
+                row['child_schema'] = schema
+            if generated:
+                row['_child_schema_generated'] = True
+            list_columns[key] = row
+        return list_columns
+
+    def _normalize_list_custom_data(
+        self,
+        conn,
+        custom_data: Optional[Mapping[str, Any]],
+    ) -> Tuple[Dict[str, Any], List[str]]:
+        if not isinstance(custom_data, Mapping):
+            return {}, []
+
+        normalized: Dict[str, Any] = dict(custom_data)
+        errors: List[str] = []
+
+        list_columns = self._load_list_columns(conn)
+        if not list_columns:
+            return normalized, errors
+
+        for key, column in list_columns.items():
+            if key not in custom_data:
+                continue
+
+            label = column.get('column_name') or key
+            raw_value = custom_data.get(key)
+
+            if raw_value in (None, '', []):
+                normalized[key] = []
+                continue
+
+            if isinstance(raw_value, str):
+                stripped = raw_value.strip()
+                if not stripped:
+                    normalized[key] = []
+                    continue
+                try:
+                    parsed_value = json.loads(stripped)
+                except json.JSONDecodeError:
+                    errors.append(f"[{label}] JSON 형식이 올바르지 않습니다.")
+                    normalized[key] = []
+                    continue
+                raw_list = parsed_value
+            else:
+                raw_list = raw_value
+
+            if not isinstance(raw_list, list):
+                errors.append(f"[{label}] 리스트 형식의 데이터를 기대합니다.")
+                normalized[key] = []
+                continue
+
+            info = deserialize_list_rows(column, column.get('child_schema'), raw_list)
+
+            for warning in info.get('warnings') or []:
+                errors.append(f"[{label}] {warning}")
+
+            for row_error in info.get('errors') or []:
+                row_index = row_error.get('row')
+                messages = row_error.get('messages') or []
+                for message in messages:
+                    if row_index is None:
+                        errors.append(f"[{label}] {message}")
+                    else:
+                        errors.append(f"[{label}] 행 {row_index + 1}: {message}")
+
+            normalized[key] = info.get('rows', raw_list)
+
+        return normalized, errors
+
+    def _attach_list_child_schemas(
+        self,
+        conn,
+        dynamic_columns: Iterable[Dict[str, Any]],
+    ) -> None:
+        if not dynamic_columns:
+            return
+        list_columns = self._load_list_columns(conn)
+        if not list_columns:
+            return
+        for column in dynamic_columns:
+            if not column:
+                continue
+            key = column.get('column_key')
+            if not key:
+                continue
+            info = list_columns.get(key)
+            if not info:
+                continue
+            if info.get('child_schema') is not None:
+                column['child_schema'] = info['child_schema']
+            if '_child_schema_generated' in info:
+                column['_child_schema_generated'] = info['_child_schema_generated']
+
+    @staticmethod
+    def _ensure_raw_json(value: Any) -> str:
+        if value is None:
+            return '[]'
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return '[]'
+
+    def _build_list_payloads(
+        self,
+        dynamic_columns: Iterable[Mapping[str, Any]],
+        custom_data: Optional[Mapping[str, Any]],
+    ) -> Dict[str, Any]:
+        if not isinstance(custom_data, Mapping):
+            return {}
+
+        payloads: Dict[str, Any] = {}
+        for column in dynamic_columns or []:
+            if not column or column.get('column_type') != 'list':
+                continue
+            key = column.get('column_key')
+            if not key:
+                continue
+
+            schema, generated = resolve_child_schema(column)
+            if schema is not None:
+                column['child_schema'] = schema
+            if generated:
+                column['_child_schema_generated'] = True
+
+            raw_value = custom_data.get(key)
+            info = deserialize_list_rows(column, column.get('child_schema'), raw_value)
+
+            payloads[key] = {
+                'raw': self._ensure_raw_json(raw_value),
+                'rows': info.get('rows', []),
+                'raw_list': info.get('raw', []),
+                'schema': column.get('child_schema'),
+                'preset': info.get('preset'),
+                'warnings': info.get('warnings', []),
+                'errors': info.get('errors', []),
+                'generated_schema': bool(column.get('_child_schema_generated')),
+            }
+
+        return payloads
+
+    @staticmethod
+    def _is_child_schema_renderer_enabled() -> bool:
+        flag = os.getenv('USE_CHILD_SCHEMA_RENDERER', '')
+        if flag:
+            return flag.lower() in {'1', 'true', 'y', 'yes'}
+        return True
 
     def _load_sections(self, conn) -> List[Dict[str, Any]]:
         try:
@@ -735,13 +998,16 @@ class SafetyInstructionRepository:
             options[field] = codes
         return options
 
-    def _prepare_save_payload(self, request):
+    def _prepare_save_payload(self, request, custom_data_override=None):
         form = request.form
-        custom_data_raw = form.get('custom_data', '{}')
-        try:
-            custom_data = json.loads(custom_data_raw) if isinstance(custom_data_raw, str) else custom_data_raw
-        except Exception:
-            custom_data = {}
+        if custom_data_override is not None:
+            custom_data = dict(custom_data_override)
+        else:
+            custom_data_raw = form.get('custom_data', '{}')
+            try:
+                custom_data = json.loads(custom_data_raw) if isinstance(custom_data_raw, str) else custom_data_raw
+            except Exception:
+                custom_data = {}
 
         issue_number = custom_data.get('issue_number') or form.get('issue_number') or self._generate_issue_number()
 
@@ -756,6 +1022,9 @@ class SafetyInstructionRepository:
                 if value not in (None, ''):
                     return value
             return default
+
+        actor_label = self._resolve_actor_label(form)
+        timestamp = get_korean_time().strftime('%Y-%m-%d %H:%M:%S')
 
         payload = {
             'issue_number': issue_number,
@@ -781,9 +1050,12 @@ class SafetyInstructionRepository:
             'safety_violation_grade': pick('safety_violation_grade'),
             'violation_type': pick('violation_type'),
             'custom_data': json.dumps(custom_data, ensure_ascii=False),
-            'created_at': get_korean_time().strftime('%Y-%m-%d %H:%M:%S'),
-            'updated_at': None,
+            'created_at': timestamp,
+            'updated_at': timestamp,
         }
+        if actor_label:
+            payload['created_by'] = actor_label
+            payload['updated_by'] = actor_label
 
         return payload
 

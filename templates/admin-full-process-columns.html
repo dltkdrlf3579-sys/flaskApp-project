@@ -415,7 +415,7 @@
                         
                         <div class="mb-3">
                             <label class="form-label">입력 타입 <span class="text-danger">*</span></label>
-                            <select class="form-select" id="columnType" onchange="toggleOptionsField(); toggleTableField(); toggleSpanField(); toggleListField(); toggleNumberField(); toggleScoringField(); checkTypeChange();">
+                            <select class="form-select" id="columnType" onchange="toggleOptionsField(); toggleTableField(); toggleSpanField(); toggleListField(); toggleNumberField(); toggleScoringField(); toggleTextareaToggle(); checkTypeChange();">
                                 <option value="" disabled selected>타입을 선택하세요</option>
                                 <option value="text">텍스트</option>
                                 <option value="dropdown">드롭다운</option>
@@ -456,6 +456,11 @@
                                     <i class="bi bi-square-fill"></i> 전체 너비 (8칸)
                                 </label>
                             </div>
+                        </div>
+
+                        <div class="form-check form-switch mt-2" id="textareaToggleWrapper" style="display: none;">
+                            <input class="form-check-input" type="checkbox" id="textareaToggle" onchange="handleTextareaToggleChange()">
+                            <label class="form-check-label" for="textareaToggle">여러 줄 텍스트 영역 허용</label>
                         </div>
                         
                         <!-- 테이블 설정 영역 -->
@@ -763,6 +768,8 @@
 <script src="/static/js/Sortable.min.js"></script>
 <!-- Sortable 초기화 헬퍼 -->
 <script src="/static/js/sortable-init.js"></script>
+<script src="/static/js/column-field-editor.js?v=20241001"></script>
+<script src="/static/js/list-child-support.js?v=20241001"></script>
 
 <script>
 // Sortable.js 로드 확인
@@ -789,6 +796,27 @@ let sectionsToAdd = [];  // 새로 추가할 섹션 추적
 let originalSections = JSON.parse(JSON.stringify({{ sections | tojson | safe }}));  // 원본 섹션 정보 보관
 let sectionChanges = {};  // 섹션 변경사항 추적
 let editingId = null;
+
+if (window.ColumnFieldEditor) {
+    window.ColumnFieldEditor.init({
+        showSection: true,
+        showSpan: true,
+        showTable: true,
+        showListButton: true,
+        showNumber: true,
+        showScoring: true,
+        showActive: true
+    });
+}
+
+if (window.ListChildSupport) {
+    window.ListChildSupport.init({
+        boardKey: 'full_process',
+        adminBase: '/admin/full-process-columns',
+        apiBase: '/api/full-process-columns',
+        reload: () => loadColumns && loadColumns()
+    });
+}
         
         // 컬럼명 실시간 유효성 검사
         function validateColumnName(input) {
@@ -1202,6 +1230,13 @@ let editingId = null;
                 const sectionColumns = columns;
                 const orderInSection = sectionColumns.indexOf(column) + 1;
                 
+                const isListType = (column.column_type === 'list') || ((column.input_type || '').toString().startsWith('list_'));
+                const listButtonDisabledAttr = (column._toDelete || column._isNew) ? 'disabled' : '';
+                const listButton = isListType ? `
+                                <button class="btn btn-sm btn-link p-0 text-info" onclick="openListChildBuilderFromCard('${column.id}', '${column.column_key}')" ${listButtonDisabledAttr} title="자식 컬럼 편집">
+                                    <i class="bi bi-layout-text-window-reverse" style="font-size: 14px;"></i>
+                                </button>` : '';
+                
                 card.innerHTML = `
                     <div class="column-number">${orderInSection}</div>
                     <div class="column-content">
@@ -1216,6 +1251,7 @@ let editingId = null;
                                 <button class="btn btn-sm btn-link p-0" onclick="editColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''} title="편집">
                                     <i class="bi bi-pencil" style="font-size: 14px;"></i>
                                 </button>
+                                ${listButton}
                                 <button class="btn btn-sm btn-link p-0 text-danger" onclick="deleteColumn('${column.id}')" ${column._toDelete ? 'disabled' : ''} title="삭제">
                                     <i class="bi bi-trash" style="font-size: 14px;"></i>
                                 </button>
@@ -1340,6 +1376,9 @@ let editingId = null;
                 'linked_dept': '연결-부서',
                 'linked_text': '연결-텍스트'
             };
+            if (type === 'textarea') {
+                return labels['text'];
+            }
             return labels[type] || type;
         }
         
@@ -1373,6 +1412,8 @@ let editingId = null;
             document.getElementById('dropdownOptions').value = '';  // 드롭다운 옵션 초기화
             const multiToggle = document.getElementById('dropdownMultiToggle');
             if (multiToggle) multiToggle.checked = false;
+            const textareaToggle = document.getElementById('textareaToggle');
+            if (textareaToggle) textareaToggle.checked = false;
             setSpan(2, { remember: true });
             toggleOptionsField();
             toggleTableField();
@@ -1381,6 +1422,7 @@ let editingId = null;
             toggleListField();
             toggleNumberField();
             handleDropdownMultiToggleChange();
+            toggleTextareaToggle();
             
             // 기존 모달 인스턴스가 있으면 재사용, 없으면 새로 생성
             const modalElement = document.getElementById('columnModal');
@@ -1499,15 +1541,26 @@ let editingId = null;
                 }
             } else {
                 const resolvedType = column.column_type; // 강제 고정 제거
-                typeSelectEl.value = resolvedType || '';
+                let baseSelectValue = resolvedType || '';
+                const textareaToggle = document.getElementById('textareaToggle');
+                if (resolvedType === 'textarea') {
+                    baseSelectValue = 'text';
+                    if (textareaToggle) {
+                        textareaToggle.checked = true;
+                    }
+                } else if (textareaToggle) {
+                    textareaToggle.checked = false;
+                }
+                typeSelectEl.value = baseSelectValue;
                 // 일반 컬럼은 타입 변경 가능
                 typeSelectEl.disabled = false;
                 if (resolvedType === 'table') {
                     document.getElementById('tableConfigField').style.display = 'block';
                 }
             }
-            
-            typeSelectEl.dataset.originalType = typeSelectEl.value || column.column_type || '';
+
+            typeSelectEl.dataset.originalType = column.column_type || typeSelectEl.value || '';
+            toggleTextareaToggle();
             document.getElementById('isActive').checked = column.is_active;
             
             // 섹션 선택 옵션 갱신 후 값 설정(옵션에 없는 탭이면 기본값)
@@ -1520,7 +1573,7 @@ let editingId = null;
             }
             
             // 텍스트 타입이고 span 값이 있으면 설정
-            if ((column.column_type === 'text' || column.column_type === 'dropdown') && column.column_span) {
+            if ((column.column_type === 'text' || column.column_type === 'dropdown' || column.column_type === 'textarea') && column.column_span) {
                 setSpan(column.column_span, { remember: true });
             }
             
@@ -1710,13 +1763,60 @@ let editingId = null;
             }
 
             handleDropdownMultiToggleChange();
+            toggleTextareaToggle();
         }
 
         function isDropdownMultiSelected() {
             const toggle = document.getElementById('dropdownMultiToggle');
             return !!(toggle && toggle.checked);
         }
-        
+
+        function toggleTextareaToggle() {
+            const wrapper = document.getElementById('textareaToggleWrapper');
+            if (!wrapper) {
+                return;
+            }
+            const type = document.getElementById('columnType').value;
+            const toggle = document.getElementById('textareaToggle');
+            if (type === 'text') {
+                wrapper.style.display = '';
+            } else {
+                wrapper.style.display = 'none';
+                if (toggle) {
+                    toggle.checked = false;
+                }
+            }
+            handleTextareaToggleChange();
+        }
+
+        function handleTextareaToggleChange() {
+            const typeEl = document.getElementById('columnType');
+            const baseType = typeEl ? typeEl.value : '';
+            const textareaOn = (baseType === 'text') && isTextareaSelected();
+            if (baseType === 'text') {
+                setSpan(textareaOn ? 8 : 2, { remember: true });
+            }
+            toggleSpanField();
+            checkTypeChange();
+        }
+
+        function getResolvedColumnType() {
+            const typeEl = document.getElementById('columnType');
+            if (!typeEl) {
+                return '';
+            }
+            const baseType = typeEl.value;
+            if (baseType === 'text' && isTextareaSelected()) {
+                return 'textarea';
+            }
+            return baseType;
+        }
+
+        function isTextareaSelected() {
+            const toggle = document.getElementById('textareaToggle');
+            return !!(toggle && toggle.checked);
+        }
+
         function toggleTableField() {
             const type = document.getElementById('columnType').value;
             document.getElementById('tableConfigField').style.display = 
@@ -1730,7 +1830,8 @@ let editingId = null;
             }
             const type = document.getElementById('columnType').value;
             const isMulti = (type === 'dropdown') && isDropdownMultiSelected();
-            const shouldShow = (type === 'text') || (type === 'dropdown' && !isMulti);
+            const isTextarea = (type === 'text') && isTextareaSelected();
+            const shouldShow = (type === 'text' && !isTextarea) || (type === 'dropdown' && !isMulti);
             spanField.style.display = shouldShow ? 'block' : 'none';
         }
 
@@ -2076,7 +2177,7 @@ let editingId = null;
                 const optgroup = select.querySelector('optgroup');
                 let options = '';
                 pendingColumns.forEach(col => {
-                    if (!col._toDelete && col.column_type === 'text') {
+                    if (!col._toDelete && (col.column_type === 'text' || col.column_type === 'textarea')) {
                         options += `<option value="${col.column_key}">${col.column_name}</option>`;
                     }
                 });
@@ -2086,8 +2187,9 @@ let editingId = null;
         
         function checkTypeChange() {
             const typeSelect = document.getElementById('columnType');
-            const currentType = typeSelect ? typeSelect.value : '';
-            if (currentType === 'dropdown') {
+            const currentResolvedType = getResolvedColumnType();
+            const baseType = typeSelect ? typeSelect.value : '';
+            if (baseType === 'dropdown') {
                 if (isDropdownMultiSelected()) {
                     setSpan(8, { remember: true });
                 } else {
@@ -2098,7 +2200,7 @@ let editingId = null;
             const originalType = typeSelect ? typeSelect.dataset.originalType : '';
             const warning = document.getElementById('typeChangeWarning');
             
-            if (editingId && originalType && originalType !== currentType) {
+            if (editingId && originalType && originalType !== currentResolvedType) {
                 warning.style.display = 'block';
             } else {
                 warning.style.display = 'none';
@@ -2109,25 +2211,29 @@ let editingId = null;
             const columnName = document.getElementById('columnName').value.trim();
             const columnKey = document.getElementById('columnKey').value.trim();
             const columnTypeElement = document.getElementById('columnType');
-            const columnType = columnTypeElement.value;
+            const baseColumnType = columnTypeElement.value;
+            const resolvedColumnType = getResolvedColumnType();
             const originalType = columnTypeElement.dataset.originalType;
             const isActive = document.getElementById('isActive').checked;
             const selectedSection = document.getElementById('columnSection').value;
             
             // span 값 가져오기 (기본값 2)
             let columnSpan = 2;
-        if (columnType === 'text' || columnType === 'dropdown') {
+        if (resolvedColumnType === 'text' || resolvedColumnType === 'dropdown') {
             const selectedSpan = document.querySelector('input[name="columnSpan"]:checked');
             if (selectedSpan) {
                 columnSpan = parseInt(selectedSpan.value);
             }
         }
-        if (columnType === 'dropdown' && isDropdownMultiSelected()) {
+        if (resolvedColumnType === 'dropdown' && isDropdownMultiSelected()) {
+            columnSpan = 8;
+        }
+        if (resolvedColumnType === 'textarea') {
             columnSpan = 8;
         }
             
             // 디버깅: disabled 상태에서도 값이 제대로 읽히는지 확인
-            console.log('Column Type:', columnType, 'Disabled:', columnTypeElement.disabled);
+            console.log('Column Type:', resolvedColumnType, 'Disabled:', columnTypeElement.disabled);
             
             if (!columnName || !columnKey) {
                 alert('컬럼명과 컬럼 키는 필수 입력 항목입니다.');
@@ -2140,7 +2246,7 @@ let editingId = null;
                 return;
             }
             
-            if (!columnType || columnType === '') {
+            if (!baseColumnType || baseColumnType === '') {
                 // linked 타입이나 popup 타입이 아닌 경우에만 타입 선택 요구
                 if (!columnTypeElement.disabled) {
                     alert('타입을 선택해주세요.');
@@ -2171,7 +2277,7 @@ let editingId = null;
             }
             
             // 타입 변경 시 경고
-            if (editingId && originalType && originalType !== columnType) {
+            if (editingId && originalType && originalType !== resolvedColumnType) {
                 const column = pendingColumns.find(c => String(c.id) === String(editingId));
                 if (column && !column._isNew) {
                     if (!confirm('⚠️ 주의: 타입을 변경하실 경우 기존 데이터가 전부 삭제될 수 있으니 신중히 변경 부탁드립니다.\n\n정말 타입을 변경하시겠습니까?')) {
@@ -2184,6 +2290,7 @@ let editingId = null;
             if (editingId) {
                 const existingColumn = pendingColumns.find(c => String(c.id) === String(editingId));
                 if (existingColumn && existingColumn.column_type && existingColumn.column_type.startsWith('linked_')) {
+                    // suffix 매칭으로 tableType 추론
                     let detected = null;
                     for (const [tKey, cfg] of Object.entries(tableColumnMappings)) {
                         for (let i = 1; i < cfg.columns.length; i++) {
@@ -2200,12 +2307,13 @@ let editingId = null;
                         const baseExists = pendingColumns.some(c => !c._toDelete && c.column_key === baseKey);
                         if (!baseExists) {
                             const baseOrder = Math.max(0, (pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete).map(c => c.column_order).reduce((a,b)=>Math.max(a,b), -1)) + 1);
+                            // 이름에서 마지막 토큰 제거하여 기본명 추정
                             let baseName = columnName;
                             const lastToken = detected.config.columns.find(c=>c.key_suffix===detected.suffix)?.name.split(' ').slice(-1)[0] || '';
                             if (lastToken && baseName.endsWith(' ' + lastToken)) {
                                 baseName = baseName.slice(0, -(' ' + lastToken).length);
                             }
-                            const baseType = detected.config.columns[0].type;
+                            const baseType = detected.config.columns[0].type; // popup_* 등
                             const newId = Date.now() + Math.floor(Math.random()*1000);
                             const newBase = {
                                 id: newId,
@@ -2228,7 +2336,7 @@ let editingId = null;
             }
             
             let dropdownOptions = null;
-            if (columnType === 'dropdown') {
+            if (resolvedColumnType === 'dropdown') {
                 const optionsText = document.getElementById('dropdownOptions').value;
                 if (optionsText) {
                     dropdownOptions = optionsText.split('\n').filter(o => o.trim());
@@ -2244,7 +2352,7 @@ let editingId = null;
                     // 테이블 컬럼 타입 보존/복원 로직
                     const suffixes = ['_id','_dept','_bizno','_code','_company'];
                     const isLinkedField = suffixes.some(s => (columnKey || '').endsWith(s));
-                    // 힌트 매핑
+                    // 힌트 매핑 (기지 키 → 테이블 타입)
                     const baseKeyHints = { 'incharged_person': 'person', 'incharge': 'department', 'company_1cha': 'company', 'company_1st': 'company' };
                     const keyHint = baseKeyHints[existingColumn.column_key] || baseKeyHints[columnKey] || null;
                     // 형제 컬럼으로 테이블 타입 추론
@@ -2255,7 +2363,7 @@ let editingId = null;
                     else if (siblings.some(c => c.column_key === baseKey + '_code')) siblingType = 'department';
                     else if (siblings.some(c => c.column_key === baseKey + '_dept')) siblingType = 'person';
                     else if (siblings.some(c => c.column_key === baseKey + '_company')) siblingType = 'contractor';
-                    // determine if this column looks like a table group in this context
+                    // 최종 테이블 타입 추정
                     const looksLikeTable = (
                         (existingColumn.column_type && (existingColumn.column_type.startsWith('popup_') || existingColumn.column_type.startsWith('linked_')))
                         || existingColumn.input_type === 'table'
@@ -2263,9 +2371,10 @@ let editingId = null;
                         || !!existingColumn.table_type
                     );
                     const tableTypeGuess = existingColumn._tableType || keyHint || siblingType || (looksLikeTable ? (existingColumn._tableType || null) : null);
-                    let newType = existingColumn._tableGroup ? existingColumn.column_type : columnType;
+                    // 최종 타입 결정
+                    let newType = existingColumn._tableGroup ? existingColumn.column_type : resolvedColumnType;
                     if (!isLinkedField && (!newType || newType === 'text') && tableTypeGuess) {
-                        const popupMap = { person:'popup_person', department:'popup_department', company:'popup_company', building:'popup_building', contractor:'popup_contractor' };
+                        const popupMap = { person:'popup_person', department:'popup_department', company:'popup_company', building:'popup_building', contractor:'popup_contractor', division:'popup_division' };
                         newType = popupMap[tableTypeGuess] || newType || 'text';
                     }
                     // 입력 서브타입 계산 (table/list/number)
@@ -2284,8 +2393,8 @@ let editingId = null;
                         resolvedInputType = (nt === 'integer') ? 'number_integer' : 'number_float';
                     }
 
-                    // 숫자형 수정 시 간단 가중치/등급을 scoring_config로 반영
-                    if (columnType === 'number') {
+            // 숫자형 수정 시 간단 가중치/등급을 scoring_config로 반영
+            if (resolvedColumnType === 'number') {
                         const perEl = document.getElementById('numberPerUnit');
                         const gradeEl = document.getElementById('numberGrade');
                         const per = perEl ? parseFloat(perEl.value || '0') : 0;
@@ -2300,7 +2409,17 @@ let editingId = null;
                         const nt = nsel ? nsel.value : 'float';
                         resolvedInputType = (nt === 'integer') ? 'number_integer' : 'number_float';
                     }
-                    const scText = (document.getElementById('scoringConfig') || {}).value || pendingColumns[index].scoring_config || null;
+            // 채점/총점 타입은 인라인 편집 상태를 즉시 반영하여 저장 (별도 저장 버튼 누르지 않아도 됨)
+            let scText;
+            if (resolvedColumnType === 'scoring' || resolvedColumnType === 'score_total') {
+                try {
+                    scText = JSON.stringify(buildScoringConfig());
+                } catch (e) {
+                    scText = (document.getElementById('scoringConfig') || {}).value || existingColumn.scoring_config || null;
+                }
+            } else {
+                scText = (document.getElementById('scoringConfig') || {}).value || existingColumn.scoring_config || null;
+            }
                     pendingColumns[index] = {
                         ...existingColumn,
                         column_name: columnName,
@@ -2318,15 +2437,14 @@ let editingId = null;
                         _tableType: existingColumn._tableType || tableTypeGuess || null,
                         _tableName: existingColumn._tableName
                     };
-                    // 변경 즉시 UI에 반영 (최종 저장은 별도 버튼)
                     try { renderColumns(); } catch(e) {}
                     setTimeout(() => {
                         alert('변경사항이 저장 대기중입니다.\n"전체 변경사항 저장" 버튼을 눌러 최종 반영하세요.');
                     }, 0);
                 }
-                } else {
-                    // 새 컬럼 추가
-                    if (columnType === 'list') {
+            } else {
+                // 새 컬럼 추가
+                if (resolvedColumnType === 'list') {
                     // 리스트 타입 처리
                     const listItemType = document.getElementById('listItemType').value;
                     const newId = Date.now();
@@ -2350,8 +2468,8 @@ let editingId = null;
                     console.log(`리스트 컬럼 생성:`, newColumn);
                     
                     alert(`✅ 리스트 컬럼이 생성되었습니다:\n\n${columnName}\n\n"전체 변경사항 저장" 버튼을 눌러야 최종 반영됩니다.`);
-                
-                } else if (columnType === 'table') {
+                    
+                } else if (resolvedColumnType === 'table') {
                     // 테이블 타입: 선택된 테이블 설정 확인
                     const selectedTable = document.getElementById('selectedTableConfig').value;
                     if (!selectedTable) {
@@ -2390,10 +2508,6 @@ let editingId = null;
                             _tableType: selectedTable, // 테이블 타입 저장
                             _tableName: config.name // 테이블 이름 저장
                         };
-
-                        if (col.type === 'table') {
-                            newColumn.input_type = 'table';
-                        }
                         
                         pendingColumns.push(newColumn);
                         createdColumns.push(colName);
@@ -2406,13 +2520,8 @@ let editingId = null;
                 } else {
                     // 일반 타입
                     const newId = Date.now();
-                    
-                    // 선택된 섹션의 마지막 순서 계산
-                    const sectionColumns = pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete);
-                    const maxOrderInSection = sectionColumns.length > 0 ? Math.max(...sectionColumns.map(c => c.column_order)) : -1;
-                    
-                    // 숫자형은 간단 가중치/등급을 scoring_config로 저장
-                    if (columnType === 'number') {
+                    // 숫자형이면 간단 가중치/등급을 scoring_config로 반영
+                    if (resolvedColumnType === 'number') {
                         const perEl = document.getElementById('numberPerUnit');
                         const gradeEl = document.getElementById('numberGrade');
                         const per = perEl ? parseFloat(perEl.value || '0') : 0;
@@ -2422,12 +2531,23 @@ let editingId = null;
                         const ta = document.getElementById('scoringConfig');
                         if (ta) ta.value = JSON.stringify(conf);
                     }
-                    const scText = (document.getElementById('scoringConfig') || {}).value || null;
+                    let scText;
+                    if (resolvedColumnType === 'scoring' || resolvedColumnType === 'score_total') {
+                        try { scText = JSON.stringify(buildScoringConfig()); }
+                        catch(e){ scText = (document.getElementById('scoringConfig') || {}).value || null; }
+                    } else {
+                        scText = (document.getElementById('scoringConfig') || {}).value || null;
+                    }
+                    
+                    // 선택된 섹션의 마지막 순서 계산
+                    const sectionColumns = pendingColumns.filter(c => c.tab === selectedSection && !c._toDelete);
+                    const maxOrderInSection = sectionColumns.length > 0 ? Math.max(...sectionColumns.map(c => c.column_order)) : -1;
+                    
                     const newColumn = {
                         id: newId,
                         column_name: columnName,
                         column_key: columnKey,
-                        column_type: columnType,
+                        column_type: resolvedColumnType,
                         column_span: columnSpan, // span 정보 추가
                         tab: selectedSection, // 섹션 정보 추가
                         is_active: isActive,
@@ -2436,15 +2556,14 @@ let editingId = null;
                         column_order: maxOrderInSection + 1, // 섹션 내 순서로 설정
                         _isNew: true
                     };
+                    if (resolvedColumnType === 'dropdown') {
+                        newColumn.input_type = isDropdownMultiSelected() ? 'dropdown_multi' : null;
+                    }
                     // 숫자 서브타입 저장
-                    if (columnType === 'number') {
+                    if (resolvedColumnType === 'number') {
                         const nsel = document.querySelector('input[name="numberType"]:checked');
                         const nt = nsel ? nsel.value : 'float';
                         newColumn.input_type = (nt === 'integer') ? 'number_integer' : 'number_float';
-                    } else if (columnType === 'dropdown') {
-                        newColumn.input_type = isDropdownMultiSelected() ? 'dropdown_multi' : null;
-                    } else if (columnType === 'table') {
-                        newColumn.input_type = 'table';
                     }
                     pendingColumns.push(newColumn);
                     

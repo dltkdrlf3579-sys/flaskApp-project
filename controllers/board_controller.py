@@ -44,6 +44,9 @@ class BoardControllerConfig:
     attachments_enabled: bool = True
     scoring_enabled: bool = False
     extra_context: Dict[str, Any] = field(default_factory=dict)
+    list_context_key: str = "items"
+    detail_missing_message: str = "항목을 찾을 수 없습니다."
+    filter_fields: tuple[str, ...] = ("company_name", "business_number")
 
 
 class BoardController:

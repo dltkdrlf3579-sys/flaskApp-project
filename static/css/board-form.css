@@ -109,8 +109,12 @@
 .info-cell input[readonly].linked-field,
 .info-cell textarea[readonly].linked-field,
 .input-group input[readonly].linked-field,
+.lfc-field input[readonly].linked-field,
+.lfc-input-group input[readonly].linked-field,
 .info-cell input[readonly][data-linked-type],
-.input-group input[readonly][data-linked-type] {
+.input-group input[readonly][data-linked-type],
+.lfc-field input[readonly][data-linked-type],
+.lfc-input-group input[readonly][data-linked-type] {
   background-color: #f1f5f9 !important;
   color: #6b7280 !important;
   cursor: not-allowed !important;

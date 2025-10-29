@@ -44,6 +44,8 @@
             <div class="info-table">
                 <!-- 평가번호와 등록일 추가 (첫 번째 섹션에만) -->
                 {% if loop.index == 1 %}
+                {% set registrar_value = process.updated_by or process.created_by %}
+                {% set updated_stamp = process.updated_at or process.created_at %}
                 <div class="info-row">
                     <div class="info-cell span-2">
                         <label>평가번호</label>
@@ -52,6 +54,14 @@
                     <div class="info-cell span-2">
                         <label>등록일</label>
                         <input type="text" value="{{ (process.created_at|date_only) if process.created_at else '-' }}" readonly class="readonly-highlight">
+                    </div>
+                    <div class="info-cell span-2">
+                        <label>등록자</label>
+                        <input type="text" value="{{ registrar_value | default('-', true) }}" readonly class="readonly-highlight">
+                    </div>
+                    <div class="info-cell span-2">
+                        <label>수정일</label>
+                        <input type="text" value="{{ (updated_stamp|date_only) if updated_stamp else '-' }}" readonly class="readonly-highlight">
                     </div>
                 </div>
                 {% endif %}

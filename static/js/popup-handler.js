@@ -3,6 +3,46 @@
  * 모든 보드에서 공통으로 사용하는 팝업 처리 함수
  */
 
+function triggerFieldEvents(field) {
+    if (!field) {
+        return;
+    }
+    try {
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        field.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch (err) {
+        console.warn('triggerFieldEvents failed', err);
+    }
+}
+
+function applyFieldValue(field, value, options) {
+    if (!field) {
+        return;
+    }
+
+    const opts = Object.assign(
+        {
+            readonly: true,
+            background: '#f3f4f6',
+        },
+        options || {}
+    );
+
+    field.value = value == null ? '' : value;
+
+    if (opts.readonly) {
+        field.setAttribute('readonly', true);
+    } else {
+        field.removeAttribute('readonly');
+    }
+
+    if (typeof opts.background === 'string') {
+        field.style.backgroundColor = opts.background;
+    }
+
+    triggerFieldEvents(field);
+}
+
 // table_group 기반 linked_text 필드 자동 업데이트 함수
 function updateLinkedFieldsByTableGroup(mainFieldKey, selectedData, tableGroup) {
     if (!tableGroup) return;
@@ -27,73 +67,63 @@ function updateLinkedFieldsByTableGroup(mainFieldKey, selectedData, tableGroup) 
         // 메인 필드는 제외
         if (fieldKey === mainFieldKey) return;
 
-        // 필드 키 패턴에 따라 데이터 매핑
-        console.log('Mapping field:', fieldKey, 'with data:', selectedData);
+        let mappedValue;
 
         if (fieldKey.includes('_company')) {
-            // contractor의 소속업체명
-            field.value = selectedData.company_name || selectedData.company || '';
+            mappedValue = selectedData.company_name || selectedData.company || '';
         } else if (fieldKey.includes('_bizno') || fieldKey.includes('_business_number')) {
-            // contractor의 사업자번호
-            field.value = selectedData.business_number || selectedData.company_business_number || '';
+            mappedValue = selectedData.business_number || selectedData.company_business_number || '';
         } else if (fieldKey.includes('_id')) {
             if (tableType === 'contractor') {
-                field.value = selectedData.worker_id || selectedData.contractor_id || selectedData.id || '';
+                mappedValue = selectedData.worker_id || selectedData.contractor_id || selectedData.id || '';
             } else if (tableType === 'company') {
-                field.value = selectedData.company_id || selectedData.id || '';
+                mappedValue = selectedData.company_id || selectedData.id || '';
             } else if (tableType === 'building') {
-                field.value = selectedData.building_id || selectedData.id || '';
+                mappedValue = selectedData.building_id || selectedData.id || '';
             }
         } else if (fieldKey.includes('_name')) {
             if (tableType === 'contractor') {
-                field.value = selectedData.worker_name || selectedData.contractor_name || selectedData.name || '';
+                mappedValue = selectedData.worker_name || selectedData.contractor_name || selectedData.name || '';
             } else if (tableType === 'company') {
-                field.value = selectedData.company_name || selectedData.name || '';
+                mappedValue = selectedData.company_name || selectedData.name || '';
             } else if (tableType === 'building') {
-                field.value = selectedData.building_name || selectedData.name || '';
+                mappedValue = selectedData.building_name || selectedData.name || '';
             }
         } else if (fieldKey.includes('_dept') || fieldKey.includes('_department')) {
-            field.value = selectedData.department_name || selectedData.department || '';
+            mappedValue = selectedData.department_name || selectedData.department || '';
         } else if (fieldKey.includes('_division')) {
-            field.value = selectedData.division_name || selectedData.division || '';
+            mappedValue = selectedData.division_name || selectedData.division || '';
         } else if (fieldKey.includes('_code')) {
             if (tableType === 'building') {
-                field.value = selectedData.building_code || selectedData.code || '';
+                mappedValue = selectedData.building_code || selectedData.code || '';
             } else if (tableType === 'department') {
-                field.value = selectedData.dept_code || selectedData.department_code || '';
+                mappedValue = selectedData.dept_code || selectedData.department_code || '';
             } else if (tableType === 'division') {
-                field.value = selectedData.division_code || selectedData.code || '';
+                mappedValue = selectedData.division_code || selectedData.code || '';
             } else {
-                field.value = selectedData.code || '';
+                mappedValue = selectedData.code || '';
             }
         } else if (fieldKey.includes('_parent')) {
             if (tableType === 'division') {
-                field.value = selectedData.parent_division_code || '';
+                mappedValue = selectedData.parent_division_code || '';
             }
         } else if (fieldKey.includes('_text')) {
-            // linked_text 필드들에 대한 매핑
-            const linkedType = field.getAttribute('data-linked-type');
-            console.log('Processing linked_text field:', fieldKey, 'linked-type:', linkedType);
-
             if (fieldKey.includes('사업자번호') || fieldKey.includes('_bizno')) {
-                field.value = selectedData.business_number || selectedData.company_business_number || '';
+                mappedValue = selectedData.business_number || selectedData.company_business_number || '';
             } else if (fieldKey.includes('소속업체') || fieldKey.includes('업체명')) {
-                field.value = selectedData.company_name || selectedData.company || '';
+                mappedValue = selectedData.company_name || selectedData.company || '';
             } else if (fieldKey.includes('부서') || fieldKey.includes('_dept')) {
-                field.value = selectedData.department_name || selectedData.department || '';
+                mappedValue = selectedData.department_name || selectedData.department || '';
             } else if (fieldKey.includes('건물') || fieldKey.includes('_building')) {
-                field.value = selectedData.building_name || selectedData.name || '';
+                mappedValue = selectedData.building_name || selectedData.name || '';
             } else {
-                // 기본적으로 name 필드 매핑
-                field.value = selectedData.name || selectedData.employee_name || selectedData.company_name || selectedData.building_name || '';
+                mappedValue = selectedData.name || selectedData.employee_name || selectedData.company_name || selectedData.building_name || '';
             }
         }
 
-        console.log('Field', fieldKey, 'mapped to:', field.value);
-
-        // 필드를 읽기 전용으로 설정
-        field.setAttribute('readonly', true);
-        field.style.backgroundColor = '#f8f9fa';
+        if (typeof mappedValue !== 'undefined') {
+            applyFieldValue(field, mappedValue, { background: '#f8f9fa' });
+        }
     });
 
     markContractorCompanyFields(document);
@@ -144,7 +174,7 @@ function openPersonSearch(fieldKey) {
     const popup = window.open(popupUrl, 'personSearch', popupOptions);
     
     if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        console.warn('Popup blocked: person search');
         return;
     }
     
@@ -176,7 +206,7 @@ function openCompanySearch(fieldKey) {
     const popup = window.open(popupUrl, 'companySearch', popupOptions);
     
     if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        console.warn('Popup blocked: company search');
         return;
     }
     
@@ -190,9 +220,7 @@ window.receiveCompanySelection = function(fieldKey, data) {
     // 메인 필드 업데이트
     const mainField = document.getElementById(fieldKey);
     if (mainField) {
-        mainField.value = data.company_name || '';
-        mainField.readOnly = true;
-        mainField.style.backgroundColor = '#f3f4f6';
+        applyFieldValue(mainField, data.company_name || '', { background: '#f3f4f6' });
 
         // table_group 기반 linked 필드 자동 업데이트
         const tableGroup = mainField.getAttribute('data-table-group');
@@ -210,10 +238,8 @@ window.receiveCompanySelection = function(fieldKey, data) {
 
     patterns.forEach(pattern => {
         const field = document.getElementById(fieldKey + pattern.suffix);
-        if (field && pattern.value) {
-            field.value = pattern.value;
-            field.setAttribute('readonly', true);
-            field.style.backgroundColor = '#f8f9fa';
+        if (field && pattern.value !== undefined) {
+            applyFieldValue(field, pattern.value, { background: '#f8f9fa' });
         }
     });
 };
@@ -242,7 +268,7 @@ function openBuildingSearch(fieldKey) {
     const popup = window.open(popupUrl, 'buildingSearch', popupOptions);
     
     if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        console.warn('Popup blocked: building search');
         return;
     }
     
@@ -274,7 +300,7 @@ function openDepartmentSearch(fieldKey) {
     const popup = window.open(popupUrl, 'departmentSearch', popupOptions);
     
     if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        console.warn('Popup blocked: department search');
         return;
     }
     
@@ -306,7 +332,7 @@ function openContractorSearch(fieldKey) {
     const popup = window.open(popupUrl, 'contractorSearch', popupOptions);
     
     if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        console.warn('Popup blocked: contractor search');
         return;
     }
     
@@ -328,16 +354,12 @@ window.receiveTableSelection = function(fieldKey, data) {
 
     const mainField = document.getElementById(fieldKey);
     if (mainField) {
-        mainField.value = data.display_value || data.name || data.display_name || '';
-        mainField.readOnly = true;
-        mainField.style.backgroundColor = '#f3f4f6';
+        applyFieldValue(mainField, data.display_value || data.name || data.display_name || '', { background: '#f3f4f6' });
     }
 
     const idField = document.getElementById(fieldKey + '_id');
     if (idField) {
-        idField.value = data.id || '';
-        idField.readOnly = true;
-        idField.style.backgroundColor = '#f3f4f6';
+        applyFieldValue(idField, data.id || '', { background: '#f3f4f6' });
     }
 };
 
@@ -346,9 +368,7 @@ window.receivePersonSelection = function(fieldKey, data) {
 
     const mainField = document.getElementById(fieldKey);
     if (mainField) {
-        mainField.value = data.employee_name || data.name || '';
-        mainField.readOnly = true;
-        mainField.style.backgroundColor = '#f3f4f6';
+        applyFieldValue(mainField, data.employee_name || data.name || '', { background: '#f3f4f6' });
 
         // table_group 기반 linked 필드 자동 업데이트
         const tableGroup = mainField.getAttribute('data-table-group');
@@ -364,10 +384,8 @@ window.receivePersonSelection = function(fieldKey, data) {
 
     patterns.forEach(pattern => {
         const field = document.getElementById(fieldKey + pattern.suffix);
-        if (field && pattern.value) {
-            field.value = pattern.value;
-            field.setAttribute('readonly', true);
-            field.style.backgroundColor = '#f8f9fa';
+        if (field && pattern.value !== undefined) {
+            applyFieldValue(field, pattern.value, { background: '#f8f9fa' });
         }
     });
 };
@@ -378,9 +396,7 @@ window.receiveBuildingSelection = function(fieldKey, data) {
 
     const mainField = document.getElementById(fieldKey);
     if (mainField) {
-        mainField.value = data.building_name || '';
-        mainField.readOnly = true;
-        mainField.style.backgroundColor = '#f3f4f6';
+        applyFieldValue(mainField, data.building_name || '', { background: '#f3f4f6' });
 
         // table_group 기반 linked 필드 자동 업데이트
         const tableGroup = mainField.getAttribute('data-table-group');
@@ -391,9 +407,7 @@ window.receiveBuildingSelection = function(fieldKey, data) {
 
     const codeField = document.getElementById(fieldKey + '_code');
     if (codeField) {
-        codeField.value = data.building_code || '';
-        codeField.readOnly = true;
-        codeField.style.backgroundColor = '#f3f4f6';
+        applyFieldValue(codeField, data.building_code || '', { background: '#f3f4f6' });
     }
 };
 
@@ -402,9 +416,7 @@ window.receiveDepartmentSelection = function(fieldKey, data) {
 
     const mainField = document.getElementById(fieldKey);
     if (mainField) {
-        mainField.value = data.dept_name || data.department_name || '';
-        mainField.readOnly = true;
-        mainField.style.backgroundColor = '#f3f4f6';
+        applyFieldValue(mainField, data.dept_name || data.department_name || '', { background: '#f3f4f6' });
 
         // table_group 기반 linked 필드 자동 업데이트
         const tableGroup = mainField.getAttribute('data-table-group');
@@ -417,9 +429,7 @@ window.receiveDepartmentSelection = function(fieldKey, data) {
     // _code 필드 업데이트
     const codeField = document.getElementById(fieldKey + '_code');
     if (codeField) {
-        codeField.value = data.dept_code || data.department_code || '';
-        codeField.readOnly = true;
-        codeField.style.backgroundColor = '#f3f4f6';
+        applyFieldValue(codeField, data.dept_code || data.department_code || '', { background: '#f3f4f6' });
     }
 };
 
@@ -443,7 +453,7 @@ function openDivisionSearch(fieldKey) {
     const popup = window.open(popupUrl, 'divisionSearch', popupOptions);
 
     if (!popup || popup.closed) {
-        alert('팝업이 차단되었습니다. 브라우저의 팝업 차단을 해제해주세요.');
+        console.warn('Popup blocked: division search');
         return;
     }
 
@@ -458,37 +468,26 @@ window.receiveDivisionSelection = function(fieldKey, data) {
                       document.querySelector(`[data-field="${fieldKey}"]`);
 
     if (mainField) {
-        mainField.value = data.division_name || '';
-        mainField.readOnly = true;
-        mainField.style.backgroundColor = '#f3f4f6';
+        applyFieldValue(mainField, data.division_name || '', { background: '#f3f4f6' });
 
-        // table_group 기반 linked 필드 자동 업데이트
         const tableGroup = mainField.getAttribute('data-table-group');
         if (tableGroup) {
             updateLinkedFieldsByTableGroup(fieldKey, data, tableGroup);
         }
-
-        // change 이벤트 발생
-        const event = new Event('change', { bubbles: true });
-        mainField.dispatchEvent(event);
     }
 
     // 사업부코드 필드 업데이트
     const codeField = document.getElementById(fieldKey + '_code') ||
                       document.querySelector(`[data-field="${fieldKey}_code"]`);
     if (codeField) {
-        codeField.value = data.division_code || '';
-        codeField.readOnly = true;
-        codeField.style.backgroundColor = '#f3f4f6';
+        applyFieldValue(codeField, data.division_code || '', { background: '#f3f4f6' });
     }
 
     // 상위사업부 필드 업데이트
     const parentField = document.getElementById(fieldKey + '_parent') ||
                         document.querySelector(`[data-field="${fieldKey}_parent"]`);
     if (parentField) {
-        parentField.value = data.parent_division_code || '';
-        parentField.readOnly = true;
-        parentField.style.backgroundColor = '#f3f4f6';
+        applyFieldValue(parentField, data.parent_division_code || '', { background: '#f3f4f6' });
     }
 };
 
@@ -497,9 +496,7 @@ window.receiveContractorSelection = function(fieldKey, data) {
     // 1. 메인 필드 업데이트
     const mainField = document.getElementById(fieldKey);
     if (mainField) {
-        mainField.value = data.worker_name || data.contractor_name || data.name || '';
-        mainField.readOnly = true;
-        mainField.style.backgroundColor = '#f3f4f6';
+        applyFieldValue(mainField, data.worker_name || data.contractor_name || data.name || '', { background: '#f3f4f6' });
     }
 
     // 2. 모든 가능한 linked 필드 패턴 처리
@@ -518,10 +515,8 @@ window.receiveContractorSelection = function(fieldKey, data) {
 
     patterns.forEach(pattern => {
         const field = document.getElementById(fieldKey + pattern.suffix);
-        if (field && pattern.value) {
-            field.value = pattern.value;
-            field.setAttribute('readonly', true);
-            field.style.backgroundColor = '#f8f9fa';
+        if (field && pattern.value !== undefined) {
+            applyFieldValue(field, pattern.value, { background: '#f8f9fa' });
         }
     });
 

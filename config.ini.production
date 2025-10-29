@@ -29,6 +29,10 @@ log_db_backend = false
 [DASHBOARD]
 dashboard_url = https://your-dashboard.com
 dashboard_enabled = True
+primary_comp_id = 
+primary_dept_ids = 
+secondary_dashboard_url = https://your-alternate-dashboard.com
+fallback_dashboard_image = 
 
 [SQL_QUERIES]
 

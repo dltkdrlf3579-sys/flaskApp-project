@@ -163,6 +163,18 @@
         
         {% block style %}{% endblock %}
     </style>
+    <script>
+        (function() {
+            const originalAlert = window.alert;
+            window.alert = function(message, ...rest) {
+                if (typeof message === 'string' && message.includes('팝업이 차단되었습니다')) {
+                    console.warn('[popup-blocked]', message);
+                    return;
+                }
+                return originalAlert.call(this, message, ...rest);
+            };
+        })();
+    </script>
     <!-- 공통 팝업 핸들러 -->
     <script src="{{ url_for('static', filename='js/popup-handler.js') }}"></script>
 </head>
@@ -170,7 +182,7 @@
     <div class="popup-container">
         <div class="popup-header">
             <h1 class="popup-title">{% block popup_title %}협력사 상세정보{% endblock %}</h1>
-            <button class="popup-close" onclick="window.close()" title="창 닫기">✕</button>
+            <button type="button" class="popup-close" onclick="closePopupWindow()" title="창 닫기">✕</button>
         </div>
         <div class="popup-content">
             {% block content %}{% endblock %}
@@ -182,6 +194,16 @@
     
     <!-- CKEditor 초기화 스크립트 -->
     <script src="{{ url_for('static', filename='js/ckeditor-simple.js') }}"></script>
+
+    <script>
+        function closePopupWindow() {
+            try {
+                window.close();
+            } catch (err) {
+                console.warn('창을 닫을 수 없습니다:', err);
+            }
+        }
+    </script>
     
     <!-- 공통 테이블 검색 모달 -->
     <div id="table-search-modal" class="modal" style="display: none;">

@@ -27,6 +27,12 @@ from controllers.boards.follow_sop_controller import (
     FollowSopController,
     build_follow_sop_config,
 )
+from controllers.boards.subcontract_controller import (
+    SubcontractApprovalController,
+    build_subcontract_approval_config,
+    SubcontractReportController,
+    build_subcontract_report_config,
+)
 from controllers.boards.safe_workplace_controller import (
     SafeWorkplaceController,
     build_safe_workplace_config,
@@ -36,6 +42,10 @@ from controllers.boards.full_process_controller import (
     build_full_process_config,
 )
 from repositories.boards.follow_sop_repository import FollowSopRepository
+from repositories.boards.subcontract_repository import (
+    SubcontractApprovalRepository,
+    SubcontractReportRepository,
+)
 from repositories.boards.safe_workplace_repository import SafeWorkplaceRepository
 from repositories.boards.full_process_repository import FullProcessRepository
 
@@ -92,10 +102,24 @@ def _response_info(response):
 follow_sop_bp = Blueprint('follow_sop', __name__)
 safe_workplace_bp = Blueprint('safe_workplace', __name__)
 full_process_bp = Blueprint('full_process', __name__)
+subcontract_approval_bp = Blueprint('subcontract_approval', __name__)
+subcontract_report_bp = Blueprint('subcontract_report', __name__)
 
 _follow_sop_controller = FollowSopController(
     build_follow_sop_config(),
     FollowSopRepository(DB_PATH),
+    menu_config=MENU_CONFIG,
+)
+
+_subcontract_approval_controller = SubcontractApprovalController(
+    build_subcontract_approval_config(),
+    SubcontractApprovalRepository(DB_PATH),
+    menu_config=MENU_CONFIG,
+)
+
+_subcontract_report_controller = SubcontractReportController(
+    build_subcontract_report_config(),
+    SubcontractReportRepository(DB_PATH),
     menu_config=MENU_CONFIG,
 )
 
@@ -204,6 +228,219 @@ def update_follow_sop():
         'UPDATE',
         object_type='FOLLOW_SOP',
         object_id=work_req_no,
+        success=success,
+        details=payload if isinstance(payload, dict) else None,
+        error_message=error_message,
+    )
+    return response
+
+# ============= Subcontract Approval 라우트 =============
+@subcontract_approval_bp.route("/subcontract-approval", endpoint="subcontract_approval_route")
+def subcontract_approval_route():
+    """산안법 도급승인 목록 페이지"""
+    guard = enforce_permission('SUBCONTRACT_APPROVAL', 'view')
+    if guard:
+        return guard
+    response = _subcontract_approval_controller.list_view(request)
+    record_menu_view('SUBCONTRACT_APPROVAL')
+    return response
+
+
+@subcontract_approval_bp.route("/subcontract-approval-register", endpoint="subcontract_approval_register")
+def subcontract_approval_register():
+    """산안법 도급승인 등록 페이지"""
+    guard = enforce_permission('SUBCONTRACT_APPROVAL', 'write')
+    if guard:
+        return guard
+    response = _subcontract_approval_controller.register_view(request)
+    record_board_action(
+        'SUBCONTRACT_APPROVAL',
+        'VIEW',
+        object_type='SUBCONTRACT_APPROVAL',
+        object_name='register',
+    )
+    return response
+
+
+@subcontract_approval_bp.route(
+    "/subcontract-approval-detail/<approval_number>",
+    endpoint="subcontract_approval_detail",
+)
+def subcontract_approval_detail(approval_number: str):
+    """산안법 도급승인 상세 페이지"""
+    guard = enforce_permission('SUBCONTRACT_APPROVAL', 'view')
+    if guard:
+        return guard
+    response = _subcontract_approval_controller.detail_view(request, approval_number)
+    success, _ = _response_info(response)
+    record_board_action(
+        'SUBCONTRACT_APPROVAL',
+        'VIEW',
+        object_type='SUBCONTRACT_APPROVAL',
+        object_id=approval_number,
+        success=success,
+    )
+    return response
+
+
+@subcontract_approval_bp.route(
+    "/register-subcontract-approval",
+    methods=['POST'],
+    endpoint="register_subcontract_approval",
+)
+def register_subcontract_approval():
+    """산안법 도급승인 신규 등록"""
+    guard = enforce_permission('SUBCONTRACT_APPROVAL', 'write', response_type='json')
+    if guard:
+        return guard
+    response = _subcontract_approval_controller.save(request)
+    success, payload = _response_info(response)
+    approval_number = None
+    error_message = None
+    if isinstance(payload, dict):
+        approval_number = payload.get('approval_number') or payload.get('identifier_value')
+        error_message = payload.get('message') if not success else None
+    record_board_action(
+        'SUBCONTRACT_APPROVAL',
+        'CREATE',
+        object_type='SUBCONTRACT_APPROVAL',
+        object_id=approval_number,
+        success=success,
+        details=payload if isinstance(payload, dict) else None,
+        error_message=error_message,
+    )
+    return response
+
+
+@subcontract_approval_bp.route(
+    "/update-subcontract-approval",
+    methods=['POST'],
+    endpoint="update_subcontract_approval",
+)
+def update_subcontract_approval():
+    """산안법 도급승인 수정"""
+    guard = enforce_permission('SUBCONTRACT_APPROVAL', 'write', response_type='json')
+    if guard:
+        return guard
+    response = _subcontract_approval_controller.update(request)
+    success, payload = _response_info(response)
+    approval_number = None
+    error_message = None
+    if isinstance(payload, dict):
+        approval_number = payload.get('approval_number') or payload.get('identifier_value')
+        error_message = payload.get('message') if not success else None
+    record_board_action(
+        'SUBCONTRACT_APPROVAL',
+        'UPDATE',
+        object_type='SUBCONTRACT_APPROVAL',
+        object_id=approval_number,
+        success=success,
+        details=payload if isinstance(payload, dict) else None,
+        error_message=error_message,
+    )
+    return response
+
+
+# ============= Subcontract Report 라우트 =============
+@subcontract_report_bp.route("/subcontract-report", endpoint="subcontract_report_route")
+def subcontract_report_route():
+    """화관법 도급신고 목록 페이지"""
+    guard = enforce_permission('SUBCONTRACT_REPORT', 'view')
+    if guard:
+        return guard
+    response = _subcontract_report_controller.list_view(request)
+    record_menu_view('SUBCONTRACT_REPORT')
+    return response
+
+
+@subcontract_report_bp.route("/subcontract-report-register", endpoint="subcontract_report_register")
+def subcontract_report_register():
+    """화관법 도급신고 등록 페이지"""
+    guard = enforce_permission('SUBCONTRACT_REPORT', 'write')
+    if guard:
+        return guard
+    response = _subcontract_report_controller.register_view(request)
+    record_board_action(
+        'SUBCONTRACT_REPORT',
+        'VIEW',
+        object_type='SUBCONTRACT_REPORT',
+        object_name='register',
+    )
+    return response
+
+
+@subcontract_report_bp.route(
+    "/subcontract-report-detail/<report_number>",
+    endpoint="subcontract_report_detail",
+)
+def subcontract_report_detail(report_number: str):
+    """화관법 도급신고 상세 페이지"""
+    guard = enforce_permission('SUBCONTRACT_REPORT', 'view')
+    if guard:
+        return guard
+    response = _subcontract_report_controller.detail_view(request, report_number)
+    success, _ = _response_info(response)
+    record_board_action(
+        'SUBCONTRACT_REPORT',
+        'VIEW',
+        object_type='SUBCONTRACT_REPORT',
+        object_id=report_number,
+        success=success,
+    )
+    return response
+
+
+@subcontract_report_bp.route(
+    "/register-subcontract-report",
+    methods=['POST'],
+    endpoint="register_subcontract_report",
+)
+def register_subcontract_report():
+    """화관법 도급신고 신규 등록"""
+    guard = enforce_permission('SUBCONTRACT_REPORT', 'write', response_type='json')
+    if guard:
+        return guard
+    response = _subcontract_report_controller.save(request)
+    success, payload = _response_info(response)
+    report_number = None
+    error_message = None
+    if isinstance(payload, dict):
+        report_number = payload.get('report_number') or payload.get('identifier_value')
+        error_message = payload.get('message') if not success else None
+    record_board_action(
+        'SUBCONTRACT_REPORT',
+        'CREATE',
+        object_type='SUBCONTRACT_REPORT',
+        object_id=report_number,
+        success=success,
+        details=payload if isinstance(payload, dict) else None,
+        error_message=error_message,
+    )
+    return response
+
+
+@subcontract_report_bp.route(
+    "/update-subcontract-report",
+    methods=['POST'],
+    endpoint="update_subcontract_report",
+)
+def update_subcontract_report():
+    """화관법 도급신고 수정"""
+    guard = enforce_permission('SUBCONTRACT_REPORT', 'write', response_type='json')
+    if guard:
+        return guard
+    response = _subcontract_report_controller.update(request)
+    success, payload = _response_info(response)
+    report_number = None
+    error_message = None
+    if isinstance(payload, dict):
+        report_number = payload.get('report_number') or payload.get('identifier_value')
+        error_message = payload.get('message') if not success else None
+    record_board_action(
+        'SUBCONTRACT_REPORT',
+        'UPDATE',
+        object_type='SUBCONTRACT_REPORT',
+        object_id=report_number,
         success=success,
         details=payload if isinstance(payload, dict) else None,
         error_message=error_message,

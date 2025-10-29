@@ -20,6 +20,8 @@ CORE_MENU_NAMES = {
     "ACCIDENT_MGT": "협력사 사고",
     "SAFETY_INSTRUCTION": "환경안전 지시서",
     "FOLLOW_SOP": "Follow SOP",
+    "SUBCONTRACT_APPROVAL": "산안법 도급승인",
+    "SUBCONTRACT_REPORT": "화관법 도급신고",
     "SAFE_WORKPLACE": "안전한 일터",
     "FULL_PROCESS": "FullProcess",
     "SAFETY_COUNCIL": "안전보건 협의체",

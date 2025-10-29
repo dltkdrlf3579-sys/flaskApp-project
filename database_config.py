@@ -39,6 +39,17 @@ def _normalize_df(df):
     df.columns = [str(c).strip().lower() for c in df.columns]
     return df
 
+_COMMON_DATE_FORMATS = [
+    '%Y-%m-%d %H:%M:%S',
+    '%Y-%m-%d',
+    '%Y/%m/%d',
+    '%Y%m%d',
+    '%d-%b-%y',
+    '%d/%m/%Y',
+    '%Y-%m-%dT%H:%M:%S',
+    '%Y-%m-%d %H:%M',
+]
+
 def _to_sqlite_safe(v):
     """SQLite에 안전하게 저장하기 위한 타입 변환"""
     if pd.isna(v):
@@ -208,6 +219,52 @@ def _apply_scoring_mappings(row_dict: dict) -> dict:
 def _prepare_row_custom_data(row) -> dict:
     cleaned = _clean_row_dict(row)
     return _apply_scoring_mappings(cleaned)
+
+
+def _row_get(row_dict: dict, key: str):
+    if key in row_dict:
+        return row_dict[key]
+    lowered = key.lower()
+    if lowered in row_dict:
+        return row_dict[lowered]
+    upper = key.upper()
+    if upper in row_dict:
+        return row_dict[upper]
+    return None
+
+
+def _first_non_empty(row_dict: dict, keys):
+    for key in keys:
+        value = _row_get(row_dict, key)
+        if value not in (None, '', []):
+            return value
+    return None
+
+
+def _coerce_datetime_value(value):
+    if value in (None, ''):
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, pd.Timestamp):
+        try:
+            return value.to_pydatetime()
+        except Exception:
+            pass
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return datetime.combine(value, datetime.min.time())
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    sanitized = text.replace('T', ' ').split('.')[0]
+    for fmt in _COMMON_DATE_FORMATS:
+        try:
+            return datetime.strptime(sanitized, fmt)
+        except ValueError:
+            continue
+    return None
 
 def execute_SQL(query):
     """
@@ -407,6 +464,18 @@ class PartnerDataManager:
                 worker_name TEXT,
                 company_name TEXT,
                 business_number TEXT
+            )
+        ''')
+
+        # 사업부 캐시 테이블
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS divisions_cache (
+                division_code TEXT PRIMARY KEY,
+                division_name TEXT,
+                parent_division_code TEXT,
+                division_level INTEGER,
+                division_manager TEXT,
+                division_location TEXT
             )
         ''')
         
@@ -975,6 +1044,69 @@ class PartnerDataManager:
             print(f"[ERROR] ❌ 협력사 근로자 데이터 동기화 실패: {e}")
             traceback.print_exc()
             return False
+
+    def sync_divisions_from_external_db(self):
+        """외부 DB에서 사업부 데이터 동기화"""
+        if not IQADB_AVAILABLE:
+            print("[ERROR] IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
+            return False
+
+        try:
+            query = self.config.get('MASTER_DATA_QUERIES', 'DIVISION_QUERY')
+            print(f"[INFO] 실행할 사업부 쿼리: {query[:100]}...")
+
+            df = execute_SQL(query)
+            df = _normalize_df(df)
+            print(f"[INFO] 사업부 데이터 조회 완료: {len(df)} 건")
+
+            if df.empty:
+                print("[WARNING] 조회된 사업부 데이터가 없습니다.")
+                return False
+
+            conn = get_db_connection(self.local_db_path)
+            cursor = conn.cursor()
+
+            cursor.execute("DELETE FROM divisions_cache")
+
+            rows = []
+            for _, row in df.iterrows():
+                code = str(row.get('division_code') or row.get('code') or '').strip()
+                name = str(row.get('division_name') or row.get('name') or '').strip()
+                if not code or not name:
+                    continue
+                parent = str(row.get('parent_division_code') or row.get('parent_code') or row.get('parent') or '').strip()
+                level = row.get('division_level', row.get('level'))
+                level_int = _safe_int(level)
+                manager = str(row.get('division_manager') or row.get('manager') or '').strip()
+                location = str(row.get('division_location') or row.get('location') or '').strip()
+
+                rows.append((code, name, parent, level_int, manager, location))
+
+            if rows:
+                cursor.executemany('''
+                    INSERT INTO divisions_cache (
+                        division_code, division_name, parent_division_code,
+                        division_level, division_manager, division_location
+                    ) VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (division_code)
+                    DO UPDATE SET
+                        division_name = EXCLUDED.division_name,
+                        parent_division_code = EXCLUDED.parent_division_code,
+                        division_level = EXCLUDED.division_level,
+                        division_manager = EXCLUDED.division_manager,
+                        division_location = EXCLUDED.division_location
+                ''', rows)
+
+            conn.commit()
+            conn.close()
+
+            print(f"[SUCCESS] ✅ 사업부 데이터 {len(rows)}건 동기화 완료")
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] ❌ 사업부 데이터 동기화 실패: {e}")
+            traceback.print_exc()
+            return False
     
     def sync_safety_instructions_from_external_db(self):
         """외부 DB에서 안전지시서 데이터 동기화"""
@@ -1431,6 +1563,119 @@ class PartnerDataManager:
             print(f"[ERROR] ❌ FullProcess 데이터 동기화 실패: {e}")
             traceback.print_exc()
             return False
+
+    def _sync_subcontract_board_from_external(self, query_keys, table_name, id_column, date_candidates, generator_import_path, board_name):
+        if not IQADB_AVAILABLE:
+            print(f"[ERROR] IQADB_CONNECT310 모듈을 사용할 수 없습니다. ({board_name})")
+            return False
+
+        query = None
+        for section in ('CONTENT_DATA_QUERIES', 'MASTER_DATA_QUERIES'):
+            for key in query_keys:
+                if self.config.has_option(section, key):
+                    query = self.config.get(section, key)
+                    break
+            if query:
+                break
+
+        if not query:
+            print(f"[WARNING] {board_name} 쿼리가 config.ini에 정의되지 않았습니다.")
+            return False
+
+        print(f"[INFO] 실행할 {board_name} 쿼리: {query[:100]}...")
+        df = execute_SQL(query)
+        df = _normalize_df(df)
+        print(f"[INFO] {board_name} 데이터 조회 완료: {len(df)} 건")
+
+        if df.empty:
+            print(f"[WARNING] 조회된 {board_name} 데이터가 없습니다.")
+            return False
+
+        module_name, func_name = generator_import_path.rsplit('.', 1)
+        generator_func = getattr(__import__(module_name, fromlist=[func_name]), func_name)
+
+        conn = get_db_connection(self.local_db_path, timeout=30.0)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("BEGIN")
+            processed = 0
+            for _, row in df.iterrows():
+                row_dict = _prepare_row_custom_data(row)
+
+                created_value = _first_non_empty(row_dict, date_candidates)
+                created_dt = _coerce_datetime_value(created_value) or datetime.now()
+                created_at_iso = created_dt.strftime('%Y-%m-%d %H:%M:%S')
+
+                identifier = _first_non_empty(row_dict, [id_column])
+                identifier = (str(identifier).strip() if identifier else '')
+                if not identifier:
+                    identifier = generator_func(self.local_db_path, created_dt)
+
+                row_dict[id_column] = identifier
+                if not _row_get(row_dict, 'created_at'):
+                    row_dict['created_at'] = created_at_iso
+
+                custom_json = json.dumps(row_dict, ensure_ascii=False, default=str)
+
+                cursor.execute(
+                    f"""
+                    INSERT INTO {table_name} ({id_column}, custom_data, created_at, is_deleted, updated_at)
+                    VALUES (%s, %s, %s::timestamp, 0, %s::timestamp)
+                    ON CONFLICT ({id_column}) DO UPDATE
+                    SET custom_data = EXCLUDED.custom_data,
+                        updated_at = EXCLUDED.updated_at,
+                        is_deleted = 0
+                    """,
+                    (identifier, custom_json, created_at_iso, created_at_iso),
+                )
+                processed += 1
+
+            conn.commit()
+            print(f"[SUCCESS] ✅ {board_name} 데이터 {processed}건 동기화 완료")
+            return True
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f"[ERROR] ❌ {board_name} 데이터 동기화 실패: {e}")
+            traceback.print_exc()
+            return False
+        finally:
+            conn.close()
+
+    def sync_subcontract_approval_from_external_db(self):
+        return self._sync_subcontract_board_from_external(
+            query_keys=['SUBCONTRACT_APPROVAL_QUERY'],
+            table_name='subcontract_approval',
+            id_column='approval_number',
+            date_candidates=[
+                'created_at',
+                'application_date',
+                'approval_issue_date',
+                'approval_start_date',
+                'approval_end_date',
+                'ehs_evaluation_date',
+            ],
+            generator_import_path='id_generator.generate_subcontract_approval_number',
+            board_name='Subcontract Approval',
+        )
+
+    def sync_subcontract_report_from_external_db(self):
+        return self._sync_subcontract_board_from_external(
+            query_keys=['SUBCONTRACT_REPORT_QUERY'],
+            table_name='subcontract_report',
+            id_column='report_number',
+            date_candidates=[
+                'created_at',
+                'submission_date',
+                'accept_date',
+                'subcontract_start_date',
+                'subcontract_end_date',
+            ],
+            generator_import_path='id_generator.generate_subcontract_report_number',
+            board_name='Subcontract Report',
+        )
 
     def sync_partner_change_requests_from_external_db(self):
         """외부 DB에서 Partner Change Requests 데이터 동기화 (동적 컬럼 방식)"""
@@ -2220,6 +2465,13 @@ def maybe_daily_sync_master(force=False):
     except Exception as e:
         print(f"[ERROR] 협력사 근로자 동기화 실패: {e}")
 
+    try:
+        if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'DIVISION_QUERY'):
+            partner_manager.sync_divisions_from_external_db()
+            print("[SUCCESS] 사업부 데이터 동기화 완료")
+    except Exception as e:
+        print(f"[ERROR] 사업부 동기화 실패: {e}")
+
     # 동기화 성공 시 마지막 동기화 시간 업데이트 (safe_upsert 사용)
     if success or force:
         sync_data = {
@@ -2295,6 +2547,28 @@ def maybe_one_time_sync_content(force=False):
                 print(f"[ERROR] FULLPROCESS sync: {e}")
                 return False
         _do_once('fullprocess', run_fullprocess)
+
+    # Subcontract Approval 동기화
+    if (partner_manager.config.has_option('CONTENT_DATA_QUERIES', 'SUBCONTRACT_APPROVAL_QUERY') or
+        partner_manager.config.has_option('MASTER_DATA_QUERIES', 'SUBCONTRACT_APPROVAL_QUERY')):
+        def run_subcontract_approval():
+            try:
+                return partner_manager.sync_subcontract_approval_from_external_db()
+            except Exception as e:
+                print(f"[ERROR] SUBCONTRACT_APPROVAL sync: {e}")
+                return False
+        _do_once('subcontract_approval', run_subcontract_approval)
+
+    # Subcontract Report 동기화
+    if (partner_manager.config.has_option('CONTENT_DATA_QUERIES', 'SUBCONTRACT_REPORT_QUERY') or
+        partner_manager.config.has_option('MASTER_DATA_QUERIES', 'SUBCONTRACT_REPORT_QUERY')):
+        def run_subcontract_report():
+            try:
+                return partner_manager.sync_subcontract_report_from_external_db()
+            except Exception as e:
+                print(f"[ERROR] SUBCONTRACT_REPORT sync: {e}")
+                return False
+        _do_once('subcontract_report', run_subcontract_report)
 
     # Partner Change Requests 동기화 (쿼리 존재 시에만 수행)
     if (partner_manager.config.has_option('CONTENT_DATA_QUERIES', 'PARTNER_CHANGE_REQUESTS_QUERY') or

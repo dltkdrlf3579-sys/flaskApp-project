@@ -15,6 +15,9 @@
 {% from 'includes/board_form/save_controls.html' import render_save_button, render_password_modal %}
 {% from 'includes/board_form/detail_content.html' import render_detail_content %}
 
+{% set feature_toggles = feature_toggles or {} %}
+{% set list_payloads = list_payloads or {} %}
+
 {% if not is_popup %}
 <div class="page-header">
     <h2 class="page-title">사고 상세정보</h2>
@@ -43,6 +46,8 @@
                 
                 <!-- accident_id와 created_at 추가 (첫 번째 섹션에만) -->
                 {% if loop.index == 1 %}
+                {% set registrar_value = accident.updated_by or accident.created_by %}
+                {% set updated_stamp = accident.updated_at or accident.created_at %}
                 <div class="info-row">
                     <div class="info-cell span-2">
                         <label>사고번호</label>
@@ -72,6 +77,20 @@
                             {% endif %}
                         {% endif %}
                         <input type="text" value="{{ reg_date }}" readonly class="readonly-highlight">
+                    </div>
+                    <div class="info-cell span-2">
+                        <label>등록자</label>
+                        <input type="text"
+                               value="{{ registrar_value | default('-', true) }}"
+                               readonly
+                               class="readonly-highlight">
+                    </div>
+                    <div class="info-cell span-2">
+                        <label>수정일</label>
+                        <input type="text"
+                               value="{{ (updated_stamp|date_only) if updated_stamp else '-' }}"
+                               readonly
+                               class="readonly-highlight">
                     </div>
                 </div>
                 {% endif %}
@@ -252,7 +271,8 @@
                             {% elif col.column_type == 'list' %}
                                 <!-- 리스트 필드 -->
                                 {% from 'includes/list_field_v3.html' import render_list_field %}
-                                {{ render_list_field(col, col_value, section, mode='edit') }}
+                                {% set _list_payload = list_payloads[col.column_key]|default(None, true) if list_payloads else None %}
+                                {{ render_list_field(col, col_value, section, mode='edit', payload=_list_payload, feature_toggles=feature_toggles) }}
                             {% elif col.column_type == 'number' %}
                                 <!-- 숫자 필드 -->
                                 {% set _nt = 'integer' if col.input_type == 'number_integer' else 'float' %}
@@ -588,24 +608,7 @@ window.closeEditPasswordModal = closeEditPasswordModal;
 </script>
 
 {% if is_popup %}
-<style>
-.page-header, .action-buttons {
-    display: none !important;
-}
-.accident-detail-container {
-    padding: 0;
-    gap: 0;
-}
-.section {
-    border-radius: 0;
-    border-left: none;
-    border-right: none;
-    border-top: none;
-}
-.section:last-child {
-    border-bottom: none;
-}
-</style>
+
 {% endif %}
 
 

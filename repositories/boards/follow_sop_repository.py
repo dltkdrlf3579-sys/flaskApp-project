@@ -1,35 +1,97 @@
-"""Repository implementation for the Follow SOP board."""
+"""Repository implementation for dynamic boards following the Follow SOP pattern."""
 
 from __future__ import annotations
 
+import json
+import logging
+import os
 import sqlite3
 from contextlib import contextmanager
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
-
-import json
-import logging
 
 from werkzeug.datastructures import FileStorage
 
 from db_connection import get_db_connection
 from db.upsert import safe_upsert
+from repositories.common.board_config import get_board_config
 from utils.board_layout import order_value, sort_columns, sort_sections
 from upload_utils import validate_uploaded_files
 from id_generator import generate_followsop_number
 from timezone_config import get_korean_time
+from list_schema_utils import resolve_child_schema, deserialize_list_rows
 
 
-class FollowSopRepository:
-    """Encapsulates database operations used by the Follow SOP controller."""
+class DynamicBoardRepository:
+    """Encapsulates database operations used by dynamic, section-driven boards."""
 
-    def __init__(self, db_path: str) -> None:
+    board_type = "follow_sop"
+    default_sections: List[Tuple[str, str, int]] = [
+        ("basic_info", "기본정보", 1),
+        ("work_info", "작업정보", 2),
+        ("additional", "추가기입정보", 3),
+    ]
+    identifier_column = "work_req_no"
+    identifier_label = "점검번호"
+    created_at_label = "등록일"
+
+    def __init__(self, db_path: str, board_type: Optional[str] = None) -> None:
         self._db_path = db_path
+        if board_type:
+            self.board_type = board_type
         self._resolved_table: Optional[str] = None
         self._columns_cache: Dict[str, List[str]] = {}
+        config = get_board_config(self.board_type)
+        self.primary_table: str = config.get("primary_table", self.board_type)
+        table_candidates = config.get("table_candidates") or ()
+        self.table_candidates: Tuple[str, ...] = tuple(str(candidate) for candidate in table_candidates)
+        self.section_table: str = config.get("section_table", f"{self.board_type}_sections")
+        self.column_table: str = config.get("column_table", f"{self.board_type}_column_config")
+        self.detail_table: str = config.get("detail_table", f"{self.board_type}_details")
+        self.identifier_column = config.get("identifier_column", self.identifier_column)
+        self.identifier_label = config.get("identifier_label", self.identifier_label)
+        self.created_at_label = config.get("created_at_label", self.created_at_label)
+        self.default_sections = list(config.get("default_sections", self.default_sections))
+        self.display_name: str = config.get("display_name", self.board_type.replace("_", " ").title())
+        generator = config.get("id_generator") or generate_followsop_number
+        self.id_generator = generator if callable(generator) else generate_followsop_number
+        self.log_prefix = f"[{self.board_type.upper()}]"
 
     @property
     def db_path(self) -> str:
         return self._db_path
+
+    def _resolve_actor_label(self, data: Mapping[str, Any]) -> str:
+        """Best-effort resolver for the current actor based on request payload."""
+        def _extract(keys):
+            for key in keys:
+                value = data.get(key)
+                if value not in (None, ''):
+                    return str(value)
+            return ''
+
+        primary = _extract(('updated_by', 'created_by', 'actor_label'))
+        if primary:
+            return primary
+
+        user_name = _extract(('user_name',))
+        emp_id = _extract(('user_id', 'emp_id', 'userid'))
+        login_id = _extract(('login_id', 'user_id'))
+
+        if user_name and emp_id:
+            return f"{user_name}/{emp_id}"
+        if user_name:
+            return user_name
+        if emp_id:
+            return emp_id
+        if login_id:
+            return login_id
+        return 'SYSTEM'
+
+    def _generate_identifier(self, created_at_dt):
+        try:
+            return self.id_generator(self.db_path, created_at_dt)
+        except TypeError:
+            return self.id_generator(self.db_path)
 
     # ------------------------------------------------------------------
     # Connection helpers
@@ -88,13 +150,15 @@ class FollowSopRepository:
         if self._resolved_table:
             return self._resolved_table
 
-        for candidate in ("follow_sop", "follow_sop_cache", "followsop_cache"):
+        candidates = [self.primary_table]
+        candidates.extend(self.table_candidates)
+        for candidate in candidates:
             if self._table_exists(conn, candidate):
                 self._resolved_table = candidate
                 return candidate
 
         # Fallback to the primary table name
-        self._resolved_table = "follow_sop"
+        self._resolved_table = self.primary_table
         return self._resolved_table
 
     def _first_value(self, row, default=None):
@@ -167,7 +231,7 @@ class FollowSopRepository:
                 WHERE board_type = %s AND column_key = %s AND is_active = 1
                 ORDER BY display_order
                 """,
-                ('follow_sop', column_key),
+                (self.board_type, column_key),
             )
             rows = cursor.fetchall()
 
@@ -191,7 +255,8 @@ class FollowSopRepository:
                             ]
                     except Exception:
                         logging.debug(
-                            "[FOLLOW_SOP] dropdown array parse failed for %s",
+                            "%s dropdown array parse failed for %s",
+                            self.log_prefix,
                             column_key,
                         )
 
@@ -205,23 +270,40 @@ class FollowSopRepository:
 
     def _clean_custom_values(self, payload):
         """Normalize placeholder strings like 'None' to actual None."""
-        if not isinstance(payload, dict):
-            return payload
-        cleaned = {}
-        for key, value in payload.items():
-            if isinstance(value, str):
-                stripped = value.strip()
-                if stripped.lower() in ('none', 'null'):
-                    cleaned[key] = None
-                elif stripped == '':
-                    cleaned[key] = None
-                else:
-                    cleaned[key] = stripped
-            elif isinstance(value, dict):
+        if isinstance(payload, dict):
+            cleaned: Dict[str, Any] = {}
+            for key, value in payload.items():
                 cleaned[key] = self._clean_custom_values(value)
-            else:
-                cleaned[key] = value
-        return cleaned
+            return cleaned
+
+        if isinstance(payload, list):
+            return [self._clean_custom_values(item) for item in payload]
+
+        if isinstance(payload, str):
+            stripped = payload.strip()
+            if not stripped or stripped.lower() in ('none', 'null'):
+                return None
+            return stripped
+
+        return payload
+
+    def _coerce_display_values(self, payload):
+        """Convert None/placeholder values to blanks for safer rendering."""
+        if isinstance(payload, dict):
+            return {
+                key: self._coerce_display_values(value)
+                for key, value in payload.items()
+            }
+        if isinstance(payload, list):
+            return [self._coerce_display_values(item) for item in payload]
+        if payload is None:
+            return ''
+        if isinstance(payload, str):
+            stripped = payload.strip()
+            if not stripped or stripped.lower() in ('none', 'null', 'undefined'):
+                return ''
+            return stripped
+        return payload
 
     def _normalise_custom_data(self, value) -> Dict[str, Any]:
         if isinstance(value, dict):
@@ -245,28 +327,174 @@ class FollowSopRepository:
         return {}
 
     # ------------------------------------------------------------------
+    # List helpers
+
+    def _load_list_columns(self, conn) -> Dict[str, Dict[str, Any]]:
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                f"""
+                SELECT *
+                FROM {self.column_table}
+                WHERE COALESCE(is_active, 1) = 1
+                  AND COALESCE(is_deleted, 0) = 0
+                  AND LOWER(COALESCE(column_type, '')) = 'list'
+                ORDER BY column_order
+                """
+            )
+            rows = [dict(row) for row in cursor.fetchall()]
+        except Exception:
+            logging.debug("%s list column lookup failed", self.log_prefix, exc_info=True)
+            return {}
+
+        list_columns: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            key = row.get('column_key')
+            if not key:
+                continue
+            schema, generated = resolve_child_schema(row)
+            if schema is not None:
+                row['child_schema'] = schema
+            if generated:
+                row['_child_schema_generated'] = True
+            list_columns[key] = row
+        return list_columns
+
+    def _normalize_list_custom_data(
+        self,
+        conn,
+        custom_data: Optional[Mapping[str, Any]],
+    ) -> Tuple[Dict[str, Any], List[str]]:
+        if not isinstance(custom_data, Mapping):
+            return {}, []
+
+        normalized: Dict[str, Any] = dict(custom_data)
+        errors: List[str] = []
+
+        list_columns = self._load_list_columns(conn)
+        if not list_columns:
+            return normalized, errors
+
+        for key, column in list_columns.items():
+            if key not in custom_data:
+                continue
+
+            label = column.get('column_name') or key
+            raw_value = custom_data.get(key)
+
+            if raw_value in (None, '', []):
+                normalized[key] = []
+                continue
+
+            if isinstance(raw_value, str):
+                stripped = raw_value.strip()
+                if not stripped:
+                    normalized[key] = []
+                    continue
+                try:
+                    parsed_value = json.loads(stripped)
+                except json.JSONDecodeError:
+                    errors.append(f"[{label}] JSON 형식이 올바르지 않습니다.")
+                    normalized[key] = []
+                    continue
+                raw_list = parsed_value
+            else:
+                raw_list = raw_value
+
+            if not isinstance(raw_list, list):
+                errors.append(f"[{label}] 리스트 형식의 데이터를 기대합니다.")
+                normalized[key] = []
+                continue
+
+            info = deserialize_list_rows(column, column.get('child_schema'), raw_list)
+
+            for warning in info.get('warnings') or []:
+                errors.append(f"[{label}] {warning}")
+
+            for row_error in info.get('errors') or []:
+                row_index = row_error.get('row')
+                messages = row_error.get('messages') or []
+                for message in messages:
+                    if row_index is None:
+                        errors.append(f"[{label}] {message}")
+                    else:
+                        errors.append(f"[{label}] 행 {row_index + 1}: {message}")
+
+            normalized[key] = info.get('rows', raw_list)
+
+        return normalized, errors
+
+    def _build_list_payloads(
+        self,
+        dynamic_columns: Iterable[Mapping[str, Any]],
+        custom_data: Optional[Mapping[str, Any]],
+    ) -> Dict[str, Any]:
+        if not isinstance(custom_data, Mapping):
+            return {}
+        payloads: Dict[str, Any] = {}
+        for column in dynamic_columns or []:
+            if not column or column.get('column_type') != 'list':
+                continue
+            key = column.get('column_key')
+            if not key:
+                continue
+
+            schema, generated = resolve_child_schema(column)
+            if schema is not None:
+                column['child_schema'] = schema
+            if generated:
+                column['_child_schema_generated'] = True
+
+            raw_value = custom_data.get(key)
+            info = deserialize_list_rows(column, column.get('child_schema'), raw_value)
+            payloads[key] = {
+                'raw': self._ensure_raw_json(raw_value),
+                'rows': info.get('rows', []),
+                'raw_list': info.get('raw', []),
+                'schema': column.get('child_schema'),
+                'preset': info.get('preset'),
+                'warnings': info.get('warnings', []),
+                'errors': info.get('errors', []),
+                'generated_schema': bool(column.get('_child_schema_generated')),
+            }
+        return payloads
+
+    @staticmethod
+    def _ensure_raw_json(value: Any) -> str:
+        if value is None:
+            return '[]'
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return '[]'
+
+    @staticmethod
+    def _is_child_schema_renderer_enabled() -> bool:
+        flag = os.getenv('USE_CHILD_SCHEMA_RENDERER', '')
+        if flag:
+            return flag.lower() in {'1', 'true', 'y', 'yes'}
+        # 기본값은 활성화
+        return True
+
+    # ------------------------------------------------------------------
     # Section / column metadata
 
     def ensure_default_sections(self) -> None:
         """Ensure 기본 섹션이 존재하도록 보강."""
 
-        defaults = [
-            ("basic_info", "기본정보", 1),
-            ("work_info", "작업정보", 2),
-            ("additional", "추가기입정보", 3),
-        ]
-
         with self.connection() as conn:
             cursor = conn.cursor()
-            for key, name, order in defaults:
+            for key, name, order in self.default_sections:
                 cursor.execute(
-                    "SELECT COUNT(*) FROM follow_sop_sections WHERE section_key = %s",
+                    f"SELECT COUNT(*) FROM {self.section_table} WHERE section_key = %s",
                     (key,),
                 )
                 if self._first_value(cursor.fetchone(), 0) == 0:
                     cursor.execute(
-                        """
-                        INSERT INTO follow_sop_sections
+                        f"""
+                        INSERT INTO {self.section_table}
                             (section_key, section_name, section_order, is_active, is_deleted)
                         VALUES
                             (%s, %s, %s, 1, 0)
@@ -280,9 +508,9 @@ class FollowSopRepository:
         with self.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                """
+                f"""
                 SELECT *
-                FROM follow_sop_sections
+                FROM {self.section_table}
                 WHERE COALESCE(is_active, 1) = 1
                   AND COALESCE(is_deleted, 0) = 0
                 ORDER BY section_order
@@ -297,9 +525,9 @@ class FollowSopRepository:
         with self.connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                """
+                f"""
                 SELECT *
-                FROM follow_sop_column_config
+                FROM {self.column_table}
                 WHERE COALESCE(is_active, 1) = 1
                   AND COALESCE(is_deleted, 0) = 0
                 ORDER BY column_order
@@ -417,7 +645,7 @@ class FollowSopRepository:
             query = (
                 f"SELECT s.* FROM {table} s "
                 f"WHERE {where_sql} "
-                "ORDER BY s.created_at DESC, s.work_req_no DESC "
+                f"ORDER BY s.created_at DESC, s.{self.identifier_column} DESC "
                 "LIMIT %s OFFSET %s"
             )
             cursor.execute(query, [*params, per_page, offset])
@@ -428,12 +656,12 @@ class FollowSopRepository:
     # ------------------------------------------------------------------
     # Detail / register context
 
-    def fetch_detail_context(self, work_req_no: str, is_popup: bool) -> Dict[str, Any]:
+    def fetch_detail_context(self, identifier: str, is_popup: bool) -> Dict[str, Any]:
         base_context = self.fetch_register_context(is_popup=False)
         sections = base_context['sections']
         dynamic_columns = base_context['dynamic_columns']
 
-        sop: Dict[str, Any] = {}
+        record: Dict[str, Any] = {}
         attachments: List[Dict[str, Any]] = []
 
         with self.connection() as conn:
@@ -445,28 +673,29 @@ class FollowSopRepository:
                     f"""
                     SELECT *
                     FROM {table}
-                    WHERE work_req_no = %s
+                    WHERE {self.identifier_column} = %s
                       AND COALESCE(is_deleted, 0) = 0
                     """,
-                    (work_req_no,),
+                    (identifier,),
                 )
             except Exception as exc:
-                logging.error("[FOLLOW_SOP] detail query failed: %s", exc)
+                logging.error("%s detail query failed: %s", self.log_prefix, exc)
                 return {}
 
             row = cursor.fetchone()
             if not row:
                 return {}
-            sop = dict(row)
+            record = dict(row)
+            record = self._clean_custom_values(record)
 
             try:
                 cursor.execute(
-                    """
+                    f"""
                     SELECT detailed_content
-                    FROM follow_sop_details
-                    WHERE work_req_no = %s
+                    FROM {self.detail_table}
+                    WHERE {self.identifier_column} = %s
                     """,
-                    (work_req_no,),
+                    (identifier,),
                 )
                 detail_row = cursor.fetchone()
                 detail_value = self._extract_detail_row_value(detail_row)
@@ -474,34 +703,44 @@ class FollowSopRepository:
                 if detail_value is not None:
                     if isinstance(detail_value, (dict, list)):
                         try:
-                            sop['detailed_content'] = json.dumps(detail_value, ensure_ascii=False)
+                            record['detailed_content'] = json.dumps(detail_value, ensure_ascii=False)
                         except Exception:
-                            sop['detailed_content'] = str(detail_value)
+                            record['detailed_content'] = str(detail_value)
                     else:
-                        sop['detailed_content'] = str(detail_value)
+                        record['detailed_content'] = str(detail_value)
             except Exception:
-                logging.debug("[FOLLOW_SOP] detail content lookup skipped", exc_info=True)
+                logging.debug("%s detail content lookup skipped", self.log_prefix, exc_info=True)
 
             try:
                 from board_services import AttachmentService
 
-                attachment_service = AttachmentService('follow_sop', self._db_path, conn)
-                attachments = attachment_service.list(work_req_no)
+                attachment_service = AttachmentService(self.board_type, self._db_path, conn)
+                attachments = attachment_service.list(identifier)
             except Exception:
-                logging.debug("[FOLLOW_SOP] attachment lookup skipped", exc_info=True)
+                logging.debug("%s attachment lookup skipped", self.log_prefix, exc_info=True)
 
-        custom_data = self._normalise_custom_data(sop.get('custom_data'))
+        custom_data = self._normalise_custom_data(record.get('custom_data'))
         if custom_data:
-            sop.update(custom_data)
-        sop['custom_data'] = custom_data
+            record.update(custom_data)
+        record['custom_data'] = custom_data
 
+        list_payloads = self._build_list_payloads(dynamic_columns, custom_data)
+        if list_payloads:
+            record['list_payloads'] = list_payloads
+
+        display_record = self._coerce_display_values(record)
+        display_custom_data = self._coerce_display_values(custom_data or {})
         detail_context = dict(base_context)
         detail_context.update({
-            'sop': sop,
-            'custom_data': custom_data,
+            'record': display_record,
+            'sop': display_record,
+            'instruction': display_record,
+            'custom_data': display_custom_data,
             'section_data': {},
             'attachments': attachments,
-            'work_req_no': work_req_no,
+            self.identifier_column: identifier,
+            'identifier_column': self.identifier_column,
+            'identifier_value': identifier,
             'all_column_keys': [
                 column.get('column_key')
                 for column in dynamic_columns
@@ -509,6 +748,12 @@ class FollowSopRepository:
             ],
             'is_popup': is_popup,
         })
+        if list_payloads:
+            detail_context['list_payloads'] = list_payloads
+        detail_context.setdefault(
+            'feature_toggles',
+            {'child_schema_renderer': self._is_child_schema_renderer_enabled()},
+        )
         return detail_context
 
     def fetch_register_context(self, is_popup: bool) -> Dict[str, Any]:
@@ -519,24 +764,35 @@ class FollowSopRepository:
             for section in sections
         }
         dynamic_columns = self.fetch_dynamic_columns(section_order_map)
+        renderer_enabled = self._is_child_schema_renderer_enabled()
+        for column in dynamic_columns:
+            if not isinstance(column, dict):
+                continue
+            if column.get('column_type') != 'list':
+                continue
+            schema, generated = resolve_child_schema(column, allow_generate=renderer_enabled)
+            if schema is not None:
+                column['child_schema'] = schema
+            if generated:
+                column['_child_schema_generated'] = True
 
         created_at_dt = get_korean_time()
         created_at = created_at_dt.strftime('%Y-%m-%d %H:%M:%S')
-        work_req_no = generate_followsop_number(self.db_path, created_at_dt)
+        identifier_value = self._generate_identifier(created_at_dt)
 
         basic_fields = [
             {
-                'column_key': 'work_req_no',
-                'column_name': '점검번호',
+                'column_key': self.identifier_column,
+                'column_name': self.identifier_label,
                 'column_type': 'text',
                 'is_required': 1,
                 'is_readonly': 1,
                 'tab': 'basic_info',
-                'default_value': work_req_no,
+                'default_value': identifier_value,
             },
             {
                 'column_key': 'created_at',
-                'column_name': '등록일',
+                'column_name': self.created_at_label,
                 'column_type': 'datetime',
                 'is_required': 1,
                 'is_readonly': 1,
@@ -549,7 +805,7 @@ class FollowSopRepository:
             col
             for col in dynamic_columns
             if col.get('tab') == 'basic_info'
-            and col.get('column_key') not in ['work_req_no', 'created_at']
+            and col.get('column_key') not in [self.identifier_column, 'created_at']
         ]
         basic_fields.extend(basic_info_dynamic)
 
@@ -579,21 +835,27 @@ class FollowSopRepository:
             'basic_options': basic_options,
             'today_date': today_date,
             'is_popup': is_popup,
+            'identifier_column': self.identifier_column,
+            'identifier_label': self.identifier_label,
+            'identifier_value': identifier_value,
+            'feature_toggles': {
+                'child_schema_renderer': renderer_enabled,
+            },
         }
 
     # ------------------------------------------------------------------
     # Detail content helpers
 
-    def _fetch_current_detail(self, conn, work_req_no: str) -> Optional[str]:
+    def _fetch_current_detail(self, conn, identifier: str) -> Optional[str]:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT detailed_content FROM follow_sop_details WHERE work_req_no = %s",
-                (work_req_no,),
+                f"SELECT detailed_content FROM {self.detail_table} WHERE {self.identifier_column} = %s",
+                (identifier,),
             )
             row = cursor.fetchone()
         except Exception:
-            logging.debug('[FOLLOW_SOP] current detail lookup skipped', exc_info=True)
+            logging.debug('%s current detail lookup skipped', self.log_prefix, exc_info=True)
             return None
 
         return self._extract_detail_row_value(row)
@@ -672,34 +934,55 @@ class FollowSopRepository:
 
         try:
             logging.info(
-                "[FOLLOW_SOP] incoming detailed_content length=%s",
+                "%s incoming detailed_content length=%s",
+                self.log_prefix,
                 len(detailed_content or "")
             )
         except Exception:
-            logging.debug("[FOLLOW_SOP] detailed_content logging skipped", exc_info=True)
+            logging.debug("%s detailed_content logging skipped", self.log_prefix, exc_info=True)
 
         valid_files, validation_errors = validate_uploaded_files(files)
         if validation_errors:
             return {'success': False, 'message': validation_errors[0], 'errors': validation_errors}, 400
 
         created_at_dt = get_korean_time()
-        work_req_no = data.get('work_req_no') or generate_followsop_number(self.db_path, created_at_dt)
+        identifier_value = (data.get(self.identifier_column) or '').strip()
+        if not identifier_value:
+            identifier_value = self._generate_identifier(created_at_dt)
 
-        custom_data_json = json.dumps(custom_data, ensure_ascii=False)
+        custom_data = self._clean_custom_values(custom_data)
 
         with self.connection() as conn:
             table = self._resolve_table_name(conn)
             table_columns = set(self._get_columns(conn, table))
 
+            custom_data, list_errors = self._normalize_list_custom_data(conn, custom_data)
+            if list_errors:
+                try:
+                    conn.rollback()
+                except Exception:
+                    logging.debug("%s rollback after list validation failed", self.log_prefix, exc_info=True)
+                return {
+                    'success': False,
+                    'message': list_errors[0],
+                    'errors': list_errors,
+                }, 400
+
+            custom_data_json = json.dumps(custom_data, ensure_ascii=False)
+
             upsert_data: Dict[str, Any] = {
-                'work_req_no': work_req_no,
+                self.identifier_column: identifier_value,
                 'custom_data': custom_data_json,
             }
 
+            actor_label = self._resolve_actor_label(data)
+
             if 'created_at' in table_columns:
                 upsert_data['created_at'] = created_at_dt.strftime('%Y-%m-%d %H:%M:%S')
-            if 'created_by' in table_columns:
-                upsert_data['created_by'] = data.get('created_by') or data.get('user_id', 'system')
+            if actor_label and 'created_by' in table_columns:
+                upsert_data['created_by'] = actor_label
+            if actor_label and 'updated_by' in table_columns:
+                upsert_data['updated_by'] = actor_label
             if 'is_deleted' in table_columns:
                 upsert_data['is_deleted'] = 0
 
@@ -708,17 +991,17 @@ class FollowSopRepository:
             try:
                 safe_upsert(
                     conn,
-                    'follow_sop_details',
+                    self.detail_table,
                     {
-                        'work_req_no': work_req_no,
+                        self.identifier_column: identifier_value,
                         'detailed_content': detailed_content,
                         'updated_at': None,
                     },
-                    conflict_cols=['work_req_no'],
+                    conflict_cols=[self.identifier_column],
                     update_cols=['detailed_content', 'updated_at'],
                 )
             except Exception:
-                logging.debug('[FOLLOW_SOP] details upsert failed', exc_info=True)
+                logging.debug('%s details upsert failed', self.log_prefix, exc_info=True)
 
             attachment_data_raw = data.get('attachment_data', '[]')
             if isinstance(attachment_data_raw, list):
@@ -733,8 +1016,8 @@ class FollowSopRepository:
                 try:
                     from board_services import AttachmentService
 
-                    attachment_service = AttachmentService('follow_sop', self._db_path, conn)
-                    uploaded_by = data.get('created_by') or data.get('user_id', 'system')
+                    attachment_service = AttachmentService(self.board_type, self._db_path, conn)
+                    uploaded_by = actor_label or data.get('user_id', 'system')
 
                     for index, file_info in enumerate(valid_files):
                         file_obj: FileStorage = file_info['file']
@@ -742,37 +1025,39 @@ class FollowSopRepository:
                         if index < len(attachment_meta) and isinstance(attachment_meta[index], dict):
                             meta['description'] = attachment_meta[index].get('description', '')
                         meta.setdefault('uploaded_by', uploaded_by)
-                        attachment_service.add(work_req_no, file_obj, meta)
+                        attachment_service.add(identifier_value, file_obj, meta)
                 except Exception:
-                    logging.error('[FOLLOW_SOP] attachment save failed', exc_info=True)
+                    logging.error('%s attachment save failed', self.log_prefix, exc_info=True)
 
             conn.commit()
 
             try:
                 detail_row = conn.execute(
-                    "SELECT detailed_content FROM follow_sop_details WHERE work_req_no = %s",
-                    (work_req_no,)
+                    f"SELECT detailed_content FROM {self.detail_table} WHERE {self.identifier_column} = %s",
+                    (identifier_value,)
                 ).fetchone()
                 logging.info(
-                    "[FOLLOW_SOP] detail length=%s",
+                    "%s detail length=%s",
+                    self.log_prefix,
                     len(detail_row[0]) if detail_row and detail_row[0] else 0
                 )
             except Exception:
-                logging.debug("[FOLLOW_SOP] post-save detail check skipped", exc_info=True)
+                logging.debug("%s post-save detail check skipped", self.log_prefix, exc_info=True)
 
         return {
             'success': True,
-            'message': 'Follow SOP가 등록되었습니다.',
-            'work_req_no': work_req_no,
+            'message': f'{self.display_name}가 등록되었습니다.',
+            self.identifier_column: identifier_value,
+            'identifier_value': identifier_value,
         }, 200
 
     def update_from_request(self, request) -> Any:
         data = request.form
         files: List[FileStorage] = request.files.getlist('files')
 
-        work_req_no = (data.get('work_req_no') or '').strip()
-        if not work_req_no:
-            return {'success': False, 'message': '점검번호가 필요합니다.'}, 400
+        identifier_value = (data.get(self.identifier_column) or '').strip()
+        if not identifier_value:
+            return {'success': False, 'message': f'{self.identifier_label}가 필요합니다.'}, 400
 
         valid_files, validation_errors = validate_uploaded_files(files)
         if validation_errors:
@@ -806,8 +1091,6 @@ class FollowSopRepository:
         except Exception:
             pass
 
-        custom_data_json = json.dumps(custom_data, ensure_ascii=False)
-
         deleted_raw = data.get('deleted_attachments', '[]')
         try:
             deleted_ids = [int(item) for item in json.loads(deleted_raw or '[]')]
@@ -826,53 +1109,80 @@ class FollowSopRepository:
         if not isinstance(attachment_meta, list):
             attachment_meta = []
 
+        custom_data = self._clean_custom_values(custom_data)
+
         with self.connection() as conn:
-            existing_detail = self._fetch_current_detail(conn, work_req_no)
+            existing_detail = self._fetch_current_detail(conn, identifier_value)
             detailed_content = self._extract_detailed_content(data, existing_detail)
             try:
                 logging.info(
-                    "[FOLLOW_SOP] update detail incoming length=%s",
+                    "%s update detail incoming length=%s",
+                    self.log_prefix,
                     len(detailed_content or "")
                 )
             except Exception:
-                logging.debug("[FOLLOW_SOP] update detail logging skipped", exc_info=True)
+                logging.debug("%s update detail logging skipped", self.log_prefix, exc_info=True)
 
             table = self._resolve_table_name(conn)
             table_columns = set(self._get_columns(conn, table))
 
+            custom_data, list_errors = self._normalize_list_custom_data(conn, custom_data)
+            if list_errors:
+                try:
+                    conn.rollback()
+                except Exception:
+                    logging.debug("%s rollback after list validation failed (update)", self.log_prefix, exc_info=True)
+                return {
+                    'success': False,
+                    'message': list_errors[0],
+                    'errors': list_errors,
+                }, 400
+
+            custom_data_json = json.dumps(custom_data, ensure_ascii=False)
+
             upsert_data: Dict[str, Any] = {
-                'work_req_no': work_req_no,
+                self.identifier_column: identifier_value,
                 'custom_data': custom_data_json,
             }
 
-            if 'created_by' in table_columns and data.get('updated_by'):
-                upsert_data['created_by'] = data.get('updated_by')
+            actor_label = self._resolve_actor_label(data)
+            update_cols: List[str] = ['custom_data']
+
             if 'updated_at' in table_columns:
                 upsert_data['updated_at'] = get_korean_time().strftime('%Y-%m-%d %H:%M:%S')
+                update_cols.append('updated_at')
+
+            if actor_label:
+                if 'updated_by' in table_columns:
+                    upsert_data['updated_by'] = actor_label
+                    update_cols.append('updated_by')
+                elif 'created_by' in table_columns and 'updated_by' not in table_columns:
+                    upsert_data['created_by'] = actor_label
+                    update_cols.append('created_by')
 
             safe_upsert(
                 conn,
                 table,
                 upsert_data,
-                conflict_cols=['work_req_no'],
-                update_cols=['custom_data'] + ([col for col in ('created_by', 'updated_at') if col in upsert_data]),
+                conflict_cols=[self.identifier_column],
+                update_cols=update_cols,
             )
 
             safe_upsert(
                 conn,
-                'follow_sop_details',
+                self.detail_table,
                 {
-                    'work_req_no': work_req_no,
+                    self.identifier_column: identifier_value,
                     'detailed_content': detailed_content,
                     'updated_at': None,
                 },
-                conflict_cols=['work_req_no'],
+                conflict_cols=[self.identifier_column],
                 update_cols=['detailed_content', 'updated_at'],
             )
 
             from board_services import AttachmentService
 
-            attachment_service = AttachmentService('follow_sop', self._db_path, conn)
+            attachment_service = AttachmentService(self.board_type, self._db_path, conn)
 
             if deleted_ids:
                 attachment_service.delete(deleted_ids)
@@ -895,7 +1205,7 @@ class FollowSopRepository:
                 meta for meta in attachment_meta
                 if isinstance(meta, dict) and (not meta.get('id') or meta.get('isNew'))
             ])
-            uploaded_by = data.get('updated_by') or data.get('user_id', 'system')
+            uploaded_by = actor_label or data.get('user_id', 'system')
             for file_info in valid_files:
                 file_obj: FileStorage = file_info['file']
                 meta: Dict[str, Any] = {}
@@ -906,24 +1216,32 @@ class FollowSopRepository:
                 if isinstance(candidate, dict):
                     meta['description'] = candidate.get('description', '')
                 meta.setdefault('uploaded_by', uploaded_by)
-                attachment_service.add(work_req_no, file_obj, meta)
+                attachment_service.add(identifier_value, file_obj, meta)
 
             conn.commit()
 
             try:
                 detail_row = conn.execute(
-                    "SELECT detailed_content FROM follow_sop_details WHERE work_req_no = %s",
-                    (work_req_no,)
+                    f"SELECT detailed_content FROM {self.detail_table} WHERE {self.identifier_column} = %s",
+                    (identifier_value,)
                 ).fetchone()
                 logging.info(
-                    "[FOLLOW_SOP] update detail length=%s",
+                    "%s update detail length=%s",
+                    self.log_prefix,
                     len(detail_row[0]) if detail_row and detail_row[0] else 0
                 )
             except Exception:
-                logging.debug("[FOLLOW_SOP] update detail check skipped", exc_info=True)
+                logging.debug("%s update detail check skipped", self.log_prefix, exc_info=True)
 
         return {
             'success': True,
-            'message': 'Follow SOP가 수정되었습니다.',
-            'work_req_no': work_req_no,
+            'message': f'{self.display_name}가 수정되었습니다.',
+            self.identifier_column: identifier_value,
+            'identifier_value': identifier_value,
         }, 200
+
+
+class FollowSopRepository(DynamicBoardRepository):
+    """Backwards-compatible repository for the Follow SOP board."""
+
+    board_type = "follow_sop"

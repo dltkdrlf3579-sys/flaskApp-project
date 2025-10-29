@@ -36,6 +36,14 @@ UPSERT_REGISTRY = {
         'conflict_cols': ['work_req_no'],
         'update_cols': ['detailed_content', 'updated_at']
     },
+    'subcontract_approval_details': {
+        'conflict_cols': ['approval_number'],
+        'update_cols': ['detailed_content', 'updated_at']
+    },
+    'subcontract_report_details': {
+        'conflict_cols': ['report_number'],
+        'update_cols': ['detailed_content', 'updated_at']
+    },
     'fullprocess_details': {
         'conflict_cols': ['fullprocess_number'],
         'update_cols': ['detailed_content', 'updated_at']
@@ -75,6 +83,14 @@ UPSERT_REGISTRY = {
     # 메인 테이블들
     'follow_sop': {
         'conflict_cols': ['work_req_no'],
+        'update_cols': ['custom_data', 'is_deleted']
+    },
+    'subcontract_approval': {
+        'conflict_cols': ['approval_number'],
+        'update_cols': ['custom_data', 'is_deleted']
+    },
+    'subcontract_report': {
+        'conflict_cols': ['report_number'],
         'update_cols': ['custom_data', 'is_deleted']
     },
     'full_process': {

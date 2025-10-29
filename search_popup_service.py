@@ -9,6 +9,7 @@ import configparser
 import os
 import sys
 from typing import List, Dict, Any, Optional
+import math
 from db_connection import get_db_connection
 from datetime import datetime, timedelta
 import hashlib
@@ -110,7 +111,13 @@ class SearchPopupService:
                 'title': '협력사 근로자 검색',
                 'placeholder': '검색어를 입력하세요',
                 'order_by': 'worker_name',
-                'use_cache': True  # 로컬 테이블 사용
+                'use_cache': True,  # 로컬 테이블 사용
+                'advanced_filters': [
+                    {'field': 'worker_name', 'label': '근로자명'},
+                    {'field': 'worker_id', 'label': '근로자ID'},
+                    {'field': 'company_name', 'label': '소속회사'}
+                ],
+                'advanced_filter_operator': 'and'
             },
             'division': {
                 'table': 'divisions_cache',  # cache 테이블 사용
@@ -149,9 +156,32 @@ class SearchPopupService:
         
         return config
     
-    def _get_cache_key(self, search_type: str, query: str, search_field: str = None) -> str:
+    def _get_cache_key(
+        self,
+        search_type: str,
+        query: str,
+        search_field: str = None,
+        filters: Optional[List[Dict[str, Any]]] = None,
+        limit: Optional[int] = None,
+        page: Optional[int] = None,
+    ) -> str:
         """캐시 키 생성"""
-        key_str = f"{search_type}:{query}:{search_field or 'default'}"
+        parts = [search_type, search_field or 'default', query or '']
+        if limit is not None:
+            parts.append(str(limit))
+        if page is not None:
+            parts.append(str(page))
+        if filters:
+            normalized = []
+            for filt in filters:
+                field = filt.get('field', '')
+                value = filt.get('value', '')
+                if value:
+                    normalized.append({'field': field, 'value': value})
+            if normalized:
+                normalized.sort(key=lambda item: item['field'])
+                parts.append(json.dumps(normalized, ensure_ascii=False))
+        key_str = '::'.join(parts)
         return hashlib.md5(key_str.encode()).hexdigest()
     
     def _is_cache_valid(self, cache_entry: Dict) -> bool:
@@ -200,6 +230,7 @@ class SearchPopupService:
     def _execute_realtime_query(self, query_key: str, search_condition: str = None, params: List = None) -> List[Dict]:
         """실시간 외부 DB 쿼리 실행"""
         results = []
+        total_count = 0
         
         try:
             # 외부 DB 연결
@@ -338,7 +369,15 @@ class SearchPopupService:
         except Exception as e:
             logging.error(f"동적 컬럼 로드 실패: {e}")
     
-    def search(self, search_type: str, query: str = '', search_field: str = None, limit: int = 50) -> Dict[str, Any]:
+    def search(
+        self,
+        search_type: str,
+        query: str = '',
+        search_field: str = None,
+        limit: int = 50,
+        page: int = 1,
+        filters: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         """
         검색 수행
         
@@ -346,157 +385,320 @@ class SearchPopupService:
             search_type: 검색 타입 (company, person, department, building)
             query: 검색어
             search_field: 검색할 필드 (None이면 default_search_field 사용)
-            limit: 결과 제한 수
-        
+            limit: 페이지당 결과 제한 수
+            page: 페이지 번호 (1부터 시작)
+            
         Returns:
             검색 결과와 설정 정보
         """
+        logging.info(
+            "[search-popup] type=%s query=%s field=%s limit=%s page=%s filters=%s",
+            search_type,
+            query,
+            search_field,
+            limit,
+            page,
+            filters,
+        )
         if search_type not in self.search_configs:
             logging.warning(f"Unknown search type: {search_type}")
             return {
                 'results': [],
                 'config': {},
-                'error': f'Unknown search type: {search_type}'
+                'error': f'Unknown search type: {search_type}',
+                'total': 0,
+                'page': 1,
+                'has_more': False,
             }
         
         config = self.search_configs[search_type]
         results = []
+
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError):
+            limit = 50
+        if limit < 1:
+            limit = 1
+
+        try:
+            page = int(page)
+        except (TypeError, ValueError):
+            page = 1
+        if page < 1:
+            page = 1
+
+        offset = (page - 1) * limit
+        query_limit = limit + 1
+        has_more_flag = False
+        prepared_filters: List[Dict[str, Any]] = []
+        if filters:
+            for filt in filters:
+                field = (filt.get('field') or '').strip()
+                value = (filt.get('value') or '').strip()
+                if field and value:
+                    prepared_filters.append({'field': field, 'value': value})
+        use_filters = len(prepared_filters) > 0
         
         try:
             # 캐시 확인 (person, department, building, contractor는 메모리 캐시 사용)
-            if search_type != 'company' and query:
-                cache_key = self._get_cache_key(search_type, query, search_field)
+            if search_type != 'company' and (query or use_filters):
+                cache_key = self._get_cache_key(search_type, query, search_field, prepared_filters, limit, page)
                 cache_entry = self._cache.get(cache_key)
                 
                 if self._is_cache_valid(cache_entry):
                     logging.info(f"캐시 히트: {search_type} - {query}")
-                    return cache_entry['data']
-            
-            # 검색어가 없으면 빈 결과 반환
-            if not query:
+                    cached_data = cache_entry['data']
+                    if 'page' not in cached_data or 'has_more' not in cached_data:
+                        rebuilt = dict(cached_data)
+                        rebuilt.setdefault('page', page)
+                        rebuilt.setdefault('has_more', len(rebuilt.get('results', [])) == limit)
+                        rebuilt.setdefault('total', len(rebuilt.get('results', [])))
+                        if 'total_pages' not in rebuilt:
+                            total_val = rebuilt.get('total', len(rebuilt.get('results', [])))
+                            rebuilt['total_pages'] = math.ceil(total_val / limit) if total_val else 0
+                        cached_data = rebuilt
+                        cache_entry['data'] = cached_data
+                    return cached_data
+
+            if not query and not use_filters:
                 return {
                     'results': [],
                     'config': config,
                     'total': 0,
-                    'message': '검색어를 입력해주세요.'
+                    'message': '검색어를 입력해주세요.',
+                    'page': page,
+                    'has_more': False,
+                    'total_pages': 0,
                 }
-            
+
             # 검색 필드 결정
             if not search_field:
                 search_field = config.get('default_search_field')
-            
+
             # 모든 타입이 로컬 캐시 테이블 사용
             if config.get('use_cache') and config.get('table'):
                 conn = get_db_connection(self.db_path, row_factory=True)
                 cursor = conn.cursor()
-                
+
                 table_name = config['table']
-                
-                # 특정 필드로 검색
-                if search_field:
-                    # 선택된 필드가 동적 컬럼인지 확인
-                    is_dynamic = False
+
+                # 헬퍼: 필드가 동적인지 확인
+                def is_dynamic_field(field_name: str) -> bool:
                     for field_info in config['search_fields']:
-                        if isinstance(field_info, dict) and field_info.get('field') == search_field:
-                            is_dynamic = field_info.get('is_dynamic', False)
-                            break
-                    
-                    if is_dynamic:
-                        # 동적 컬럼(JSON) 검색 (Postgres/SQLite 분기)
-                        if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                            sql = f"""
-                                SELECT * FROM {table_name}
-                                WHERE (custom_data->>'{search_field}') ILIKE %s
-                                ORDER BY {config.get('order_by', config.get('id_field', 'id'))}
-                                LIMIT %s
-                            """
-                        else:
-                            sql = f"""
-                                SELECT * FROM {table_name}
-                                WHERE json_extract(custom_data, '$.{search_field}') LIKE ?
-                                ORDER BY {config.get('order_by', config.get('id_field', 'id'))}
-                                LIMIT ?
-                            """
-                    else:
-                        # 일반 컬럼 검색
-                        if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                            sql = f"""
-                                SELECT * FROM {table_name}
-                                WHERE {search_field} ILIKE %s
-                                ORDER BY {config.get('order_by', config.get('id_field', 'id'))}
-                                LIMIT %s
-                            """
-                        else:
-                            sql = f"""
-                                SELECT * FROM {table_name}
-                                WHERE {search_field} LIKE ?
-                                ORDER BY {config.get('order_by', config.get('id_field', 'id'))}
-                                LIMIT ?
-                            """
-                    params = [f"%{query}%", limit]
-                else:
-                    # 모든 검색 필드에서 검색
+                        if isinstance(field_info, dict) and field_info.get('field') == field_name:
+                            return field_info.get('is_dynamic', False)
+                    return False
+
+                query_sql = None
+                query_params: List[Any] = []
+                count_sql = None
+                count_params: List[Any] = []
+
+                if use_filters:
                     where_clauses = []
-                    params = []
+                    base_params = []
+                    for filt in prepared_filters:
+                        field = filt['field']
+                        value = filt['value']
+                        dynamic_field = is_dynamic_field(field)
+                        like_param = f"%{value}%"
+                        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                            if dynamic_field:
+                                where_clauses.append(f"(custom_data->>'{field}') ILIKE %s")
+                            else:
+                                where_clauses.append(f"{field} ILIKE %s")
+                        else:
+                            if dynamic_field:
+                                where_clauses.append(f"json_extract(custom_data, '$.{field}') LIKE ?")
+                            else:
+                                where_clauses.append(f"{field} LIKE ?")
+                        base_params.append(like_param)
+
+                    if not where_clauses:
+                        conn.close()
+                        return {
+                            'results': [],
+                            'config': config,
+                            'total': 0,
+                            'message': '검색 조건을 입력해주세요.',
+                            'page': page,
+                            'has_more': False,
+                            'total_pages': 0,
+                        }
+
+                    where_sql = ' AND '.join(where_clauses) if config.get('advanced_filter_operator', 'and').lower() == 'and' else ' OR '.join(where_clauses)
+                    order_clause = config.get('order_by', config.get('id_field', 'id'))
+
+                    if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                        query_sql = f"""
+                            SELECT * FROM {table_name}
+                            WHERE {where_sql}
+                            ORDER BY {order_clause}
+                            LIMIT %s OFFSET %s
+                        """
+                        count_sql = f"""
+                            SELECT COUNT(*) FROM {table_name}
+                            WHERE {where_sql}
+                        """
+                    else:
+                        query_sql = f"""
+                            SELECT * FROM {table_name}
+                            WHERE {where_sql}
+                            ORDER BY {order_clause}
+                            LIMIT ? OFFSET ?
+                        """
+                        count_sql = f"""
+                            SELECT COUNT(*) FROM {table_name}
+                            WHERE {where_sql}
+                        """
+
+                    count_params = list(base_params)
+                    query_params = list(base_params)
+                    query_params.extend([query_limit, offset])
+
+                elif search_field:
+                    is_dynamic = is_dynamic_field(search_field)
+                    order_clause = config.get('order_by', config.get('id_field', 'id'))
+                    like_param = f"%{query}%"
+
+                    if is_dynamic:
+                        if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                            condition = f"(custom_data->>'{search_field}') ILIKE %s"
+                        else:
+                            condition = f"json_extract(custom_data, '$.{search_field}') LIKE ?"
+                    else:
+                        condition = f"{search_field} ILIKE %s" if hasattr(conn, 'is_postgres') and conn.is_postgres else f"{search_field} LIKE ?"
+
+                    if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                        query_sql = f"""
+                            SELECT * FROM {table_name}
+                            WHERE {condition}
+                            ORDER BY {order_clause}
+                            LIMIT %s OFFSET %s
+                        """
+                        count_sql = f"""
+                            SELECT COUNT(*) FROM {table_name}
+                            WHERE {condition}
+                        """
+                    else:
+                        query_sql = f"""
+                            SELECT * FROM {table_name}
+                            WHERE {condition}
+                            ORDER BY {order_clause}
+                            LIMIT ? OFFSET ?
+                        """
+                        count_sql = f"""
+                            SELECT COUNT(*) FROM {table_name}
+                            WHERE {condition}
+                        """
+
+                    count_params = [like_param]
+                    query_params = [like_param, query_limit, offset]
+
+                else:
+                    where_clauses = []
+                    base_params = []
                     for field_info in config['search_fields']:
                         if isinstance(field_info, dict):
                             field = field_info['field']
                             is_dynamic = field_info.get('is_dynamic', False)
-                            
-                            if is_dynamic:
-                                # 동적 컬럼(JSON) 검색 (Postgres/SQLite 분기)
-                                if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                            like_param = f"%{query}%"
+                            if hasattr(conn, 'is_postgres') and conn.is_postgres:
+                                if is_dynamic:
                                     where_clauses.append(f"(custom_data->>'{field}') ILIKE %s")
                                 else:
-                                    where_clauses.append(f"json_extract(custom_data, '$.{field}') LIKE ?")
-                            else:
-                                # 일반 컬럼 검색
-                                if hasattr(conn, 'is_postgres') and conn.is_postgres:
                                     where_clauses.append(f"{field} ILIKE %s")
+                            else:
+                                if is_dynamic:
+                                    where_clauses.append(f"json_extract(custom_data, '$.{field}') LIKE ?")
                                 else:
                                     where_clauses.append(f"{field} LIKE ?")
+                            base_params.append(like_param)
                         else:
                             field = field_info
+                            like_param = f"%{query}%"
                             if hasattr(conn, 'is_postgres') and conn.is_postgres:
                                 where_clauses.append(f"{field} ILIKE %s")
                             else:
                                 where_clauses.append(f"{field} LIKE ?")
-                        
-                        params.append(f"%{query}%")
-                    
-                    where_sql = " OR ".join(where_clauses)
-                    
+                            base_params.append(like_param)
+
+                    where_sql = ' OR '.join(where_clauses)
+                    order_clause = config.get('order_by', config.get('id_field', 'id'))
+
                     if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                        sql = f"""
+                        query_sql = f"""
                             SELECT * FROM {table_name}
                             WHERE {where_sql}
-                            ORDER BY {config.get('order_by', config.get('id_field', 'id'))}
-                            LIMIT %s
+                            ORDER BY {order_clause}
+                            LIMIT %s OFFSET %s
+                        """
+                        count_sql = f"""
+                            SELECT COUNT(*) FROM {table_name}
+                            WHERE {where_sql}
                         """
                     else:
-                        sql = f"""
+                        query_sql = f"""
                             SELECT * FROM {table_name}
                             WHERE {where_sql}
-                            ORDER BY {config.get('order_by', config.get('id_field', 'id'))}
-                            LIMIT ?
+                            ORDER BY {order_clause}
+                            LIMIT ? OFFSET ?
                         """
-                    params.append(limit)
-                
-                cursor.execute(sql, params)
+                        count_sql = f"""
+                            SELECT COUNT(*) FROM {table_name}
+                            WHERE {where_sql}
+                        """
+
+                    count_params = list(base_params)
+                    query_params = list(base_params)
+                    query_params.extend([query_limit, offset])
+
+                if not query_sql or not count_sql:
+                    conn.close()
+                    return {
+                        'results': [],
+                        'config': config,
+                        'total': 0,
+                        'page': page,
+                        'has_more': False,
+                        'total_pages': 0,
+                    }
+
+                cursor.execute(query_sql, query_params)
+                logging.info("[search-popup] local-sql type=%s sql=%s params=%s", search_type, query_sql, query_params)
                 rows = cursor.fetchall()
+                has_more_flag = len(rows) > limit
+                rows = rows[:limit]
                 results = [dict(row) for row in rows]
+
+                cursor.execute(count_sql, count_params)
+                count_row = cursor.fetchone()
+                total_count = count_row[0] if count_row else 0
+
                 conn.close()
             else:
                 # 실시간 쿼리 실행 (person, department, building, contractor)
                 query_key = config.get('query_key')
                 if not query_key:
                     raise ValueError(f"query_key not found for {search_type}")
-                
+
                 # 검색 조건 구성
                 search_conditions = []
                 params = []
-                
-                if search_field:
+
+                if use_filters:
+                    operator = config.get('advanced_filter_operator', 'and').lower()
+                    clause_joiner = ' AND ' if operator == 'and' else ' OR '
+                    filter_clauses = []
+                    for filt in prepared_filters:
+                        field = filt['field']
+                        value = filt['value']
+                        filter_clauses.append(f"{field} LIKE ?")
+                        params.append(f"%{value}%")
+                    if filter_clauses:
+                        search_conditions.append(clause_joiner.join(filter_clauses))
+                elif search_field:
                     # 특정 필드 검색
                     search_conditions.append(f"{search_field} LIKE ?")
                     params.append(f"%{query}%")
@@ -510,40 +712,93 @@ class SearchPopupService:
                             field = field_info
                         field_conditions.append(f"{field} LIKE ?")
                         params.append(f"%{query}%")
-                    
+
                     if field_conditions:
                         search_conditions.append(f"({' OR '.join(field_conditions)})")
-                
+
                 # LIMIT 추가
                 search_condition = ' AND '.join(search_conditions) if search_conditions else '1=1'
-                
-                # 실시간 쿼리 실행
+
                 all_results = self._execute_realtime_query(query_key, search_condition, params)
-                
+                logging.info(
+                    "[search-popup] realtime type=%s condition=%s params=%s results=%s",
+                    search_type,
+                    search_condition,
+                    params,
+                    len(all_results),
+                )
+
+                # fallback 데이터에 대해서는 파이썬에서 필터링 수행
+                def matches_filters(row_dict):
+                    def value_contains(field_key, target_value):
+                        val = row_dict.get(field_key)
+                        if val is None:
+                            return False
+                        return target_value in str(val).lower()
+
+                    if use_filters:
+                        operator = config.get('advanced_filter_operator', 'and').lower()
+                        prepared = [{'field': f['field'], 'value': f['value'].lower()} for f in prepared_filters]
+                        if operator == 'and':
+                            return all(value_contains(f['field'], f['value']) for f in prepared)
+                        return any(value_contains(f['field'], f['value']) for f in prepared)
+                    if query:
+                        search_fields = []
+                        if search_field:
+                            search_fields.append(search_field)
+                        else:
+                            for field_info in config.get('search_fields', []):
+                                if isinstance(field_info, dict):
+                                    search_fields.append(field_info.get('field'))
+                                else:
+                                    search_fields.append(field_info)
+                        lowered = query.lower()
+                        for field in search_fields:
+                            if field and value_contains(field, lowered):
+                                return True
+                        return False
+                    return True
+
+                filtered_results = [row for row in all_results if matches_filters(row)]
+
                 # LIMIT 적용
-                results = all_results[:limit]
-                
+                results = filtered_results[offset: offset + limit]
+                has_more_flag = len(filtered_results) > (offset + limit)
+                total_count = len(filtered_results)
+
                 # 캐시 저장 (company 제외)
                 if search_type != 'company':
-                    cache_key = self._get_cache_key(search_type, query, search_field)
+                    cache_key = self._get_cache_key(search_type, query, search_field, prepared_filters, limit, page)
                     cache_data = {
                         'results': results,
                         'config': config,
-                        'total': len(results)
+                        'total': total_count,
+                        'total_pages': math.ceil(total_count / limit) if total_count else 0,
+                        'has_more': has_more_flag,
+                        'page': page,
                     }
                     self._cache[cache_key] = {
                         'data': cache_data,
                         'timestamp': datetime.now()
                     }
-            
+        
         except Exception as e:
-            logging.error(f"Search error for {search_type}: {e}")
+            logging.error(
+                "Search error for %s: %s (query_key=%s)",
+                search_type,
+                e,
+                locals().get('query_key'),
+            )
             return {
                 'results': [],
                 'config': config,
-                'error': str(e)
+                'error': str(e),
+                'total': 0,
+                'page': page,
+                'has_more': False,
+                'total_pages': 0,
             }
-        
+
         # 키 대/소문자 동시 접근 가능하도록 보강
         for result in results:
             for key in list(result.keys()):
@@ -564,11 +819,14 @@ class SearchPopupService:
                 # department_name -> department 매핑
                 if 'department_name' in result:
                     result['department'] = result['department_name']
-        
+
         return {
             'results': results,
             'config': config,
-            'total': len(results)
+            'total': total_count,
+            'total_pages': math.ceil(total_count / limit) if total_count else 0,
+            'page': page,
+            'has_more': has_more_flag,
         }
     
     def cleanup_cache(self):

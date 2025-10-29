@@ -16,6 +16,8 @@ _PER_BOARD_PROTECTED = {
     'change_request': {"request_number"},
     'follow_sop': {"work_req_no"},
     'full_process': {"fullprocess_number"},
+    'subcontract_approval': {"approval_number"},
+    'subcontract_report': {"report_number"},
 }
 
 

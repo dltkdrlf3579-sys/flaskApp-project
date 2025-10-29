@@ -8,6 +8,10 @@ import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from db_connection import get_db_connection
+from list_schema_utils import (
+    resolve_child_schema,
+    dump_child_schema,
+)
 
 # 시스템/폼 전용 보호 컬럼 키 (관리자 컬럼 설정 화면에서 숨김 + 수정/삭제 금지)
 PROTECTED_KEYS = {"attachments", "detailed_content", "notes", "note", "created_at"}
@@ -20,6 +24,8 @@ def _protected_for_board(board_type: str) -> set[str]:
         'follow_sop': {"work_req_no"},
         'full_process': {"fullprocess_number"},
         'safe_workplace': {"safeplace_no"},
+        'subcontract_approval': {"approval_number"},
+        'subcontract_report': {"report_number"},
         'partner_standards': {"standard_number"},
     }
     return PROTECTED_KEYS | per_board.get(board_type, set())
@@ -64,10 +70,30 @@ class ColumnConfigService:
             'partner_standards': 'partner_standards',
             'follow_sop': 'follow_sop',
             'full_process': 'full_process',
-            'safe_workplace': 'safe_workplace'
+            'safe_workplace': 'safe_workplace',
+            'subcontract_approval': 'subcontract_approval',
+            'subcontract_report': 'subcontract_report',
         }
         return table_map.get(self.board_type, f"{self.board_type}s")
-    
+
+    def _default_list_preset(self) -> Optional[str]:
+        """Return board-specific default list preset (None to disable)."""
+        return None
+
+    @staticmethod
+    def _normalize_list_preset(value: Optional[str]) -> Optional[str]:
+        """Normalize stored preset values to simple keys."""
+        if value is None:
+            return None
+        value = str(value).strip()
+        if not value:
+            return None
+        if value.startswith('list_'):
+            value = value[5:]
+        if value == 'custom':
+            return None
+        return value or None
+
     def _ensure_tables_exist(self):
         """필요한 테이블 생성"""
         conn = get_db_connection(self.db_path)
@@ -141,6 +167,10 @@ class ColumnConfigService:
             add_column('is_deleted', 'INTEGER DEFAULT 0')
         if not has_column(self.table_name, 'input_type'):
             add_column('input_type', 'TEXT')
+        if not has_column(self.table_name, 'list_item_type'):
+            add_column('list_item_type', 'TEXT')
+        if not has_column(self.table_name, 'child_schema'):
+            add_column('child_schema', 'TEXT')
         # 테이블 메타 컬럼 보강
         if not has_column(self.table_name, 'table_group'):
             add_column('table_group', 'TEXT')
@@ -151,6 +181,8 @@ class ColumnConfigService:
         # 채점 시스템 설정 저장 컬럼 추가
         if not has_column(self.table_name, 'scoring_config'):
             add_column('scoring_config', 'TEXT')
+        if not has_column(self.table_name, 'is_system'):
+            add_column('is_system', 'INTEGER DEFAULT 0')
 
         conn.commit()
         conn.close()
@@ -189,6 +221,31 @@ class ColumnConfigService:
                     column_dict['dropdown_options'] = json.loads(column_dict['dropdown_options'])
                 except json.JSONDecodeError:
                     column_dict['dropdown_options'] = []
+            schema, generated = resolve_child_schema(column_dict)
+            column_dict['child_schema'] = schema
+            if generated:
+                column_dict['_child_schema_generated'] = True
+            if (
+                column_dict.get('column_type') == 'list'
+                and not column_dict['child_schema']
+            ):
+                column_dict['list_item_type'] = None
+                if isinstance(column_dict.get('input_type'), str) and column_dict['input_type'].startswith('list_'):
+                    column_dict['input_type'] = 'list_custom'
+            if column_dict.get('column_type') == 'list' and not column_dict.get('list_item_type'):
+                inferred = (column_dict.get('input_type') or '').strip() if isinstance(column_dict.get('input_type'), str) else ''
+                if inferred.startswith('list_') and len(inferred) > 5:
+                    inferred_preset = inferred[5:]
+                    if inferred_preset and inferred_preset != 'custom':
+                        column_dict['list_item_type'] = inferred_preset
+                    else:
+                        default_preset = self._default_list_preset()
+                        if default_preset:
+                            column_dict['list_item_type'] = default_preset
+                else:
+                    default_preset = self._default_list_preset()
+                    if default_preset:
+                        column_dict['list_item_type'] = default_preset
             result.append(column_dict)
 
         # 보호 컬럼 및 시스템 컬럼은 관리자 목록에서 숨김
@@ -211,6 +268,21 @@ class ColumnConfigService:
         ]
         return filtered
     
+
+    def get_column_by_key(self, column_key: str, *, include_deleted: bool = False) -> Optional[Dict[str, Any]]:
+        """Fetch a column by its column_key."""
+        conn = get_db_connection(self.db_path, row_factory=True)
+        deleted_clause = '' if include_deleted else 'AND COALESCE(is_deleted, 0) = 0'
+        row = conn.execute(
+            f"SELECT id FROM {self.table_name} WHERE column_key = %s " + deleted_clause,
+            (column_key,)
+        ).fetchone()
+        conn.close()
+        if row:
+            column_id = row['id'] if isinstance(row, dict) else row[0]
+            return self.get_column(column_id)
+        return None
+
     def get_column(self, column_id: int) -> Optional[Dict[str, Any]]:
         """
         특정 컬럼 조회
@@ -236,6 +308,31 @@ class ColumnConfigService:
                     column_dict['dropdown_options'] = json.loads(column_dict['dropdown_options'])
                 except json.JSONDecodeError:
                     column_dict['dropdown_options'] = []
+            schema, generated = resolve_child_schema(column_dict)
+            column_dict['child_schema'] = schema
+            if generated:
+                column_dict['_child_schema_generated'] = True
+            if (
+                column_dict.get('column_type') == 'list'
+                and not column_dict['child_schema']
+            ):
+                column_dict['list_item_type'] = None
+                if isinstance(column_dict.get('input_type'), str) and column_dict['input_type'].startswith('list_'):
+                    column_dict['input_type'] = 'list_custom'
+            if column_dict.get('column_type') == 'list' and not column_dict.get('list_item_type'):
+                inferred = (column_dict.get('input_type') or '').strip() if isinstance(column_dict.get('input_type'), str) else ''
+                if inferred.startswith('list_') and len(inferred) > 5:
+                    inferred_preset = inferred[5:]
+                    if inferred_preset and inferred_preset != 'custom':
+                        column_dict['list_item_type'] = inferred_preset
+                    else:
+                        default_preset = self._default_list_preset()
+                        if default_preset:
+                            column_dict['list_item_type'] = default_preset
+                else:
+                    default_preset = self._default_list_preset()
+                    if default_preset:
+                        column_dict['list_item_type'] = default_preset
             return column_dict
         
         return None
@@ -293,15 +390,43 @@ class ColumnConfigService:
             dropdown_options = column_data.get('dropdown_options', [])
             if isinstance(dropdown_options, list):
                 dropdown_options = json.dumps(dropdown_options, ensure_ascii=False)
-            
+
+            child_schema_json = dump_child_schema(column_data.get('child_schema'))
+
+            preset_value = self._normalize_list_preset(column_data.get('list_item_type'))
+
             # input_type 처리 (follow_sop, full_process용)
             input_type = None
             if 'input_type' in column_data:
                 input_type = column_data.get('input_type')
+                if not preset_value and isinstance(input_type, str):
+                    inferred_input = input_type.strip()
+                    if inferred_input.startswith('list_') and len(inferred_input) > 5:
+                        preset_value = inferred_input[5:]
             elif column_data.get('column_type') == 'table':
                 # column_type이 table인 경우 input_type을 table로 설정
                 input_type = 'table'
-            
+            elif column_data.get('column_type') == 'list':
+                if preset_value:
+                    input_type = 'list_' + preset_value
+                else:
+                    default_preset = self._default_list_preset()
+                    if default_preset:
+                        input_type = 'list_' + default_preset
+                        preset_value = default_preset
+                    else:
+                        input_type = 'list_custom'
+
+            list_item_type_value = preset_value
+            if column_data.get('column_type') == 'list':
+                if list_item_type_value is None and isinstance(input_type, str):
+                    inferred_input = input_type.strip()
+                    if inferred_input.startswith('list_') and len(inferred_input) > 5:
+                        list_item_type_value = inferred_input[5:]
+                # no default preset
+            elif list_item_type_value is not None:
+                list_item_type_value = self._normalize_list_preset(list_item_type_value)
+
             # 테이블 컬럼 존재 여부 확인
             # PostgreSQL: information_schema를 통해 컬럼 정보 조회
             cursor.execute("""
@@ -311,6 +436,7 @@ class ColumnConfigService:
             """, (self.table_name,))
             cols = [col[0] for col in cursor.fetchall()]
             has_input_type = 'input_type' in cols
+            has_list_item_type = 'list_item_type' in cols
             has_table_group = 'table_group' in cols
             has_table_type = 'table_type' in cols
             has_table_name = 'table_name' in cols
@@ -360,6 +486,9 @@ class ColumnConfigService:
             if has_input_type:
                 fields.append('input_type')
                 values.append(input_type)
+            if has_list_item_type:
+                fields.append('list_item_type')
+                values.append(list_item_type_value)
             if has_table_group:
                 fields.append('table_group')
                 values.append(column_data.get('table_group'))
@@ -387,6 +516,10 @@ class ColumnConfigService:
                 if isinstance(sc, (dict, list)):
                     sc = json.dumps(sc, ensure_ascii=False)
                 values.append(sc)
+
+            if 'child_schema' in cols2:
+                fields.append('child_schema')
+                values.append(child_schema_json)
 
             placeholders = ', '.join(['%s'] * len(fields))
             cursor.execute_with_returning_id(
@@ -440,6 +573,9 @@ class ColumnConfigService:
             'id': column_id,
             'column_key': column_key,
             'column_name': column_data['column_name'],
+            'input_type': input_type,
+            'list_item_type': list_item_type_value,
+            'child_schema': column_data.get('child_schema'),
             'success': True,
             'message': '컬럼이 추가되었습니다.'
         }
@@ -503,10 +639,17 @@ class ColumnConfigService:
                 dropdown_options = column_data['dropdown_options']
                 if isinstance(dropdown_options, list):
                     column_data['dropdown_options'] = json.dumps(dropdown_options, ensure_ascii=False)
-            
+
+            if 'child_schema' in column_data:
+                column_data['child_schema'] = dump_child_schema(column_data.get('child_schema'))
+
             # 업데이트할 필드 구성
             update_fields = []
             update_values = []
+
+            preset_value = self._normalize_list_preset(column_data.get('list_item_type'))
+            if 'list_item_type' in column_data:
+                column_data['list_item_type'] = preset_value
             
             # input_type이 지원되는지 확인
             # PostgreSQL: information_schema를 통해 컬럼 정보 조회
@@ -517,9 +660,10 @@ class ColumnConfigService:
             """, (self.table_name,))
             columns = [col[0] for col in cursor.fetchall()]
             has_input_type = 'input_type' in columns
+            has_list_item_type = 'list_item_type' in columns
             
-            allowed_fields = ['column_name', 'column_type', 'is_active', 
-                             'is_required', 'dropdown_options', 'column_order', 'column_span', 'tab',
+            allowed_fields = ['column_name', 'column_type', 'is_active',
+                             'is_required', 'dropdown_options', 'child_schema', 'column_order', 'column_span', 'tab',
                              'table_group', 'table_type', 'table_name', 'scoring_config']
             
             # input_type이 있으면 허용 필드에 추가
@@ -528,7 +672,29 @@ class ColumnConfigService:
                 # column_type이 table인 경우 자동으로 input_type 설정
                 if column_data.get('column_type') == 'table' and 'input_type' not in column_data:
                     column_data['input_type'] = 'table'
-            
+                elif column_data.get('column_type') == 'list' and 'input_type' not in column_data:
+                    preset = preset_value or self._normalize_list_preset(column_data.get('list_item_type'))
+                    if preset:
+                        column_data['input_type'] = 'list_' + preset
+                    else:
+                        default_preset = self._default_list_preset()
+                        column_data['input_type'] = ('list_' + default_preset) if default_preset else 'list_custom'
+
+            if has_list_item_type:
+                allowed_fields.append('list_item_type')
+                if column_data.get('column_type') == 'list' and 'list_item_type' not in column_data:
+                    inferred = (column_data.get('input_type') or '').strip()
+                    if inferred.startswith('list_'):
+                        inferred_value = inferred[5:] or None
+                        if inferred_value and inferred_value != 'custom':
+                            column_data['list_item_type'] = inferred_value
+                        else:
+                            default_preset = self._default_list_preset()
+                            if default_preset:
+                                column_data['list_item_type'] = default_preset
+                    else:
+                        column_data['list_item_type'] = None
+
             for field in allowed_fields:
                 if field in column_data:
                     update_fields.append(f"{field} = %s")
@@ -560,6 +726,8 @@ class ColumnConfigService:
                                 val = json.dumps(val, ensure_ascii=False)
                             except Exception:
                                 pass
+                        if field == 'child_schema' and isinstance(val, dict):
+                            val = dump_child_schema(val)
                         update_values.append(val)
             
             if update_fields:

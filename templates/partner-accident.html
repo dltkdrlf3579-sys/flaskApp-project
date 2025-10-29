@@ -864,6 +864,22 @@ function deleteSelected() {
 }
 </script>
 
+{% if feature_toggles %}
+<script>
+    (function() {
+        var toggles = {{ feature_toggles|tojson|safe }};
+        if (!window.__FEATURE_TOGGLES__) {
+            window.__FEATURE_TOGGLES__ = {};
+        }
+        for (var key in toggles) {
+            if (Object.prototype.hasOwnProperty.call(toggles, key)) {
+                window.__FEATURE_TOGGLES__[key] = toggles[key];
+            }
+        }
+    })();
+</script>
+{% endif %}
+
 <style>
 /* 재해자명단 컬럼 고정 너비 및 말줄임 처리 */
 .data-table th[data-col="injured_person"], 
