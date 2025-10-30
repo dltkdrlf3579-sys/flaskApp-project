@@ -782,6 +782,7 @@ def check_first_request():
 
 @app.before_request
 def ensure_periodic_master_sync():
+    global _master_sync_last_check_ts, _master_sync_last_run_date
     if not _master_sync_enabled:
         return
     now_utc = datetime.utcnow()
@@ -797,7 +798,6 @@ def ensure_periodic_master_sync():
         return
 
     with _master_sync_lock:
-        global _master_sync_last_check_ts, _master_sync_last_run_date
         now_utc = datetime.utcnow()
         if (now_utc - _master_sync_last_check_ts) < timedelta(minutes=10):
             return
