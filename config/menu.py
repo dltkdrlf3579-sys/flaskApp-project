@@ -18,20 +18,15 @@ MENU_CONFIG = [
         "title": "작업안전",
         "submenu": [
             {"title": "Follow SOP", "url": "follow-sop"},
+            {"title": "FullProcess", "url": "full-process"},
             {"title": "안전한 일터", "url": "safe-workplace"},
         ],
     },
     {
-        "title": "적격성평가",
+        "title": "인허가",
         "submenu": [
             {"title": "산안법 도급승인", "url": "subcontract-approval"},
             {"title": "화관법 도급신고", "url": "subcontract-report"},
-        ],
-    },
-    {
-        "title": "안전문화",
-        "submenu": [
-            {"title": "FullProcess", "url": "full-process"},
         ],
     },
 ]

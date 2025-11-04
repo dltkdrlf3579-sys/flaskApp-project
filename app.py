@@ -5,7 +5,8 @@ import pytz
 from pathlib import Path
 import shutil
 import json
-from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, Response, send_from_directory, abort
+import csv
+from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, Response, send_from_directory, abort, stream_with_context
 import configparser
 from timezone_config import KST, get_korean_time, get_korean_time_str
 from config.menu import MENU_CONFIG
@@ -7215,18 +7216,19 @@ def export_follow_sop_excel():
             conn.close()
         return jsonify({"success": False, "message": str(e)}), 500
 
-# ===== Safe Workplace 엑셀 다운로드 API =====
+# ===== Safe Workplace CSV 다운로드 API =====
 @app.route('/api/safe-workplace-export')
-def export_safe_workplace_excel():
-    """Safe Workplace 데이터 엑셀 다운로드"""
+def export_safe_workplace_csv():
+    """Safe Workplace 데이터를 CSV로 스트리밍 다운로드."""
+    conn = None
+    meta_cursor = None
+    data_cursor = None
+
     try:
-        import openpyxl
-        from openpyxl import Workbook
-        from openpyxl.styles import Font, Alignment, PatternFill
         import io
 
         conn = get_db_connection()
-        cursor = conn.cursor()
+        meta_cursor = conn.cursor()
 
         section_sql = f"""
             SELECT section_key, section_name, section_order
@@ -7236,58 +7238,40 @@ def export_safe_workplace_excel():
             ORDER BY section_order
         """
         try:
-            cursor.execute(section_sql)
-            sections = [dict(row) for row in cursor.fetchall()]
+            meta_cursor.execute(section_sql)
+            sections = [dict(row) for row in meta_cursor.fetchall()]
         except Exception:
             sections = []
 
         where_c_active = sql_is_active_true('is_active', conn)
         where_c_notdel = sql_is_deleted_false('is_deleted', conn)
-        cursor.execute(f"""
+        meta_cursor.execute(f"""
             SELECT * FROM safe_workplace_column_config
             WHERE {where_c_active}
               AND {where_c_notdel}
             ORDER BY column_order
         """)
-        dynamic_columns_all = [dict(row) for row in cursor.fetchall()]
+        dynamic_columns_all = [dict(row) for row in meta_cursor.fetchall()]
+        meta_cursor.close()
+        meta_cursor = None
 
-        dynamic_columns = []
+        dynamic_columns: List[Dict[str, Any]] = []
         if sections:
             for section in sections:
                 section_columns = [col for col in dynamic_columns_all if col.get('tab') == section['section_key']]
                 dynamic_columns.extend(section_columns)
-            no_section_columns = [col for col in dynamic_columns_all if not col.get('tab') or not any(s['section_key'] == col.get('tab') for s in sections)]
+            no_section_columns = [
+                col for col in dynamic_columns_all
+                if not col.get('tab') or not any(s['section_key'] == col.get('tab') for s in sections)
+            ]
             dynamic_columns.extend(no_section_columns)
         else:
             dynamic_columns = dynamic_columns_all
 
-        cursor.execute(f"""
-            SELECT * FROM safe_workplace
-            WHERE {sql_is_deleted_false('is_deleted', conn)}
-            ORDER BY created_at DESC
-        """)
-        data = [dict(row) for row in cursor.fetchall()]
+        import json as _json
 
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Safe Workplace"
-
-        header_font = Font(bold=True, color="FFFFFF")
-        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
-        header_align = Alignment(horizontal="center", vertical="center")
-
-        col_idx = 1
-        basic_headers = ['점검번호', '등록일', '작성자']
-        for header in basic_headers:
-            cell = ws.cell(row=1, column=col_idx, value=header)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = header_align
-            col_idx += 1
-
-        def _expand_scoring_columns(_cols):
-            out = []
-            import json as _json
+        def _expand_scoring_columns(_cols: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            expanded = []
             for c in _cols:
                 if c.get('column_type') == 'scoring':
                     sc = c.get('scoring_config')
@@ -7302,161 +7286,201 @@ def export_safe_workplace_excel():
                         label = it.get('label') or iid
                         if not iid:
                             continue
-                        out.append({
+                        expanded.append({
                             'column_key': f"{c['column_key']}__{iid}",
                             'column_name': f"{c.get('column_name', c.get('column_key'))} - {label}",
                             'column_type': 'number',
                             '_virtual': 1,
                             '_source_scoring_key': c['column_key'],
-                            '_source_item_id': iid
+                            '_source_item_id': iid,
                         })
                 else:
-                    out.append(dict(c))
-            return out
+                    expanded.append(dict(c))
+            return expanded
 
         dyn_cols_list = [dict(x) for x in dynamic_columns]
         expanded_columns = _expand_scoring_columns(dyn_cols_list)
-
-        import json as _json
         scoring_cols = [dict(c) for c in dyn_cols_list if dict(c).get('column_type') == 'scoring']
-        score_total_cols = [dict(c) for c in dyn_cols_list if dict(c).get('column_type') == 'score_total']
 
-        for col in expanded_columns:
-            cell = ws.cell(row=1, column=col_idx, value=col['column_name'])
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = header_align
-            col_idx += 1
-
-        for row_idx, row in enumerate(data, 2):
-            row_dict = dict(row)
-            col_idx = 1
-
-            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('safeplace_no', ''))
-            col_idx += 1
-            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('created_at', ''))
-            col_idx += 1
-            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('created_by', ''))
-            col_idx += 1
-
-            custom_data = row_dict.get('custom_data', {})
-            if not isinstance(custom_data, dict):
+        def _map_value(col: Dict[str, Any], value: Any) -> Any:
+            if isinstance(value, dict):
+                return value.get('name') or str(value)
+            if isinstance(value, list):
+                if not value:
+                    return ''
                 try:
-                    custom_data = _json.loads(custom_data) if custom_data else {}
+                    return json.dumps(value, ensure_ascii=False)
                 except Exception:
-                    custom_data = {}
+                    return str(value)
+            if col.get('column_type') == 'dropdown' and value:
+                opts = get_dropdown_options_for_display('safe_workplace', col['column_key'])
+                if opts:
+                    for opt in opts:
+                        if opt['code'] == value:
+                            return opt['value']
+            return value if value is not None else ''
 
-            def _map_value(col, value):
-                if isinstance(value, dict):
-                    return value.get('name') or str(value)
-                if isinstance(value, list):
-                    if not value:
-                        return ''
-                    try:
-                        return json.dumps(value, ensure_ascii=False)
-                    except Exception:
-                        return str(value)
-                if col['column_type'] == 'dropdown' and value:
-                    opts = get_dropdown_options_for_display('safe_workplace', col['column_key'])
-                    if opts:
-                        for opt in opts:
-                            if opt['code'] == value:
-                                return opt['value']
-                return value if value is not None else ''
+        data_sql = f"""
+            SELECT * FROM safe_workplace
+            WHERE {sql_is_deleted_false('is_deleted', conn)}
+            ORDER BY created_at DESC
+        """
+        data_cursor = conn.cursor()
+        data_cursor.execute(data_sql)
 
-            for col in expanded_columns:
-                if col.get('_virtual') == 1:
-                    src = col.get('_source_scoring_key')
-                    iid = col.get('_source_item_id')
-                    group_obj = custom_data.get(src, {})
-                    if isinstance(group_obj, str):
-                        try:
-                            group_obj = _json.loads(group_obj)
-                        except Exception:
-                            group_obj = {}
-                    value = 0
-                    if isinstance(group_obj, dict):
-                        value = group_obj.get(iid, 0)
-                    ws.cell(row=row_idx, column=col_idx, value=value)
-                else:
-                    if col.get('column_type') == 'score_total':
-                        try:
-                            conf = col.get('scoring_config')
-                            if conf and isinstance(conf, str):
-                                conf = _json.loads(conf)
-                            base = (conf or {}).get('base_score', 100)
-                            include_keys = (conf or {}).get('include_keys') or []
-                            total = base
-                            if include_keys:
-                                for key in include_keys:
-                                    sc_col = next((c for c in scoring_cols if c.get('column_key') == key), None)
-                                    if not sc_col:
-                                        continue
-                                    sconf = sc_col.get('scoring_config')
-                                    if sconf and isinstance(sconf, str):
-                                        try:
-                                            sconf = _json.loads(sconf)
-                                        except Exception:
-                                            sconf = {}
-                                    items_cfg = (sconf or {}).get('items') or []
-                                    group_obj = custom_data.get(key, {})
-                                    if isinstance(group_obj, str):
-                                        try:
-                                            group_obj = _json.loads(group_obj)
-                                        except Exception:
-                                            group_obj = {}
-                                    for it in items_cfg:
-                                        iid = it.get('id')
-                                        delta = float(it.get('per_unit_delta') or 0)
-                                        cnt = 0
-                                        if isinstance(group_obj, dict) and iid in group_obj:
-                                            try:
-                                                cnt = int(group_obj.get(iid) or 0)
-                                            except Exception:
+        headers = ['점검번호', '등록일', '작성자'] + [col['column_name'] for col in expanded_columns]
+        filename = f"safe_workplace_{get_korean_time().strftime('%Y%m%d_%H%M%S')}.csv"
+
+        def stream_csv():
+            output = io.StringIO()
+            writer = csv.writer(output, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+
+            first_chunk = True
+
+            def flush_buffer():
+                nonlocal first_chunk
+                chunk = output.getvalue()
+                output.seek(0)
+                output.truncate(0)
+                if not chunk:
+                    return b''
+                encoded = chunk.encode('utf-8-sig' if first_chunk else 'utf-8')
+                first_chunk = False
+                return encoded
+
+            # Excel 구분자 힌트
+            output.write('sep=,\n')
+            chunk = flush_buffer()
+            if chunk:
+                yield chunk
+
+            writer.writerow(headers)
+            chunk = flush_buffer()
+            if chunk:
+                yield chunk
+
+            try:
+                while True:
+                    rows = data_cursor.fetchmany(1000)
+                    if not rows:
+                        break
+                    for row in rows:
+                        row_dict = dict(row)
+                        csv_row = [
+                            row_dict.get('safeplace_no', ''),
+                            row_dict.get('created_at', ''),
+                            row_dict.get('created_by', ''),
+                        ]
+
+                        custom_data = row_dict.get('custom_data', {})
+                        if not isinstance(custom_data, dict):
+                            try:
+                                custom_data = _json.loads(custom_data) if custom_data else {}
+                            except Exception:
+                                custom_data = {}
+
+                        for col in expanded_columns:
+                            if col.get('_virtual') == 1:
+                                src = col.get('_source_scoring_key')
+                                iid = col.get('_source_item_id')
+                                group_obj = custom_data.get(src, {})
+                                if isinstance(group_obj, str):
+                                    try:
+                                        group_obj = _json.loads(group_obj)
+                                    except Exception:
+                                        group_obj = {}
+                                value = 0
+                                if isinstance(group_obj, dict):
+                                    value = group_obj.get(iid, 0)
+                                csv_row.append(value)
+                            elif col.get('column_type') == 'score_total':
+                                try:
+                                    conf = col.get('scoring_config')
+                                    if conf and isinstance(conf, str):
+                                        conf = _json.loads(conf)
+                                    base = (conf or {}).get('base_score', 100)
+                                    include_keys = (conf or {}).get('include_keys') or []
+                                    total = base
+                                    if include_keys:
+                                        for key in include_keys:
+                                            sc_col = next((c for c in scoring_cols if c.get('column_key') == key), None)
+                                            if not sc_col:
+                                                continue
+                                            sconf = sc_col.get('scoring_config')
+                                            if sconf and isinstance(sconf, str):
+                                                try:
+                                                    sconf = _json.loads(sconf)
+                                                except Exception:
+                                                    sconf = {}
+                                            items_cfg = (sconf or {}).get('items') or []
+                                            group_obj = custom_data.get(key, {})
+                                            if isinstance(group_obj, str):
+                                                try:
+                                                    group_obj = _json.loads(group_obj)
+                                                except Exception:
+                                                    group_obj = {}
+                                            for it in items_cfg:
+                                                iid = it.get('id')
+                                                delta = float(it.get('per_unit_delta') or 0)
                                                 cnt = 0
-                                        total += cnt * delta
-                            ws.cell(row=row_idx, column=col_idx, value=total)
-                        except Exception:
-                            ws.cell(row=row_idx, column=col_idx, value='')
-                    else:
-                        ws.cell(row=row_idx, column=col_idx, value=_map_value(col, custom_data.get(col['column_key'], '')))
-                col_idx += 1
+                                                if isinstance(group_obj, dict) and iid in group_obj:
+                                                    try:
+                                                        cnt = int(group_obj.get(iid) or 0)
+                                                    except Exception:
+                                                        cnt = 0
+                                                total += cnt * delta
+                                    csv_row.append(total)
+                                except Exception:
+                                    csv_row.append('')
+                            else:
+                                csv_row.append(_map_value(col, custom_data.get(col['column_key'], '')))
 
-        for column in ws.columns:
-            max_length = 0
-            column_letter = column[0].column_letter
-            for cell in column:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except Exception:
-                    pass
-            adjusted_width = min((max_length + 2) * 1.2, 50)
-            ws.column_dimensions[column_letter].width = adjusted_width
+                        writer.writerow(csv_row)
 
-        output = io.BytesIO()
-        wb.save(output)
-        output.seek(0)
+                    chunk = flush_buffer()
+                    if chunk:
+                        yield chunk
+            finally:
+                if data_cursor:
+                    try:
+                        data_cursor.close()
+                    except Exception:
+                        pass
+                if conn:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
 
-        filename = f"safe_workplace_{get_korean_time().strftime('%Y%m%d_%H%M%S')}.xlsx"
-
-        conn.close()
-
-        return Response(
-            output.getvalue(),
-            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        response = Response(
+            stream_with_context(stream_csv()),
+            mimetype='text/csv; charset=utf-8',
             headers={
                 'Content-Disposition': f'attachment; filename={filename}',
-                'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-            }
+                'Cache-Control': 'no-cache',
+            },
         )
+        return response
 
     except Exception as e:
         import traceback
-        logging.error(f"Safe Workplace 엑셀 다운로드 중 오류: {e}")
+        logging.error(f"Safe Workplace CSV 다운로드 중 오류: {e}")
         logging.error(traceback.format_exc())
+        if data_cursor:
+            try:
+                data_cursor.close()
+            except Exception:
+                pass
+        if meta_cursor:
+            try:
+                meta_cursor.close()
+            except Exception:
+                pass
         if conn:
-            conn.close()
+            try:
+                conn.close()
+            except Exception:
+                pass
         return jsonify({"success": False, "message": str(e)}), 500
 
 # ===== Full Process 엑셀 다운로드 API =====
