@@ -136,6 +136,13 @@ def row_to_custom_data(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def sanitize_value(value: Any) -> Any:
+    try:
+        import pandas as _pd
+        if _pd.isna(value):
+            return ""
+    except Exception:
+        pass
+
     if value is None:
         return ""
     if isinstance(value, float):
