@@ -2,6 +2,9 @@
 """
 Excel → subcontract_report 데이터 이관 스크립트.
 
+실행 전 상단에 있는 `EXCEL_FILE`, `SHEET_NAME`, `DATABASE_URL`, `CREATED_BY`, `DRY_RUN`
+값만 수정하면 됩니다. (환경변수로 덮어쓸 수도 있음)
+
 1. xlwings로 엑셀을 강제로 열어 원본 서식을 그대로 읽어옵니다.
 2. submission_date를 created_at으로 간주하고 SRyyMMdd### 형식의 report_number를 생성합니다.
 3. 나머지 컬럼은 custom_data(JSONB)로 직렬화한 뒤 subcontract_report 테이블에 upsert 합니다.
@@ -9,7 +12,6 @@ Excel → subcontract_report 데이터 이관 스크립트.
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import sys
@@ -22,10 +24,15 @@ import xlwings as xw
 from sqlalchemy import MetaData, Table, create_engine
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-DEFAULT_DB_URL = os.environ.get(
+# ===== 실행 전 사용자 설정 =====
+EXCEL_FILE = os.environ.get("SUBCONTRACT_REPORT_XLSX", r"C:\path\to\subcontract_report.xlsx")
+SHEET_NAME = os.environ.get("SUBCONTRACT_REPORT_SHEET")  # 예: "Sheet1" / None → 첫 시트
+DATABASE_URL = os.environ.get(
     "PORTAL_DATABASE_URL",
     "postgresql+psycopg2://adminuser:password@0.0.0.0:5432/servername",
 )
+CREATED_BY = os.environ.get("SUBCONTRACT_REPORT_CREATED_BY", "excel_migration")
+DRY_RUN = os.environ.get("SUBCONTRACT_REPORT_DRY_RUN", "true").lower() in {"1", "true", "yes"}
 
 EXCEL_DATE_COLUMNS = {
     "submission_date",
@@ -183,38 +190,12 @@ def upsert_records(engine, records: Iterable[Dict[str, Any]], dry_run: bool) -> 
     _log(f"Processed {total} rows ({'dry-run' if dry_run else 'committed'}).")
 
 
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Import subcontract_report data from Excel.")
-    parser.add_argument("excel_path", help="Excel 파일 경로")
-    parser.add_argument(
-        "--sheet",
-        dest="sheet_name",
-        default=None,
-        help="읽어올 시트명 (미지정 시 첫 번째 시트)",
-    )
-    parser.add_argument(
-        "--db-url",
-        dest="db_url",
-        default=DEFAULT_DB_URL,
-        help=f"SQLAlchemy DB URL (default: {DEFAULT_DB_URL})",
-    )
-    parser.add_argument(
-        "--created-by",
-        dest="created_by",
-        default="excel_migration",
-        help="created_by / updated_by에 기록할 값",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="DB에 쓰지 않고 생성될 report_number와 변환 결과만 로그로 출력",
-    )
-    return parser.parse_args(argv)
+def main() -> None:
+    if not EXCEL_FILE or not os.path.exists(EXCEL_FILE):
+        _log(f"엑셀 파일을 찾을 수 없습니다: {EXCEL_FILE}")
+        sys.exit(1)
 
-
-def main(argv: Optional[List[str]] = None) -> None:
-    args = parse_args(argv)
-    df_raw = load_excel_via_xlwings(args.excel_path, args.sheet_name)
+    df_raw = load_excel_via_xlwings(EXCEL_FILE, SHEET_NAME)
     df = clean_dataframe(df_raw)
 
     if df.empty:
@@ -226,19 +207,19 @@ def main(argv: Optional[List[str]] = None) -> None:
     records = list(
         build_records(
             df=df,
-            created_by=args.created_by,
-            updated_by=args.created_by,
+            created_by=CREATED_BY,
+            updated_by=CREATED_BY,
         )
     )
 
-    if args.dry_run:
+    if DRY_RUN:
         _log("=== DRY RUN SAMPLE ===")
         for sample in records[:3]:
             _log(json.dumps(sample, ensure_ascii=False, default=str))
 
-    engine = create_engine(args.db_url, future=True)
-    upsert_records(engine, records, dry_run=args.dry_run)
+    engine = create_engine(DATABASE_URL, future=True)
+    upsert_records(engine, records, dry_run=DRY_RUN)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    main()
