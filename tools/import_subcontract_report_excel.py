@@ -84,7 +84,8 @@ def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     df = df.loc[:, ~df.columns.isnull()]
     df.columns = [_normalize_column(col) for col in df.columns]
     df = df.loc[:, [col for col in df.columns if col]]
-    df = df.replace({pd.NaT: None, pd.NA: None})
+    df = df.replace({pd.NaT: None})
+    df = df.where(pd.notna(df), None)
     return df
 
 
