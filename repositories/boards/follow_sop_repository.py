@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import sqlite3
+import math
 from contextlib import contextmanager
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
@@ -268,6 +269,96 @@ class DynamicBoardRepository:
             for row in rows
         ]
 
+    def _extract_inline_dropdown_source(self, column: Mapping[str, Any]):
+        """Return the raw inline dropdown payload, if any."""
+        raw = column.get('dropdown_options')
+        if raw in (None, '', 'null', 'NULL'):
+            raw = column.get('dropdown_values')
+        return raw
+
+    def _parse_inline_dropdown_options(
+        self,
+        column_key: str,
+        raw_options,
+    ) -> List[Dict[str, Any]]:
+        """Build dropdown options from inline JSON/list definitions."""
+        if raw_options in (None, '', [], {}):
+            return []
+
+        payload = raw_options
+        if isinstance(payload, str):
+            stripped = payload.strip()
+            if not stripped:
+                return []
+            try:
+                payload = json.loads(stripped)
+            except Exception:
+                candidates = [segment.strip() for segment in stripped.replace('\r', '\n').split('\n') if segment.strip()]
+                if len(candidates) <= 1:
+                    candidates = [segment.strip() for segment in stripped.split(',') if segment.strip()]
+                if not candidates:
+                    return []
+                payload = candidates
+
+        if isinstance(payload, dict):
+            items: List[Dict[str, Any]] = []
+            for idx, (code, value) in enumerate(payload.items()):
+                option_code = str(code) if code is not None else f"{column_key.upper()}_{idx + 1:03d}"
+                option_value = value
+                if isinstance(option_value, (dict, list)):
+                    option_value = json.dumps(option_value, ensure_ascii=False)
+                if option_value in (None, ''):
+                    option_value = option_code
+                items.append({'code': option_code, 'value': str(option_value)})
+            return items
+
+        if isinstance(payload, (list, tuple, set)):
+            result: List[Dict[str, Any]] = []
+            for index, item in enumerate(list(payload)):
+                option_code = None
+                option_value = None
+                if isinstance(item, dict):
+                    option_code = (
+                        item.get('code')
+                        or item.get('option_code')
+                        or item.get('key')
+                        or item.get('value')
+                    )
+                    option_value = (
+                        item.get('value')
+                        or item.get('label')
+                        or item.get('option_value')
+                        or item.get('name')
+                    )
+                else:
+                    option_value = item
+                code = (
+                    str(option_code)
+                    if option_code not in (None, '')
+                    else f"{column_key.upper()}_{index + 1:03d}"
+                )
+                value = option_value
+                if isinstance(value, (dict, list)):
+                    value = json.dumps(value, ensure_ascii=False)
+                if value in (None, ''):
+                    value = code
+                result.append({'code': code, 'value': str(value)})
+            return result
+
+        if isinstance(payload, (int, float)):
+            payload = [payload]
+
+        if isinstance(payload, str):
+            tokens = [token.strip() for token in payload.replace('\r', '\n').split('\n') if token.strip()]
+            if len(tokens) <= 1:
+                tokens = [token.strip() for token in payload.split(',') if token.strip()]
+            return [
+                {'code': f"{column_key.upper()}_{idx + 1:03d}", 'value': token}
+                for idx, token in enumerate(tokens)
+            ]
+
+        return []
+
     def _clean_custom_values(self, payload):
         """Normalize placeholder strings like 'None' to actual None."""
         if isinstance(payload, dict):
@@ -303,6 +394,15 @@ class DynamicBoardRepository:
             if not stripped or stripped.lower() in ('none', 'null', 'undefined'):
                 return ''
             return stripped
+        if isinstance(payload, (int, float)):
+            if isinstance(payload, float):
+                if math.isnan(payload) or math.isinf(payload):
+                    return ''
+                if payload.is_integer():
+                    return str(int(payload))
+                text = format(payload, 'f').rstrip('0').rstrip('.')
+                return text or '0'
+            return str(payload)
         return payload
 
     def _normalise_custom_data(self, value) -> Dict[str, Any]:
@@ -822,6 +922,10 @@ class DynamicBoardRepository:
                 col_key = col.get('column_key')
                 if col_key:
                     options = self._get_dropdown_options(col_key)
+                    if not options:
+                        inline_source = self._extract_inline_dropdown_source(col)
+                        if inline_source not in (None, '', [], {}):
+                            options = self._parse_inline_dropdown_options(col_key, inline_source)
                     if options:
                         basic_options[col_key] = options
                         col['dropdown_options_mapped'] = options

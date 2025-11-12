@@ -234,15 +234,21 @@
                                                data-field-type="dropdown_multi_hidden"
                                                value="{{ selected_codes|tojson if selected_codes else '' }}">
                                     {% else %}
-                                        {% set single_value = col_value|string if col_value is not none else '' %}
-                                        <select class="{{ section.section_key|replace('_', '-') }}-input"
-                                                data-field="{{ col.column_key }}"
-                                                data-section="{{ section.section_key }}">
-                                            <option value="">선택하세요</option>
-                                            {% for opt in options %}
-                                            <option value="{{ opt.code }}" {% if opt.code == single_value %}selected{% endif %}>{{ opt.value }}</option>
-                                            {% endfor %}
-                                        </select>
+                                    {% set single_value = (col_value|string)|trim if col_value is not none else '' %}
+                                    {% set ns = namespace(matched=false) %}
+                                    <select class="{{ section.section_key|replace('_', '-') }}-input"
+                                            data-field="{{ col.column_key }}"
+                                            data-section="{{ section.section_key }}">
+                                        <option value="">선택하세요</option>
+                                        {% for opt in options %}
+                                        {% set is_selected = (opt.code == single_value or opt.value == single_value) %}
+                                        {% if is_selected %}{% set ns.matched = true %}{% endif %}
+                                        <option value="{{ opt.code }}" {% if is_selected %}selected{% endif %}>{{ opt.value }}</option>
+                                        {% endfor %}
+                                        {% if single_value and not ns.matched %}
+                                        <option value="{{ single_value }}" selected>{{ single_value }}</option>
+                                        {% endif %}
+                                    </select>
                                     {% endif %}
                                     
                                 {% elif col.column_type == 'date' %}
