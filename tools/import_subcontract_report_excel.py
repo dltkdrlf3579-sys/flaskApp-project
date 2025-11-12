@@ -18,6 +18,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
+import math
 
 import pandas as pd
 import xlwings as xw
@@ -124,15 +125,45 @@ def row_to_custom_data(row: Dict[str, Any]) -> Dict[str, Any]:
     for key, value in row.items():
         if key in {"created_at"}:
             continue
-        if value in (None, "", [], {}):
+        cleaned = sanitize_value(value)
+        if cleaned == "":
             continue
-        if isinstance(value, datetime):
-            payload[key] = value.isoformat()
-        elif isinstance(value, (list, dict)):
-            payload[key] = value
+        if isinstance(cleaned, datetime):
+            payload[key] = cleaned.isoformat()
         else:
-            payload[key] = value
+            payload[key] = cleaned
     return payload
+
+
+def sanitize_value(value: Any) -> Any:
+    if value is None:
+        return ""
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return ""
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return ""
+        if stripped.lower() in {"nan", "none", "null"}:
+            return ""
+        return stripped
+    if isinstance(value, list):
+        cleaned_list = []
+        for item in value:
+            cleaned = sanitize_value(item)
+            if cleaned != "":
+                cleaned_list.append(cleaned)
+        return cleaned_list or ""
+    if isinstance(value, dict):
+        cleaned_dict = {}
+        for k, v in value.items():
+            cleaned = sanitize_value(v)
+            if cleaned != "":
+                cleaned_dict[k] = cleaned
+        return cleaned_dict or ""
+    return value
 
 
 def build_records(
