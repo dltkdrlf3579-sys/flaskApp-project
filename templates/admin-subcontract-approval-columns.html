@@ -1592,15 +1592,21 @@ if (window.ListChildSupport) {
         }
         
         function toggleListField() {
-            const type = document.getElementById('columnType').value;
-            document.getElementById('listConfigField').style.display = 
-                type === 'list' ? 'block' : 'none';
+            const typeSelect = document.getElementById('columnType');
+            const listField = document.getElementById('listConfigField');
+            if (!typeSelect || !listField) {
+                return;
+            }
+            listField.style.display = typeSelect.value === 'list' ? 'block' : 'none';
         }
 
         function toggleNumberField() {
-            const type = document.getElementById('columnType').value;
-            document.getElementById('numberConfigField').style.display = 
-                type === 'number' ? 'block' : 'none';
+            const typeSelect = document.getElementById('columnType');
+            const numberField = document.getElementById('numberConfigField');
+            if (!typeSelect || !numberField) {
+                return;
+            }
+            numberField.style.display = typeSelect.value === 'number' ? 'block' : 'none';
         }
 
         function toggleScoringField() {

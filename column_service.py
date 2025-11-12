@@ -15,6 +15,7 @@ from list_schema_utils import (
 
 # 시스템/폼 전용 보호 컬럼 키 (관리자 컬럼 설정 화면에서 숨김 + 수정/삭제 금지)
 PROTECTED_KEYS = {"attachments", "detailed_content", "notes", "note", "created_at"}
+JSONB_ONLY_BOARDS = {"subcontract_report", "subcontract_approval"}
 
 def _protected_for_board(board_type: str) -> set[str]:
     per_board = {
@@ -529,35 +530,39 @@ class ColumnConfigService:
             
             column_id = cursor.lastrowid
 
-            # 실제 데이터 테이블에도 컬럼 추가 (핵심 수정사항)
-            try:
-                # 컬럼 타입별 DDL 매핑
-                column_type_map = {
-                    'text': 'TEXT',
-                    'number': 'NUMERIC',
-                    'date': 'DATE',
-                    'dropdown': 'TEXT',
-                    'checkbox': 'INTEGER DEFAULT 0',
-                    'popup_person': 'TEXT',
-                    'popup_company': 'TEXT',
-                    'popup_department': 'TEXT',
-                    'popup_building': 'TEXT',
-                    'popup_contractor': 'TEXT',
-                    'linked_text': 'TEXT',
-                    'linked_dept': 'TEXT',
-                    'list': 'TEXT'
-                }
-
-                ddl_type = column_type_map.get(column_data.get('column_type', 'text'), 'TEXT')
-
-                # 데이터 테이블에 컬럼 추가
-                alter_sql = f"ALTER TABLE {self.data_table} ADD COLUMN {column_key} {ddl_type}"
-                cursor.execute(alter_sql)
-                logging.info(f"데이터 테이블 컬럼 추가: {self.data_table}.{column_key}")
-
-            except Exception as alter_error:
-                # 컬럼이 이미 존재하거나 다른 이유로 실패해도 설정 테이블 추가는 유지
-                logging.warning(f"데이터 테이블 컬럼 추가 실패 (무시): {alter_error}")
+            # JSONB 기반 보드는 실제 테이블 컬럼을 만들지 않음
+            if self.board_type not in JSONB_ONLY_BOARDS:
+                try:
+                    column_type_map = {
+                        'text': 'TEXT',
+                        'number': 'NUMERIC',
+                        'date': 'DATE',
+                        'dropdown': 'TEXT',
+                        'checkbox': 'INTEGER DEFAULT 0',
+                        'popup_person': 'TEXT',
+                        'popup_company': 'TEXT',
+                        'popup_department': 'TEXT',
+                        'popup_building': 'TEXT',
+                        'popup_contractor': 'TEXT',
+                        'linked_text': 'TEXT',
+                        'linked_dept': 'TEXT',
+                        'list': 'TEXT'
+                    }
+    
+                    ddl_type = column_type_map.get(column_data.get('column_type', 'text'), 'TEXT')
+    
+                    alter_sql = f"ALTER TABLE {self.data_table} ADD COLUMN {column_key} {ddl_type}"
+                    cursor.execute(alter_sql)
+                    logging.info(f"데이터 테이블 컬럼 추가: {self.data_table}.{column_key}")
+    
+                except Exception as alter_error:
+                    logging.warning(f"데이터 테이블 컬럼 추가 실패 (무시): {alter_error}")
+            else:
+                logging.info(
+                    "Skipping physical column creation for JSONB board %s (key=%s)",
+                    self.board_type,
+                    column_key,
+                )
 
             conn.commit()
 
