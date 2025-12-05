@@ -11,6 +11,7 @@ from permission_helpers import is_super_admin, resolve_menu_code
 from config.menu import MENU_CONFIG
 from functools import wraps
 from typing import Any, List
+import configparser
 import logging
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,95 @@ def _build_menu_title_map():
                 # 기존 슬러그로 저장된 데이터와의 호환성을 위해 슬러그도 매핑
                 mapping[slug] = name
     return mapping
+
+
+def _load_request_default_levels():
+    """Load menu-specific default grant levels for approval-time auto-assignment."""
+    cfg = configparser.ConfigParser()
+    cfg.read('config.ini', encoding='utf-8')
+
+    def _parse_section(name):
+        levels = {}
+        if not cfg.has_section(name):
+            return levels
+        for key, raw in cfg.items(name):
+            parts = [p.strip() for p in (raw or '').split(',')]
+            if len(parts) >= 2:
+                try:
+                    read_level = int(parts[0])
+                    write_level = int(parts[1])
+                except ValueError:
+                    continue
+                levels[key.upper()] = {'read': read_level, 'write': write_level}
+        return levels
+
+    emp_levels = _parse_section('PERMISSION_REQUEST_GRANTS_EMP')
+    partner_levels = _parse_section('PERMISSION_REQUEST_GRANTS_PARTNER')
+    return emp_levels, partner_levels
+
+
+def _get_user_company_id(login_id):
+    """Fetch company_id for the given login_id; returns None if not found."""
+    if not login_id:
+        return None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT company_id
+              FROM system_users
+             WHERE login_id = %s
+             LIMIT 1
+            """,
+            (login_id,),
+        )
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        if not row:
+            return None
+        try:
+            return row[0] if isinstance(row, (list, tuple)) else row.get('company_id')
+        except Exception:
+            return None
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("company_id lookup failed for %s: %s", login_id, exc)
+        return None
+
+
+def _default_levels_for_request(menu_code, permission_type, company_id, emp_levels, partner_levels):
+    """Compute default read/write levels for approval if payload does not override."""
+    comp = (company_id or '').upper()
+    if comp == 'C10':
+        target_map = partner_levels
+    elif comp == 'C100':
+        target_map = emp_levels
+    else:
+        # 보수적 접근: 회사 구분이 없거나 모르면 협력사 기본치 사용
+        target_map = partner_levels or emp_levels
+    entry = target_map.get(menu_code.upper()) if menu_code else None
+
+    # Fallbacks: read 1 for read request, write 1 for read_write request, else 0
+    if permission_type == 'read_write':
+        fallback_read = 1
+        fallback_write = 1
+    else:
+        fallback_read = 1
+        fallback_write = 0
+
+    if entry:
+        read_level = entry.get('read', fallback_read)
+        write_level = entry.get('write', fallback_write)
+    else:
+        read_level = fallback_read
+        write_level = fallback_write
+
+    # Ensure write implies at least same read level
+    if write_level > 0 and read_level < write_level:
+        read_level = write_level
+
+    return read_level, write_level
 
 
 def _admin_required(func):
@@ -1403,6 +1493,7 @@ def register_permission_routes(app):
         try:
             data = request.json
             reviewer_id = session.get('user_id')
+            reviewer_comp_id = session.get('compid')
             review_comment = data.get('comment', '')
 
             if not reviewer_id:
@@ -1443,6 +1534,9 @@ def register_permission_routes(app):
             permissions_payload = data.get('permissions') or {}
             payload_entry = permissions_payload.get(menu_code) if isinstance(permissions_payload, dict) else None
 
+            emp_levels, partner_levels = _load_request_default_levels()
+            applicant_comp_id = session.get('compid') or _get_user_company_id(login_id)
+
             def _sanitize_level(value):
                 try:
                     return max(0, min(4, int(value)))
@@ -1452,12 +1546,16 @@ def register_permission_routes(app):
             if payload_entry:
                 read_level = _sanitize_level(payload_entry.get('read_level'))
                 write_level = _sanitize_level(payload_entry.get('write_level'))
+                if write_level > 0 and read_level == 0:
+                    read_level = write_level
             else:
-                read_level = 3 if permission_type in ('read', 'read_write') else 0
-                write_level = 3 if permission_type == 'read_write' else 0
-
-            if write_level > 0 and read_level == 0:
-                read_level = write_level
+                read_level, write_level = _default_levels_for_request(
+                    menu_code=menu_code,
+                    permission_type=permission_type,
+                    company_id=applicant_comp_id,
+                    emp_levels=emp_levels,
+                    partner_levels=partner_levels,
+                )
 
             # 사용자 권한 업데이트 (UPSERT)
             cursor.execute("""

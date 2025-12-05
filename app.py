@@ -1,6 +1,6 @@
 import os
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import pytz
 from pathlib import Path
 import shutil
@@ -18,6 +18,7 @@ import sqlite3
 import math
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Callable, Iterator
+from decimal import Decimal, InvalidOperation
 from board_services import CodeService, ItemService
 from repositories.common.column_config_repository import ColumnConfigRepository
 from column_service import ColumnConfigService
@@ -116,6 +117,30 @@ app.register_blueprint(safe_workplace_bp)
 app.register_blueprint(subcontract_approval_bp)
 app.register_blueprint(subcontract_report_bp)
 register_permission_routes(app)
+
+CHANGE_REQUEST_DATE_COLUMNS = {'final_check_date'}
+CHANGE_REQUEST_STATUS_VALUES = {'requested', 'pending', 'approved', 'rejected', 'completed'}
+
+
+def normalize_date_value(value):
+    """Convert various incoming date representations to a date object or None."""
+    if value in (None, '', 'null'):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        # Allow datetime strings by slicing date portion
+        try:
+            return datetime.strptime(value[:10], '%Y-%m-%d').date()
+        except ValueError:
+            logging.warning("normalize_date_value: invalid date string '%s'", value)
+            return None
+    return value
 
 
 def _stream_csv_response(filename_prefix: str, headers: List[str], row_iterator: Iterator[List[Any]]) -> Response:
@@ -246,6 +271,61 @@ def date_korean_filter(datetime_str):
     except:
         pass
     return date_part
+
+@app.template_filter('date_input')
+def date_input_filter(raw_value):
+    """HTML date input에서 인식 가능한 YYYY-MM-DD 문자열 반환."""
+    if not raw_value:
+        return ''
+    text = str(raw_value).strip()
+    if not text:
+        return ''
+    candidates = [
+        '%Y-%m-%d %H:%M:%S',
+        '%Y-%m-%d %H:%M',
+        '%Y/%m/%d %H:%M:%S',
+        '%Y/%m/%d %H:%M',
+        '%Y/%m/%d',
+        '%Y-%m-%d',
+        '%Y.%m.%d',
+    ]
+    for fmt in candidates:
+        try:
+            parsed = datetime.strptime(text, fmt)
+            return parsed.strftime('%Y-%m-%d')
+        except ValueError:
+            continue
+    for separator in (' ', 'T'):
+        if separator in text:
+            head = text.split(separator)[0]
+            if len(head) == 10 and head[4] == '-' and head[7] == '-':
+                return head
+    if len(text) >= 10:
+        snippet = text[:10]
+        if snippet[4:5] == '-' and snippet[7:8] == '-':
+            return snippet
+    return text
+
+@app.template_filter('numeric_input')
+def numeric_input_filter(raw_value):
+    """HTML number input에서 사용할 값(불필요한 .0 제거)을 반환."""
+    if raw_value in (None, ''):
+        return ''
+    text = str(raw_value).strip()
+    if not text:
+        return ''
+    try:
+        number = Decimal(text.replace(',', ''))
+    except (InvalidOperation, AttributeError):
+        try:
+            number = Decimal(str(float(text)))
+        except Exception:
+            return text
+    if number == number.to_integral():
+        return str(int(number))
+    normalized = format(number.normalize(), 'f')
+    normalized = normalized.rstrip('0').rstrip('.')
+    return normalized or '0'
 
 # 메뉴 설정
 menu = MENU_CONFIG
@@ -1152,6 +1232,94 @@ def _table_has_column(conn, table_name: str, column_name: str) -> bool:
             pass
 
 
+def _table_exists(conn, table_name: str) -> bool:
+    """Return True if the given table exists."""
+    cursor = conn.cursor()
+    try:
+        if getattr(conn, 'is_postgres', False):
+            cursor.execute("SELECT to_regclass(%s)", (table_name,))
+            row = cursor.fetchone()
+            return bool(row and row[0])
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (table_name,),
+        )
+        return cursor.fetchone() is not None
+    finally:
+        try:
+            cursor.close()
+        except Exception:
+            pass
+
+
+def _extract_request_number_value(row: Any) -> Optional[str]:
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        return row.get('request_number') or next(iter(row.values()), None)
+    try:
+        return row['request_number']
+    except Exception:
+        pass
+    if isinstance(row, (list, tuple)):
+        return row[0]
+    return row
+
+
+def generate_change_request_number(conn) -> str:
+    """Generate a sequential request number in CRYYMMNNN format."""
+    prefix = f"CR{get_korean_time().strftime('%y%m')}"
+    like_pattern = f"{prefix}%"
+    max_seq = 0
+
+    def extract_sequence(value: Optional[str]) -> Optional[int]:
+        if not value:
+            return None
+        match = re.match(rf"^{re.escape(prefix)}(\d{{3}})$", str(value).strip())
+        return int(match.group(1)) if match else None
+
+    def update_from_table(table_name: str) -> None:
+        nonlocal max_seq
+        if not _table_exists(conn, table_name):
+            return
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                f"""
+                SELECT request_number
+                FROM {table_name}
+                WHERE request_number LIKE %s
+                ORDER BY request_number DESC
+                LIMIT 50
+                """,
+                (like_pattern,),
+            )
+            for row in cursor.fetchall():
+                seq = extract_sequence(_extract_request_number_value(row))
+                if seq is not None and seq > max_seq:
+                    max_seq = seq
+        except Exception as exc:
+            logging.debug(
+                "generate_change_request_number: lookup failed for %s: %s",
+                table_name,
+                exc,
+            )
+        finally:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+
+    update_from_table('partner_change_requests')
+    update_from_table('change_requests_cache')
+    update_from_table('change_requests')
+
+    next_seq = max_seq + 1
+    if next_seq > 999:
+        next_seq = 1
+    return f"{prefix}{next_seq:03d}"
+
+
 def partner_standards():
     """협력사 기준정보 페이지"""
     guard = enforce_permission('VENDOR_MGT', 'view')
@@ -1621,6 +1789,8 @@ def change_request_detail(request_id: int):
                 continue
 
             column_key = row['column_key']
+            if column_key == 'reviewer':
+                continue
             column_name = row['column_name']
             column_type = (row.get('column_type') or 'text') if isinstance(row, dict) else row['column_type']
             tab_key = row.get('tab') or 'additional' if isinstance(row, dict) else row['tab'] or 'additional'
@@ -1662,6 +1832,8 @@ def change_request_detail(request_id: int):
     request_dict = dict(record)
     fallback_detail = detail_text or custom_data.get('detailed_content', '')
     request_dict['detailed_content'] = fallback_detail
+    if not request_dict.get('change_reason'):
+        request_dict['change_reason'] = custom_data.get('change_reason', '')
     request_data = SimpleNamespace(**request_dict)
 
     section_columns: Dict[str, List[Dict[str, Any]]] = {}
@@ -1672,7 +1844,7 @@ def change_request_detail(request_id: int):
     try:
         from board_services import AttachmentService
 
-        request_number = request_data.request_number or f"CR-{request_id}"
+        request_number = request_data.request_number or f"CR{request_id}"
         attachment_service = AttachmentService('change_request', DB_PATH)
         attachments = [dict(item) for item in attachment_service.list(request_number)]
     except Exception as exc:
@@ -1698,39 +1870,21 @@ def register_change_request():
     conn = None
     try:
         from board_services import AttachmentService
-        from timezone_config import get_korean_time, get_korean_time_str
+        from timezone_config import get_korean_time_str
 
         data = pyjson.loads(request.form.get('data', '{}'))
         attachment_data = pyjson.loads(request.form.get('attachment_data', '[]'))
         files = request.files.getlist('files')
         detailed_content = data.get('detailed_content', '')
 
-        today = get_korean_time()
-        year_month = today.strftime('%Y%m')
-        prefix = f"CR-{year_month}-"
-
         conn = get_db_connection(DB_PATH, timeout=30.0)
         cursor = conn.cursor()
 
-        cursor.execute(
-            """
-            SELECT request_number
-            FROM partner_change_requests
-            WHERE request_number LIKE %s
-            ORDER BY request_number DESC
-            LIMIT 1
-            """,
-            (f"{prefix}%",),
-        )
-        last_row = cursor.fetchone()
-        if last_row:
-            try:
-                last_seq = int(last_row[0][-2:])
-            except Exception:
-                last_seq = 0
+        provided_number = data.get('request_number')
+        if provided_number and re.match(r"^CR\d{7}$", str(provided_number).strip()):
+            request_number = str(provided_number).strip()
         else:
-            last_seq = 0
-        request_number = f"{prefix}{last_seq + 1:02d}"
+            request_number = generate_change_request_number(conn)
 
         cursor.execute(
             """
@@ -1908,9 +2062,22 @@ def update_change_request():
         actual_request_number = existing[1] or request_number
         status_current = existing[2]
 
-        status_value = custom_data.get('status', status_current)
-        if status_value not in ('requested', 'approved', 'rejected'):
-            status_value = 'requested'
+        status_current_normalized = (
+            str(status_current).strip() if status_current else ''
+        )
+        status_candidate = custom_data.get('status', status_current_normalized)
+        status_value = (
+            str(status_candidate).strip()
+            if status_candidate is not None
+            else ''
+        )
+        if status_value not in CHANGE_REQUEST_STATUS_VALUES:
+            fallback = (
+                status_current_normalized
+                if status_current_normalized in CHANGE_REQUEST_STATUS_VALUES
+                else 'requested'
+            )
+            status_value = fallback
 
         custom_data['detailed_content'] = detailed_content
 
@@ -1939,7 +2106,10 @@ def update_change_request():
             )
             if cursor.fetchone():
                 update_sql.append(f"{key} = %s")
-                params.append(value)
+                if key in CHANGE_REQUEST_DATE_COLUMNS:
+                    params.append(normalize_date_value(value))
+                else:
+                    params.append(value)
 
         params.append(request_id)
         cursor.execute(
@@ -4845,38 +5015,13 @@ def change_request_register():
     """변경요청 등록 팝업 페이지"""
     from timezone_config import get_korean_time
     
-    # 요청번호 자동 생성 (CR-YYYYMM-NN 형식으로 통일)
+    # 요청번호 자동 생성 (CRYYNNN 형식)
     today = get_korean_time()
-    base_number = f"CR-{today.strftime('%Y%m')}-"
     
     conn = None
     try:
-        # 오늘 날짜의 마지막 번호 찾기
         conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # 변경요청 캐시 테이블이 없으면 생성 (미니멀 필드)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS change_requests (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                request_number TEXT UNIQUE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        cursor.execute("""
-            SELECT MAX(CAST(SUBSTR(request_number, -2) AS INTEGER))
-            FROM change_requests
-            WHERE request_number LIKE %s
-        """, (f"{base_number}%",))
-        
-        last_number = cursor.fetchone()[0]
-        if last_number is None:
-            last_number = 0
-        
-        request_number = f"{base_number}{str(last_number + 1).zfill(2)}"
-        conn.commit()
+        request_number = generate_change_request_number(conn)
         
         # 동적 컬럼 설정 가져오기 (딕셔너리로 직접 조회)
         _wa = sql_is_active_true('is_active', conn)
@@ -4925,8 +5070,11 @@ def change_request_register():
             else:
                 col['dropdown_options_mapped'] = []
     
-    # detailed_content는 별도 섹션으로 처리하므로 dynamic_columns에서 제외
-    dynamic_columns = [col for col in dynamic_columns if col['column_key'] != 'detailed_content']
+    # detailed_content와 제거 대상 컬럼 제외
+    dynamic_columns = [
+        col for col in dynamic_columns
+        if col['column_key'] not in ('detailed_content', 'reviewer')
+    ]
     
     logging.info(f"변경요청 동적 컬럼 {len(dynamic_columns)}개 로드됨 (detailed_content 제외)")
     
@@ -8358,20 +8506,8 @@ def create_partner_change_request():
         # PostgreSQL/SQLite 호환 처리
         # 운영환경에서는 테이블이 이미 생성되어 있어야 함
         
-        # request_number 생성 (CR-YYYYMM-SEQ 형식)
-        current_month = get_korean_time().strftime('%Y%m')
-        
-        # 이번 달 최대 시퀀스 번호 조회
-        cursor.execute("""
-            SELECT MAX(CAST(SUBSTR(request_number, -2) AS INTEGER)) as max_seq
-            FROM partner_change_requests
-            WHERE request_number LIKE %s
-        """, (f'CR-{current_month}-%',))
-        
-        result = cursor.fetchone()
-        max_seq = result[0] if result[0] else 0
-        new_seq = max_seq + 1
-        request_number = f'CR-{current_month}-{new_seq:02d}'
+        # request_number 생성 (CRYYNNN 형식)
+        request_number = generate_change_request_number(conn)
         
         # status 값 결정 (requested로 설정)
         status = data.get('status', 'requested')

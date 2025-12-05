@@ -1,20 +1,5 @@
-"""
-메뉴와 권한 코드 매핑
-"""
-
-# 메뉴 URL과 권한 코드 매핑
-MENU_PERMISSION_MAP = {
-    'partner-standards': 'VENDOR_MGT',
-    'partner-change-request': 'REFERENCE_CHANGE',
-    'accident': 'ACCIDENT_MGT',
-    'safety-instruction': 'SAFETY_INSTRUCTION',
-    'follow-sop': 'FOLLOW_SOP',
-    'subcontract-approval': 'SUBCONTRACT_APPROVAL',
-    'subcontract-report': 'SUBCONTRACT_REPORT',
-    'safe-workplace': 'SAFE_WORKPLACE',  # 안전한 일터 추가
-    'full-process': 'FULL_PROCESS',
-    'safety-council': 'SAFETY_COUNCIL'  # 안전보건 협의체도 추가
-}
+"""메뉴와 권한 코드 매핑 (permission_helpers의 정규화 함수 사용)"""
+from permission_helpers import resolve_menu_code
 
 def get_filtered_menu_config(user_accessible_menus):
     """
@@ -31,8 +16,8 @@ def get_filtered_menu_config(user_accessible_menus):
         filtered_submenu = []
 
         for submenu in main_menu.get('submenu', []):
-            # URL에서 권한 코드 가져오기
-            permission_code = MENU_PERMISSION_MAP.get(submenu['url'])
+            # URL에서 권한 코드 정규화
+            permission_code = resolve_menu_code(submenu.get('url'))
 
             # 권한이 있는 경우에만 서브메뉴 추가
             if permission_code and permission_code in accessible_codes:

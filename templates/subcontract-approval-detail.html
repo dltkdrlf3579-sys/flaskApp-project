@@ -257,7 +257,7 @@
                                            class="{{ section.section_key|replace('_', '-') }}-input" 
                                            data-field="{{ col.column_key }}"
                                            data-section="{{ section.section_key }}"
-                                           value="{{ col_value }}">
+                                           value="{{ col_value|date_input }}">
                                            
                                 {% elif col.column_type == 'number' %}
                                     <!-- 숫자 필드 -->
@@ -270,7 +270,7 @@
                                            step="{% if _nt == 'integer' %}1{% else %}any{% endif %}"
                                            oninput="validateNumberInput(this)"
                                            onkeypress="return isNumberKey(event, this)"
-                                           value="{{ col_value }}">
+                                           value="{{ col_value|numeric_input }}">
                                            
                                 {% elif render_type == 'linked_text' %}
                                     <!-- 연결된 필드 (읽기 전용) -->

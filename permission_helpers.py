@@ -258,9 +258,11 @@ def get_user_accessible_menus():
                 {'code': 'ACCIDENT_MGT', 'name': '협력사 사고', 'url': '/accident-management', 'icon': 'fas fa-exclamation-triangle', 'read_level': 3, 'write_level': 3},
                 {'code': 'SAFETY_INSTRUCTION', 'name': '환경안전 지시서', 'url': '/safety-instruction', 'icon': 'fas fa-clipboard-check', 'read_level': 3, 'write_level': 3},
                 {'code': 'FOLLOW_SOP', 'name': 'Follow SOP', 'url': '/follow-sop', 'icon': 'fas fa-tasks', 'read_level': 3, 'write_level': 3},
+                {'code': 'FULL_PROCESS', 'name': 'FullProcess', 'url': '/full-process', 'icon': 'fas fa-project-diagram', 'read_level': 3, 'write_level': 3},
                 {'code': 'SAFE_WORKPLACE', 'name': '안전한 일터', 'url': '/safe-workplace', 'icon': 'fas fa-hard-hat', 'read_level': 3, 'write_level': 3},
-                {'code': 'FULL_PROCESS', 'name': 'FullProcess', 'url': '/fullprocess', 'icon': 'fas fa-project-diagram', 'read_level': 3, 'write_level': 3},
-                {'code': 'SAFETY_COUNCIL', 'name': '안전보건 협의체', 'url': '/safety-council', 'icon': 'fas fa-users', 'read_level': 3, 'write_level': 3}
+                {'code': 'SUBCONTRACT_APPROVAL', 'name': '산안법 도급승인', 'url': '/subcontract-approval', 'icon': 'fas fa-file-signature', 'read_level': 3, 'write_level': 3},
+                {'code': 'SUBCONTRACT_REPORT', 'name': '화관법 도급신고', 'url': '/subcontract-report', 'icon': 'fas fa-file-alt', 'read_level': 3, 'write_level': 3},
+                {'code': 'SAFETY_COUNCIL', 'name': '안전보건 협의체', 'url': '/safety-council', 'icon': 'fas fa-users', 'read_level': 3, 'write_level': 3},
             ]
 
         conn = get_db_connection()
@@ -294,9 +296,13 @@ def get_user_accessible_menus():
                 UNION ALL
                 SELECT 'FOLLOW_SOP', 'Follow SOP', '/follow-sop', 'fas fa-tasks'
                 UNION ALL
+                SELECT 'FULL_PROCESS', 'FullProcess', '/full-process', 'fas fa-project-diagram'
+                UNION ALL
                 SELECT 'SAFE_WORKPLACE', '안전한 일터', '/safe-workplace', 'fas fa-hard-hat'
                 UNION ALL
-                SELECT 'FULL_PROCESS', 'FullProcess', '/fullprocess', 'fas fa-project-diagram'
+                SELECT 'SUBCONTRACT_APPROVAL', '산안법 도급승인', '/subcontract-approval', 'fas fa-file-signature'
+                UNION ALL
+                SELECT 'SUBCONTRACT_REPORT', '화관법 도급신고', '/subcontract-report', 'fas fa-file-alt'
                 UNION ALL
                 SELECT 'SAFETY_COUNCIL', '안전보건 협의체', '/safety-council', 'fas fa-users'
             )
@@ -327,9 +333,11 @@ def get_user_accessible_menus():
                     WHEN 'ACCIDENT_MGT' THEN 3
                     WHEN 'SAFETY_INSTRUCTION' THEN 4
                     WHEN 'FOLLOW_SOP' THEN 5
-                    WHEN 'SAFE_WORKPLACE' THEN 6
-                    WHEN 'FULL_PROCESS' THEN 7
-                    WHEN 'SAFETY_COUNCIL' THEN 8
+                    WHEN 'FULL_PROCESS' THEN 6
+                    WHEN 'SAFE_WORKPLACE' THEN 7
+                    WHEN 'SUBCONTRACT_APPROVAL' THEN 8
+                    WHEN 'SUBCONTRACT_REPORT' THEN 9
+                    WHEN 'SAFETY_COUNCIL' THEN 10
                 END
         """, (login_id, dept_id or ''))
 

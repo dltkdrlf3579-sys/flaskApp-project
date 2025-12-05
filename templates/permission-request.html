@@ -3,6 +3,19 @@
 {% block title %}권한 신청{% endblock %}
 
 {% block content %}
+<style>
+  .menu-table-wrapper {
+    max-height: 420px;
+    overflow-y: auto;
+  }
+  .menu-selection-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #fff;
+  }
+</style>
+
 <div class="permission-request-wrapper">
   <div class="request-card">
     <h2>권한 신청</h2>

@@ -62,7 +62,7 @@
         <div class="section-content" id="additional-info-content">
             
             <div class="info-table">
-                {% set columns_per_row = 8 %}
+                {% set columns_per_row = 4 %}
                 {% for chunk in dynamic_columns | batch(columns_per_row) %}
                 <div class="info-row">
                     {% for col in chunk %}
@@ -234,34 +234,17 @@
                     </div>
                     {% endif %}
                     {% endfor %}
-                    
-                    {# 빈 셀 채우기 #}
-                    {% for _ in range(columns_per_row - chunk|length) %}
-                    <div class="info-cell"></div>
-                    {% endfor %}
                 </div>
                 {% endfor %}
             </div>
         </div>
     </div>
 
-    <!-- 3. 위반 상세내용 영역 -->
-    <div class="section detail-content-section">
-        <div class="section-header">
-            <h3 class="section-title">변경사유</h3>
-        </div>
-        <div class="section-content">
-            <div class="content-editor">
-                <!-- 간단한 편집 가능한 영역 -->
-                <!-- textarea로 변경하여 안정적인 편집 기능 제공 -->
-                <textarea id="detailed-content" 
-                          name="detailed_content"
-                          placeholder="변경사유를 입력하세요."
-                          rows="10"
-                          style="width: 100%; min-height: 200px; padding: 15px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px; line-height: 1.5;" data-ckeditor="true">{{ request_data.detailed_content if request_data.detailed_content else '' }}</textarea>
-            </div>
-        </div>
-    </div>
+    {% set change_reason_value = request_data.change_reason or '' %}
+    {% include 'includes/change_reason_section.html' %}
+
+    {% set detailed_content = request_data.detailed_content or '' %}
+    {% include 'includes/detailed_content_section.html' %}
 
     <!-- 4. 첨부파일 영역 (공통 컴포넌트) -->
     {% from 'includes/attachment_section.html' import render_attachment_section %}
@@ -452,6 +435,10 @@
 .status-completed {
     background-color: #e0e7ff;
     color: #3730a3;
+}
+.status-requested {
+    background-color: #dbeafe;
+    color: #1d4ed8;
 }
 
 /* 2. 추가 기입정보 섹션 (동적 컬럼 입력) */
@@ -938,6 +925,9 @@ function saveChanges() {
     }
     console.log('저장할 내용 길이:', detailedContent.length);
     console.log('내용 미리보기:', detailedContent.substring(0, 200));
+
+    const changeReasonInput = document.getElementById('change-reason');
+    const changeReason = changeReasonInput ? (changeReasonInput.value || '') : '';
     
     const requestId = '{{ request_data.id }}';
     
@@ -957,6 +947,8 @@ function saveChanges() {
         console.log(`Collecting: ${columnKey} = ${value} (type: ${element.tagName})`);
         customData[columnKey] = value;
     });
+
+    customData['change_reason'] = changeReason;
     
     console.log('Collected customData:', customData);
     
@@ -980,6 +972,7 @@ function saveChanges() {
     formData.append('request_id', requestId);  // ID로 전송
     formData.append('request_number', '{{ request_data.request_number or "" }}');  // 안전한 request_number 전송
     formData.append('change_content', '');  // 변경내용 (필요시 추가)
+    formData.append('change_reason', changeReason);
     formData.append('detailed_content', detailedContent);  // detailed_content로 변경
     formData.append('custom_data', JSON.stringify(customData));
     formData.append('deleted_attachments', JSON.stringify(deletedAttachments));

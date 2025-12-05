@@ -264,6 +264,19 @@ td.fixed-col[style*="width: 60px"] {
     background-color: #e0e7ff;
     color: #3730a3;
 }
+.status-requested {
+    background-color: #dbeafe;
+    color: #1d4ed8;
+}
+
+.change-reason-cell span {
+    display: inline-block;
+    max-width: 260px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+}
 
 /* 페이지네이션 */
 .pagination-section {
@@ -366,7 +379,7 @@ td.fixed-col[style*="width: 60px"] {
                             {% if item.request_number %}
                                 {{ item.request_number }}
                             {% else %}
-                                CR-{{ item.id or '-' }}
+                                CR{{ item.id or '-' }}
                             {% endif %}
                         </a>
                     </td>
@@ -376,7 +389,9 @@ td.fixed-col[style*="width: 60px"] {
                     <td>{{ item.change_type_label or item.change_type or '-' }}</td>
                     <td>{{ item.current_value or '-' }}</td>
                     <td>{{ item.new_value or '-' }}</td>
-                    <td>{{ item.change_reason or '-' }}</td>
+                    <td class="change-reason-cell">
+                        <span title="{{ item.change_reason or '-' }}">{{ item.change_reason or '-' }}</span>
+                    </td>
                     <td>
                         <span class="status-badge status-{{ item.status }}">
                             {{ item.status_label or item.status or '-' }}
