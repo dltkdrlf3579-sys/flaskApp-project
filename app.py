@@ -2094,7 +2094,8 @@ def update_change_request():
         ]
 
         for key, value in custom_data.items():
-            if key in ('status', 'custom_data', 'detailed_content'):
+            # change_reason는 별도 컬럼으로 이미 설정하므로 중복 방지
+            if key in ('status', 'custom_data', 'detailed_content', 'change_reason'):
                 continue
             cursor.execute(
                 """
