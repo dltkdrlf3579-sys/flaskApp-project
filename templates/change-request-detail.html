@@ -46,6 +46,21 @@
                         <label>등록일</label>
                         <div class="value">{{ (request_data.created_at|date_only) if request_data.created_at else '-' }}</div>
                     </div>
+                    {% set author_name = request_data.created_by_name or request_data.requester_name or '' %}
+                    {% set author_login = request_data.created_by_login or '' %}
+                    {% set author_dept = request_data.created_by_dept or request_data.requester_department or '' %}
+                    <div class="info-cell span-1">
+                        <label>작성자</label>
+                        <div class="value">
+                            {% if author_name or author_login %}
+                                {{ author_name or author_login }}{% if author_login and author_name %} ({{ author_login }}){% endif %}
+                            {% else %}-{% endif %}
+                        </div>
+                    </div>
+                    <div class="info-cell span-1">
+                        <label>작성부서</label>
+                        <div class="value">{{ author_dept or '-' }}</div>
+                    </div>
                 </div>
             </div>
         </div>

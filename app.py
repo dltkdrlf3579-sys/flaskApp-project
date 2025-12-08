@@ -1877,6 +1877,15 @@ def register_change_request():
         files = request.files.getlist('files')
         detailed_content = data.get('detailed_content', '')
 
+        author_name = session.get('user_name') or ''
+        author_login = session.get('user_id') or session.get('loginid') or ''
+        author_dept = (
+            session.get('deptname')
+            or session.get('dept_name')
+            or session.get('department')
+            or ''
+        )
+
         conn = get_db_connection(DB_PATH, timeout=30.0)
         cursor = conn.cursor()
 
@@ -1903,10 +1912,25 @@ def register_change_request():
                 created_at TIMESTAMP,
                 updated_at TIMESTAMP,
                 custom_data TEXT,
-                is_deleted INTEGER DEFAULT 0
+                is_deleted INTEGER DEFAULT 0,
+                created_by_name TEXT,
+                created_by_login TEXT,
+                created_by_dept TEXT
             )
             """
         )
+
+        # 기존 테이블에 컬럼이 없으면 추가 (SQLite/Postgres 호환)
+        for col_name, col_type in (
+            ('created_by_name', 'TEXT'),
+            ('created_by_login', 'TEXT'),
+            ('created_by_dept', 'TEXT'),
+        ):
+            try:
+                if not _table_has_column(conn, 'partner_change_requests', col_name):
+                    cursor.execute(f"ALTER TABLE partner_change_requests ADD COLUMN {col_name} {col_type}")
+            except Exception as exc:
+                logging.debug("partner_change_requests add column %s skipped: %s", col_name, exc)
 
         data['status'] = 'requested'
         cursor.execute(
@@ -1924,9 +1948,12 @@ def register_change_request():
                 custom_data,
                 change_type,
                 current_value,
-                new_value
+                new_value,
+                created_by_name,
+                created_by_login,
+                created_by_dept
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
             (
@@ -1943,6 +1970,9 @@ def register_change_request():
                 data.get('change_type', ''),
                 data.get('current_value', ''),
                 data.get('new_value', ''),
+                author_name,
+                author_login,
+                author_dept,
             ),
         )
         request_id = cursor.fetchone()[0]
@@ -2094,8 +2124,16 @@ def update_change_request():
         ]
 
         for key, value in custom_data.items():
-            # change_reason는 별도 컬럼으로 이미 설정하므로 중복 방지
-            if key in ('status', 'custom_data', 'detailed_content', 'change_reason'):
+            # change_reason/작성자 정보는 별도/초기값 고정
+            if key in (
+                'status',
+                'custom_data',
+                'detailed_content',
+                'change_reason',
+                'created_by_name',
+                'created_by_login',
+                'created_by_dept',
+            ):
                 continue
             cursor.execute(
                 """

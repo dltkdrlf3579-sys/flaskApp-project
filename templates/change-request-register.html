@@ -42,8 +42,22 @@
                         <label>등록일</label>
                         <div class="value">{{ today.strftime('%Y-%m-%d') if today else '' }}</div>
                     </div>
+                    {% set author_name = session.get('user_name') or '' %}
+                    {% set author_login = session.get('user_id') or session.get('loginid') or '' %}
+                    {% set author_dept = session.get('deptname') or session.get('dept_name') or '' %}
+                    <div class="info-cell">
+                        <label>작성자</label>
+                        <div class="value">{{ author_name or author_login }}</div>
+                    </div>
+                    <div class="info-cell">
+                        <label>작성부서</label>
+                        <div class="value">{{ author_dept }}</div>
+                    </div>
                 </div>
             </div>
+            <input type="hidden" id="author_name" value="{{ author_name }}">
+            <input type="hidden" id="author_login" value="{{ author_login }}">
+            <input type="hidden" id="author_dept" value="{{ author_dept }}">
         </div>
     </div>
 
@@ -545,7 +559,12 @@ function saveChangeRequest() {
 
     const changeReasonInput = document.getElementById('change-reason');
     const changeReason = changeReasonInput ? (changeReasonInput.value || '') : '';
-    
+
+    // 작성자 정보 (고정)
+    const authorName = document.getElementById('author_name')?.value || '';
+    const authorLogin = document.getElementById('author_login')?.value || '';
+    const authorDept = document.getElementById('author_dept')?.value || '';
+
     // 필수 필드 추가 (동적 컬럼에서 수집)
     // requester_name, requester_department, company_name, business_number 등은
     // 이미 동적 컬럼으로 처리되므로 dynamicData에 포함되어 있음
@@ -554,6 +573,9 @@ function saveChangeRequest() {
     dynamicData['status'] = 'requested';
     dynamicData['detailed_content'] = detailedContent;
     dynamicData['change_reason'] = changeReason;
+    dynamicData['created_by_name'] = authorName;
+    dynamicData['created_by_login'] = authorLogin;
+    dynamicData['created_by_dept'] = authorDept;
     
     // 첨부파일 설명 수집
     const attachments = [];
