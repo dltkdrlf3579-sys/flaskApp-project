@@ -59,7 +59,7 @@ function resetForm() {
     document.querySelectorAll('.search-form select').forEach(select => {
         select.selectedIndex = 0;
     });
-    
+
     // 폼 제출
     document.querySelector('.search-form').submit();
 }
@@ -69,19 +69,40 @@ function validateAndSubmitSearch() {
     // 모든 검색 input 필드 확인
     const inputs = document.querySelectorAll('.search-form input[type="text"], .search-form input[type="date"], .search-form select');
     let hasValue = false;
-    
+
     inputs.forEach(input => {
         if (input.value && input.value.trim() !== '') {
             hasValue = true;
         }
     });
-    
+
     if (!hasValue) {
         alert('최소 하나 이상의 검색 조건을 입력해주세요.');
         return;
     }
-    
+
     document.querySelector('.search-form').submit();
+}
+
+// Enter 키로도 검색 실행
+if (!window.__searchEnterBindingAdded) {
+    window.__searchEnterBindingAdded = true;
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('.search-form').forEach(form => {
+            form.addEventListener('keydown', event => {
+                if (event.key !== 'Enter') return;
+                // textarea 등에서의 엔터는 그대로 동작하도록 허용
+                const tag = event.target.tagName.toLowerCase();
+                if (tag === 'textarea' || tag === 'button') return;
+                event.preventDefault();
+                if (typeof validateAndSubmitSearch === 'function') {
+                    validateAndSubmitSearch();
+                } else {
+                    form.submit();
+                }
+            });
+        });
+    });
 }
 </script>
 {% endmacro %}

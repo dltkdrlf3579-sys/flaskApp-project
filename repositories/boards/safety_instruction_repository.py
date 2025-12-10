@@ -397,6 +397,7 @@ class SafetyInstructionRepository:
     def update_from_request(self, request) -> Any:
         data = request.form
         files: List[FileStorage] = request.files.getlist('files')
+        actor_label = self._resolve_actor_label(data)
         issue_number = data.get('issue_number')
         custom_data_raw = data.get('custom_data', '{}')
         detailed_content = data.get('detailed_content', '')

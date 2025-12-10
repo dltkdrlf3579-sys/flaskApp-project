@@ -740,6 +740,7 @@ class SafeWorkplaceRepository:
     def update_from_request(self, request) -> Any:
         data = request.form
         files: List[FileStorage] = request.files.getlist('files')
+        actor_label = self._resolve_actor_label(data)
 
         safeplace_no = (data.get('safeplace_no') or '').strip()
         if not safeplace_no:

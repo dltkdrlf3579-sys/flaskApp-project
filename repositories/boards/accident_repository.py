@@ -277,6 +277,7 @@ class AccidentRepository:
     def update_from_request(self, request) -> Any:
         data = request.form
         files: List[FileStorage] = request.files.getlist('files')
+        actor_label = self._resolve_actor_label(request.form)
 
         accident_number = (data.get('accident_number') or '').strip()
         if not accident_number:
