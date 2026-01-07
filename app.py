@@ -1056,11 +1056,22 @@ def api_search_popup_autocomplete():
 @app.route("/")
 def index():
     # 대시보드 설정 가져오기 (단순화)
+    dashboard_url = db_config.config.get('DASHBOARD', 'DASHBOARD_URL', fallback='').strip()
+    dashboard_enabled = db_config.config.getboolean('DASHBOARD', 'DASHBOARD_ENABLED', fallback=True)
+    dashboard_mode = db_config.config.get('DASHBOARD', 'DASHBOARD_MODE', fallback='iframe').strip().lower()
+    fallback_image = db_config.config.get('DASHBOARD', 'FALLBACK_DASHBOARD_IMAGE', fallback='').strip()
+
+    if dashboard_mode not in ('iframe', 'image'):
+        dashboard_mode = 'iframe'
+    if dashboard_mode == 'image' and not fallback_image:
+        dashboard_mode = 'iframe'
+
     dashboard_config = {
-        'url': db_config.config.get('DASHBOARD', 'DASHBOARD_URL', 
-                                   fallback='https://your-dashboard.com'),
-        'enabled': db_config.config.getboolean('DASHBOARD', 'DASHBOARD_ENABLED', 
-                                              fallback=True)
+        'url': dashboard_url or 'https://your-dashboard.com',
+        'enabled': dashboard_enabled,
+        'mode': dashboard_mode,
+        'image': fallback_image,
+        'show_loader': True,
     }
     return render_template("index.html", menu=MENU_CONFIG, dashboard_config=dashboard_config)
 
