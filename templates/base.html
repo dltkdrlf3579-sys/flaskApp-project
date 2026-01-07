@@ -64,6 +64,15 @@
             padding: 20px;
             box-sizing: border-box;
         }
+
+        /* 리스트 테이블 기본 폭 제한 */
+        .data-table th,
+        .data-table td {
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
     </style>
 </head>
 <body>
