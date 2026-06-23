@@ -1,6 +1,5 @@
 import configparser
 import os
-import sqlite3
 import logging
 import sys
 import traceback
@@ -143,7 +142,7 @@ def _safe_float(value):
 
 SYSTEM_SECTIONS = {
     'DEFAULT', 'DATABASE', 'SECURITY', 'LOGGING', 'DASHBOARD',
-    'SQL_QUERIES', 'COLUMNS', 'MASTER_DATA_QUERIES',
+    'SQL_QUERIES', 'COLUMNS', 'MASTER_DATA_QUERIES', 'LOCAL_DATA_QUERIES',
     'CONTENT_DATA_QUERIES', 'SSO', 'APPLICATION', 'REDIS'
 }
 
@@ -288,6 +287,37 @@ def execute_SQL(query):
     finally:
         conn.close()
 
+def execute_local_query(query):
+    """
+    전용 PostgreSQL 데이터베이스에서 조회를 실행하고 DataFrame으로 반환한다.
+    LOCAL_DATA_QUERIES 섹션 전용 헬퍼이며 IQADB fallback을 수행하지 않는다.
+    """
+    if not query or not str(query).strip():
+        raise ValueError("LOCAL_DATA_QUERIES 쿼리가 비어 있습니다.")
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(query)
+
+        if not cursor.description:
+            return pd.DataFrame()
+
+        col_names = [desc[0] for desc in cursor.description]
+        records = []
+        for row in cursor.fetchall():
+            if isinstance(row, dict):
+                records.append({col: row.get(col) for col in col_names})
+            else:
+                records.append({col: row[idx] for idx, col in enumerate(col_names)})
+        return pd.DataFrame(records, columns=col_names)
+    except Exception as e:
+        print(f"[ERROR] execute_local_query 실행 중 오류: {e}")
+        traceback.print_exc()
+        raise
+    finally:
+        conn.close()
+
 # config는 이미 위에서 로드되었음 - 중복 제거
 # 설정 파일 로드 성공 메시지는 이미 위에서 출력됨
 
@@ -326,7 +356,7 @@ class PartnerDataManager:
             'annual_revenue': 'BIGINT',
             'transaction_count': 'TEXT',
             'permanent_workers': 'INTEGER',
-            'synced_at': 'DATETIME DEFAULT CURRENT_TIMESTAMP',
+            'synced_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
             'is_deleted': 'INTEGER DEFAULT 0'
         }
         
@@ -347,7 +377,7 @@ class PartnerDataManager:
                     annual_revenue BIGINT,
                     transaction_count TEXT,
                     permanent_workers INTEGER,
-                    synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     is_deleted INTEGER DEFAULT 0
                 )
             ''')
@@ -368,7 +398,7 @@ class PartnerDataManager:
             CREATE TABLE IF NOT EXISTS partner_details (
                 business_number TEXT PRIMARY KEY,
                 detailed_content TEXT DEFAULT '',
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_by TEXT
             )
         ''')
@@ -376,12 +406,12 @@ class PartnerDataManager:
         # 첨부파일 테이블 (로컬 전용)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS partner_attachments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 business_number TEXT NOT NULL,
                 file_name TEXT NOT NULL,
                 file_path TEXT NOT NULL,
                 file_size INTEGER,
-                upload_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 description TEXT,
                 uploaded_by TEXT
             )
@@ -392,7 +422,7 @@ class PartnerDataManager:
             CREATE TABLE IF NOT EXISTS accident_details (
                 accident_number TEXT PRIMARY KEY,
                 detailed_content TEXT DEFAULT '',
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_by TEXT
             )
         ''')
@@ -400,12 +430,12 @@ class PartnerDataManager:
         # 사고 첨부파일 테이블
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS accident_attachments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 accident_number TEXT NOT NULL,
                 file_name TEXT NOT NULL,
                 file_path TEXT NOT NULL,
                 file_size INTEGER,
-                upload_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 description TEXT,
                 uploaded_by TEXT
             )
@@ -414,7 +444,7 @@ class PartnerDataManager:
         # Phase 1: 사고 컬럼 설정 테이블 (동적 컬럼 관리용)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS accident_column_config (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 column_key VARCHAR(50) UNIQUE NOT NULL,
                 column_name VARCHAR(100) NOT NULL,
                 column_type VARCHAR(20) DEFAULT 'text',
@@ -424,8 +454,8 @@ class PartnerDataManager:
                 tab TEXT,
                 column_span INTEGER DEFAULT 1,
                 linked_columns TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
@@ -482,7 +512,7 @@ class PartnerDataManager:
         # 협력사 사고 정보 캐시 테이블
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS accidents_cache (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 accident_number TEXT,
                 accident_name TEXT,
                 workplace TEXT,
@@ -500,7 +530,7 @@ class PartnerDataManager:
                 location_detail TEXT,
                 custom_data TEXT DEFAULT '{}',
                 is_deleted INTEGER DEFAULT 0,
-                synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         # 누락 컬럼 보강 (report_date)
@@ -535,12 +565,12 @@ class PartnerDataManager:
         # 안전지시서 캐시 테이블
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS safety_instructions_cache (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 issue_number TEXT UNIQUE,
-                created_at DATETIME,
+                created_at TIMESTAMP,
                 custom_data TEXT DEFAULT '{}',
                 is_deleted INTEGER DEFAULT 0,
-                synced_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
@@ -583,10 +613,7 @@ class PartnerDataManager:
             conn = get_db_connection(self.local_db_path, timeout=30.0)
             cursor = conn.cursor()
             
-            # PRAGMA settings removed for PostgreSQL compatibility
-            # cursor.execute("PRAGMA journal_mode=WAL")
-            # cursor.execute("PRAGMA busy_timeout=5000")
-            # cursor.execute("PRAGMA synchronous=NORMAL")
+            # PostgreSQL connection settings are handled by the driver/config.
             
             # 트랜잭션 시작
             cursor.execute("BEGIN")
@@ -844,33 +871,32 @@ class PartnerDataManager:
             return False
     
     def sync_employees_from_external_db(self):
-        """외부 DB에서 임직원 데이터 동기화"""
-        if not IQADB_AVAILABLE:
-            print("[ERROR] IQADB_CONNECT310 모듈을 사용할 수 없습니다.")
-            return False
-        
+        """전용 PostgreSQL DB에서 임직원 데이터를 조회하여 employees_cache에 동기화"""
         try:
-            # config.ini에서 EMPLOYEE_EXTERNAL_QUERY 가져오기 (외부 DB용)
-            query = self.config.get('MASTER_DATA_QUERIES', 'EMPLOYEE_QUERY')
+            if not self.config.has_option('LOCAL_DATA_QUERIES', 'EMPLOYEE_QUERY'):
+                print("[WARNING] LOCAL_DATA_QUERIES.EMPLOYEE_QUERY가 config.ini에 정의되지 않았습니다.")
+                return False
+
+            query = self.config.get('LOCAL_DATA_QUERIES', 'EMPLOYEE_QUERY')
             print(f"[INFO] 실행할 임직원 쿼리: {query[:100]}...")
             
-            # 외부 DB에서 데이터 조회
-            print("[INFO] IQADB_CONNECT310을 사용하여 임직원 데이터 조회 시작...")
-            df = execute_SQL(query)
+            print("[INFO] 전용 PostgreSQL DB에서 임직원 데이터 조회 시작...")
+            df = execute_local_query(query)
+            df = _normalize_df(df)
             print(f"[INFO] 임직원 데이터 조회 완료: {len(df)} 건")
             
             if df.empty:
                 print("[WARNING] 조회된 임직원 데이터가 없습니다.")
                 return False
             
-            # SQLite에 저장
+            # 전용 PostgreSQL 캐시에 저장
             conn = get_db_connection(self.local_db_path)
             cursor = conn.cursor()
             
             # 기존 캐시 데이터 삭제
             cursor.execute("DELETE FROM employees_cache")
             
-            # DataFrame을 레코드 배열로 변환하여 SQLite에 삽입
+            # DataFrame을 레코드 배열로 변환하여 캐시에 삽입
             for _, row in df.iterrows():
                 cursor.execute('''
                     INSERT INTO employees_cache (
@@ -2138,7 +2164,6 @@ class PartnerDataManager:
     def get_partner_by_business_number(self, business_number):
         """사업자번호로 협력사 정보 조회 (캐시 + 상세정보 조인)"""
         conn = get_db_connection(self.local_db_path)
-        conn.row_factory = sqlite3.Row
         
         query = '''
             SELECT 
@@ -2157,7 +2182,6 @@ class PartnerDataManager:
     def get_all_partners(self, page=1, per_page=10, filters=None):
         """협력사 목록 조회 (필터링 포함)"""
         conn = get_db_connection(self.local_db_path)
-        conn.row_factory = sqlite3.Row
         
         # 기본 쿼리 (삭제되지 않은 데이터만)
         query = "SELECT * FROM partners_cache WHERE (is_deleted = 0 OR is_deleted IS NULL)"
@@ -2210,13 +2234,9 @@ class DatabaseConfig:
         self.local_db_path = config.get('DATABASE', 'LOCAL_DB_PATH', fallback='portal.db')
         self.external_db_enabled = config.getboolean('DATABASE', 'EXTERNAL_DB_ENABLED', fallback=False)
 
-    def get_connection(self, timeout: float = 10.0, *, row_factory: bool = False):
-        """PostgreSQL 기본 연결을 반환한다 (레거시 호환)."""
-        return get_db_connection(timeout=timeout, row_factory=row_factory)
-
-    def get_sqlite_connection(self, timeout=10.0, row_factory: bool = False):
-        """레거시 호환용 메서드: 이제 PostgreSQL 연결을 반환한다."""
-        return self.get_connection(timeout=timeout, row_factory=row_factory)
+    def get_connection(self, timeout: float = 10.0):
+        """PostgreSQL 기본 연결을 반환한다."""
+        return get_db_connection(timeout=timeout)
 
     def get_postgres_dsn(self) -> str:
         """현재 설정된 PostgreSQL DSN을 반환한다."""
@@ -2239,7 +2259,7 @@ def maybe_daily_sync(force=False):
     cur.execute('''
         CREATE TABLE IF NOT EXISTS sync_state (
             id INTEGER PRIMARY KEY CHECK (id=1),
-            last_full_sync DATETIME
+            last_full_sync TIMESTAMP
         )
     ''')
     
@@ -2281,10 +2301,14 @@ def maybe_daily_sync(force=False):
         except Exception as e:
             print(f"[ERROR] 사고 동기화 실패: {e}")
         
-        # 다른 마스터 데이터 동기화 (외부 쿼리 존재 여부로 체크)
+        # 임직원 데이터 동기화: LOCAL_DATA_QUERIES 전용, IQADB fallback 없음
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'EMPLOYEE_QUERY'):
-                partner_manager.sync_employees_from_external_db()
+            if partner_manager.config.has_option('LOCAL_DATA_QUERIES', 'EMPLOYEE_QUERY'):
+                if partner_manager.sync_employees_from_external_db():
+                    success = True
+                    print("[SUCCESS] 임직원 데이터 동기화 완료")
+            else:
+                print("[INFO] LOCAL_DATA_QUERIES.EMPLOYEE_QUERY not found - skip")
         except Exception as e:
             print(f"[ERROR] 임직원 동기화 실패: {e}")
             
@@ -2314,7 +2338,7 @@ def maybe_daily_sync(force=False):
                     CREATE TABLE IF NOT EXISTS safety_instructions_sync_history (
                         id INTEGER PRIMARY KEY CHECK (id=1),
                         first_sync_done INTEGER DEFAULT 0,
-                        sync_date DATETIME,
+                        sync_date TIMESTAMP,
                         record_count INTEGER
                     )
                 ''')
@@ -2372,22 +2396,23 @@ def _ensure_boot_sync_tables(conn):
     cur.execute("""
         CREATE TABLE IF NOT EXISTS master_sync_state(
           id INTEGER PRIMARY KEY CHECK(id=1),
-          last_master_sync DATETIME
+          last_master_sync TIMESTAMP
         )
     """)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS content_sync_state(
           name TEXT PRIMARY KEY,
           first_sync_done INTEGER DEFAULT 0,
-          first_sync_at DATETIME
+          first_sync_at TIMESTAMP
         )
     """)
     conn.commit()
 
 def maybe_daily_sync_master(force=False):
     """
-    마스터 데이터(협력사, 사고, 임직원, 부서, 건물, 협력사근로자): 매일 1회.
-    - [MASTER_DATA_QUERIES]에 쿼리가 정의된 항목만 수행.
+    마스터 데이터(협력사, 사고, 부서, 건물, 협력사근로자): 매일 1회.
+    - 공용DB 항목은 [MASTER_DATA_QUERIES] 기준으로 수행.
+    - 임직원은 보안상 [LOCAL_DATA_QUERIES] 기준으로 전용 PostgreSQL에서만 수행.
     """
     import pandas as pd
     conn = get_db_connection(db_config.local_db_path)
@@ -2398,11 +2423,13 @@ def maybe_daily_sync_master(force=False):
     if not force:
         row = cur.execute("SELECT last_master_sync FROM master_sync_state WHERE id=1").fetchone()
         if row and row[0]:
+            from timezone_config import get_korean_time
             last = pd.to_datetime(row[0])
-            need = (pd.Timestamp.now() - last) > pd.Timedelta(days=1)
+            today = get_korean_time().date()
+            need = last.date() < today
 
     if not need and not force:
-        print("[INFO] Master daily sync skipped (< 24h)")
+        print("[INFO] Master daily sync skipped (already synced today)")
         conn.close()
         return
 
@@ -2436,11 +2463,14 @@ def maybe_daily_sync_master(force=False):
     except Exception as e:
         print(f"[ERROR] 사고 동기화 실패: {e}")
 
-    # 다른 마스터 데이터 동기화 (외부 쿼리 존재 여부로 체크)
+    # 임직원 데이터 동기화: LOCAL_DATA_QUERIES 전용, IQADB fallback 없음
     try:
-        if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'EMPLOYEE_QUERY'):
-            partner_manager.sync_employees_from_external_db()
-            print("[SUCCESS] 임직원 데이터 동기화 완료")
+        if partner_manager.config.has_option('LOCAL_DATA_QUERIES', 'EMPLOYEE_QUERY'):
+            if partner_manager.sync_employees_from_external_db():
+                success = True
+                print("[SUCCESS] 임직원 데이터 동기화 완료")
+        else:
+            print("[INFO] LOCAL_DATA_QUERIES.EMPLOYEE_QUERY not found - skip")
     except Exception as e:
         print(f"[ERROR] 임직원 동기화 실패: {e}")
         

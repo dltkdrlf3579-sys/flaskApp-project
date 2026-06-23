@@ -329,7 +329,7 @@ td.fixed-col[style*="width: 90px"] {
 
 <!-- 액션 버튼과 테이블 헤더 통합 -->
 <div class="table-section">
-    {{ render_table_controls(total_count, show_excel=False, show_register=False) }}
+    {{ render_table_controls(total_count, show_excel=False, show_register=False, can_write=can_write|default(true)) }}
     <div class="table-wrapper">
         <table class="data-table">
             <thead>
@@ -1048,9 +1048,9 @@ function updateDeleteButton() {
     }
 }
 
-// 비밀번호 확인 후 선택된 협력사 삭제
+// 권한 확인 후 선택된 협력사 삭제
 function deleteSelectedWithPassword() {
-    PwModal.show(deleteSelected, { boardType: 'partner' });
+    deleteSelected();
 }
 
 // 선택된 협력사 삭제

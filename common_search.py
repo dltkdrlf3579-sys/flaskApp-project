@@ -1,21 +1,23 @@
 """
-공통 검색 모듈 - 동적 컬럼(JSON) 검색 지원
-SQLite JSON 검색 및 PostgreSQL JSONB 마이그레이션 대비
+공통 검색 모듈 - 동적 컬럼(JSONB) 검색 지원
 """
-import sqlite3
 import json
 from typing import List, Dict, Tuple, Any, Optional
 import logging
 
+from db.schema import table_exists
+from utils.sql_filters import sql_is_active_true
+
+
+def _json_text_expr(custom_data_field: str, field_name: str) -> str:
+    safe_field = str(field_name).replace("'", "''")
+    return f"{custom_data_field}->>'{safe_field}'"
+
 class DynamicSearchBuilder:
     """동적 컬럼 검색 쿼리 빌더"""
     
-    def __init__(self, db_type: str = 'sqlite'):
-        """
-        Args:
-            db_type: 'sqlite' 또는 'postgresql'
-        """
-        self.db_type = db_type
+    def __init__(self, db_type: str = 'postgresql'):
+        self.db_type = 'postgresql'
         
     def add_search_condition(
         self, 
@@ -62,50 +64,24 @@ class DynamicSearchBuilder:
                 query += f" AND {field_name} <= %s"
                 params.append(field_value)
         else:
-            # JSON/JSONB 필드 검색
-            if self.db_type == 'sqlite':
-                # SQLite JSON 검색
-                json_path = f'$.{field_name}'
-                
-                if search_type == 'like':
-                    if fallback_column:
-                        # JSON 필드와 폴백 컬럼 동시 검색
-                        query += f" AND (json_extract({custom_data_field}, '{json_path}') LIKE %s OR {fallback_column} LIKE %s)"
-                        params.append(f"%{field_value}%")
-                        params.append(f"%{field_value}%")
-                    else:
-                        # JSON 필드만 검색
-                        query += f" AND json_extract({custom_data_field}, '{json_path}') LIKE %s"
-                        params.append(f"%{field_value}%")
-                        
-                elif search_type == 'equals':
-                    query += f" AND json_extract({custom_data_field}, '{json_path}') = %s"
-                    params.append(field_value)
-                    
-                elif search_type == 'gte':
-                    query += f" AND CAST(json_extract({custom_data_field}, '{json_path}') AS REAL) >= %s"
-                    params.append(field_value)
-                    
-                elif search_type == 'lte':
-                    query += f" AND CAST(json_extract({custom_data_field}, '{json_path}') AS REAL) <= %s"
-                    params.append(field_value)
-                    
-            elif self.db_type == 'postgresql':
-                # PostgreSQL JSONB 검색 (미래 대비)
-                if search_type == 'like':
-                    if fallback_column:
-                        query += f" AND ({custom_data_field}->>{field_name} ILIKE %s OR {fallback_column} ILIKE %s)"
-                        params.append(f"%{field_value}%")
-                        params.append(f"%{field_value}%")
-                    else:
-                        query += f" AND {custom_data_field}->>{field_name} ILIKE %s"
-                        params.append(f"%{field_value}%")
-                        
-                elif search_type == 'equals':
-                    query += f" AND {custom_data_field} @> %s"
-                    params.append(json.dumps({field_name: field_value}))
-                    
-                # PostgreSQL은 JSONB 인덱스로 더 빠른 검색 가능
+            json_expr = _json_text_expr(custom_data_field, field_name)
+            if search_type == 'like':
+                if fallback_column:
+                    query += f" AND ({json_expr} ILIKE %s OR {fallback_column} ILIKE %s)"
+                    params.append(f"%{field_value}%")
+                    params.append(f"%{field_value}%")
+                else:
+                    query += f" AND {json_expr} ILIKE %s"
+                    params.append(f"%{field_value}%")
+            elif search_type == 'equals':
+                query += f" AND {custom_data_field} @> %s"
+                params.append(json.dumps({field_name: field_value}, ensure_ascii=False))
+            elif search_type == 'gte':
+                query += f" AND NULLIF({json_expr}, '')::numeric >= %s"
+                params.append(field_value)
+            elif search_type == 'lte':
+                query += f" AND NULLIF({json_expr}, '')::numeric <= %s"
+                params.append(field_value)
                     
         return query, params
     
@@ -175,7 +151,7 @@ class DynamicSearchBuilder:
 
 
 # 헬퍼 함수들
-def get_column_config(conn: sqlite3.Connection, board_type: str) -> List[Dict[str, Any]]:
+def get_column_config(conn, board_type: str) -> List[Dict[str, Any]]:
     """
     특정 보드의 컬럼 설정 가져오기
     
@@ -192,10 +168,13 @@ def get_column_config(conn: sqlite3.Connection, board_type: str) -> List[Dict[st
     table_name = f"{board_type}_column_config"
     
     try:
+        if not table_exists(conn, table_name):
+            logging.warning(f"테이블 {table_name}이 없습니다.")
+            return []
         cursor.execute(f"""
             SELECT column_key, column_name, column_type, is_active
             FROM {table_name}
-            WHERE is_active = 1
+            WHERE {sql_is_active_true('is_active', conn)}
             ORDER BY column_order
         """)
         columns = cursor.fetchall()
@@ -209,7 +188,7 @@ def get_column_config(conn: sqlite3.Connection, board_type: str) -> List[Dict[st
             }
             for col in columns
         ]
-    except sqlite3.OperationalError:
+    except Exception:
         logging.warning(f"테이블 {table_name}이 없습니다.")
         return []
 
@@ -250,7 +229,7 @@ def get_static_columns(board_type: str) -> List[str]:
 # 사용 예시
 if __name__ == "__main__":
     # 테스트 코드
-    builder = DynamicSearchBuilder('sqlite')
+    builder = DynamicSearchBuilder()
     
     # 기본 쿼리
     query = "SELECT * FROM accidents_cache WHERE is_deleted = 0"

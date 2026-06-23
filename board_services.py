@@ -4,7 +4,6 @@
 """
 import json
 import logging
-import sqlite3
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -29,7 +28,6 @@ class ColumnService:
         - 기본 필터: is_deleted=0, (옵션) is_active=1
         """
         conn = get_db_connection(self.db_path)
-        conn.row_factory = sqlite3.Row
 
         # 보호 키: 폼 전용/기본키/등록일은 숨김
         protected_common = {"attachments","detailed_content","notes","note","created_at"}
@@ -114,11 +112,6 @@ class ColumnService:
         else:
             values.append(None)
 
-        child_schema_json = dump_child_schema(data.get('child_schema'))
-        if 'child_schema' in existing_columns:
-            columns.append('child_schema')
-            values.append(child_schema_json)
-
         # table_name과 table_type이 테이블에 있는지 확인
         # PostgreSQL: information_schema를 통해 컬럼 정보 조회
         cursor.execute("""
@@ -127,6 +120,11 @@ class ColumnService:
             WHERE table_name = %s
         """, (self.config['column_table'],))
         existing_columns = [row[0] for row in cursor.fetchall()]
+
+        child_schema_json = dump_child_schema(data.get('child_schema'))
+        if 'child_schema' in existing_columns:
+            columns.append('child_schema')
+            values.append(child_schema_json)
         
         if 'table_name' in existing_columns and 'table_name' in data:
             columns.append('table_name')
@@ -143,13 +141,14 @@ class ColumnService:
         placeholders = ', '.join(['%s' for _ in values])
         columns_str = ', '.join(columns)
         
-        cursor.execute_with_returning_id(f"""
+        cursor.execute(f"""
             INSERT INTO {self.config['column_table']}
             ({columns_str})
             VALUES ({placeholders}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            RETURNING id
         """, values)
         
-        column_id = cursor.lastrowid
+        column_id = cursor.fetchone()[0]
         conn.commit()
         conn.close()
         
@@ -167,8 +166,8 @@ class ColumnService:
                 (column_id,)
             ).fetchone()
             if row:
-                col_key = row[0] if not isinstance(row, sqlite3.Row) else row[0]
-                is_system = row[1] if not isinstance(row, sqlite3.Row) else row[1]
+                col_key = row[0]
+                is_system = row[1]
                 if is_system == 1 or self._is_protected_key(str(col_key)):
                     raise ValueError("Protected column cannot be modified")
         except Exception:
@@ -228,7 +227,6 @@ class ColumnService:
             (column_id,)
         ).fetchone()
         if row:
-            # sqlite3.Row/tuple 모두 대응
             col_key = row[0]
             is_system = row[1]
             if is_system == 1 or self._is_protected_key(str(col_key)):
@@ -275,7 +273,6 @@ class CodeService:
     def list(self, column_key: str) -> List[Dict]:
         """드롭다운 코드 목록 조회"""
         conn = get_db_connection(self.db_path)
-        # PostgreSQL에서는 row_factory 불필요 (psycopg이 자동 처리)
         
         # v2 테이블 우선 조회
         codes = conn.execute("""
@@ -367,7 +364,6 @@ class ItemService:
     def list(self, filters: Dict = None, page: int = 1, per_page: int = 10) -> Dict:
         """아이템 목록 조회"""
         conn = get_db_connection(self.db_path)
-        conn.row_factory = sqlite3.Row
         
         # WHERE 절 구성
         where_clauses = ["is_deleted = 0"]
@@ -423,7 +419,6 @@ class ItemService:
     def detail(self, item_id: int) -> Optional[Dict]:
         """아이템 상세 조회"""
         conn = get_db_connection(self.db_path)
-        conn.row_factory = sqlite3.Row
         
         item = conn.execute(f"""
             SELECT * FROM {self.config['cache_table']}
@@ -453,11 +448,12 @@ class ItemService:
         number = f"{self.config['number_prefix']}-{year:04d}-{month:02d}-{max_seq + 1:04d}"
         
         # 데이터 저장
-        cursor.execute_with_returning_id(f"""
+        cursor.execute(f"""
             INSERT INTO {self.config['cache_table']}
             ({self.board_type}_number, {self.board_type}_date, title, content, 
              custom_data, created_by, created_at, updated_at)
             VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            RETURNING id
         """, (
             number,
             data.get('date'),
@@ -467,7 +463,7 @@ class ItemService:
             data.get('created_by', 'system')
         ))
         
-        item_id = cursor.lastrowid
+        item_id = cursor.fetchone()[0]
         conn.commit()
         conn.close()
         

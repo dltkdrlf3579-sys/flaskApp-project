@@ -38,7 +38,8 @@
         register_callback='openRegisterPopup()',
         show_final_check=True,
         final_check_label='검토완료 처리',
-        final_check_callback='requestSafeWorkplaceFinalCheck()'
+        final_check_callback='requestSafeWorkplaceFinalCheck()',
+        can_write=can_write|default(true)
     ) }}
     <div class="table-wrapper">
         <table class="data-table">
@@ -197,7 +198,7 @@ function updateDeleteButton() {
 }
 
 function deleteSelectedWithPassword() {
-    PwModal.show(deleteSelected, { boardType: 'safe_workplace' });
+    deleteSelected();
 }
 
 function requestSafeWorkplaceFinalCheck() {
@@ -207,7 +208,7 @@ function requestSafeWorkplaceFinalCheck() {
         return;
     }
 
-    PwModal.show(() => markSafeWorkplaceFinalCheck(), { boardType: 'safe_workplace' });
+    markSafeWorkplaceFinalCheck();
 }
 
 function markSafeWorkplaceFinalCheck() {
@@ -295,5 +296,4 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 </script>
 
-{% include 'includes/password_modal.html' %}
 {% endblock %}

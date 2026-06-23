@@ -1,0 +1,1054 @@
+{% extends "base.html" %}
+{% block title %}협력사 실시간 출입정보{% endblock %}
+
+{% block content %}
+<style>
+.page-header {
+    background: #fff;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #2f5fd3;
+}
+.page-title {
+    color: #333;
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0;
+}
+.access-search-section {
+    background: #f8f9fa;
+    padding: 20px;
+    margin-bottom: 20px;
+    border-radius: 4px;
+    border: 1px solid #e5e7eb;
+}
+.mode-row {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    margin-bottom: 18px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid #e5e7eb;
+}
+.mode-title {
+    font-weight: 700;
+    color: #333;
+    width: 80px;
+}
+.mode-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    color: #374151;
+    cursor: pointer;
+}
+.search-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(390px, 1fr));
+    gap: 14px 28px;
+}
+.search-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.search-group label {
+    font-weight: 600;
+    color: #333;
+    font-size: 14px;
+    width: 82px;
+    flex: 0 0 82px;
+}
+.search-group input,
+.search-group select {
+    height: 40px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 14px;
+    box-sizing: border-box;
+    padding: 0 12px;
+    background: #fff;
+}
+.search-group input:focus,
+.search-group select:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.1);
+}
+.search-group select,
+.search-group input[type="text"],
+.search-group input[type="datetime-local"] {
+    width: 240px;
+}
+.time-range {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+}
+.time-range input[type="datetime-local"] {
+    width: 210px;
+}
+#historyTimeGroup {
+    grid-column: span 2;
+}
+.field-picker {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+}
+.field-shell {
+    position: relative;
+    width: 240px;
+}
+.field-shell input {
+    width: 100%;
+    padding-right: 28px;
+}
+.field-shell input.locked {
+    background: #eef1f5;
+    color: #374151;
+    cursor: default;
+}
+.clear-inside {
+    display: none;
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    color: #6b7280;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+}
+.field-shell.has-value .clear-inside {
+    display: inline-flex;
+}
+.picker-button {
+    height: 40px;
+    width: 42px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    background: #fff;
+    color: #374151;
+    cursor: pointer;
+}
+.picker-button:hover {
+    background: #f3f4f6;
+}
+.search-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 18px;
+}
+.btn-reset,
+.btn-search {
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+}
+.btn-reset {
+    background: #6b7280;
+    color: #fff;
+}
+.btn-search {
+    background: #2f5fd3;
+    color: #fff;
+}
+.btn-reset:hover { background: #4b5563; }
+.btn-search:hover { background: #1d4ed8; }
+.table-section {
+    background: #fff;
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+.table-header {
+    padding: 12px 16px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.total-count {
+    font-weight: 600;
+    color: #374151;
+    font-size: 14px;
+}
+.result-message {
+    color: #6b7280;
+    font-size: 13px;
+}
+.table-header-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+.table-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.btn-excel-download {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 34px;
+    padding: 0 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    background: #fff;
+    color: #333;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.btn-excel-download:hover {
+    background: #f3f4f6;
+}
+.table-wrapper {
+    overflow-x: auto;
+    max-height: 70vh;
+}
+.data-table {
+    width: 100%;
+    min-width: 1250px;
+    border-collapse: collapse;
+    background: #fff;
+}
+.data-table th {
+    background: #f8f9fa;
+    color: #333;
+    font-weight: 600;
+    text-align: left;
+    padding: 12px 8px;
+    border-bottom: 2px solid #e5e7eb;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    white-space: nowrap;
+}
+.data-table td {
+    padding: 10px 8px;
+    border-bottom: 1px solid #f1f3f4;
+    color: #333;
+    white-space: nowrap;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.data-table tbody tr:hover {
+    background: #f8f9fa;
+}
+.empty-row td {
+    text-align: center;
+    color: #6b7280;
+    padding: 28px 8px;
+}
+.access-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(17, 24, 39, 0.45);
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+.access-modal.open {
+    display: flex;
+}
+.access-modal-content {
+    background: #fff;
+    border-radius: 8px;
+    width: min(980px, 96vw);
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.22);
+}
+.access-modal-header,
+.access-modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid #e5e7eb;
+}
+.access-modal-footer {
+    justify-content: flex-end;
+    gap: 8px;
+    border-top: 1px solid #e5e7eb;
+    border-bottom: none;
+}
+.access-modal-title {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 700;
+}
+.modal-close {
+    border: none;
+    background: transparent;
+    font-size: 24px;
+    color: #6b7280;
+    cursor: pointer;
+}
+.modal-body {
+    padding: 18px;
+    overflow: auto;
+}
+.split-picker {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    min-height: 420px;
+}
+.picker-panel {
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    min-height: 360px;
+}
+.picker-panel-header {
+    padding: 12px;
+    border-bottom: 1px solid #e5e7eb;
+    background: #f8f9fa;
+    font-weight: 700;
+}
+.picker-search {
+    padding: 12px;
+    border-bottom: 1px solid #e5e7eb;
+}
+.picker-search input {
+    width: 100%;
+    height: 38px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    padding: 0 10px;
+}
+.picker-list {
+    padding: 10px;
+    overflow: auto;
+    flex: 1;
+}
+.picker-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    text-align: left;
+    padding: 9px 10px;
+    border: 1px solid #e5e7eb;
+    background: #fff;
+    border-radius: 4px;
+    margin-bottom: 8px;
+    cursor: pointer;
+}
+.picker-item:hover,
+.picker-item.active {
+    background: #eef4ff;
+    border-color: #90b4ff;
+}
+.check-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 4px;
+}
+.check-row input {
+    width: 16px;
+    height: 16px;
+}
+.modal-btn {
+    border: none;
+    border-radius: 4px;
+    padding: 8px 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.modal-btn.cancel {
+    background: #6b7280;
+    color: #fff;
+}
+.modal-btn.confirm {
+    background: #2f5fd3;
+    color: #fff;
+}
+.loading-text,
+.muted-text {
+    color: #6b7280;
+    padding: 12px;
+    font-size: 14px;
+}
+@media (max-width: 760px) {
+    .split-picker {
+        grid-template-columns: 1fr;
+    }
+    .search-grid {
+        grid-template-columns: 1fr;
+    }
+    #historyTimeGroup {
+        grid-column: span 1;
+    }
+    .time-range {
+        flex-wrap: wrap;
+    }
+}
+</style>
+
+<div class="page-header">
+    <h1 class="page-title">협력사 실시간 출입정보</h1>
+</div>
+
+<section class="access-search-section">
+    <div class="mode-row">
+        <div class="mode-title">조회 모드</div>
+        <label class="mode-option">
+            <input type="radio" name="accessMode" value="occupancy" checked>
+            재실인원 확인
+        </label>
+        <label class="mode-option">
+            <input type="radio" name="accessMode" value="history">
+            출입이력 확인
+        </label>
+    </div>
+
+    <div class="search-grid">
+        <div class="search-group">
+            <label for="siteKey">사업장</label>
+            <select id="siteKey">
+                {% for site in sites %}
+                <option value="{{ site.key }}">{{ site.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="search-group">
+            <label for="buildingFloorDisplay">건물/층</label>
+            <div class="field-picker">
+                <div class="field-shell" id="buildingFieldShell">
+                    <input id="buildingFloorDisplay" type="text" readonly placeholder="건물/층 선택">
+                    <button type="button" class="clear-inside" aria-label="건물/층 초기화" onclick="clearBuildingSelection()">×</button>
+                </div>
+                <button type="button" class="picker-button" title="건물/층 선택" onclick="openBuildingModal()">🔍</button>
+            </div>
+        </div>
+
+        <div class="search-group">
+            <label for="companyName">협력사명</label>
+            <input id="companyName" type="text" placeholder="협력사명 입력">
+        </div>
+
+        <div class="search-group">
+            <label for="employeeName">성명</label>
+            <input id="employeeName" type="text" placeholder="성명 입력">
+        </div>
+
+        <div class="search-group">
+            <label for="detailLocationText">상세위치</label>
+            <div class="field-picker">
+                <div class="field-shell" id="locationFieldShell">
+                    <input id="detailLocationText" type="text" placeholder="상세위치 입력 또는 선택">
+                    <button type="button" class="clear-inside" aria-label="상세위치 초기화" onclick="clearLocationSelection()">×</button>
+                </div>
+                <button type="button" class="picker-button" title="상세위치 선택" onclick="openLocationModal()">🔍</button>
+            </div>
+        </div>
+
+        <div class="search-group time-mode" id="occupancyTimeGroup">
+            <label for="asOfTime">기준시각</label>
+            <input id="asOfTime" type="datetime-local">
+        </div>
+
+        <div class="search-group time-mode" id="historyTimeGroup" style="display:none;">
+            <label>조회기간</label>
+            <div class="time-range">
+                <input id="startTime" type="datetime-local">
+                <span>~</span>
+                <input id="endTime" type="datetime-local">
+            </div>
+        </div>
+    </div>
+
+    <div class="search-buttons">
+        <button type="button" class="btn-reset" onclick="resetPartnerAccessForm()">초기화</button>
+        <button type="button" class="btn-search" onclick="searchPartnerAccess()">검색</button>
+    </div>
+</section>
+
+<section class="table-section">
+    <div class="table-header">
+        <div class="table-header-left">
+            <span class="total-count" id="resultCount">총 0건</span>
+            <span class="result-message" id="resultMessage"></span>
+        </div>
+        <div class="table-header-actions">
+            <button type="button" class="btn-excel-download" onclick="exportPartnerAccessExcel()">
+                <img src="/static/icons/excel-icon.png" style="vertical-align: middle;" width="16" height="16" alt="">
+                엑셀 다운로드
+            </button>
+        </div>
+    </div>
+    <div class="table-wrapper">
+        <table class="data-table">
+            <thead id="resultHead"></thead>
+            <tbody id="resultBody">
+                <tr class="empty-row"><td>검색 조건을 입력한 뒤 검색해 주세요.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<div class="access-modal" id="buildingModal" aria-hidden="true">
+    <div class="access-modal-content">
+        <div class="access-modal-header">
+            <h2 class="access-modal-title">건물/층 선택</h2>
+            <button type="button" class="modal-close" onclick="closeModal('buildingModal')">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="split-picker">
+                <div class="picker-panel">
+                    <div class="picker-panel-header">건물</div>
+                    <div class="picker-search">
+                        <input id="buildingSearchInput" type="text" placeholder="건물명 검색" oninput="debouncedLoadBuildings()">
+                    </div>
+                    <div class="picker-list" id="buildingList">
+                        <div class="muted-text">건물을 불러오는 중입니다.</div>
+                    </div>
+                </div>
+                <div class="picker-panel">
+                    <div class="picker-panel-header">층</div>
+                    <div class="picker-list" id="floorList">
+                        <div class="muted-text">건물을 먼저 선택해 주세요.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="access-modal-footer">
+            <button type="button" class="modal-btn cancel" onclick="closeModal('buildingModal')">취소</button>
+            <button type="button" class="modal-btn confirm" onclick="confirmBuildingSelection()">선택 완료</button>
+        </div>
+    </div>
+</div>
+
+<div class="access-modal" id="locationModal" aria-hidden="true">
+    <div class="access-modal-content">
+        <div class="access-modal-header">
+            <h2 class="access-modal-title">상세위치 선택</h2>
+            <button type="button" class="modal-close" onclick="closeModal('locationModal')">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="picker-panel">
+                <div class="picker-panel-header">상세위치</div>
+                <div class="picker-search">
+                    <input id="locationSearchInput" type="text" placeholder="상세위치 검색" oninput="debouncedLoadLocations()">
+                </div>
+                <div class="picker-list" id="locationList">
+                    <div class="muted-text">상세위치를 불러오는 중입니다.</div>
+                </div>
+            </div>
+        </div>
+        <div class="access-modal-footer">
+            <button type="button" class="modal-btn cancel" onclick="closeModal('locationModal')">취소</button>
+            <button type="button" class="modal-btn confirm" onclick="confirmLocationSelection()">선택 완료</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const partnerAccessState = {
+    buildingName: '',
+    floorNames: [],
+    detailLocations: [],
+    tempBuildingName: '',
+    tempFloorNames: [],
+    tempDetailLocations: []
+};
+
+const resultColumns = {
+    occupancy: [
+        ['event_time', '최종출입시각'],
+        ['direction', '최종상태'],
+        ['employee_name', '성명'],
+        ['company_name', '협력사명'],
+        ['employee_no', '사번'],
+        ['employee_type', '임직원구분'],
+        ['domain_id', 'DomainID'],
+        ['site_name', '사업장'],
+        ['building_name', '건물'],
+        ['floor_name', '층'],
+        ['detail_location', '상세위치'],
+        ['access_level', '구분'],
+        ['reader_name', '리더기명']
+    ],
+    history: [
+        ['event_time', '출입시각'],
+        ['direction', 'IN/OUT'],
+        ['employee_name', '성명'],
+        ['company_name', '협력사명'],
+        ['employee_no', '사번'],
+        ['employee_type', '임직원구분'],
+        ['domain_id', 'DomainID'],
+        ['site_name', '사업장'],
+        ['building_name', '건물'],
+        ['floor_name', '층'],
+        ['detail_location', '상세위치'],
+        ['access_level', '구분'],
+        ['reader_name', '리더기명']
+    ]
+};
+
+let buildingSearchTimer = null;
+let locationSearchTimer = null;
+
+function currentMode() {
+    return document.querySelector('input[name="accessMode"]:checked').value;
+}
+
+function getSiteKey() {
+    return document.getElementById('siteKey').value;
+}
+
+function toDatetimeLocal(date) {
+    const pad = value => String(value).padStart(2, '0');
+    return [
+        date.getFullYear(),
+        pad(date.getMonth() + 1),
+        pad(date.getDate())
+    ].join('-') + 'T' + [pad(date.getHours()), pad(date.getMinutes())].join(':');
+}
+
+function setDefaultTimes() {
+    const now = new Date();
+    now.setSeconds(0, 0);
+    const start = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+    document.getElementById('asOfTime').value = toDatetimeLocal(now);
+    document.getElementById('startTime').value = toDatetimeLocal(start);
+    document.getElementById('endTime').value = toDatetimeLocal(now);
+}
+
+function syncModeUI() {
+    const mode = currentMode();
+    document.getElementById('occupancyTimeGroup').style.display = mode === 'occupancy' ? 'flex' : 'none';
+    document.getElementById('historyTimeGroup').style.display = mode === 'history' ? 'flex' : 'none';
+    renderTable([], '');
+}
+
+function openModal(id) {
+    const modal = document.getElementById(id);
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeModal(id) {
+    const modal = document.getElementById(id);
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+}
+
+function apiGet(url) {
+    return fetch(url, { headers: { 'Accept': 'application/json' } })
+        .then(response => response.json().then(data => ({ ok: response.ok, data })));
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+}
+
+function clearBuildingSelection() {
+    partnerAccessState.buildingName = '';
+    partnerAccessState.floorNames = [];
+    updateBuildingDisplay();
+    clearLocationSelection();
+}
+
+function updateBuildingDisplay() {
+    const shell = document.getElementById('buildingFieldShell');
+    const input = document.getElementById('buildingFloorDisplay');
+    const building = partnerAccessState.buildingName;
+    const floors = partnerAccessState.floorNames;
+    if (!building) {
+        input.value = '';
+        shell.classList.remove('has-value');
+        return;
+    }
+    const floorText = floors.length ? `${floors[0]}${floors.length > 1 ? ` 외 ${floors.length - 1}개` : ''}` : '전체 층';
+    input.value = `${building} / ${floorText}`;
+    shell.classList.add('has-value');
+}
+
+function clearLocationSelection() {
+    partnerAccessState.detailLocations = [];
+    const shell = document.getElementById('locationFieldShell');
+    const input = document.getElementById('detailLocationText');
+    input.value = '';
+    input.readOnly = false;
+    input.classList.remove('locked');
+    shell.classList.remove('has-value');
+}
+
+function updateLocationDisplay() {
+    const shell = document.getElementById('locationFieldShell');
+    const input = document.getElementById('detailLocationText');
+    const selected = partnerAccessState.detailLocations;
+    if (!selected.length) {
+        input.readOnly = false;
+        input.classList.remove('locked');
+        shell.classList.remove('has-value');
+        return;
+    }
+    input.value = `${selected[0]}${selected.length > 1 ? ` 외 ${selected.length - 1}개 선택됨` : ''}`;
+    input.readOnly = true;
+    input.classList.add('locked');
+    shell.classList.add('has-value');
+}
+
+function openBuildingModal() {
+    partnerAccessState.tempBuildingName = partnerAccessState.buildingName;
+    partnerAccessState.tempFloorNames = [...partnerAccessState.floorNames];
+    document.getElementById('buildingSearchInput').value = '';
+    openModal('buildingModal');
+    loadBuildings();
+    if (partnerAccessState.tempBuildingName) {
+        loadFloors(partnerAccessState.tempBuildingName);
+    } else {
+        document.getElementById('floorList').innerHTML = '<div class="muted-text">건물을 먼저 선택해 주세요.</div>';
+    }
+}
+
+function debouncedLoadBuildings() {
+    clearTimeout(buildingSearchTimer);
+    buildingSearchTimer = setTimeout(loadBuildings, 250);
+}
+
+async function loadBuildings() {
+    const site = encodeURIComponent(getSiteKey());
+    const q = encodeURIComponent(document.getElementById('buildingSearchInput').value.trim());
+    const list = document.getElementById('buildingList');
+    list.innerHTML = '<div class="loading-text">건물을 불러오는 중입니다.</div>';
+    const { ok, data } = await apiGet(`/api/partner-access/buildings?site=${site}&q=${q}`);
+    if (!ok || !data.success) {
+        list.innerHTML = `<div class="muted-text">${escapeHtml(data.message || '건물 조회 실패')}</div>`;
+        return;
+    }
+    if (!data.data.length) {
+        list.innerHTML = '<div class="muted-text">조회된 건물이 없습니다.</div>';
+        return;
+    }
+    list.innerHTML = data.data.map(building => `
+        <button type="button"
+                class="picker-item ${building === partnerAccessState.tempBuildingName ? 'active' : ''}"
+                data-building="${escapeHtml(building)}">
+            ${escapeHtml(building)}
+        </button>
+    `).join('');
+    list.querySelectorAll('[data-building]').forEach(button => {
+        button.addEventListener('click', () => selectTempBuilding(button.dataset.building));
+    });
+}
+
+function selectTempBuilding(building) {
+    partnerAccessState.tempBuildingName = building;
+    partnerAccessState.tempFloorNames = [];
+    loadBuildings();
+    loadFloors(building);
+}
+
+async function loadFloors(building) {
+    const site = encodeURIComponent(getSiteKey());
+    const buildingParam = encodeURIComponent(building);
+    const list = document.getElementById('floorList');
+    list.innerHTML = '<div class="loading-text">층 정보를 불러오는 중입니다.</div>';
+    const { ok, data } = await apiGet(`/api/partner-access/floors?site=${site}&building=${buildingParam}`);
+    if (!ok || !data.success) {
+        list.innerHTML = `<div class="muted-text">${escapeHtml(data.message || '층 조회 실패')}</div>`;
+        return;
+    }
+    if (!data.data.length) {
+        list.innerHTML = '<div class="muted-text">조회된 층이 없습니다.</div>';
+        return;
+    }
+    const rows = data.data.map(floor => `
+        <label class="check-row">
+            <input type="checkbox"
+                   class="floor-checkbox"
+                   value="${escapeHtml(floor)}"
+                   ${partnerAccessState.tempFloorNames.includes(floor) ? 'checked' : ''}>
+            <span>${escapeHtml(floor)}</span>
+        </label>
+    `).join('');
+    list.innerHTML = `
+        <label class="check-row">
+            <input type="checkbox" onchange="toggleAllFloors(this.checked)">
+            <strong>전체선택</strong>
+        </label>
+        ${rows}
+    `;
+}
+
+function toggleAllFloors(checked) {
+    document.querySelectorAll('.floor-checkbox').forEach(input => {
+        input.checked = checked;
+    });
+}
+
+function confirmBuildingSelection() {
+    if (!partnerAccessState.tempBuildingName) {
+        alert('건물을 선택해 주세요.');
+        return;
+    }
+    const floors = Array.from(document.querySelectorAll('.floor-checkbox:checked')).map(input => input.value);
+    partnerAccessState.buildingName = partnerAccessState.tempBuildingName;
+    partnerAccessState.floorNames = floors;
+    updateBuildingDisplay();
+    clearLocationSelection();
+    closeModal('buildingModal');
+}
+
+function openLocationModal() {
+    partnerAccessState.tempDetailLocations = [...partnerAccessState.detailLocations];
+    document.getElementById('locationSearchInput').value = '';
+    openModal('locationModal');
+    loadLocations();
+}
+
+function debouncedLoadLocations() {
+    clearTimeout(locationSearchTimer);
+    locationSearchTimer = setTimeout(loadLocations, 250);
+}
+
+async function loadLocations() {
+    const params = new URLSearchParams();
+    params.set('site', getSiteKey());
+    params.set('q', document.getElementById('locationSearchInput').value.trim());
+    if (partnerAccessState.buildingName) {
+        params.set('building', partnerAccessState.buildingName);
+    }
+    partnerAccessState.floorNames.forEach(floor => params.append('floor', floor));
+
+    const list = document.getElementById('locationList');
+    list.innerHTML = '<div class="loading-text">상세위치를 불러오는 중입니다.</div>';
+    const { ok, data } = await apiGet(`/api/partner-access/locations?${params.toString()}`);
+    if (!ok || !data.success) {
+        list.innerHTML = `<div class="muted-text">${escapeHtml(data.message || '상세위치 조회 실패')}</div>`;
+        return;
+    }
+    if (!data.data.length) {
+        list.innerHTML = '<div class="muted-text">조회된 상세위치가 없습니다.</div>';
+        return;
+    }
+    const rows = data.data.map(location => `
+        <label class="check-row">
+            <input type="checkbox"
+                   class="location-checkbox"
+                   value="${escapeHtml(location)}"
+                   ${partnerAccessState.tempDetailLocations.includes(location) ? 'checked' : ''}>
+            <span>${escapeHtml(location)}</span>
+        </label>
+    `).join('');
+    list.innerHTML = `
+        <label class="check-row">
+            <input type="checkbox" onchange="toggleAllLocations(this.checked)">
+            <strong>전체선택</strong>
+        </label>
+        ${rows}
+    `;
+}
+
+function toggleAllLocations(checked) {
+    document.querySelectorAll('.location-checkbox').forEach(input => {
+        input.checked = checked;
+    });
+}
+
+function confirmLocationSelection() {
+    const selected = Array.from(document.querySelectorAll('.location-checkbox:checked')).map(input => input.value);
+    partnerAccessState.detailLocations = selected;
+    updateLocationDisplay();
+    closeModal('locationModal');
+}
+
+function getSearchPayload() {
+    const mode = currentMode();
+    const payload = {
+        mode,
+        site_key: getSiteKey(),
+        company_name: document.getElementById('companyName').value.trim(),
+        employee_name: document.getElementById('employeeName').value.trim(),
+        building_name: partnerAccessState.buildingName,
+        floor_names: partnerAccessState.floorNames,
+        detail_locations: partnerAccessState.detailLocations,
+        detail_text: partnerAccessState.detailLocations.length ? '' : document.getElementById('detailLocationText').value.trim()
+    };
+    if (mode === 'occupancy') {
+        payload.as_of = document.getElementById('asOfTime').value;
+    } else {
+        payload.start_at = document.getElementById('startTime').value;
+        payload.end_at = document.getElementById('endTime').value;
+    }
+    return payload;
+}
+
+function validatePayload(payload) {
+    if (!payload.site_key) return '사업장을 선택해 주세요.';
+    if (payload.mode === 'occupancy' && !payload.as_of) return '기준시각을 입력해 주세요.';
+    if (payload.mode === 'history' && (!payload.start_at || !payload.end_at)) return '조회기간을 입력해 주세요.';
+    const hasFilter = Boolean(
+        payload.company_name ||
+        payload.employee_name ||
+        payload.building_name ||
+        payload.floor_names.length ||
+        payload.detail_locations.length ||
+        payload.detail_text
+    );
+    if (!hasFilter) return '성명, 협력사명, 건물/층, 상세위치 중 하나 이상 입력해 주세요.';
+    return '';
+}
+
+async function searchPartnerAccess() {
+    const payload = getSearchPayload();
+    const validationMessage = validatePayload(payload);
+    if (validationMessage) {
+        alert(validationMessage);
+        return;
+    }
+    document.getElementById('resultMessage').textContent = '검색 중입니다.';
+    const response = await fetch('/api/partner-access/search', {
+        method: 'POST',
+        headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+        document.getElementById('resultMessage').textContent = '';
+        alert(data.message || '검색 중 오류가 발생했습니다.');
+        return;
+    }
+    renderTable(data.data || [], data.limited ? `최대 ${data.limit}건까지만 표시됩니다.` : '');
+}
+
+function getFilenameFromDisposition(disposition) {
+    if (!disposition) return '';
+    const utf8Match = disposition.match(/filename\\*=UTF-8''([^;]+)/i);
+    if (utf8Match) return decodeURIComponent(utf8Match[1]);
+    const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
+    return plainMatch ? plainMatch[1] : '';
+}
+
+async function exportPartnerAccessExcel() {
+    const payload = getSearchPayload();
+    const validationMessage = validatePayload(payload);
+    if (validationMessage) {
+        alert(validationMessage);
+        return;
+    }
+
+    document.getElementById('resultMessage').textContent = '엑셀 생성 중입니다.';
+    const response = await fetch('/api/partner-access/export', {
+        method: 'POST',
+        headers: {
+            'Accept': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/json',
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    });
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!response.ok || contentType.includes('application/json')) {
+        const data = await response.json();
+        document.getElementById('resultMessage').textContent = '';
+        alert(data.message || '엑셀 다운로드 중 오류가 발생했습니다.');
+        return;
+    }
+
+    const blob = await response.blob();
+    const filename = getFilenameFromDisposition(response.headers.get('content-disposition'))
+        || `partner_access_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+    document.getElementById('resultMessage').textContent = '';
+}
+
+function renderTable(rows, message) {
+    const mode = currentMode();
+    const columns = resultColumns[mode];
+    const head = document.getElementById('resultHead');
+    const body = document.getElementById('resultBody');
+    document.getElementById('resultCount').textContent = `총 ${rows.length}건`;
+    document.getElementById('resultMessage').textContent = message || '';
+    head.innerHTML = `<tr>${columns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join('')}</tr>`;
+    if (!rows.length) {
+        body.innerHTML = `<tr class="empty-row"><td colspan="${columns.length}">조회 결과가 없습니다.</td></tr>`;
+        return;
+    }
+    body.innerHTML = rows.map(row => `
+        <tr>
+            ${columns.map(([key]) => `<td title="${escapeHtml(row[key] || '')}">${escapeHtml(row[key] || '')}</td>`).join('')}
+        </tr>
+    `).join('');
+}
+
+function resetPartnerAccessForm() {
+    document.getElementById('siteKey').selectedIndex = 0;
+    document.getElementById('companyName').value = '';
+    document.getElementById('employeeName').value = '';
+    clearBuildingSelection();
+    clearLocationSelection();
+    setDefaultTimes();
+    renderTable([], '');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    setDefaultTimes();
+    renderTable([], '');
+    document.querySelectorAll('input[name="accessMode"]').forEach(input => {
+        input.addEventListener('change', syncModeUI);
+    });
+    document.getElementById('siteKey').addEventListener('change', () => {
+        clearBuildingSelection();
+        clearLocationSelection();
+        renderTable([], '');
+    });
+    document.getElementById('detailLocationText').addEventListener('input', () => {
+        if (!partnerAccessState.detailLocations.length) {
+            const shell = document.getElementById('locationFieldShell');
+            shell.classList.toggle('has-value', Boolean(document.getElementById('detailLocationText').value.trim()));
+        }
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+            closeModal('buildingModal');
+            closeModal('locationModal');
+        }
+        if (event.key === 'Enter' && !event.target.closest('.access-modal')) {
+            event.preventDefault();
+            searchPartnerAccess();
+        }
+    });
+});
+</script>
+{% endblock %}

@@ -20,6 +20,8 @@ class AccidentController(BoardController):
 
     def detail_view(self, request, accident_id):
         context = self.repository.fetch_detail_context(accident_id, request.args.get('popup') == '1')
+        if context and context.get('_permission_denied'):
+            return "사고 정보를 조회할 권한이 없습니다.", 403
         if not context:
             return "사고 정보를 찾을 수 없습니다.", 404
         template_context = self._build_template_context(**context)

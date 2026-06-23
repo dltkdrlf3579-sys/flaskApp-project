@@ -1,6 +1,5 @@
 # ============= 필요한 imports =============
 import logging
-import sqlite3
 import json
 from flask import (
     Blueprint,
@@ -55,7 +54,7 @@ def _first(row, default=0):
     try:
         if row is None:
             return default
-        # sqlite3.Row 또는 tuple/리스트 인덱스 0 시도
+        # mapping row 또는 tuple/list 인덱스 0 시도
         try:
             return row[0]
         except Exception:

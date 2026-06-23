@@ -64,7 +64,8 @@
         show_delete=True,
         show_final_check=True,
         final_check_label=final_check_label,
-        final_check_callback='requestBoardFinalCheck()'
+        final_check_callback='requestBoardFinalCheck()',
+        can_write=can_write|default(true)
     ) }}
     <div class="table-wrapper">
         <table class="data-table">
@@ -721,7 +722,7 @@ function updateDeleteButton() {
 }
 
 function deleteSelectedWithPassword() {
-    PwModal.show(deleteSelected, { boardType: boardPageConfig.boardType });
+    deleteSelected();
 }
 
 function requestBoardFinalCheck() {
@@ -731,7 +732,7 @@ function requestBoardFinalCheck() {
         return;
     }
 
-    PwModal.show(() => markBoardFinalCheck(), { boardType: boardPageConfig.boardType });
+    markBoardFinalCheck();
 }
 
 function markBoardFinalCheck() {
@@ -821,8 +822,5 @@ function deleteSelected() {
 }
 
 </script>
-
-<!-- 비밀번호 모달 포함 -->
-{% include 'includes/password_modal.html' %}
 
 {% endblock %}

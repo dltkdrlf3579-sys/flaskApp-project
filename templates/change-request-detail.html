@@ -4,7 +4,7 @@
 {% extends "base.html" %}
 {% endif %}
 
-{% from 'includes/board_form/save_controls.html' import render_save_button, render_password_modal %}
+{% from 'includes/board_form/save_controls.html' import render_save_button %}
 
 {% block head %}
     {{ super() }}
@@ -265,14 +265,10 @@
     {% from 'includes/attachment_section.html' import render_attachment_section %}
     {{ render_attachment_section(attachments, 'change_request') }}
 
-    {{ render_save_button('showEditPasswordModal()') }}
+    {% if can_write|default(true) %}
+        {{ render_save_button('saveChanges()') }}
+    {% endif %}
     
-    {{ render_password_modal(
-        modal_id='edit-password-modal',
-        input_id='edit-password-input',
-        confirm_onclick='verifyPasswordAndSave()',
-        cancel_onclick='closeEditPasswordModal()'
-    ) }}
 
     {% if not is_popup %}
     <div class="action-buttons">
@@ -872,54 +868,8 @@ function toggleSection(sectionId) {
 
 // 페이지 로드시 첨부파일 정보 초기화는 공통 컴포넌트에서 처리됨
 
-function showEditPasswordModal() {
-    document.getElementById('edit-password-modal').style.display = 'block';
-    document.getElementById('edit-password-input').focus();
-}
-
-function closeEditPasswordModal() {
-    document.getElementById('edit-password-modal').style.display = 'none';
-    document.getElementById('edit-password-input').value = '';
-}
-
-function verifyPasswordAndSave() {
-    const input = document.getElementById('edit-password-input');
-    const password = input ? input.value : '';
-
-    if (!password) {
-        alert('비밀번호를 입력해주세요.');
-        if (input) {
-            input.focus();
-        }
-        return;
-    }
-
-    BoardDetail.verifyPassword({ boardType: 'change_request', password })
-        .then(() => {
-            closeEditPasswordModal();
-            saveChanges();
-        })
-        .catch((error) => {
-            alert(error && error.message ? error.message : '비밀번호가 올바르지 않습니다.');
-            if (input) {
-                input.value = '';
-                input.focus();
-            }
-        });
-}
-
 // 페이지 로드 시 초기화
 document.addEventListener('DOMContentLoaded', function() {
-    // 비밀번호 입력 엔터 키 이벤트
-    const passwordInput = document.getElementById('edit-password-input');
-    if (passwordInput) {
-        passwordInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                verifyPasswordAndSave();
-            }
-        });
-    }
-    
     // 상세내용은 서버에서 직접 렌더링되므로 별도 초기화 불필요
 });
 

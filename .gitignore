@@ -14,6 +14,8 @@ static/logo-sample.png
 
 # Markdown 파일들 제외
 *.md
+!docs/refactor-audit/**/*.md
+!docs/refactor-audit/*.md
 nul
 
 # IDE 및 에디터 설정 폴더 제외

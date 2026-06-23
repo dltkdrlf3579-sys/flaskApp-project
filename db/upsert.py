@@ -1,10 +1,6 @@
-"""
-안전한 UPSERT 유틸리티 - Phase 3
-SQLite의 INSERT OR REPLACE를 PostgreSQL의 ON CONFLICT로 변환
-"""
+"""PostgreSQL UPSERT utilities."""
 import logging
-from typing import Dict, Any, List, Optional, Tuple
-import sqlite3
+from typing import Dict, Any, List, Optional
 
 
 # 테이블별 UPSERT 레지스트리
@@ -135,7 +131,7 @@ def safe_upsert(conn, table: str, data: Dict[str, Any],
     안전한 UPSERT 함수
     
     Args:
-        conn: CompatConnection 객체
+        conn: PostgreSQL connection 객체
         table: 테이블명
         data: 삽입/업데이트할 데이터 딕셔너리
         conflict_cols: 충돌 감지 컬럼들 (None이면 레지스트리에서 자동 조회)
@@ -159,11 +155,7 @@ def safe_upsert(conn, table: str, data: Dict[str, Any],
     
     cursor = conn.cursor()
     
-    # PostgreSQL 모드인지 확인
-    if hasattr(conn, 'is_postgres') and conn.is_postgres:
-        return _upsert_postgresql(cursor, table, data, conflict_cols, update_cols)
-    else:
-        return _upsert_sqlite(cursor, table, data)
+    return _upsert_postgresql(cursor, table, data, conflict_cols, update_cols)
 
 
 def _upsert_postgresql(cursor, table: str, data: Dict[str, Any],
@@ -203,12 +195,13 @@ def _upsert_postgresql(cursor, table: str, data: Dict[str, Any],
     # ON CONFLICT 쿼리 구성
     conflict_cols_str = ', '.join(conflict_cols)
     update_sets_str = ', '.join(update_sets)
+    conflict_action = f"DO UPDATE SET {update_sets_str}" if update_sets_str else "DO NOTHING"
     
     sql = f"""
         INSERT INTO {table} ({', '.join(insert_columns)})
         VALUES ({', '.join(insert_placeholders)})
         ON CONFLICT ({conflict_cols_str}) 
-        DO UPDATE SET {update_sets_str}
+        {conflict_action}
     """
     
     logging.debug(f"PostgreSQL UPSERT SQL: {sql}")
@@ -217,34 +210,6 @@ def _upsert_postgresql(cursor, table: str, data: Dict[str, Any],
     cursor.execute(sql, insert_values)
     return cursor.rowcount
 
-
-def _upsert_sqlite(cursor, table: str, data: Dict[str, Any]) -> int:
-    """SQLite용 INSERT OR REPLACE"""
-    
-    columns = list(data.keys())
-    placeholders = ['?'] * len(columns)
-    values = list(data.values())
-    
-    # timestamp 컬럼들 자동 처리: SQLite에서는 datetime('now') 사용
-    timestamp_columns = ['updated_at', 'last_master_sync', 'last_full_sync', 'sync_date', 'first_sync_at', 'created_at']
-    for ts_col in timestamp_columns:
-        if ts_col in data:
-            ts_idx = columns.index(ts_col)
-            placeholders[ts_idx] = "datetime('now')"
-            values.pop(ts_idx)  # datetime('now')는 바인딩하지 않음
-    
-    sql = f"""
-        INSERT OR REPLACE INTO {table} ({', '.join(columns)})
-        VALUES ({', '.join(placeholders)})
-    """
-    
-    logging.debug(f"SQLite UPSERT SQL: {sql}")
-    logging.debug(f"Values: {values}")
-    
-    cursor.execute(sql, values)
-    return cursor.rowcount
-
-
 def bulk_upsert(conn, table: str, data_list: List[Dict[str, Any]],
                 conflict_cols: Optional[List[str]] = None,
                 update_cols: Optional[List[str]] = None) -> int:
@@ -252,7 +217,7 @@ def bulk_upsert(conn, table: str, data_list: List[Dict[str, Any]],
     배치 UPSERT 함수
     
     Args:
-        conn: CompatConnection 객체
+        conn: PostgreSQL connection 객체
         table: 테이블명
         data_list: 삽입/업데이트할 데이터 리스트
         conflict_cols: 충돌 감지 컬럼들

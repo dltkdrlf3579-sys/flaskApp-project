@@ -1,10 +1,11 @@
-"""Synchronise system_users and departments_external using MASTER_DATA_QUERIES.
+"""Synchronise system_users and departments_external using configured source queries.
 
 Run with:
-    venv\Scripts\python.exe scripts\sync_permission_master_data.py
+    venv\\Scripts\\python.exe scripts\\sync_permission_master_data.py
 
-This fetches employee/dept data from the external IQADB source (execute_SQL)
-then upserts into the Postgres tables system_users / departments_external.
+Employees are fetched from LOCAL_DATA_QUERIES through the local PostgreSQL helper.
+Departments are fetched from MASTER_DATA_QUERIES through the external IQADB helper.
+The results are upserted into the Postgres tables system_users / departments_external.
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ import configparser
 from typing import Dict, Iterable, List, Sequence
 
 from db_connection import get_db_connection
-from database_config import execute_SQL  # external DB helper
+from database_config import execute_SQL, execute_local_query
 
 logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
 log = logging.getLogger(__name__)
@@ -32,6 +33,21 @@ def fetch_external_data(query: str) -> List[Dict[str, any]]:
         return []
     log.info('Running external query (first 100 chars): %s', query[:100])
     df = execute_SQL(query)
+    if df is None:
+        return []
+    rows = df.to_dict('records')
+    normalised = []
+    for record in rows:
+        lower_dict = {str(k).lower(): v for k, v in record.items()}
+        normalised.append(lower_dict)
+    return normalised
+
+
+def fetch_local_data(query: str) -> List[Dict[str, any]]:
+    if not query:
+        return []
+    log.info('Running local query (first 100 chars): %s', query[:100])
+    df = execute_local_query(query)
     if df is None:
         return []
     rows = df.to_dict('records')
@@ -137,15 +153,15 @@ def upsert_rows(
 def main() -> None:
     cfg = load_config()
 
-    employee_query = cfg.get('MASTER_DATA_QUERIES', 'employee_query', fallback='').strip()
+    employee_query = cfg.get('LOCAL_DATA_QUERIES', 'employee_query', fallback='').strip()
     department_query = cfg.get('MASTER_DATA_QUERIES', 'department_query', fallback='').strip()
 
     if not employee_query:
-        raise RuntimeError('MASTER_DATA_QUERIES.employee_query 설정이 필요합니다.')
+        raise RuntimeError('LOCAL_DATA_QUERIES.employee_query 설정이 필요합니다.')
     if not department_query:
         raise RuntimeError('MASTER_DATA_QUERIES.department_query 설정이 필요합니다.')
 
-    employees = fetch_external_data(employee_query)
+    employees = fetch_local_data(employee_query)
     departments = fetch_external_data(department_query)
 
     log.info('Employees fetched: %d', len(employees))

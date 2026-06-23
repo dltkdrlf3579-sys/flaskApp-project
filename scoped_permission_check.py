@@ -17,7 +17,12 @@ def _row_value(row, index, key):
     if row is None:
         return None
     if hasattr(row, 'keys'):
-        return row.get(key)
+        if hasattr(row, 'get'):
+            return row.get(key)
+        try:
+            return row[key]
+        except Exception:
+            pass
     return row[index]
 
 
@@ -69,8 +74,9 @@ def _get_dept_permission_levels(cursor, menu_code, dept_id, dept_code, dept_path
         path_codes.append(dept_code)
 
     if path_codes:
-        where_clauses.append("dept_code = ANY(%s)")
-        params.append(path_codes)
+        placeholders = ", ".join(["%s"] * len(path_codes))
+        where_clauses.append(f"dept_code IN ({placeholders})")
+        params.extend(path_codes)
 
     if not where_clauses:
         return None
@@ -89,7 +95,7 @@ def _get_dept_permission_levels(cursor, menu_code, dept_id, dept_code, dept_path
           AND is_active = true
           AND ({where_sql})
         ORDER BY
-            CASE WHEN dept_id = %s THEN 0 ELSE 1,
+            CASE WHEN dept_id = %s THEN 0 ELSE 1 END,
             COALESCE(length(dept_full_path), 0) DESC,
             updated_at DESC
         LIMIT 1
@@ -329,8 +335,9 @@ def get_user_permission_summary(login_id, dept_id):
 
             if where_parts or path_codes:
                 if path_codes:
-                    where_parts.append("dept_code = ANY(%s)")
-                    params.append(path_codes)
+                    placeholders = ", ".join(["%s"] * len(path_codes))
+                    where_parts.append(f"dept_code IN ({placeholders})")
+                    params.extend(path_codes)
 
                 where_sql = " OR ".join(where_parts)
                 params_extended = params + [dept_id if dept_id else '']
@@ -342,7 +349,7 @@ def get_user_permission_summary(login_id, dept_id):
                     WHERE is_active = true AND menu_code IS NOT NULL
                       AND ({where_sql})
                     ORDER BY
-                        CASE WHEN dept_id = %s THEN 0 ELSE 1,
+                        CASE WHEN dept_id = %s THEN 0 ELSE 1 END,
                         COALESCE(length(dept_full_path), 0) DESC,
                         updated_at DESC
                     """,

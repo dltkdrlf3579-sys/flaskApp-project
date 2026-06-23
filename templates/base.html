@@ -83,10 +83,10 @@
           <img src="/static/logo-sample.png" alt="Logo" class="logo-img">
           상생EHS Portal
         </a>
-        {% set _nav_menu = user_menu if user_menu is defined and user_menu else menu %}
+        {% set _nav_menu = user_menu if user_menu is defined else menu %}
         <ul class="nav-main" role="menubar" aria-label="메인 메뉴">
           {# 현재 활성 슬러그 파악 #}
-          {% set active_slug = (request.view_args.get('url') if request.view_args else '') %}
+          {% set active_slug = (request.view_args.get('url') if request.view_args else '') or request.path.strip('/') %}
           {% for m in _nav_menu %}
           {% set is_active = false %}
           {% for sm in m.submenu %}

@@ -5,19 +5,16 @@ import pytz
 from pathlib import Path
 import shutil
 import json
-import csv
-import io
-from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, Response, send_from_directory, abort, stream_with_context
+from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, send_from_directory, abort
 import configparser
 from timezone_config import KST, get_korean_time, get_korean_time_str
 from config.menu import MENU_CONFIG
 from database_config import db_config, partner_manager
 import re
 import base64
-import sqlite3
 import math
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional, Callable, Iterator
+from typing import Any, Dict, List, Optional
 from decimal import Decimal, InvalidOperation
 from board_services import CodeService, ItemService
 from repositories.common.column_config_repository import ColumnConfigRepository
@@ -26,6 +23,7 @@ from table_mappings import get_table_mappings
 from search_popup_service import SearchPopupService
 from column_sync_service import ColumnSyncService
 from db_connection import get_db_connection
+from db.schema import column_exists, table_exists
 from database_config import execute_SQL
 from db.upsert import safe_upsert
 from column_utils import normalize_column_types, determine_linked_type
@@ -35,7 +33,10 @@ from permission_helpers import (
     SUPER_ADMIN_USERS,
     build_user_menu_config,
     enforce_permission,
+    enforce_board_permission,
+    get_user_permission_level,
     resolve_menu_code,
+    resolve_board_permission_code,
 )
 from audit_logger import record_audit_log, record_board_action, record_menu_view, normalize_scope, normalize_action, normalize_result
 from notification_service import get_notification_service, NotificationError
@@ -49,6 +50,8 @@ from add_page_routes import (
     _response_info,
 )
 from boards.safety_instruction import safety_instruction_bp
+from partner_access import partner_access_bp
+from ai_assistant import ai_assistant_bp
 from controllers.boards.accident_controller import (
     AccidentController,
     build_accident_config,
@@ -60,8 +63,6 @@ from controllers.boards.safety_instruction_controller import (
 )
 from repositories.boards.safety_instruction_repository import SafetyInstructionRepository
 from utils.sql_filters import sql_is_active_true, sql_is_deleted_false
-import threading
-import schedule
 import threading
 import time
 # SSO 관련 imports 추가
@@ -116,6 +117,8 @@ app.register_blueprint(safety_instruction_bp)
 app.register_blueprint(safe_workplace_bp)
 app.register_blueprint(subcontract_approval_bp)
 app.register_blueprint(subcontract_report_bp)
+app.register_blueprint(partner_access_bp)
+app.register_blueprint(ai_assistant_bp)
 register_permission_routes(app)
 
 CHANGE_REQUEST_DATE_COLUMNS = {'final_check_date'}
@@ -143,58 +146,13 @@ def normalize_date_value(value):
     return value
 
 
-def _stream_csv_response(filename_prefix: str, headers: List[str], row_iterator: Iterator[List[Any]]) -> Response:
-    """Return a streaming CSV Response with CP949 encoding and Excel-friendly header."""
-
-    def _make_generator():
-        buffer = io.StringIO()
-        writer = csv.writer(buffer, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-
-        def flush_chunk() -> bytes:
-            chunk = buffer.getvalue()
-            buffer.seek(0)
-            buffer.truncate(0)
-            if not chunk:
-                return b''
-            return chunk.encode('cp949', errors='ignore')
-
-        try:
-            buffer.write('sep=,\n')
-            chunk = flush_chunk()
-            if chunk:
-                yield chunk
-
-            writer.writerow(headers)
-            chunk = flush_chunk()
-            if chunk:
-                yield chunk
-
-            for row in row_iterator:
-                writer.writerow(row)
-                chunk = flush_chunk()
-                if chunk:
-                    yield chunk
-
-            chunk = flush_chunk()
-            if chunk:
-                yield chunk
-        finally:
-            if hasattr(row_iterator, 'close'):
-                try:
-                    row_iterator.close()
-                except Exception:
-                    pass
-            buffer.close()
-
-    filename = f"{filename_prefix}_{get_korean_time().strftime('%Y%m%d_%H%M%S')}.csv"
-    return Response(
-        stream_with_context(_make_generator()),
-        mimetype='text/csv; charset=cp949',
-        headers={
-            'Content-Disposition': f'attachment; filename={filename}',
-            'Cache-Control': 'no-cache',
-        },
-    )
+def _get_export_row_limit() -> int:
+    """Return max rows for export (config.ini [EXPORT] MAX_ROWS)."""
+    try:
+        limit = db_config.config.getint('EXPORT', 'MAX_ROWS', fallback=5000)
+    except Exception:
+        limit = 5000
+    return limit if limit > 0 else 5000
 
 
 def _build_board_user_context():
@@ -421,13 +379,33 @@ _safety_instruction_controller = SafetyInstructionController(
     menu_config=MENU_CONFIG,
 )
 
+_accident_repository = AccidentRepository(DB_PATH)
+
 _accident_controller = AccidentController(
     build_accident_config(),
-    AccidentRepository(DB_PATH),
+    _accident_repository,
     menu_config=MENU_CONFIG,
 )
 
-PASSWORD = db_config.config.get('DEFAULT', 'EDIT_PASSWORD')
+
+def _accident_write_scope_clause(conn, alias='a'):
+    _accident_repository._ensure_scope_columns(conn)
+    return _accident_repository._build_scope_filter(conn, 'write', alias=alias)
+
+
+def _can_read_accident_attachment(conn, attachment_id):
+    _accident_repository._ensure_scope_columns(conn)
+    row = conn.execute(
+        """
+        SELECT c.*
+        FROM accident_attachments att
+        JOIN accidents_cache c ON c.accident_number = att.accident_number
+        WHERE att.id = %s
+        """,
+        (attachment_id,),
+    ).fetchone()
+    return bool(row and _accident_repository._record_matches_scope(dict(row), 'read'))
+
 ADMIN_PASSWORD = db_config.config.get('DEFAULT', 'ADMIN_PASSWORD')
 
 # 관리자 인증 함수
@@ -646,9 +624,11 @@ def sync_all_master_data():
         
         # 3. 임직원 데이터 동기화
         try:
-            if partner_manager.config.has_option('MASTER_DATA_QUERIES', 'EMPLOYEE_QUERY'):
+            if partner_manager.config.has_option('LOCAL_DATA_QUERIES', 'EMPLOYEE_QUERY'):
                 logging.info("임직원 데이터 동기화 중...")
                 sync_results['임직원'] = partner_manager.sync_employees_from_external_db()
+            else:
+                logging.info("LOCAL_DATA_QUERIES.EMPLOYEE_QUERY 없음 - 임직원 동기화 건너뜀")
         except Exception as e:
             logging.error(f"임직원 동기화 오류: {e}")
         
@@ -688,12 +668,6 @@ def sync_all_master_data():
         
     except Exception as e:
         logging.error(f"스케줄 동기화 중 전체 오류: {e}")
-
-def run_scheduler():
-    """스케줄러 실행 함수"""
-    while True:
-        schedule.run_pending()
-        time.sleep(60)  # 1분마다 스케줄 체크
 
 def init_sample_data():
     """외부 DB 없을 때 샘플 데이터 생성"""
@@ -833,22 +807,20 @@ def init_sample_data():
 
 
 # ======================================================================
-# 부트 동기화 훅 - 첫 요청시 한번만 실행
+# 부트/백그라운드 동기화
 # ======================================================================
 from flask import current_app
 
 boot_sync_done = False
-_master_sync_enabled = False
-_master_sync_target_hour = 3  # KST hour when daily sync allowed
-_master_sync_last_run_date = None
-_master_sync_last_check_ts = datetime.min
 _master_sync_lock = threading.Lock()
+_background_master_sync_started = False
+_background_master_sync_thread = None
 
 def boot_sync_once():
     """
-    서버 프로세스가 어떤 방식으로 떠도(WSGI/리로더/워커), 첫 요청 들어올 때 1회 실행.
-    - 마스터 데이터: 매일 1회
-    - 컨텐츠 데이터: 최초 1회(또는 force)
+    첫 요청에서 코어 스키마만 보장한다.
+    데이터 동기화는 사용자를 기다리게 하지 않도록 백그라운드 스케줄러가 담당한다.
+    INITIAL_SYNC_ON_FIRST_REQUEST=true인 경우에만 명시적으로 첫 요청 동기화를 수행한다.
     """
     global boot_sync_done
     if boot_sync_done:
@@ -872,30 +844,29 @@ def boot_sync_once():
 
         ext_on = db_config.config.getboolean('DATABASE', 'EXTERNAL_DB_ENABLED', fallback=False)
         init_on = db_config.config.getboolean('DATABASE', 'INITIAL_SYNC_ON_FIRST_REQUEST', fallback=False)
-        current_app.logger.info(f"[BOOT] EXTERNAL_DB_ENABLED={ext_on}, INITIAL_SYNC_ON_FIRST_REQUEST={init_on}")
+        daily_on = db_config.config.getboolean('DATABASE', 'MASTER_DATA_DAILY', fallback=False)
+        current_app.logger.info(
+            f"[BOOT] EXTERNAL_DB_ENABLED={ext_on}, "
+            f"INITIAL_SYNC_ON_FIRST_REQUEST={init_on}, "
+            f"MASTER_DATA_DAILY={daily_on}"
+        )
 
         # 필수 키 점검(빠르게 조기 경보)
-        req_master = ['PARTNERS_QUERY','ACCIDENTS_QUERY','EMPLOYEE_QUERY','DEPARTMENT_QUERY','BUILDING_QUERY','CONTRACTOR_QUERY']
+        req_master = ['PARTNERS_QUERY','ACCIDENTS_QUERY','DEPARTMENT_QUERY','BUILDING_QUERY','CONTRACTOR_QUERY']
         missing_master = [k for k in req_master if not db_config.config.has_option('MASTER_DATA_QUERIES', k)]
         if missing_master:
             current_app.logger.warning(f"[BOOT] MASTER_DATA_QUERIES missing keys: {missing_master}")
+        if not db_config.config.has_option('LOCAL_DATA_QUERIES', 'EMPLOYEE_QUERY'):
+            current_app.logger.warning("[BOOT] LOCAL_DATA_QUERIES missing key: EMPLOYEE_QUERY")
 
         # 컨텐츠 쿼리는 옵션(있으면 사용)
         if not db_config.config.has_section('CONTENT_DATA_QUERIES'):
             current_app.logger.info("[BOOT] CONTENT_DATA_QUERIES section not found (skip content one-time sync)")
 
-        global _master_sync_enabled, _master_sync_target_hour, _master_sync_last_run_date, _master_sync_last_check_ts
         if ext_on and init_on:
-            _master_sync_enabled = db_config.config.getboolean('DATABASE', 'MASTER_DATA_DAILY', fallback=True)
-            _master_sync_target_hour = db_config.config.getint('DATABASE', 'MASTER_DATA_SYNC_HOUR', fallback=3)
-            # 1) 마스터: 매일 체크 → 필요 시 동기화
-            if _master_sync_enabled:
-                current_app.logger.info("[BOOT] Master daily sync check...")
-                maybe_daily_sync_master(force=False)  # 24시간 경과 시에만
-                current_app.logger.info("[BOOT] Master daily sync done/kept")
-                now_kst = get_korean_time()
-                _master_sync_last_run_date = now_kst.date()
-                _master_sync_last_check_ts = datetime.utcnow()
+            current_app.logger.info("[BOOT] Initial master sync check...")
+            maybe_daily_sync_master(force=False)
+            current_app.logger.info("[BOOT] Initial master sync done/kept")
 
             # 2) 컨텐츠: 최초 1회만
             if db_config.config.getboolean('DATABASE', 'CONTENT_DATA_ONCE', fallback=True):
@@ -903,9 +874,87 @@ def boot_sync_once():
                 maybe_one_time_sync_content(force=False)  # 최초 1회만
                 current_app.logger.info("[BOOT] Content one-time sync done/kept")
         else:
-            current_app.logger.info("[BOOT] Initial sync skipped (flag off or external off)")
+            current_app.logger.info("[BOOT] Initial sync skipped (INITIAL_SYNC_ON_FIRST_REQUEST off or external off)")
     except Exception as e:
         current_app.logger.error(f"[BOOT] Initial sync error: {e}")
+
+
+def _get_master_sync_schedule_config():
+    external_on = db_config.config.getboolean('DATABASE', 'EXTERNAL_DB_ENABLED', fallback=False)
+    daily_on = db_config.config.getboolean('DATABASE', 'MASTER_DATA_DAILY', fallback=False)
+    hour = db_config.config.getint('DATABASE', 'MASTER_DATA_SYNC_HOUR', fallback=3)
+    minute = db_config.config.getint('DATABASE', 'MASTER_DATA_SYNC_MINUTE', fallback=0)
+    check_minutes = db_config.config.getint('DATABASE', 'MASTER_DATA_SYNC_CHECK_MINUTES', fallback=10)
+
+    hour = max(0, min(23, hour))
+    minute = max(0, min(59, minute))
+    check_minutes = max(1, check_minutes)
+
+    return external_on, daily_on, hour, minute, check_minutes
+
+
+def _is_master_sync_time(now_kst, hour, minute):
+    target = now_kst.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return now_kst >= target
+
+
+def _run_background_master_sync_loop():
+    logging.info("[MASTER SYNC] Background scheduler thread started.")
+
+    while True:
+        try:
+            external_on, daily_on, hour, minute, check_minutes = _get_master_sync_schedule_config()
+            if not external_on or not daily_on:
+                time.sleep(max(60, check_minutes * 60))
+                continue
+
+            now_kst = get_korean_time()
+            if not _is_master_sync_time(now_kst, hour, minute):
+                time.sleep(max(60, check_minutes * 60))
+                continue
+
+            with _master_sync_lock:
+                logging.info("[MASTER SYNC] Scheduled daily sync check started.")
+                from database_config import maybe_daily_sync_master
+                maybe_daily_sync_master(force=False)
+                logging.info("[MASTER SYNC] Scheduled daily sync check finished.")
+
+            time.sleep(max(60, check_minutes * 60))
+        except Exception as exc:
+            logging.error("[MASTER SYNC] Background scheduler error: %s", exc, exc_info=True)
+            time.sleep(300)
+
+
+def start_background_master_sync_scheduler():
+    global _background_master_sync_started, _background_master_sync_thread
+
+    if _background_master_sync_started:
+        return
+
+    external_on, daily_on, hour, minute, check_minutes = _get_master_sync_schedule_config()
+    if not external_on or not daily_on:
+        logging.info(
+            "[MASTER SYNC] Background scheduler disabled "
+            "(EXTERNAL_DB_ENABLED=%s, MASTER_DATA_DAILY=%s).",
+            external_on,
+            daily_on,
+        )
+        return
+
+    _background_master_sync_started = True
+    _background_master_sync_thread = threading.Thread(
+        target=_run_background_master_sync_loop,
+        name="master-data-sync",
+        daemon=True,
+    )
+    _background_master_sync_thread.start()
+    logging.info(
+        "[MASTER SYNC] Background scheduler enabled at %02d:%02d KST "
+        "(check every %d minute(s)).",
+        hour,
+        minute,
+        check_minutes,
+    )
 
 # Flask 2.3+ 호환 방식으로 첫 요청 훅 등록
 @app.before_request
@@ -915,39 +964,95 @@ def check_first_request():
         boot_sync_once()
 
 
+start_background_master_sync_scheduler()
+
+WRITE_PERMISSION_BY_PATH = {
+    '/register-change-request': 'REFERENCE_CHANGE',
+    '/update-change-request': 'REFERENCE_CHANGE',
+    '/api/change-request/save': 'REFERENCE_CHANGE',
+    '/api/partner-change-request': 'REFERENCE_CHANGE',
+    '/api/change-requests/delete': 'REFERENCE_CHANGE',
+    '/update-partner': 'VENDOR_MGT',
+    '/api/auto-upload-partner-files': 'VENDOR_MGT',
+    '/api/partners/delete': 'VENDOR_MGT',
+    '/api/partners/restore': 'VENDOR_MGT',
+    '/register-accident': 'ACCIDENT_MGT',
+    '/update-accident': 'ACCIDENT_MGT',
+    '/api/accident-import': 'ACCIDENT_MGT',
+    '/api/accidents/delete': 'ACCIDENT_MGT',
+    '/api/accidents/restore': 'ACCIDENT_MGT',
+    '/api/accidents/permanent-delete': 'ACCIDENT_MGT',
+    '/api/safety-instructions/delete': 'SAFETY_INSTRUCTION',
+    '/api/safety-instruction/restore': 'SAFETY_INSTRUCTION',
+    '/api/follow-sop/delete': 'FOLLOW_SOP',
+    '/api/follow-sop/restore': 'FOLLOW_SOP',
+    '/api/follow-sop/final-check': 'FOLLOW_SOP',
+    '/api/safe-workplace/delete': 'SAFE_WORKPLACE',
+    '/api/safe-workplace/restore': 'SAFE_WORKPLACE',
+    '/api/safe-workplace/final-check': 'SAFE_WORKPLACE',
+    '/api/full-process/delete': 'FULL_PROCESS',
+    '/api/full-process/restore': 'FULL_PROCESS',
+    '/api/full-process/final-check': 'FULL_PROCESS',
+}
+
+ADMIN_MUTATION_MARKERS = (
+    '-columns',
+    '/columns',
+    '-sections',
+    '/sections',
+    'dropdown-codes',
+    'force-delete-keys',
+)
+
+
+def _json_forbidden(message='권한이 없습니다.'):
+    return jsonify({'success': False, 'error': message, 'message': message}), 403
+
+
+def _is_mutating_method() -> bool:
+    return request.method.upper() in {'POST', 'PUT', 'PATCH', 'DELETE'}
+
+
+def _requires_admin_for_config_mutation(path: str) -> bool:
+    if not path.startswith('/api/') and not path.startswith('/admin/'):
+        return False
+    lowered = path.lower()
+    return any(marker in lowered for marker in ADMIN_MUTATION_MARKERS)
+
+
+def _dynamic_items_board_from_path(path: str) -> Optional[str]:
+    match = re.match(r'^/api/([^/]+)/items/(register|update/\d+|delete)$', path)
+    if match:
+        return match.group(1)
+    return None
+
+
 @app.before_request
-def ensure_periodic_master_sync():
-    global _master_sync_last_check_ts, _master_sync_last_run_date
-    if not _master_sync_enabled:
-        return
-    now_utc = datetime.utcnow()
-    if (now_utc - _master_sync_last_check_ts) < timedelta(minutes=10):
-        return
+def enforce_mutation_permissions():
+    """Server-side write/admin permission gate for mutating endpoints."""
+    if not _is_mutating_method():
+        return None
 
-    now_kst = get_korean_time()
-    if _master_sync_last_run_date == now_kst.date():
-        _master_sync_last_check_ts = now_utc
-        return
-    if now_kst.hour < max(0, min(23, _master_sync_target_hour)):
-        _master_sync_last_check_ts = now_utc
-        return
+    path = request.path.rstrip('/') or '/'
 
-    with _master_sync_lock:
-        now_utc = datetime.utcnow()
-        if (now_utc - _master_sync_last_check_ts) < timedelta(minutes=10):
-            return
-        try:
-            from database_config import maybe_daily_sync_master
-            maybe_daily_sync_master(force=False)
-            current_app.logger.debug("[MASTER SYNC] Periodic check executed.")
-            _master_sync_last_run_date = get_korean_time().date()
-        except Exception as exc:
-            try:
-                current_app.logger.error(f"[MASTER SYNC] periodic sync failed: {exc}")
-            except Exception:
-                pass
-        finally:
-            _master_sync_last_check_ts = now_utc
+    if _requires_admin_for_config_mutation(path):
+        if session.get('admin_authenticated') or is_super_admin():
+            return None
+        return _json_forbidden('관리자 권한이 필요합니다.')
+
+    menu_code = WRITE_PERMISSION_BY_PATH.get(path)
+    if menu_code:
+        return enforce_permission(menu_code, 'write', response_type='json')
+
+    board_type = _dynamic_items_board_from_path(path)
+    if board_type:
+        return enforce_board_permission(board_type, 'write', response_type='json')
+
+    generic_delete_match = re.match(r'^/api/([^/]+)/delete$', path)
+    if generic_delete_match:
+        return enforce_board_permission(generic_delete_match.group(1), 'write', response_type='json')
+
+    return None
 
 @app.route("/api/test-simple")
 def test_simple():
@@ -1215,52 +1320,12 @@ def accident_route():
 
 def _table_has_column(conn, table_name: str, column_name: str) -> bool:
     """Return True if the given column exists on the table for the active backend."""
-    cursor = conn.cursor()
-    try:
-        if getattr(conn, 'is_postgres', False):
-            cursor.execute(
-                """
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_name = %s AND column_name = %s
-                """,
-                (table_name, column_name),
-            )
-            return cursor.fetchone() is not None
-        cursor.execute(f"PRAGMA table_info({table_name})")
-        for row in cursor.fetchall():
-            try:
-                name = row['name']
-            except Exception:
-                name = row[1] if len(row) > 1 else None
-            if (name or '').lower() == column_name.lower():
-                return True
-        return False
-    finally:
-        try:
-            cursor.close()
-        except Exception:
-            pass
+    return column_exists(conn, table_name, column_name)
 
 
 def _table_exists(conn, table_name: str) -> bool:
     """Return True if the given table exists."""
-    cursor = conn.cursor()
-    try:
-        if getattr(conn, 'is_postgres', False):
-            cursor.execute("SELECT to_regclass(%s)", (table_name,))
-            row = cursor.fetchone()
-            return bool(row and row[0])
-        cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-            (table_name,),
-        )
-        return cursor.fetchone() is not None
-    finally:
-        try:
-            cursor.close()
-        except Exception:
-            pass
+    return table_exists(conn, table_name)
 
 
 def _extract_request_number_value(row: Any) -> Optional[str]:
@@ -1371,7 +1436,6 @@ def partner_standards():
     conn = None
     try:
         conn = get_db_connection(DB_PATH)
-        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         config_rows = cursor.execute(
             """
@@ -1446,6 +1510,9 @@ def partner_standards():
         pagination=pagination,
         dynamic_columns=dynamic_columns,
         menu=MENU_CONFIG,
+        read_permission_level=get_user_permission_level('VENDOR_MGT', 'read'),
+        write_permission_level=get_user_permission_level('VENDOR_MGT', 'write'),
+        can_write=get_user_permission_level('VENDOR_MGT', 'write') > 0,
     )
 
 
@@ -1470,7 +1537,6 @@ def partner_change_request():
     conn = None
     try:
         conn = get_db_connection(DB_PATH)
-        conn.row_factory = sqlite3.Row
         is_postgres = getattr(conn, 'is_postgres', False)
 
         has_is_deleted = _table_has_column(conn, 'partner_change_requests', 'is_deleted')
@@ -1595,6 +1661,9 @@ def partner_change_request():
         total_count=total_count,
         pagination=pagination,
         menu=MENU_CONFIG,
+        read_permission_level=get_user_permission_level('REFERENCE_CHANGE', 'read'),
+        write_permission_level=get_user_permission_level('REFERENCE_CHANGE', 'write'),
+        can_write=get_user_permission_level('REFERENCE_CHANGE', 'write') > 0,
     )
 
 
@@ -1605,7 +1674,6 @@ def get_dropdown_options_for_display(board_type: str, column_key: str) -> List[D
 
     try:
         conn = get_db_connection(DB_PATH)
-        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -1671,6 +1739,10 @@ def get_dropdown_options_for_display(board_type: str, column_key: str) -> List[D
 @app.route("/partner-detail/<business_number>")
 def partner_detail(business_number: str):
     """협력사 상세정보 페이지."""
+    guard = enforce_permission('VENDOR_MGT', 'view')
+    if guard:
+        return guard
+
     partner = partner_manager.get_partner_by_business_number(business_number)
     if not partner:
         logging.warning("partner_detail: partner not found for %s", business_number)
@@ -1679,7 +1751,6 @@ def partner_detail(business_number: str):
     attachments: List[Dict[str, Any]] = []
     try:
         conn = partner_manager.db_config.get_connection()
-        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -1708,6 +1779,9 @@ def partner_detail(business_number: str):
         menu=MENU_CONFIG,
         is_popup=is_popup,
         board_type='partner',
+        read_permission_level=get_user_permission_level('VENDOR_MGT', 'read'),
+        write_permission_level=get_user_permission_level('VENDOR_MGT', 'write'),
+        can_write=get_user_permission_level('VENDOR_MGT', 'write') > 0,
     )
 
 
@@ -1717,7 +1791,6 @@ def change_request_detail(request_id: int):
     conn = None
     try:
         conn = get_db_connection(DB_PATH)
-        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -1872,6 +1945,9 @@ def change_request_detail(request_id: int):
         section_columns=section_columns,
         is_popup=is_popup,
         menu=MENU_CONFIG,
+        read_permission_level=get_user_permission_level('REFERENCE_CHANGE', 'read'),
+        write_permission_level=get_user_permission_level('REFERENCE_CHANGE', 'write'),
+        can_write=get_user_permission_level('REFERENCE_CHANGE', 'write') > 0,
     )
 
 
@@ -1909,7 +1985,7 @@ def register_change_request():
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS partner_change_requests (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 request_number TEXT UNIQUE,
                 requester_name TEXT,
                 requester_department TEXT,
@@ -2514,7 +2590,10 @@ def partner_accident():
                          sections=sections,
                          section_columns=section_columns,
                          dynamic_columns=dynamic_columns,
-                         menu=MENU_CONFIG)
+                         menu=MENU_CONFIG,
+                         read_permission_level=get_user_permission_level('ACCIDENT_MGT', 'read'),
+                         write_permission_level=get_user_permission_level('ACCIDENT_MGT', 'write'),
+                         can_write=get_user_permission_level('ACCIDENT_MGT', 'write') > 0)
 
 def safety_instruction_route_logic():
     """환경안전 지시서 페이지 라우트"""
@@ -2536,47 +2615,6 @@ def update_safety_instruction_logic():
     """환경안전 지시서 수정"""
     return _safety_instruction_controller.update(request)
 
-
-@app.route("/verify-password", methods=["POST"])
-def verify_password():
-    """게시판별 비밀번호 검증"""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"success": False, "message": "No data received"}), 400
-            
-        password = data.get('password')
-        board_type = data.get('board_type', 'default')  # partner, accident, 또는 default
-        
-        if not password:
-            return jsonify({"success": False, "message": "Password not provided"}), 400
-        
-        # 게시판 타입별 비밀번호 확인
-        correct_password = None
-        
-        if board_type == 'partner':
-            # 협력사 게시판 비밀번호
-            correct_password = db_config.config.get('PASSWORDS', 'PARTNER_EDIT_PASSWORD', fallback=None)
-        elif board_type == 'accident':
-            # 사고 게시판 비밀번호
-            correct_password = db_config.config.get('PASSWORDS', 'ACCIDENT_EDIT_PASSWORD', fallback=None)
-        else:
-            # 기본 비밀번호 (기존 호환성)
-            correct_password = db_config.config.get('DEFAULT', 'EDIT_PASSWORD')
-        
-        # 비밀번호가 설정되지 않은 경우 기본 비밀번호 사용
-        if not correct_password:
-            correct_password = db_config.config.get('DEFAULT', 'EDIT_PASSWORD')
-        
-        logging.info(f"비밀번호 검증 요청: board_type={board_type}")
-        
-        if password == correct_password:
-            return jsonify({"success": True})
-        else:
-            return jsonify({"success": False, "message": "비밀번호가 올바르지 않습니다."})
-    except Exception as e:
-        logging.error(f"비밀번호 검증 중 오류: {e}")
-        return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route("/update-partner", methods=["POST"])
 def update_partner():
@@ -3432,7 +3470,20 @@ def _get_attachment_info(board_type: str, attachment_id: int, conn=None) -> Opti
 @app.route("/download/<board_type>/<int:attachment_id>")
 def download_attachment_for_board(board_type, attachment_id):
     """보드 타입별 첨부파일 다운로드 엔드포인트"""
-    info = _get_attachment_info(board_type, attachment_id)
+    conn = None
+    try:
+        if board_type == 'accident':
+            conn = get_db_connection()
+            info = _get_attachment_info(board_type, attachment_id, conn)
+            if not info:
+                return "File not found", 404
+            if not _can_read_accident_attachment(conn, attachment_id):
+                return "사고 첨부파일을 조회할 권한이 없습니다.", 403
+        else:
+            info = _get_attachment_info(board_type, attachment_id)
+    finally:
+        if conn:
+            conn.close()
     if not info:
         return "File not found", 404
 
@@ -3462,6 +3513,8 @@ def download_attachment(attachment_id):
         for board in AttachmentService.ID_COLUMN_MAP.keys():
             info = _get_attachment_info(board, attachment_id, conn)
             if info:
+                if board == 'accident' and not _can_read_accident_attachment(conn, attachment_id):
+                    return "사고 첨부파일을 조회할 권한이 없습니다.", 403
                 logging.info(
                     "다운로드 요청(legacy): board=%s, id=%s, file=%s",
                     board,
@@ -5022,7 +5075,7 @@ def save_change_request():
         # 테이블이 없으면 생성
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS change_requests (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 request_number TEXT UNIQUE NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -5063,6 +5116,10 @@ def save_change_request():
 @app.route("/change-request-register")
 def change_request_register():
     """변경요청 등록 팝업 페이지"""
+    guard = enforce_permission('REFERENCE_CHANGE', 'write')
+    if guard:
+        return guard
+
     from timezone_config import get_korean_time
     
     # 요청번호 자동 생성 (CRYYNNN 형식)
@@ -5589,11 +5646,13 @@ def delete_accidents():
         
         # 모든 사고 삭제 가능 (ACC, K 모두)
         placeholders = ','.join(['%s'] * len(ids))
+        scope_sql, scope_params = _accident_write_scope_clause(conn, alias='a')
         cursor.execute(f"""
-            UPDATE accidents_cache 
+            UPDATE accidents_cache AS a
             SET is_deleted = 1 
-            WHERE id IN ({placeholders})
-        """, ids)
+            WHERE a.id IN ({placeholders})
+              AND {scope_sql}
+        """, list(ids) + scope_params)
         
         deleted_count = cursor.rowcount
         conn.commit()
@@ -6012,11 +6071,13 @@ def restore_accidents():
         
         # 선택한 사고들을 복구 (is_deleted = 0)
         placeholders = ','.join(['%s'] * len(ids))
+        scope_sql, scope_params = _accident_write_scope_clause(conn, alias='a')
         cursor.execute(f"""
-            UPDATE accidents_cache 
+            UPDATE accidents_cache AS a
             SET is_deleted = 0 
-            WHERE id IN ({placeholders})
-        """, ids)
+            WHERE a.id IN ({placeholders})
+              AND {scope_sql}
+        """, list(ids) + scope_params)
         
         restored_count = cursor.rowcount
         conn.commit()
@@ -6416,10 +6477,12 @@ def permanent_delete_accidents():
         
         # 선택한 사고들을 영구 삭제
         placeholders = ','.join(['%s'] * len(ids))
+        scope_sql, scope_params = _accident_write_scope_clause(conn, alias='a')
         cursor.execute(f"""
-            DELETE FROM accidents_cache 
-            WHERE id IN ({placeholders})
-        """, ids)
+            DELETE FROM accidents_cache AS a
+            WHERE a.id IN ({placeholders})
+              AND {scope_sql}
+        """, list(ids) + scope_params)
         
         deleted_count = cursor.rowcount
         conn.commit()
@@ -6633,20 +6696,22 @@ def reorder_accident_sections():
 
 
 @app.route("/api/accident-export")
-def export_accidents_csv():
-    """사고 데이터 CSV 다운로드"""
-    conn = None
-    meta_cursor = None
-    data_cursor = None
-
+def export_accidents_excel():
+    """사고 데이터 엑셀 다운로드"""
     try:
+        import openpyxl
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill
+        import io
+
+        max_rows = _get_export_row_limit()
+
         company_name = request.args.get('company_name', '')
         business_number = request.args.get('business_number', '')
         accident_date_start = request.args.get('accident_date_start', '')
         accident_date_end = request.args.get('accident_date_end', '')
 
         conn = get_db_connection()
-        meta_cursor = conn.cursor()
 
         section_sql = f"""
             SELECT section_key, section_name, section_order
@@ -6657,24 +6722,22 @@ def export_accidents_csv():
             ORDER BY section_order
         """
         try:
-            meta_cursor.execute(section_sql)
-            sections = [dict(row) for row in meta_cursor.fetchall()]
+            sections = [dict(row) for row in conn.execute(section_sql).fetchall()]
         except Exception:
             sections = []
 
         where_c_active = sql_is_active_true('is_active', conn)
         where_c_notdel = sql_is_deleted_false('is_deleted', conn)
-        meta_cursor.execute(f"""
+        dyn_sql = f"""
             SELECT * FROM accident_column_config
             WHERE {where_c_active}
               AND {where_c_notdel}
             ORDER BY column_order
-        """)
-        dynamic_columns_all = [dict(row) for row in meta_cursor.fetchall()]
-        meta_cursor.close()
-        meta_cursor = None
+        """
+        dynamic_columns_rows = conn.execute(dyn_sql).fetchall()
+        dynamic_columns_all = [dict(row) for row in dynamic_columns_rows]
 
-        dynamic_columns: List[Dict[str, Any]] = []
+        dynamic_columns = []
         if sections:
             for section in sections:
                 section_columns = [col for col in dynamic_columns_all if col.get('tab') == section['section_key']]
@@ -6691,7 +6754,7 @@ def export_accidents_csv():
             SELECT * FROM accidents_cache
             WHERE {sql_is_deleted_false('is_deleted', conn)}
         """
-        params: List[Any] = []
+        params = []
 
         if accident_date_start:
             query += " AND accident_date >= %s"
@@ -6700,32 +6763,44 @@ def export_accidents_csv():
             query += " AND accident_date <= %s"
             params.append(accident_date_end)
 
-        query += " ORDER BY created_at DESC, accident_number DESC"
+        query += " ORDER BY created_at DESC, accident_number DESC LIMIT %s"
+        params.append(max_rows)
 
-        data_cursor = conn.cursor()
-        data_cursor.execute(query, params)
+        accidents = conn.execute(query, params).fetchall()
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "사고 현황"
+
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_align = Alignment(horizontal="center", vertical="center")
 
         headers = ['사고번호', '등록일', '사고명']
         skip_keys = {'accident_number', 'created_at', 'accident_name'}
         custom_columns = [col for col in dynamic_columns if col.get('column_key') not in skip_keys]
         headers.extend([col['column_name'] for col in custom_columns])
 
-        dropdown_cache: Dict[str, Optional[List[Dict[str, Any]]]] = {}
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
 
-        def _map_dropdown_value(column_key: str, code_value: Any) -> Any:
-            if code_value in (None, ''):
+        def get_display_value(column_key, code_value):
+            if not code_value or code_value == '':
                 return ''
-            opts = dropdown_cache.get(column_key)
-            if opts is None:
-                opts = get_dropdown_options_for_display('accident', column_key)
-                dropdown_cache[column_key] = opts
-            if opts:
-                for option in opts:
-                    if option.get('code') == code_value:
-                        return option.get('value', code_value)
-            return code_value
+            try:
+                options = get_dropdown_options_for_display('accident', column_key)
+                if options:
+                    for option in options:
+                        if option['code'] == code_value:
+                            return option['value']
+                return code_value
+            except Exception:
+                return code_value
 
-        def format_date(date_value: Any) -> str:
+        def format_date(date_value):
             if not date_value:
                 return ''
             date_str = str(date_value)
@@ -6733,98 +6808,89 @@ def export_accidents_csv():
                 return date_str.split(' ')[0]
             return date_str
 
-        def _map_value(col: Dict[str, Any], value: Any) -> Any:
-            if isinstance(value, list):
-                if col.get('column_type') == 'list':
-                    try:
-                        return pyjson.dumps(value, ensure_ascii=False) if value else ''
-                    except Exception:
-                        return ''
-                return ''
-            if isinstance(value, dict):
-                return value.get('name') or str(value)
-            if col.get('column_type') == 'dropdown' and value not in (None, ''):
-                return _map_dropdown_value(col['column_key'], value)
-            if col.get('column_type') in ('date', 'datetime') and value:
-                return format_date(value)
-            if value in (None, [], {}):
-                return ''
-            return value
-
-        def row_generator():
+        for row_idx, accident_row in enumerate(accidents, 2):
+            rec = dict(accident_row)
+            custom = {}
             try:
-                while True:
-                    rows = data_cursor.fetchmany(1000)
-                    if not rows:
-                        break
-                    for row in rows:
-                        rec = dict(row)
-                        custom = {}
+                raw = rec.get('custom_data')
+                if isinstance(raw, dict):
+                    custom = raw
+                elif isinstance(raw, str) and raw:
+                    custom = pyjson.loads(raw)
+            except Exception:
+                custom = {}
+
+            if not rec.get('accident_name'):
+                nm = custom.get('accident_name')
+                if nm and str(nm).strip():
+                    rec['accident_name'] = nm
+
+            acc_no = str(rec.get('accident_number') or '')
+            if acc_no.startswith('K'):
+                display_created = rec.get('report_date') or rec.get('created_at')
+            else:
+                display_created = rec.get('created_at')
+
+            ws.cell(row=row_idx, column=1, value=rec.get('accident_number', ''))
+            ws.cell(row=row_idx, column=2, value=format_date(display_created))
+            ws.cell(row=row_idx, column=3, value=rec.get('accident_name', ''))
+
+            start_col = 4
+            for offset, col in enumerate(custom_columns):
+                key = col['column_key']
+                value = custom.get(key, rec.get(key, ''))
+
+                if isinstance(value, list):
+                    if col.get('column_type') == 'list':
                         try:
-                            raw = rec.get('custom_data')
-                            if isinstance(raw, dict):
-                                custom = raw
-                            elif isinstance(raw, str) and raw:
-                                custom = pyjson.loads(raw)
+                            value = pyjson.dumps(value, ensure_ascii=False) if value else ''
                         except Exception:
-                            custom = {}
+                            value = ''
+                    else:
+                        value = ''
+                elif isinstance(value, dict):
+                    value = value.get('name') or str(value)
+                elif col.get('column_type') == 'dropdown' and value:
+                    value = get_display_value(key, value)
+                elif col.get('column_type') in ['date', 'datetime'] and value:
+                    value = format_date(value)
 
-                        if not rec.get('accident_name'):
-                            nm = custom.get('accident_name')
-                            if nm and str(nm).strip():
-                                rec['accident_name'] = nm
+                if value is None or value == [] or value == {}:
+                    value = ''
 
-                        acc_no = str(rec.get('accident_number') or '')
-                        if acc_no.startswith('K'):
-                            display_created = rec.get('report_date') or rec.get('created_at')
-                        else:
-                            display_created = rec.get('created_at')
+                ws.cell(row=row_idx, column=start_col + offset, value=value)
 
-                        csv_row = [
-                            rec.get('accident_number', ''),
-                            format_date(display_created),
-                            rec.get('accident_name', ''),
-                        ]
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except Exception:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
 
-                        for col in custom_columns:
-                            key = col['column_key']
-                            value = custom.get(key, rec.get(key, ''))
-                            csv_row.append(_map_value(col, value))
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
 
-                        yield csv_row
-            finally:
-                if data_cursor:
-                    try:
-                        data_cursor.close()
-                    except Exception:
-                        pass
-                if conn:
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
+        conn.close()
 
-        return _stream_csv_response('accident_list', headers, row_generator())
+        filename = f"accident_list_{get_korean_time().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
 
     except Exception as e:
+        logging.error(f"엑셀 다운로드 중 오류: {e}")
         import traceback
-        logging.error(f"CSV 다운로드 중 오류: {e}")
         logging.error(traceback.format_exc())
-        if data_cursor:
-            try:
-                data_cursor.close()
-            except Exception:
-                pass
-        if meta_cursor:
-            try:
-                meta_cursor.close()
-            except Exception:
-                pass
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
         return jsonify({"success": False, "message": str(e)}), 500
 
 # ===== 엑셀 임포트 API =====
@@ -6859,12 +6925,8 @@ def import_accidents():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # accident_columns 테이블 확인 및 생성
-        cursor.execute("""
-            SELECT name FROM sqlite_master 
-            WHERE type='table' AND name='accident_column_config'
-        """)
-        if not cursor.fetchone():
+        # accident_column_config 테이블 확인
+        if not table_exists(conn, 'accident_column_config'):
             # 테이블이 없으면 빈 리스트로 처리
             dynamic_columns = []
             logging.info("accident_columns 테이블이 없어서 동적 컬럼 없이 처리합니다.")
@@ -7136,15 +7198,18 @@ def import_accidents():
         logging.error(traceback.format_exc())
         return jsonify({"success": False, "message": str(e)}), 500
 
-# ===== Follow SOP CSV 다운로드 API =====
+# ===== Follow SOP 엑셀 다운로드 API =====
 @app.route('/api/follow-sop-export')
-def export_follow_sop_csv():
-    """Follow SOP 데이터를 CSV로 스트리밍 다운로드."""
-    conn = None
-    cursor = None
-    data_cursor = None
-
+def export_follow_sop_excel():
+    """Follow SOP 데이터 엑셀 다운로드"""
     try:
+        import openpyxl
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill
+        import io
+
+        max_rows = _get_export_row_limit()
+
         conn = get_db_connection()
         cursor = conn.cursor()
 
@@ -7171,7 +7236,7 @@ def export_follow_sop_csv():
         """)
         dynamic_columns_all = [dict(row) for row in cursor.fetchall()]
 
-        dynamic_columns: List[Dict[str, Any]] = []
+        dynamic_columns = []
         if sections:
             for section in sections:
                 section_columns = [col for col in dynamic_columns_all if col.get('tab') == section['section_key']]
@@ -7188,14 +7253,31 @@ def export_follow_sop_csv():
             SELECT * FROM follow_sop
             WHERE {sql_is_deleted_false('is_deleted', conn)}
             ORDER BY created_at DESC
+            LIMIT %s
         """
-        data_cursor = conn.cursor()
-        data_cursor.execute(data_sql)
+        cursor.execute(data_sql, [max_rows])
+        data = [dict(row) for row in cursor.fetchall()]
 
-        import json as _json
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Follow SOP"
 
-        def _expand_scoring_columns(_cols: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_align = Alignment(horizontal="center", vertical="center")
+
+        col_idx = 1
+        basic_headers = ['점검번호', '등록일', '작성자']
+        for header in basic_headers:
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            col_idx += 1
+
+        def _expand_scoring_columns(_cols):
             out = []
+            import json as _json
             for c in _cols:
                 if c.get('column_type') == 'scoring':
                     sc = c.get('scoring_config')
@@ -7216,7 +7298,7 @@ def export_follow_sop_csv():
                             'column_type': 'number',
                             '_virtual': 1,
                             '_source_scoring_key': c['column_key'],
-                            '_source_item_id': iid,
+                            '_source_item_id': iid
                         })
                 else:
                     out.append(dict(c))
@@ -7224,167 +7306,167 @@ def export_follow_sop_csv():
 
         dyn_cols_list = [dict(x) for x in dynamic_columns]
         expanded_columns = _expand_scoring_columns(dyn_cols_list)
+
+        import json as _json
         scoring_cols = [dict(c) for c in dyn_cols_list if dict(c).get('column_type') == 'scoring']
-        score_total_cols = [dict(c) for c in dyn_cols_list if dict(c).get('column_type') == 'score_total']
 
-        headers = ['점검번호', '등록일', '작성자'] + [col['column_name'] for col in expanded_columns]
+        for col in expanded_columns:
+            cell = ws.cell(row=1, column=col_idx, value=col['column_name'])
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            col_idx += 1
 
-        dropdown_cache: Dict[str, Optional[List[Dict[str, Any]]]] = {}
-
-        def _map_dropdown_value(column_key: str, raw_value: Any) -> Any:
-            if raw_value in (None, ''):
-                return ''
-            opts = dropdown_cache.get(column_key)
-            if opts is None:
-                opts = get_dropdown_options_for_display('follow_sop', column_key)
-                dropdown_cache[column_key] = opts
-            if opts:
-                for opt in opts:
-                    if opt.get('code') == raw_value:
-                        return opt.get('value', raw_value)
-            return raw_value
-
-        def _map_value(col: Dict[str, Any], value: Any) -> Any:
+        def _map_value(col, value):
             if isinstance(value, dict):
                 return value.get('name') or str(value)
-            if isinstance(value, list):
+            if col.get('column_type') == 'list' and isinstance(value, list):
                 if not value:
                     return ''
                 try:
                     return json.dumps(value, ensure_ascii=False)
                 except Exception:
                     return str(value)
-            if col.get('column_type') == 'dropdown' and value not in (None, ''):
-                return _map_dropdown_value(col['column_key'], value)
-            return value if value is not None else ''
+            if col.get('column_type') == 'dropdown' and value:
+                opts = get_dropdown_options_for_display('follow_sop', col['column_key'])
+                if opts:
+                    for opt in opts:
+                        if opt['code'] == value:
+                            return opt['value']
+            return value
 
-        def row_generator():
-            try:
-                while True:
-                    rows = data_cursor.fetchmany(1000)
-                    if not rows:
-                        break
-                    for row in rows:
-                        row_dict = dict(row)
-                        csv_row = [
-                            row_dict.get('work_req_no', ''),
-                            row_dict.get('created_at', ''),
-                            row_dict.get('created_by', ''),
-                        ]
+        for row_idx, row in enumerate(data, 2):
+            row_dict = dict(row)
+            col_idx = 1
 
-                        custom_data = row_dict.get('custom_data', {})
-                        if not isinstance(custom_data, dict):
-                            try:
-                                custom_data = _json.loads(custom_data) if custom_data else {}
-                            except Exception:
-                                custom_data = {}
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('work_req_no', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('created_at', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('created_by', ''))
+            col_idx += 1
 
-                        for col in expanded_columns:
-                            if col.get('_virtual') == 1:
-                                src = col.get('_source_scoring_key')
-                                iid = col.get('_source_item_id')
-                                group_obj = custom_data.get(src, {})
-                                if isinstance(group_obj, str):
-                                    try:
-                                        group_obj = _json.loads(group_obj)
-                                    except Exception:
-                                        group_obj = {}
-                                value = 0
-                                if isinstance(group_obj, dict):
-                                    value = group_obj.get(iid, 0)
-                                csv_row.append(value)
-                            elif col.get('column_type') == 'score_total':
+            custom_data = row_dict.get('custom_data', {})
+            if not isinstance(custom_data, dict):
+                try:
+                    custom_data = _json.loads(custom_data) if custom_data else {}
+                except Exception:
+                    custom_data = {}
+
+            for col in expanded_columns:
+                if col.get('_virtual') == 1:
+                    src = col.get('_source_scoring_key')
+                    iid = col.get('_source_item_id')
+                    group_obj = custom_data.get(src, {})
+                    if isinstance(group_obj, str):
+                        try:
+                            group_obj = _json.loads(group_obj)
+                        except Exception:
+                            group_obj = {}
+                    v = 0
+                    if isinstance(group_obj, dict):
+                        v = group_obj.get(iid, 0)
+                    ws.cell(row=row_idx, column=col_idx, value=v)
+                else:
+                    if col.get('column_type') == 'score_total':
+                        try:
+                            conf = col.get('scoring_config')
+                            if conf and isinstance(conf, str):
                                 try:
-                                    conf = col.get('scoring_config')
-                                    if conf and isinstance(conf, str):
-                                        conf = _json.loads(conf)
-                                    base = (conf or {}).get('base_score', 100)
-                                    include_keys = (conf or {}).get('include_keys') or []
-                                    total_key = (conf or {}).get('total_key') or 'default'
-                                    total = base
-                                    if include_keys:
-                                        for key in include_keys:
-                                            sc_col = next((c for c in scoring_cols if c.get('column_key') == key), None)
-                                            if not sc_col:
-                                                continue
-                                            sconf = sc_col.get('scoring_config')
-                                            if sconf and isinstance(sconf, str):
-                                                try:
-                                                    sconf = _json.loads(sconf)
-                                                except Exception:
-                                                    sconf = {}
-                                            if ((sconf or {}).get('total_key') or 'default') != total_key:
-                                                continue
-                                            items_cfg = (sconf or {}).get('items') or []
-                                            group_obj = custom_data.get(sc_col.get('column_key'), {})
-                                            if isinstance(group_obj, str):
-                                                try:
-                                                    group_obj = _json.loads(group_obj)
-                                                except Exception:
-                                                    group_obj = {}
-                                            for it in items_cfg:
-                                                iid = it.get('id')
-                                                delta = float(it.get('per_unit_delta') or 0)
-                                                cnt = 0
-                                                if isinstance(group_obj, dict) and iid in group_obj:
-                                                    try:
-                                                        cnt = int(group_obj.get(iid) or 0)
-                                                    except Exception:
-                                                        cnt = 0
-                                                total += cnt * delta
-                                    csv_row.append(total)
+                                    conf = _json.loads(conf)
                                 except Exception:
-                                    csv_row.append('')
-                            else:
-                                csv_row.append(_map_value(col, custom_data.get(col['column_key'], '')))
+                                    conf = {}
+                            base = (conf or {}).get('base_score', 100)
+                            include_keys = (conf or {}).get('include_keys') or []
+                            total_key = (conf or {}).get('total_key') or 'default'
+                            total = base
+                            if include_keys:
+                                for key in include_keys:
+                                    sc_col = next((c for c in scoring_cols if c.get('column_key') == key), None)
+                                    if not sc_col:
+                                        continue
+                                    sconf = sc_col.get('scoring_config')
+                                    if sconf and isinstance(sconf, str):
+                                        try:
+                                            sconf = _json.loads(sconf)
+                                        except Exception:
+                                            sconf = {}
+                                    if ((sconf or {}).get('total_key') or 'default') != total_key:
+                                        continue
+                                    items_cfg = (sconf or {}).get('items') or []
+                                    group_obj = custom_data.get(sc_col.get('column_key'), {})
+                                    if isinstance(group_obj, str):
+                                        try:
+                                            group_obj = _json.loads(group_obj)
+                                        except Exception:
+                                            group_obj = {}
+                                    for it in items_cfg:
+                                        iid = it.get('id')
+                                        delta = float(it.get('per_unit_delta') or 0)
+                                        cnt = 0
+                                        if isinstance(group_obj, dict) and iid in group_obj:
+                                            try:
+                                                cnt = int(group_obj.get(iid) or 0)
+                                            except Exception:
+                                                cnt = 0
+                                        total += cnt * delta
+                            ws.cell(row=row_idx, column=col_idx, value=total)
+                        except Exception:
+                            ws.cell(row=row_idx, column=col_idx, value='')
+                    else:
+                        v = custom_data.get(col['column_key'], '')
+                        ws.cell(row=row_idx, column=col_idx, value=_map_value(col, v))
+                col_idx += 1
 
-                        yield csv_row
-            finally:
-                if data_cursor:
-                    try:
-                        data_cursor.close()
-                    except Exception:
-                        pass
-                if conn:
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except Exception:
+                    pass
+            adjusted_width = min((max_length + 2) * 1.2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
 
-        return _stream_csv_response('follow_sop', headers, row_generator())
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        filename = f"follow_sop_{get_korean_time().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+        conn.close()
+
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
 
     except Exception as e:
         import traceback
-        logging.error(f"Follow SOP CSV 다운로드 중 오류: {e}")
+        logging.error(f"Follow SOP 엑셀 다운로드 중 오류: {e}")
         logging.error(traceback.format_exc())
-        if data_cursor:
-            try:
-                data_cursor.close()
-            except Exception:
-                pass
-        if cursor:
-            try:
-                cursor.close()
-            except Exception:
-                pass
         if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
+            conn.close()
         return jsonify({"success": False, "message": str(e)}), 500
 
-# ===== Safe Workplace CSV 다운로드 API =====
+# ===== Safe Workplace 엑셀 다운로드 API =====
 @app.route('/api/safe-workplace-export')
-def export_safe_workplace_csv():
-    """Safe Workplace 데이터를 CSV로 스트리밍 다운로드."""
-    conn = None
-    meta_cursor = None
-    data_cursor = None
-
+def export_safe_workplace_excel():
+    """Safe Workplace 데이터 엑셀 다운로드"""
     try:
+        import openpyxl
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill
+        import io
+
+        max_rows = _get_export_row_limit()
+
         conn = get_db_connection()
-        meta_cursor = conn.cursor()
+        cursor = conn.cursor()
 
         section_sql = f"""
             SELECT section_key, section_name, section_order
@@ -7394,24 +7476,22 @@ def export_safe_workplace_csv():
             ORDER BY section_order
         """
         try:
-            meta_cursor.execute(section_sql)
-            sections = [dict(row) for row in meta_cursor.fetchall()]
+            cursor.execute(section_sql)
+            sections = [dict(row) for row in cursor.fetchall()]
         except Exception:
             sections = []
 
         where_c_active = sql_is_active_true('is_active', conn)
         where_c_notdel = sql_is_deleted_false('is_deleted', conn)
-        meta_cursor.execute(f"""
+        cursor.execute(f"""
             SELECT * FROM safe_workplace_column_config
             WHERE {where_c_active}
               AND {where_c_notdel}
             ORDER BY column_order
         """)
-        dynamic_columns_all = [dict(row) for row in meta_cursor.fetchall()]
-        meta_cursor.close()
-        meta_cursor = None
+        dynamic_columns_all = [dict(row) for row in cursor.fetchall()]
 
-        dynamic_columns: List[Dict[str, Any]] = []
+        dynamic_columns = []
         if sections:
             for section in sections:
                 section_columns = [col for col in dynamic_columns_all if col.get('tab') == section['section_key']]
@@ -7426,7 +7506,7 @@ def export_safe_workplace_csv():
 
         import json as _json
 
-        def _expand_scoring_columns(_cols: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        def _expand_scoring_columns(_cols):
             expanded = []
             for c in _cols:
                 if c.get('column_type') == 'scoring':
@@ -7457,6 +7537,30 @@ def export_safe_workplace_csv():
         dyn_cols_list = [dict(x) for x in dynamic_columns]
         expanded_columns = _expand_scoring_columns(dyn_cols_list)
         scoring_cols = [dict(c) for c in dyn_cols_list if dict(c).get('column_type') == 'scoring']
+
+        data_sql = f"""
+            SELECT * FROM safe_workplace
+            WHERE {sql_is_deleted_false('is_deleted', conn)}
+            ORDER BY created_at DESC
+            LIMIT %s
+        """
+        cursor.execute(data_sql, [max_rows])
+        data = [dict(row) for row in cursor.fetchall()]
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Safe Workplace"
+
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_align = Alignment(horizontal="center", vertical="center")
+
+        headers = ['점검번호', '등록일', '작성자'] + [col['column_name'] for col in expanded_columns]
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
 
         dropdown_cache: Dict[str, Optional[List[Dict[str, Any]]]] = {}
 
@@ -7490,138 +7594,128 @@ def export_safe_workplace_csv():
                 return _map_dropdown_value(col['column_key'], value)
             return value if value is not None else ''
 
-        data_sql = f"""
-            SELECT * FROM safe_workplace
-            WHERE {sql_is_deleted_false('is_deleted', conn)}
-            ORDER BY created_at DESC
-        """
-        data_cursor = conn.cursor()
-        data_cursor.execute(data_sql)
+        for row_idx, row in enumerate(data, 2):
+            row_dict = dict(row)
 
-        headers = ['점검번호', '등록일', '작성자'] + [col['column_name'] for col in expanded_columns]
+            ws.cell(row=row_idx, column=1, value=row_dict.get('safeplace_no', ''))
+            ws.cell(row=row_idx, column=2, value=row_dict.get('created_at', ''))
+            ws.cell(row=row_idx, column=3, value=row_dict.get('created_by', ''))
 
-        def row_generator():
-            try:
-                while True:
-                    rows = data_cursor.fetchmany(1000)
-                    if not rows:
-                        break
-                    for row in rows:
-                        row_dict = dict(row)
-                        csv_row = [
-                            row_dict.get('safeplace_no', ''),
-                            row_dict.get('created_at', ''),
-                            row_dict.get('created_by', ''),
-                        ]
+            custom_data = row_dict.get('custom_data', {})
+            if not isinstance(custom_data, dict):
+                try:
+                    custom_data = _json.loads(custom_data) if custom_data else {}
+                except Exception:
+                    custom_data = {}
 
-                        custom_data = row_dict.get('custom_data', {})
-                        if not isinstance(custom_data, dict):
-                            try:
-                                custom_data = _json.loads(custom_data) if custom_data else {}
-                            except Exception:
-                                custom_data = {}
-
-                        for col in expanded_columns:
-                            if col.get('_virtual') == 1:
-                                src = col.get('_source_scoring_key')
-                                iid = col.get('_source_item_id')
-                                group_obj = custom_data.get(src, {})
+            start_col = 4
+            for offset, col in enumerate(expanded_columns):
+                if col.get('_virtual') == 1:
+                    src = col.get('_source_scoring_key')
+                    iid = col.get('_source_item_id')
+                    group_obj = custom_data.get(src, {})
+                    if isinstance(group_obj, str):
+                        try:
+                            group_obj = _json.loads(group_obj)
+                        except Exception:
+                            group_obj = {}
+                    value = 0
+                    if isinstance(group_obj, dict):
+                        value = group_obj.get(iid, 0)
+                    ws.cell(row=row_idx, column=start_col + offset, value=value)
+                elif col.get('column_type') == 'score_total':
+                    try:
+                        conf = col.get('scoring_config')
+                        if conf and isinstance(conf, str):
+                            conf = _json.loads(conf)
+                        base = (conf or {}).get('base_score', 100)
+                        include_keys = (conf or {}).get('include_keys') or []
+                        total = base
+                        if include_keys:
+                            for key in include_keys:
+                                sc_col = next((c for c in scoring_cols if c.get('column_key') == key), None)
+                                if not sc_col:
+                                    continue
+                                sconf = sc_col.get('scoring_config')
+                                if sconf and isinstance(sconf, str):
+                                    try:
+                                        sconf = _json.loads(sconf)
+                                    except Exception:
+                                        sconf = {}
+                                items_cfg = (sconf or {}).get('items') or []
+                                group_obj = custom_data.get(key, {})
                                 if isinstance(group_obj, str):
                                     try:
                                         group_obj = _json.loads(group_obj)
                                     except Exception:
                                         group_obj = {}
-                                value = 0
-                                if isinstance(group_obj, dict):
-                                    value = group_obj.get(iid, 0)
-                                csv_row.append(value)
-                            elif col.get('column_type') == 'score_total':
-                                try:
-                                    conf = col.get('scoring_config')
-                                    if conf and isinstance(conf, str):
-                                        conf = _json.loads(conf)
-                                    base = (conf or {}).get('base_score', 100)
-                                    include_keys = (conf or {}).get('include_keys') or []
-                                    total = base
-                                    if include_keys:
-                                        for key in include_keys:
-                                            sc_col = next((c for c in scoring_cols if c.get('column_key') == key), None)
-                                            if not sc_col:
-                                                continue
-                                            sconf = sc_col.get('scoring_config')
-                                            if sconf and isinstance(sconf, str):
-                                                try:
-                                                    sconf = _json.loads(sconf)
-                                                except Exception:
-                                                    sconf = {}
-                                            items_cfg = (sconf or {}).get('items') or []
-                                            group_obj = custom_data.get(key, {})
-                                            if isinstance(group_obj, str):
-                                                try:
-                                                    group_obj = _json.loads(group_obj)
-                                                except Exception:
-                                                    group_obj = {}
-                                            for it in items_cfg:
-                                                iid = it.get('id')
-                                                delta = float(it.get('per_unit_delta') or 0)
-                                                cnt = 0
-                                                if isinstance(group_obj, dict) and iid in group_obj:
-                                                    try:
-                                                        cnt = int(group_obj.get(iid) or 0)
-                                                    except Exception:
-                                                        cnt = 0
-                                                total += cnt * delta
-                                    csv_row.append(total)
-                                except Exception:
-                                    csv_row.append('')
-                            else:
-                                csv_row.append(_map_value(col, custom_data.get(col['column_key'], '')))
-
-                        yield csv_row
-            finally:
-                if data_cursor:
-                    try:
-                        data_cursor.close()
+                                for it in items_cfg:
+                                    iid = it.get('id')
+                                    delta = float(it.get('per_unit_delta') or 0)
+                                    cnt = 0
+                                    if isinstance(group_obj, dict) and iid in group_obj:
+                                        try:
+                                            cnt = int(group_obj.get(iid) or 0)
+                                        except Exception:
+                                            cnt = 0
+                                    total += cnt * delta
+                        ws.cell(row=row_idx, column=start_col + offset, value=total)
                     except Exception:
-                        pass
-                if conn:
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
+                        ws.cell(row=row_idx, column=start_col + offset, value='')
+                else:
+                    ws.cell(
+                        row=row_idx,
+                        column=start_col + offset,
+                        value=_map_value(col, custom_data.get(col['column_key'], ''))
+                    )
 
-        return _stream_csv_response('safe_workplace', headers, row_generator())
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except Exception:
+                    pass
+            adjusted_width = min((max_length + 2) * 1.2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        filename = f"safe_workplace_{get_korean_time().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+        conn.close()
+
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
 
     except Exception as e:
         import traceback
-        logging.error(f"Safe Workplace CSV 다운로드 중 오류: {e}")
+        logging.error(f"Safe Workplace 엑셀 다운로드 중 오류: {e}")
         logging.error(traceback.format_exc())
-        if data_cursor:
-            try:
-                data_cursor.close()
-            except Exception:
-                pass
-        if meta_cursor:
-            try:
-                meta_cursor.close()
-            except Exception:
-                pass
         if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
+            conn.close()
         return jsonify({"success": False, "message": str(e)}), 500
 
-# ===== Full Process CSV 다운로드 API =====
+# ===== Full Process 엑셀 다운로드 API =====
 @app.route('/api/full-process-export')
-def export_full_process_csv():
-    """Full Process 데이터를 CSV로 스트리밍 다운로드."""
-    conn = None
-    cursor = None
-    data_cursor = None
-
+def export_full_process_excel():
+    """Full Process 데이터 엑셀 다운로드"""
     try:
+        import openpyxl
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill
+        import io
+
+        max_rows = _get_export_row_limit()
+
         conn = get_db_connection()
         cursor = conn.cursor()
 
@@ -7640,15 +7734,16 @@ def export_full_process_csv():
 
         where_c_active = sql_is_active_true('is_active', conn)
         where_c_notdel = sql_is_deleted_false('is_deleted', conn)
-        cursor.execute(f"""
+        dyn_sql = f"""
             SELECT * FROM full_process_column_config
             WHERE {where_c_active}
               AND {where_c_notdel}
             ORDER BY column_order
-        """)
+        """
+        cursor.execute(dyn_sql)
         dynamic_columns_all = [dict(row) for row in cursor.fetchall()]
 
-        dynamic_columns: List[Dict[str, Any]] = []
+        dynamic_columns = []
         if sections:
             for section in sections:
                 section_columns = [col for col in dynamic_columns_all if col.get('tab') == section['section_key']]
@@ -7665,13 +7760,31 @@ def export_full_process_csv():
             SELECT * FROM full_process
             WHERE {sql_is_deleted_false('is_deleted', conn)}
             ORDER BY created_at DESC
+            LIMIT %s
         """
-        data_cursor = conn.cursor()
-        data_cursor.execute(data_sql)
+        cursor.execute(data_sql, [max_rows])
+        data = [dict(row) for row in cursor.fetchall()]
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Full Process"
+
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_align = Alignment(horizontal="center", vertical="center")
+
+        col_idx = 1
+        basic_headers = ['프로세스 번호', '작성일', '작성자']
+        for header in basic_headers:
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            col_idx += 1
 
         import json as _json
 
-        def _expand_scoring_columns(_cols: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        def _expand_scoring_columns(_cols):
             out = []
             for c in _cols:
                 if c.get('column_type') == 'scoring':
@@ -7693,7 +7806,7 @@ def export_full_process_csv():
                             'column_type': 'number',
                             '_virtual': 1,
                             '_source_scoring_key': c['column_key'],
-                            '_source_item_id': iid,
+                            '_source_item_id': iid
                         })
                 else:
                     out.append(dict(c))
@@ -7703,24 +7816,14 @@ def export_full_process_csv():
         expanded_columns = _expand_scoring_columns(dyn_cols_list)
         scoring_cols = [dict(c) for c in dyn_cols_list if dict(c).get('column_type') == 'scoring']
 
-        headers = ['프로세스 번호', '작성일', '작성자'] + [col['column_name'] for col in expanded_columns]
+        for col in expanded_columns:
+            cell = ws.cell(row=1, column=col_idx, value=col['column_name'])
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            col_idx += 1
 
-        dropdown_cache: Dict[str, Optional[List[Dict[str, Any]]]] = {}
-
-        def _map_dropdown_value(column_key: str, raw_value: Any) -> Any:
-            if raw_value in (None, ''):
-                return ''
-            opts = dropdown_cache.get(column_key)
-            if opts is None:
-                opts = get_dropdown_options_for_display('full_process', column_key)
-                dropdown_cache[column_key] = opts
-            if opts:
-                for opt in opts:
-                    if opt.get('code') == raw_value:
-                        return opt.get('value', raw_value)
-            return raw_value
-
-        def _map_value(col: Dict[str, Any], value: Any) -> Any:
+        def _map_value(col, value):
             if isinstance(value, dict):
                 return value.get('name', str(value))
             if col.get('column_type') == 'list' and isinstance(value, list):
@@ -7730,162 +7833,169 @@ def export_full_process_csv():
                     return json.dumps(value, ensure_ascii=False)
                 except Exception:
                     return str(value)
-            if col.get('column_type') == 'dropdown' and value not in (None, ''):
-                return _map_dropdown_value(col['column_key'], value)
-            if value is None:
-                return ''
+            if col.get('column_type') == 'dropdown' and value:
+                opts = get_dropdown_options_for_display('full_process', col['column_key'])
+                if opts:
+                    for opt in opts:
+                        if opt['code'] == value:
+                            return opt['value']
             return value
 
-        def row_generator():
-            try:
-                while True:
-                    rows = data_cursor.fetchmany(1000)
-                    if not rows:
-                        break
-                    for row in rows:
-                        row_dict = dict(row)
-                        csv_row = [
-                            row_dict.get('fullprocess_number', ''),
-                            row_dict.get('created_at', ''),
-                            row_dict.get('created_by', ''),
-                        ]
+        for row_idx, row in enumerate(data, 2):
+            row_dict = dict(row)
+            col_idx = 1
 
-                        custom_data = row_dict.get('custom_data', {})
-                        if not isinstance(custom_data, dict):
-                            try:
-                                custom_data = _json.loads(custom_data) if custom_data else {}
-                            except Exception:
-                                custom_data = {}
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('fullprocess_number', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('created_at', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('created_by', ''))
+            col_idx += 1
 
-                        for col in expanded_columns:
-                            if col.get('_virtual') == 1:
-                                src = col.get('_source_scoring_key')
-                                iid = col.get('_source_item_id')
-                                group_obj = custom_data.get(src, {})
-                                if isinstance(group_obj, str):
-                                    try:
-                                        group_obj = _json.loads(group_obj)
-                                    except Exception:
-                                        group_obj = {}
-                                value = 0
-                                if isinstance(group_obj, dict):
-                                    value = group_obj.get(iid, 0)
-                                csv_row.append(value)
-                            elif col.get('column_type') == 'score_total':
+            custom_data = row_dict.get('custom_data', {})
+            if not isinstance(custom_data, dict):
+                try:
+                    custom_data = _json.loads(custom_data) if custom_data else {}
+                except Exception:
+                    custom_data = {}
+
+            for col in expanded_columns:
+                if col.get('_virtual') == 1:
+                    src = col.get('_source_scoring_key')
+                    iid = col.get('_source_item_id')
+                    group_obj = custom_data.get(src, {})
+                    if isinstance(group_obj, str):
+                        try:
+                            group_obj = _json.loads(group_obj)
+                        except Exception:
+                            group_obj = {}
+                    v = 0
+                    if isinstance(group_obj, dict):
+                        v = group_obj.get(iid, 0)
+                    ws.cell(row=row_idx, column=col_idx, value=v)
+                else:
+                    if col.get('column_type') == 'score_total':
+                        try:
+                            conf = col.get('scoring_config')
+                            if conf and isinstance(conf, str):
                                 try:
-                                    conf = col.get('scoring_config')
-                                    if conf and isinstance(conf, str):
-                                        conf = _json.loads(conf)
-                                    base = (conf or {}).get('base_score', 100)
-                                    include_keys = (conf or {}).get('include_keys') or []
-                                    total_key = (conf or {}).get('total_key') or 'default'
-                                    total = base
-                                    if include_keys:
-                                        for key in include_keys:
-                                            sc_col = next((c for c in scoring_cols if c.get('column_key') == key), None)
-                                            if not sc_col:
-                                                continue
-                                            sconf = sc_col.get('scoring_config')
-                                            if sconf and isinstance(sconf, str):
-                                                try:
-                                                    sconf = _json.loads(sconf)
-                                                except Exception:
-                                                    sconf = {}
-                                            items_cfg = (sconf or {}).get('items') or []
-                                            group_obj = custom_data.get(key, {})
-                                            if isinstance(group_obj, str):
-                                                try:
-                                                    group_obj = _json.loads(group_obj)
-                                                except Exception:
-                                                    group_obj = {}
-                                            for it in items_cfg:
-                                                iid = it.get('id')
-                                                delta = float(it.get('per_unit_delta') or 0)
-                                                cnt = 0
-                                                if isinstance(group_obj, dict) and iid in group_obj:
-                                                    try:
-                                                        cnt = int(group_obj.get(iid) or 0)
-                                                    except Exception:
-                                                        cnt = 0
-                                                total += cnt * delta
-                                    else:
-                                        for sc_col in scoring_cols:
-                                            sconf = sc_col.get('scoring_config')
-                                            if sconf and isinstance(sconf, str):
-                                                try:
-                                                    sconf = _json.loads(sconf)
-                                                except Exception:
-                                                    sconf = {}
-                                            if ((sconf or {}).get('total_key') or 'default') != total_key:
-                                                continue
-                                            items_cfg = (sconf or {}).get('items') or []
-                                            group_obj = custom_data.get(sc_col.get('column_key'), {})
-                                            if isinstance(group_obj, str):
-                                                try:
-                                                    group_obj = _json.loads(group_obj)
-                                                except Exception:
-                                                    group_obj = {}
-                                            for it in items_cfg:
-                                                iid = it.get('id')
-                                                delta = float(it.get('per_unit_delta') or 0)
-                                                cnt = 0
-                                                if isinstance(group_obj, dict) and iid in group_obj:
-                                                    try:
-                                                        cnt = int(group_obj.get(iid) or 0)
-                                                    except Exception:
-                                                        cnt = 0
-                                                total += cnt * delta
-                                    csv_row.append(total)
+                                    conf = _json.loads(conf)
                                 except Exception:
-                                    csv_row.append('')
+                                    conf = {}
+                            base = (conf or {}).get('base_score', 100)
+                            include_keys = (conf or {}).get('include_keys') or []
+                            total_key = (conf or {}).get('total_key') or 'default'
+                            total = base
+                            if include_keys:
+                                for key in include_keys:
+                                    sc_col = next((c for c in scoring_cols if c.get('column_key') == key), None)
+                                    if not sc_col:
+                                        continue
+                                    sconf = sc_col.get('scoring_config')
+                                    if sconf and isinstance(sconf, str):
+                                        try:
+                                            sconf = _json.loads(sconf)
+                                        except Exception:
+                                            sconf = {}
+                                    items_cfg = (sconf or {}).get('items') or []
+                                    group_obj = custom_data.get(key, {})
+                                    if isinstance(group_obj, str):
+                                        try:
+                                            group_obj = _json.loads(group_obj)
+                                        except Exception:
+                                            group_obj = {}
+                                    for it in items_cfg:
+                                        iid = it.get('id')
+                                        delta = float(it.get('per_unit_delta') or 0)
+                                        cnt = 0
+                                        if isinstance(group_obj, dict) and iid in group_obj:
+                                            try:
+                                                cnt = int(group_obj.get(iid) or 0)
+                                            except Exception:
+                                                cnt = 0
+                                        total += cnt * delta
                             else:
-                                csv_row.append(_map_value(col, custom_data.get(col['column_key'], '')))
+                                for sc_col in scoring_cols:
+                                    sconf = sc_col.get('scoring_config')
+                                    if sconf and isinstance(sconf, str):
+                                        try:
+                                            sconf = _json.loads(sconf)
+                                        except Exception:
+                                            sconf = {}
+                                    if ((sconf or {}).get('total_key') or 'default') != total_key:
+                                        continue
+                                    items_cfg = (sconf or {}).get('items') or []
+                                    group_obj = custom_data.get(sc_col.get('column_key'), {})
+                                    if isinstance(group_obj, str):
+                                        try:
+                                            group_obj = _json.loads(group_obj)
+                                        except Exception:
+                                            group_obj = {}
+                                    for it in items_cfg:
+                                        iid = it.get('id')
+                                        delta = float(it.get('per_unit_delta') or 0)
+                                        cnt = 0
+                                        if isinstance(group_obj, dict) and iid in group_obj:
+                                            try:
+                                                cnt = int(group_obj.get(iid) or 0)
+                                            except Exception:
+                                                cnt = 0
+                                        total += cnt * delta
+                            ws.cell(row=row_idx, column=col_idx, value=total)
+                        except Exception:
+                            ws.cell(row=row_idx, column=col_idx, value='')
+                    else:
+                        v = custom_data.get(col['column_key'], '')
+                        ws.cell(row=row_idx, column=col_idx, value=_map_value(col, v))
+                col_idx += 1
 
-                        yield csv_row
-            finally:
-                if data_cursor:
-                    try:
-                        data_cursor.close()
-                    except Exception:
-                        pass
-                if conn:
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except Exception:
+                    pass
+            adjusted_width = min((max_length + 2) * 1.2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
 
-        return _stream_csv_response('full_process', headers, row_generator())
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        filename = f"full_process_{get_korean_time().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+        conn.close()
+
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
 
     except Exception as e:
         import traceback
-        logging.error(f"Full Process CSV 다운로드 중 오류: {e}")
+        logging.error(f"Full Process 엑셀 다운로드 중 오류: {e}")
         logging.error(traceback.format_exc())
-        if data_cursor:
-            try:
-                data_cursor.close()
-            except Exception:
-                pass
-        if cursor:
-            try:
-                cursor.close()
-            except Exception:
-                pass
         if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
+            conn.close()
         return jsonify({"success": False, "message": str(e)}), 500
 
-# ===== Safety Instruction CSV 다운로드 API =====
+# ===== Safety Instruction 엑셀 다운로드 API =====
 @app.route('/api/safety-instruction-export')
-def export_safety_instruction_csv():
-    """Safety Instruction 데이터를 CSV로 스트리밍 다운로드."""
-    conn = None
-    cursor = None
-    data_cursor = None
-
+def export_safety_instruction_excel():
+    """Safety Instruction 데이터 엑셀 다운로드"""
     try:
+        import openpyxl
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill
+        import io
+
+        max_rows = _get_export_row_limit()
+
         conn = get_db_connection()
         cursor = conn.cursor()
 
@@ -7916,15 +8026,16 @@ def export_safety_instruction_csv():
 
         where_c_active = sql_is_active_true('is_active', conn)
         where_c_notdel = sql_is_deleted_false('is_deleted', conn)
-        cursor.execute(f"""
+        dyn_sql = f"""
             SELECT * FROM safety_instruction_column_config
             WHERE {where_c_active}
               AND {where_c_notdel}
             ORDER BY column_order
-        """)
+        """
+        cursor.execute(dyn_sql)
         dynamic_columns_all = [dict(row) for row in cursor.fetchall()]
 
-        dynamic_columns: List[Dict[str, Any]] = []
+        dynamic_columns = []
         if sections:
             for section in sections:
                 section_columns = [col for col in dynamic_columns_all if col.get('tab') == section['section_key']]
@@ -7941,124 +8052,151 @@ def export_safety_instruction_csv():
             SELECT * FROM safety_instructions
             WHERE {sql_is_deleted_false('is_deleted', conn)}
             ORDER BY created_at DESC, issue_number DESC
+            LIMIT %s
         """
-        data_cursor = conn.cursor()
-        data_cursor.execute(data_sql)
+        cursor.execute(data_sql, [max_rows])
+        data = [dict(row) for row in cursor.fetchall()]
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Safety Instructions"
+
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_align = Alignment(horizontal="center", vertical="center")
+
+        col_idx = 1
+        basic_headers = ['발부번호', '발부자', '위반일자', '징계일자', '피징계자']
+        for header in basic_headers:
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            col_idx += 1
+
+        basic_column_keys = ['issue_number', 'issuer', 'violation_date', 'discipline_date', 'disciplined_person']
+        for col in dynamic_columns:
+            if col['column_key'] not in basic_column_keys:
+                cell = ws.cell(row=1, column=col_idx, value=col['column_name'])
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_align
+                col_idx += 1
+
+        data_list = []
+        for row in data:
+            row_dict = dict(row)
+            if row_dict.get('custom_data'):
+                try:
+                    raw = row_dict.get('custom_data')
+                    if isinstance(raw, dict):
+                        custom_data = raw
+                    elif isinstance(raw, str):
+                        custom_data = pyjson.loads(raw) if raw else {}
+                    else:
+                        custom_data = {}
+
+                    base_fields = {'issue_number', 'created_at', 'updated_at', 'is_deleted', 'synced_at'}
+                    for k, v in custom_data.items():
+                        if k not in base_fields:
+                            row_dict[k] = v
+                except Exception as exc:
+                    logging.error(f"Custom data parsing error: {exc}")
+            data_list.append(row_dict)
 
         from common_mapping import smart_apply_mappings
+        if data_list:
+            data_list = smart_apply_mappings(
+                data_list,
+                'safety_instruction',
+                [dict(col) for col in dynamic_columns],
+                DB_PATH
+            )
 
-        dynamic_columns_def = [dict(col) for col in dynamic_columns]
-        basic_headers = ['발부번호', '발부자', '위반일자', '징계일자', '피징계자']
-        basic_column_keys = ['issue_number', 'issuer', 'violation_date', 'discipline_date', 'disciplined_person']
-        headers = basic_headers + [
-            col['column_name'] for col in dynamic_columns_def
-            if col.get('column_key') not in basic_column_keys
-        ]
+        for row_idx, row_dict in enumerate(data_list, 2):
+            col_idx = 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('issue_number', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('issuer', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('violation_date', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('discipline_date', ''))
+            col_idx += 1
+            ws.cell(row=row_idx, column=col_idx, value=row_dict.get('disciplined_person', ''))
+            col_idx += 1
 
-        BASE_FIELDS = {'issue_number', 'created_at', 'updated_at', 'is_deleted', 'synced_at'}
+            for col in dynamic_columns:
+                if col['column_key'] not in basic_column_keys:
+                    col_key = col['column_key']
+                    value = row_dict.get(col_key, '')
 
-        def _flatten_custom_fields(row_dict: Dict[str, Any]) -> None:
-            raw = row_dict.get('custom_data')
-            if not raw:
-                return
-            try:
-                if isinstance(raw, dict):
-                    custom = raw
-                elif isinstance(raw, str):
-                    custom = pyjson.loads(raw) if raw else {}
-                else:
-                    custom = {}
-                for k, v in custom.items():
-                    if k not in BASE_FIELDS:
-                        row_dict[k] = v
-            except Exception as exc:
-                logging.error(f"Custom data parsing error: {exc}")
+                    if isinstance(value, list):
+                        if not value:
+                            value = ''
+                        else:
+                            try:
+                                value = json.dumps(value, ensure_ascii=False)
+                            except Exception:
+                                value = str(value)
+                    elif isinstance(value, dict):
+                        if not value:
+                            value = ''
+                        else:
+                            value = value.get('name', str(value))
+                    elif value is None:
+                        value = ''
 
-        def _normalize_value(value: Any) -> Any:
-            if isinstance(value, list):
-                if not value:
-                    return ''
+                    ws.cell(row=row_idx, column=col_idx, value=value)
+                    col_idx += 1
+
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
                 try:
-                    return json.dumps(value, ensure_ascii=False)
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
                 except Exception:
-                    return str(value)
-            if isinstance(value, dict):
-                return value.get('name', str(value))
-            if value is None:
-                return ''
-            return value
+                    pass
+            adjusted_width = min((max_length + 2) * 1.2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
 
-        def row_generator():
-            try:
-                while True:
-                    rows = data_cursor.fetchmany(500)
-                    if not rows:
-                        break
-                    chunk = []
-                    for row in rows:
-                        row_dict = dict(row)
-                        _flatten_custom_fields(row_dict)
-                        chunk.append(row_dict)
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
 
-                    mapped_chunk = smart_apply_mappings(chunk, 'safety_instruction', dynamic_columns_def, DB_PATH)
-                    for row_dict in mapped_chunk:
-                        csv_row = [
-                            row_dict.get('issue_number', ''),
-                            row_dict.get('issuer', ''),
-                            row_dict.get('violation_date', ''),
-                            row_dict.get('discipline_date', ''),
-                            row_dict.get('disciplined_person', ''),
-                        ]
-                        for col in dynamic_columns_def:
-                            if col.get('column_key') in basic_column_keys:
-                                continue
-                            value = row_dict.get(col['column_key'], '')
-                            csv_row.append(_normalize_value(value))
-                        yield csv_row
-            finally:
-                if data_cursor:
-                    try:
-                        data_cursor.close()
-                    except Exception:
-                        pass
-                if conn:
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
+        filename = f"safety_instruction_{get_korean_time().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
-        return _stream_csv_response('safety_instruction', headers, row_generator())
+        conn.close()
+
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
 
     except Exception as e:
+        logging.error(f"Safety Instruction 엑셀 다운로드 중 오류: {e}")
         import traceback
-        logging.error(f"Safety Instruction CSV 다운로드 중 오류: {e}")
         logging.error(traceback.format_exc())
-        if data_cursor:
-            try:
-                data_cursor.close()
-            except Exception:
-                pass
-        if cursor:
-            try:
-                cursor.close()
-            except Exception:
-                pass
         if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
+            conn.close()
         return jsonify({"success": False, "message": str(e)}), 500
 
-# ===== 기준정보 변경요청 CSV 다운로드 API =====
+# ===== 기준정보 변경요청 엑셀 다운로드 API =====
 @app.route('/api/change-requests/export')
-def export_change_requests_csv():
-    """기준정보 변경요청 데이터를 CSV로 스트리밍 다운로드."""
-    conn = None
-    meta_cursor = None
-    data_cursor = None
-
+def export_change_requests_excel():
+    """기준정보 변경요청 데이터 엑셀 다운로드"""
     try:
+        import openpyxl
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill
+        import io
+
+        max_rows = _get_export_row_limit()
+
         company_name = request.args.get('company_name', '')
         business_number = request.args.get('business_number', '')
         status = request.args.get('status', '')
@@ -8066,7 +8204,6 @@ def export_change_requests_csv():
         created_date_end = request.args.get('created_date_end', '')
 
         conn = get_db_connection()
-        meta_cursor = conn.cursor()
 
         section_sql = f"""
             SELECT section_key, section_name, section_order
@@ -8075,21 +8212,20 @@ def export_change_requests_csv():
               AND {sql_is_active_true('is_active', conn)}
             ORDER BY section_order
         """
-        sections = meta_cursor.execute(section_sql).fetchall()
+        sections = conn.execute(section_sql).fetchall()
 
         where_c_active = sql_is_active_true('is_active', conn)
         where_c_notdel = sql_is_deleted_false('is_deleted', conn)
-        meta_cursor.execute(f"""
+        dyn_sql = f"""
             SELECT * FROM change_request_column_config
             WHERE {where_c_active}
               AND {where_c_notdel}
             ORDER BY column_order
-        """)
-        dynamic_columns_all = [dict(row) for row in meta_cursor.fetchall()]
-        meta_cursor.close()
-        meta_cursor = None
+        """
+        dynamic_columns_rows = conn.execute(dyn_sql).fetchall()
+        dynamic_columns_all = [dict(row) for row in dynamic_columns_rows]
 
-        dynamic_columns: List[Dict[str, Any]] = []
+        dynamic_columns = []
         if sections:
             for section in sections:
                 section_columns = [col for col in dynamic_columns_all if col.get('tab') == section['section_key']]
@@ -8108,7 +8244,7 @@ def export_change_requests_csv():
             SELECT * FROM partner_change_requests
             WHERE {sql_is_deleted_false('is_deleted', conn)}
         """
-        params: List[Any] = []
+        params = []
 
         if company_name:
             query += " AND company_name LIKE %s"
@@ -8126,29 +8262,25 @@ def export_change_requests_csv():
             query += " AND DATE(created_at) <= %s"
             params.append(created_date_end)
 
-        query += " ORDER BY created_at DESC, id DESC"
+        query += " ORDER BY created_at DESC, id DESC LIMIT %s"
+        params.append(max_rows)
 
-        data_cursor = conn.cursor()
-        data_cursor.execute(query, params)
+        change_requests = conn.execute(query, params).fetchall()
 
-        headers = ['요청번호', '회사명', '사업자번호', '상태', '등록일', '수정일'] + [col['column_name'] for col in dynamic_columns]
-
-        dropdown_cache: Dict[str, Optional[List[Dict[str, Any]]]] = {}
-
-        def _map_dropdown_value(column_key: str, code_value: Any) -> Any:
-            if code_value in (None, ''):
+        def get_display_value(column_key, code_value):
+            if not code_value or code_value == '':
                 return ''
-            opts = dropdown_cache.get(column_key)
-            if opts is None:
-                opts = get_dropdown_options_for_display('change_request', column_key)
-                dropdown_cache[column_key] = opts
-            if opts:
-                for opt in opts:
-                    if opt.get('code') == code_value:
-                        return opt.get('value', code_value)
-            return code_value
+            try:
+                options = get_dropdown_options_for_display('change_request', column_key)
+                if options:
+                    for option in options:
+                        if option['code'] == code_value:
+                            return option['value']
+                return code_value
+            except Exception:
+                return code_value
 
-        def format_date(date_value: Any) -> str:
+        def format_date(date_value):
             if not date_value:
                 return ''
             date_str = str(date_value)
@@ -8156,207 +8288,296 @@ def export_change_requests_csv():
                 return date_str.split(' ')[0]
             return date_str
 
-        def _normalize_value(col: Dict[str, Any], value: Any) -> Any:
-            if isinstance(value, dict):
-                return value.get('name', str(value))
-            if isinstance(value, list):
-                if not value:
-                    return ''
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "기준정보 변경요청"
+
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_align = Alignment(horizontal="center", vertical="center")
+
+        headers = ['요청번호', '회사명', '사업자번호', '상태', '등록일', '수정일']
+        for col in dynamic_columns:
+            headers.append(col['column_name'])
+
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+
+        for row_idx, request_row in enumerate(change_requests, 2):
+            request_data = dict(request_row)
+
+            ws.cell(row=row_idx, column=1, value=request_data.get('request_number', ''))
+            ws.cell(row=row_idx, column=2, value=request_data.get('company_name', ''))
+            ws.cell(row=row_idx, column=3, value=request_data.get('business_number', ''))
+
+            status_value = request_data.get('status', '')
+            status_display = get_display_value('status', status_value) if status_value else ''
+            ws.cell(row=row_idx, column=4, value=status_display)
+
+            ws.cell(row=row_idx, column=5, value=format_date(request_data.get('created_at', '')))
+            ws.cell(row=row_idx, column=6, value=format_date(request_data.get('updated_at', '')))
+
+            custom_data = {}
+            if request_data.get('custom_data'):
                 try:
-                    return pyjson.dumps(value, ensure_ascii=False)
+                    if isinstance(request_data['custom_data'], str):
+                        custom_data = pyjson.loads(request_data['custom_data'])
+                    else:
+                        custom_data = request_data['custom_data']
                 except Exception:
-                    return str(value)
-            if col.get('column_type') == 'dropdown' and value not in (None, ''):
-                return _map_dropdown_value(col['column_key'], value)
-            if col.get('column_type') in ('date', 'datetime') and value:
-                return format_date(value)
-            return value if value not in (None, []) else ''
+                    custom_data = {}
 
-        def row_generator():
-            try:
-                while True:
-                    rows = data_cursor.fetchmany(500)
-                    if not rows:
-                        break
-                    for row in rows:
-                        request_data = dict(row)
-                        csv_row = [
-                            request_data.get('request_number', ''),
-                            request_data.get('company_name', ''),
-                            request_data.get('business_number', ''),
-                            _map_dropdown_value('status', request_data.get('status', '')),
-                            format_date(request_data.get('created_at', '')),
-                            format_date(request_data.get('updated_at', '')),
-                        ]
+            for col_idx, col in enumerate(dynamic_columns, 7):
+                value = custom_data.get(col['column_key'], '')
 
-                        custom_data = {}
-                        raw_custom = request_data.get('custom_data')
-                        if raw_custom:
-                            try:
-                                if isinstance(raw_custom, str):
-                                    custom_data = pyjson.loads(raw_custom) if raw_custom else {}
-                                else:
-                                    custom_data = raw_custom
-                            except Exception:
-                                custom_data = {}
+                if isinstance(value, dict):
+                    if 'name' in value:
+                        value = value['name']
+                    else:
+                        value = str(value)
+                elif isinstance(value, list):
+                    if not value:
+                        value = ''
+                    else:
+                        try:
+                            value = pyjson.dumps(value, ensure_ascii=False)
+                        except Exception:
+                            value = str(value)
+                elif col['column_type'] == 'dropdown' and value:
+                    value = get_display_value(col['column_key'], value)
+                elif col['column_type'] in ['date', 'datetime'] and value:
+                    value = format_date(value)
 
-                        for col in dynamic_columns:
-                            csv_row.append(_normalize_value(col, custom_data.get(col['column_key'], '')))
+                ws.cell(row=row_idx, column=col_idx, value=value)
 
-                        yield csv_row
-            finally:
-                if data_cursor:
-                    try:
-                        data_cursor.close()
-                    except Exception:
-                        pass
-                if conn:
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except Exception:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
 
-        return _stream_csv_response('change_requests', headers, row_generator())
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        korean_time = get_korean_time()
+        filename = f"기준정보_변경요청_{korean_time.strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+        conn.close()
+
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
 
     except Exception as e:
-        import traceback
-        logging.error(f"변경요청 CSV 다운로드 중 오류: {e}")
-        logging.error(traceback.format_exc())
-        if data_cursor:
-            try:
-                data_cursor.close()
-            except Exception:
-                pass
-        if meta_cursor:
-            try:
-                meta_cursor.close()
-            except Exception:
-                pass
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
+        logging.error(f"변경요청 엑셀 다운로드 중 오류: {e}")
         return jsonify({"success": False, "message": str(e)}), 500
 
-# ===== 협력사 CSV 다운로드 API =====
+# ===== 협력사 엑셀 다운로드 API =====
 @app.route('/api/partners/export')
-def export_partners_to_csv():
-    """협력사 기준정보를 CSV로 스트리밍 다운로드."""
-    headers = [
-        '협력사명', '사업자번호', 'Class', '업종(대분류)', '업종(소분류)',
-        '위험작업여부', '대표자성명', '주소', '평균연령', '매출액',
-        '거래차수', '상시근로자'
-    ]
-
-    company_name = request.args.get('company_name', '')
-    business_number = request.args.get('business_number', '')
-    business_type_major = request.args.get('business_type_major', '')
-    business_type_minor = request.args.get('business_type_minor', '')
-    workers_min = request.args.get('workers_min', '')
-    workers_max = request.args.get('workers_max', '')
-
-    conn = None
-    cursor = None
-
+def export_partners_to_excel():
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        import openpyxl
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill
+        import io
 
-        query = f"SELECT * FROM partners_cache WHERE {sql_is_deleted_false('is_deleted', conn)}"
-        params: List[Any] = []
+        max_rows = _get_export_row_limit()
 
-        if company_name:
-            query += " AND company_name LIKE %s"
-            params.append(f"%{company_name}%")
-        if business_number:
-            query += " AND business_number LIKE %s"
-            params.append(f"%{business_number}%")
-        if business_type_major:
-            query += " AND business_type_major = %s"
-            params.append(business_type_major)
-        if business_type_minor:
-            query += " AND business_type_minor = %s"
-            params.append(business_type_minor)
-        if workers_min:
-            try:
-                query += " AND permanent_workers >= %s"
-                params.append(int(workers_min))
-            except ValueError:
-                pass
-        if workers_max:
-            try:
-                query += " AND permanent_workers <= %s"
-                params.append(int(workers_max))
-            except ValueError:
-                pass
+        company_name = request.args.get('company_name', '')
+        business_number = request.args.get('business_number', '')
+        business_type_major = request.args.get('business_type_major', '')
+        business_type_minor = request.args.get('business_type_minor', '')
+        workers_min = request.args.get('workers_min', '')
+        workers_max = request.args.get('workers_max', '')
 
-        query += " ORDER BY company_name"
-        cursor.execute(query, params)
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
 
-        def row_generator():
-            try:
-                while True:
-                    rows = cursor.fetchmany(1000)
-                    if not rows:
-                        break
-                    for row in rows:
-                        partner = dict(row)
-                        hazard_work = partner.get('hazard_work_flag', '')
-                        hazard_text = '예' if hazard_work == 'O' else '아니오' if hazard_work == 'X' else ''
-                        revenue = partner.get('annual_revenue') or 0
-                        revenue_text = f"{int(revenue) // 100000000}억원" if revenue else ''
-                        workers = partner.get('permanent_workers')
-                        workers_text = f"{workers}명" if workers else ''
-                        csv_row = [
-                            partner.get('company_name', ''),
-                            partner.get('business_number', ''),
-                            partner.get('partner_class', ''),
-                            partner.get('business_type_major', ''),
-                            partner.get('business_type_minor', ''),
-                            hazard_text,
-                            partner.get('representative', ''),
-                            partner.get('address', ''),
-                            partner.get('average_age', ''),
-                            revenue_text,
-                            partner.get('transaction_count', ''),
-                            workers_text,
-                        ]
-                        yield csv_row
-            finally:
-                if cursor:
+            query = f"SELECT * FROM partners_cache WHERE {sql_is_deleted_false('is_deleted', conn)}"
+            params = []
+
+            if company_name:
+                query += " AND company_name LIKE %s"
+                params.append(f'%{company_name}%')
+            if business_number:
+                query += " AND business_number LIKE %s"
+                params.append(f'%{business_number}%')
+            if business_type_major:
+                query += " AND business_type_major = %s"
+                params.append(business_type_major)
+            if business_type_minor:
+                query += " AND business_type_minor = %s"
+                params.append(business_type_minor)
+            if workers_min:
+                try:
+                    min_val = int(workers_min)
+                    query += " AND permanent_workers >= %s"
+                    params.append(min_val)
+                except ValueError:
+                    pass
+            if workers_max:
+                try:
+                    max_val = int(workers_max)
+                    query += " AND permanent_workers <= %s"
+                    params.append(max_val)
+                except ValueError:
+                    pass
+
+            query += " ORDER BY company_name LIMIT %s"
+            params.append(max_rows)
+
+            partners = cursor.execute(query, params).fetchall()
+
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "협력사 기준정보"
+
+            header_font = Font(bold=True, color="FFFFFF")
+            header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+            header_align = Alignment(horizontal="center", vertical="center")
+
+            headers = [
+                '협력사명', '사업자번호', 'Class', '업종(대분류)', '업종(소분류)',
+                '위험작업여부', '대표자성명', '주소', '평균연령', '매출액',
+                '거래차수', '상시근로자'
+            ]
+
+            for col_idx, header in enumerate(headers, 1):
+                cell = ws.cell(row=1, column=col_idx, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_align
+
+            for row_idx, partner_row in enumerate(partners, 2):
+                partner = dict(partner_row)
+
+                ws.cell(row=row_idx, column=1, value=partner.get('company_name', ''))
+                ws.cell(row=row_idx, column=2, value=partner.get('business_number', ''))
+                ws.cell(row=row_idx, column=3, value=partner.get('partner_class', ''))
+                ws.cell(row=row_idx, column=4, value=partner.get('business_type_major', ''))
+                ws.cell(row=row_idx, column=5, value=partner.get('business_type_minor', ''))
+
+                hazard_work = partner.get('hazard_work_flag', '')
+                hazard_text = '예' if hazard_work == 'O' else '아니오' if hazard_work == 'X' else ''
+                ws.cell(row=row_idx, column=6, value=hazard_text)
+
+                ws.cell(row=row_idx, column=7, value=partner.get('representative', ''))
+                ws.cell(row=row_idx, column=8, value=partner.get('address', ''))
+                ws.cell(row=row_idx, column=9, value=partner.get('average_age', ''))
+
+                revenue = partner.get('annual_revenue')
+                if revenue:
+                    revenue_text = f"{revenue // 100000000}억원"
+                else:
+                    revenue_text = ''
+                ws.cell(row=row_idx, column=10, value=revenue_text)
+
+                ws.cell(row=row_idx, column=11, value=partner.get('transaction_count', ''))
+
+                workers = partner.get('permanent_workers')
+                workers_text = f"{workers}명" if workers else ''
+                ws.cell(row=row_idx, column=12, value=workers_text)
+
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
                     try:
-                        cursor.close()
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
                     except Exception:
                         pass
-                if conn:
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
+                adjusted_width = min(max_length + 2, 50)
+                ws.column_dimensions[column_letter].width = adjusted_width
 
-        return _stream_csv_response('partners_list', headers, row_generator())
+            output = io.BytesIO()
+            wb.save(output)
+            output.seek(0)
 
-    except Exception as db_error:
-        logging.error(f"협력사 데이터 조회 중 오류: {db_error}")
-        if cursor:
-            try:
-                cursor.close()
-            except Exception:
-                pass
-        if conn:
-            try:
-                conn.close()
-            except Exception:
-                pass
+            conn.close()
 
-        def fallback_rows():
-            yield [
+            filename = f"partners_list_{get_korean_time().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+            return send_file(
+                output,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                as_attachment=True,
+                download_name=filename
+            )
+
+        except Exception as db_error:
+            logging.error(f"협력사 데이터 조회 중 오류: {db_error}")
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "협력사 기준정보"
+
+            headers = [
+                '협력사명', '사업자번호', 'Class', '업종(대분류)', '업종(소분류)',
+                '위험작업여부', '대표자성명', '주소', '평균연령', '매출액',
+                '거래차수', '상시근로자'
+            ]
+
+            header_font = Font(bold=True, color="FFFFFF")
+            header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+            header_align = Alignment(horizontal="center", vertical="center")
+
+            for col_idx, header in enumerate(headers, 1):
+                cell = ws.cell(row=1, column=col_idx, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_align
+
+            sample_data = [
                 '샘플 협력사', '123-45-67890', 'A', '제조업', '전자제품',
                 '예', '김대표', '서울시 강남구', '35', '100억원', '5', '50명'
             ]
+            for col_idx, value in enumerate(sample_data, 1):
+                ws.cell(row=2, column=col_idx, value=value)
 
-        return _stream_csv_response('partners_list', headers, fallback_rows())
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except Exception:
+                        pass
+                adjusted_width = min(max_length + 2, 30)
+                ws.column_dimensions[column_letter].width = adjusted_width
+
+            output = io.BytesIO()
+            wb.save(output)
+            output.seek(0)
+
+            filename = f"partners_list_{get_korean_time().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+            return send_file(
+                output,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                as_attachment=True,
+                download_name=filename
+            )
+
+    except Exception as e:
+        logging.error(f"협력사 엑셀 다운로드 중 오류: {e}")
+        import traceback
+        logging.error(traceback.format_exc())
+        return jsonify({"success": False, "message": str(e)}), 500
 
 # ===== 협력사 삭제 API =====
 @app.route('/api/partners/delete', methods=['POST'])
@@ -8568,6 +8789,7 @@ def create_partner_change_request():
             (request_number, requester_name, requester_department, company_name, business_number,
              change_type, current_value, new_value, change_reason, custom_data, status)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (
             request_number,  # 자동 생성된 request_number
             data['requester_name'],
@@ -8582,7 +8804,7 @@ def create_partner_change_request():
             status  # status 추가
         ))
         
-        request_id = cursor.lastrowid
+        request_id = cursor.fetchone()[0]
         conn.commit()
         conn.close()
         
@@ -8774,9 +8996,10 @@ def api_create_person():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        cursor.execute_with_returning_id("""
+        cursor.execute("""
             INSERT INTO person_master (name, department, position, company_name, phone, email)
             VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id
         """, (
             data.get('name'),
             data.get('department', ''),
@@ -8786,7 +9009,7 @@ def api_create_person():
             data.get('email', '')
         ))
         
-        person_id = cursor.lastrowid
+        person_id = cursor.fetchone()[0]
         conn.commit()
         conn.close()
         
@@ -9200,6 +9423,8 @@ def page_view(url):
         'subcontract-approval': 'subcontract_approval.subcontract_approval_route',
         'subcontract-report': 'subcontract_report.subcontract_report_route',
         'partner-standards': 'partner_standards_route',
+        'partner-access': 'partner_access.partner_access_page',
+        'ai-assistant': 'ai_assistant.ai_assistant_page',
         # 구 라우트 호환: /change-request -> /partner-change-request
         'change-request': 'partner_change_request_route',
     }
@@ -9223,7 +9448,7 @@ def page_view(url):
     try:
         conn.execute('''
             CREATE TABLE IF NOT EXISTS pages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 url TEXT UNIQUE,
                 title TEXT,
                 content TEXT
@@ -10383,19 +10608,7 @@ if __name__ == "__main__":
         print("JSON 동기화 건너뜀 (config: SYNC_ON_STARTUP=false)", flush=True)
         print("DB의 컬럼 설정을 그대로 사용합니다.", flush=True)
     
-    # 스케줄러는 실제 메인 프로세스에서만 시작(리로더 중복 방지)
-    if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
-        # 스케줄 등록: 매일 07:00에 maybe_daily_sync() 호출
-        schedule.clear()  # 혹시 있을지 모르는 기존 잡 제거
-        schedule.every().day.at("07:00").do(maybe_daily_sync)
-
-        scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
-        scheduler_thread.start()
-
-        logging.info("=" * 50)
-        logging.info("자동 동기화 스케줄러 시작")
-        logging.info("매일 오전 7시에 자동으로 데이터를 동기화합니다.")
-        logging.info("=" * 50)
+    start_background_master_sync_scheduler()
     
     print(f"partner-accident 라우트 등록됨: {'/partner-accident' in [rule.rule for rule in app.url_map.iter_rules()]}", flush=True)
 

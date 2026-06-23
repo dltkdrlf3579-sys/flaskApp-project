@@ -2,12 +2,12 @@
 동적 컬럼 관리 공통 서비스
 모든 보드의 동적 컬럼 설정을 통합 관리
 """
-import sqlite3
 import json
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from db_connection import get_db_connection
+from db.schema import column_exists
 from list_schema_utils import (
     resolve_child_schema,
     dump_child_schema,
@@ -100,11 +100,10 @@ class ColumnConfigService:
         conn = get_db_connection(self.db_path)
         cursor = conn.cursor()
         
-        # 컬럼 설정 테이블 (PostgreSQL/SQLite 모두 생성 가능)
-        # CompatConnection이 AUTOINCREMENT → SERIAL 변환을 처리하므로 공통 DDL 사용
+        # 컬럼 설정 테이블 (PostgreSQL 전용)
         cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS {self.table_name} (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 column_key TEXT UNIQUE NOT NULL,
                 column_name TEXT NOT NULL,
                 column_type TEXT NOT NULL,
@@ -127,26 +126,12 @@ class ColumnConfigService:
         # 누락 컬럼 보강 (PostgreSQL/SQLite 공용)
         def _has_column_pg(table: str, col: str) -> bool:
             try:
-                cursor.execute(
-                    "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = %s AND column_name = %s",
-                    (table, col,)
-                )
-                return (cursor.fetchone() or [0])[0] > 0
-            except Exception:
-                return False
-
-        def _has_column_sqlite(table: str, col: str) -> bool:
-            try:
-                cursor.execute(f"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = %s", (col,))
-                return (cursor.fetchone() or [0])[0] > 0
+                return column_exists(conn, table, col)
             except Exception:
                 return False
 
         def has_column(table: str, col: str) -> bool:
-            if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                # information_schema는 소문자 기준
-                return _has_column_pg(table.lower(), col.lower())
-            return _has_column_sqlite(table, col)
+            return _has_column_pg(table.lower(), col.lower())
 
         def add_column(col: str, ddl: str):
             try:
@@ -198,7 +183,7 @@ class ColumnConfigService:
         Returns:
             컬럼 설정 리스트
         """
-        conn = get_db_connection(self.db_path, row_factory=True)
+        conn = get_db_connection(self.db_path)
         
         # 쿼리 구성 - is_deleted 컬럼이 이제 모든 테이블에 존재
         query = f"SELECT * FROM {self.table_name}"
@@ -272,7 +257,7 @@ class ColumnConfigService:
 
     def get_column_by_key(self, column_key: str, *, include_deleted: bool = False) -> Optional[Dict[str, Any]]:
         """Fetch a column by its column_key."""
-        conn = get_db_connection(self.db_path, row_factory=True)
+        conn = get_db_connection(self.db_path)
         deleted_clause = '' if include_deleted else 'AND COALESCE(is_deleted, 0) = 0'
         row = conn.execute(
             f"SELECT id FROM {self.table_name} WHERE column_key = %s " + deleted_clause,
@@ -294,7 +279,7 @@ class ColumnConfigService:
         Returns:
             컬럼 정보 또는 None
         """
-        conn = get_db_connection(self.db_path, row_factory=True)
+        conn = get_db_connection(self.db_path)
         
         column = conn.execute(
             f"SELECT * FROM {self.table_name} WHERE id = %s", 
@@ -353,8 +338,6 @@ class ColumnConfigService:
         
         try:
             # 트랜잭션 시작
-            conn.execute("BEGIN IMMEDIATE")
-            
             # 보호 컬럼 키 방지
             if column_data.get('column_key') and str(column_data['column_key']).lower() in _protected_for_board(self.board_type):
                 raise ValueError("Protected column cannot be created")
@@ -523,12 +506,12 @@ class ColumnConfigService:
                 values.append(child_schema_json)
 
             placeholders = ', '.join(['%s'] * len(fields))
-            cursor.execute_with_returning_id(
-                f"INSERT INTO {self.table_name} ({', '.join(fields)}) VALUES ({placeholders})",
+            cursor.execute(
+                f"INSERT INTO {self.table_name} ({', '.join(fields)}) VALUES ({placeholders}) RETURNING id",
                 tuple(values)
             )
             
-            column_id = cursor.lastrowid
+            column_id = cursor.fetchone()[0]
 
             # JSONB 기반 보드는 실제 테이블 컬럼을 만들지 않음
             if self.board_type not in JSONB_ONLY_BOARDS:
@@ -601,8 +584,6 @@ class ColumnConfigService:
         
         try:
             # 트랜잭션 시작
-            conn.execute("BEGIN IMMEDIATE")
-
             # 보호 컬럼은 수정 불가 (is_system=1 또는 보호 키)
             row = cursor.execute(
                 f"SELECT column_key, COALESCE(is_system,0) FROM {self.table_name} WHERE id = %s",
@@ -611,8 +592,8 @@ class ColumnConfigService:
             if not row:
                 conn.rollback()
                 return {'success': False, 'message': '컬럼을 찾을 수 없습니다.'}
-            col_key = row[0] if not isinstance(row, sqlite3.Row) else row[0]
-            is_system = row[1] if not isinstance(row, sqlite3.Row) else row[1]
+            col_key = row[0]
+            is_system = row[1]
             if (str(col_key).lower() in _protected_for_board(self.board_type)) or _to_bool(is_system):
                 conn.rollback()
                 return {'success': False, 'message': '보호 컬럼은 수정할 수 없습니다.'}
@@ -782,8 +763,6 @@ class ColumnConfigService:
         
         try:
             # 트랜잭션 시작
-            conn.execute("BEGIN IMMEDIATE")
-
             # 보호 컬럼은 삭제(비활성화) 불가
             row = cursor.execute(
                 f"SELECT column_key, COALESCE(is_system,0) FROM {self.table_name} WHERE id = %s",
@@ -792,8 +771,8 @@ class ColumnConfigService:
             if not row:
                 conn.rollback()
                 return {'success': False, 'message': '컬럼을 찾을 수 없습니다.'}
-            col_key = row[0] if not isinstance(row, sqlite3.Row) else row[0]
-            is_system = row[1] if not isinstance(row, sqlite3.Row) else row[1]
+            col_key = row[0]
+            is_system = row[1]
             if (str(col_key).lower() in _protected_for_board(self.board_type)) or _to_bool(is_system):
                 conn.rollback()
                 return {'success': False, 'message': '보호 컬럼은 삭제할 수 없습니다.'}
@@ -837,8 +816,6 @@ class ColumnConfigService:
         
         try:
             # 트랜잭션 시작
-            conn.execute("BEGIN IMMEDIATE")
-            
             for item in order_data:
                 cursor.execute(f"""
                     UPDATE {self.table_name} 

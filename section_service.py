@@ -1,8 +1,9 @@
-import sqlite3
 import json
 import logging
 from datetime import datetime
 from db_connection import get_db_connection
+from db.schema import column_exists
+from utils.sql_filters import sql_is_active_true, sql_is_deleted_false
 
 class SectionConfigService:
     """섹션 설정 관리 서비스 클래스"""
@@ -30,20 +31,11 @@ class SectionConfigService:
     def get_sections(self):
         """특정 보드 타입의 모든 활성 섹션 가져오기"""
         conn = get_db_connection(self.db_path)
-        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
         def _col_exists(table: str, col: str) -> bool:
             try:
-                if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                    cursor.execute(
-                        "SELECT 1 FROM information_schema.columns WHERE table_name = %s AND column_name = %s",
-                        (table.lower(), col.lower())
-                    )
-                    return cursor.fetchone() is not None
-                else:
-                    cursor.execute(f"PRAGMA table_info({table})")
-                    return any(r[1].lower() == col.lower() for r in cursor.fetchall())
+                return column_exists(conn, table, col)
             except Exception:
                 return False
 
@@ -54,9 +46,9 @@ class SectionConfigService:
                 where_clauses = []
 
                 if _col_exists(table, 'is_active'):
-                    where_clauses.append("is_active = 1")
+                    where_clauses.append(sql_is_active_true('is_active', conn))
                 if _col_exists(table, 'is_deleted'):
-                    where_clauses.append("(is_deleted = 0 OR is_deleted IS NULL)")
+                    where_clauses.append(sql_is_deleted_false('is_deleted', conn))
 
                 sql = f"SELECT * FROM {table}"
                 if where_clauses:
@@ -68,12 +60,12 @@ class SectionConfigService:
                 cursor.execute(sql)
             else:
                 # safety_instruction 등은 기존 section_config 테이블 사용
-                where = "board_type = ?"
+                where = "board_type = %s"
                 if _col_exists('section_config', 'is_active'):
-                    where += " AND is_active = 1"
+                    where += f" AND {sql_is_active_true('is_active', conn)}"
                 add_deleted = _col_exists('section_config', 'is_deleted')
                 if add_deleted:
-                    where += " AND (is_deleted = 0 OR is_deleted IS NULL)"
+                    where += f" AND {sql_is_deleted_false('is_deleted', conn)}"
                 sql = f"SELECT * FROM section_config WHERE {where} ORDER BY section_order"
                 cursor.execute(sql, (self.board_type,))
 
@@ -89,7 +81,6 @@ class SectionConfigService:
     def get_sections_with_columns(self):
         """섹션과 해당 컬럼들을 함께 가져오기"""
         conn = get_db_connection(self.db_path)
-        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
         try:
@@ -100,23 +91,15 @@ class SectionConfigService:
             table_name = f"{self.board_type}_column_config"
             
             for section in sections:
-                where = "tab = ? AND is_active = 1"
+                where = f"tab = %s AND {sql_is_active_true('is_active', conn)}"
                 # column_config에 is_deleted 있는지 확인
                 def _has_col(col: str) -> bool:
                     try:
-                        if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                            cursor.execute(
-                                "SELECT 1 FROM information_schema.columns WHERE table_name = %s AND column_name = %s",
-                                (table_name.lower(), col.lower())
-                            )
-                            return cursor.fetchone() is not None
-                        else:
-                            cursor.execute(f"PRAGMA table_info({table_name})")
-                            return any(r[1].lower() == col.lower() for r in cursor.fetchall())
+                        return column_exists(conn, table_name, col)
                     except Exception:
                         return False
                 if _has_col('is_deleted'):
-                    where += " AND (is_deleted = 0 OR is_deleted IS NULL)"
+                    where += f" AND {sql_is_deleted_false('is_deleted', conn)}"
                 cursor.execute(f"SELECT * FROM {table_name} WHERE {where} ORDER BY column_order", (section['section_key'],))
                 
                 section['columns'] = [dict(row) for row in cursor.fetchall()]
@@ -259,7 +242,7 @@ class SectionConfigService:
                     """
                     INSERT INTO section_config
                     (board_type, section_key, section_name, section_order, is_active)
-                    VALUES (?, ?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s, %s)
                     """,
                     (
                         self.board_type,
@@ -274,7 +257,7 @@ class SectionConfigService:
                     f"""
                     INSERT INTO {self.table_name}
                     (section_key, section_name, section_order, is_active)
-                    VALUES (?, ?, ?, ?)
+                    VALUES (%s, %s, %s, %s)
                     """,
                     (
                         section_key,
@@ -308,15 +291,15 @@ class SectionConfigService:
             update_values = []
             
             if 'section_name' in section_data:
-                update_fields.append('section_name = ?')
+                update_fields.append('section_name = %s')
                 update_values.append(section_data['section_name'])
             
             if 'section_order' in section_data:
-                update_fields.append('section_order = ?')
+                update_fields.append('section_order = %s')
                 update_values.append(section_data['section_order'])
             
             if 'is_active' in section_data:
-                update_fields.append('is_active = ?')
+                update_fields.append('is_active = %s')
                 update_values.append(section_data['is_active'])
             
             if not update_fields:
@@ -361,15 +344,7 @@ class SectionConfigService:
             # soft delete가 불가능하면 hard delete로 폴백
             def _has_col(table: str, col: str) -> bool:
                 try:
-                    if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                        cursor.execute(
-                            "SELECT 1 FROM information_schema.columns WHERE table_name = %s AND column_name = %s",
-                            (table.lower(), col.lower())
-                        )
-                        return cursor.fetchone() is not None
-                    else:
-                        cursor.execute(f"PRAGMA table_info({table})")
-                        return any(r[1].lower() == col.lower() for r in cursor.fetchall())
+                    return column_exists(conn, table, col)
                 except Exception:
                     return False
 

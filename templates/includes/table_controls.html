@@ -7,7 +7,8 @@
     register_callback='showRegisterModal()',
     show_final_check=False,
     final_check_label='검토완료 처리',
-    final_check_callback='markFinalCheckCompleted()'
+    final_check_callback='markFinalCheckCompleted()',
+    can_write=True
 ) %}
 <style>
 /* 테이블 헤더 공통 스타일 */
@@ -124,12 +125,12 @@
         </div>
     </div>
     <div class="action-buttons">
-        {% if show_delete %}
+        {% if show_delete and can_write %}
         <button class="btn btn-delete" data-default-label="선택 삭제" onclick="deleteSelectedWithPassword()">
             선택 삭제
         </button>
         {% endif %}
-        {% if show_final_check %}
+        {% if show_final_check and can_write %}
         <button class="btn btn-final-check" data-default-label="{{ final_check_label }}" onclick="{{ final_check_callback }}">
             {{ final_check_label }}
         </button>
@@ -140,7 +141,7 @@
             엑셀 다운로드
         </button>
         {% endif %}
-        {% if show_register %}
+        {% if show_register and can_write %}
         <button class="btn btn-register" onclick="{{ register_callback }}">
             등록
         </button>

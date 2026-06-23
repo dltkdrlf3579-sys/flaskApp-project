@@ -345,7 +345,7 @@ td.fixed-col[style*="width: 60px"] {
 
 <!-- 액션 버튼과 테이블 헤더 통합 -->
 <div class="table-section">
-    {{ render_table_controls(total_count, show_excel=True, show_register=True) }}
+    {{ render_table_controls(total_count, show_excel=True, show_register=True, can_write=can_write|default(true)) }}
     <div class="table-wrapper">
         <table class="data-table">
             <thead>
@@ -1257,9 +1257,9 @@ function updateDeleteButton() {
     }
 }
 
-// 비밀번호 확인 후 선택한 항목 삭제
+// 권한 확인 후 선택한 항목 삭제
 function deleteSelectedWithPassword() {
-    PwModal.show(deleteSelected, { boardType: 'change_request' });
+    deleteSelected();
 }
 
 // 선택한 항목 삭제
@@ -1592,6 +1592,5 @@ function formatDate(dateString) {
 }
 </script>
 
-{% include 'includes/password_modal.html' %}
 
 {% endblock %}

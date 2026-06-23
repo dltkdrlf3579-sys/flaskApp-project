@@ -2,10 +2,9 @@
 
 import logging
 import configparser
-import sqlite3  # sqlite3.Row 재사용용 (커서 결과 dict 변환)
 from typing import Optional
 
-from db.compat import CompatConnection
+from db.postgres import PostgresConnection
 
 
 def _load_config() -> configparser.ConfigParser:
@@ -30,7 +29,7 @@ def _require_postgres_backend(config: configparser.ConfigParser) -> str:
     return dsn
 
 
-def get_db_connection(db_path: str = None, timeout: float = 10.0, row_factory: bool = False):
+def get_db_connection(db_path: str = None, timeout: float = 10.0, **_legacy_options):
     """PostgreSQL 연결을 생성한다. 실패 시 예외를 그대로 전파한다."""
 
     config = _load_config()
@@ -41,11 +40,8 @@ def get_db_connection(db_path: str = None, timeout: float = 10.0, row_factory: b
 
     dsn = _require_postgres_backend(config)
 
-    conn = CompatConnection(backend='postgres', dsn=dsn, timeout=timeout)
+    conn = PostgresConnection(dsn=dsn, timeout=timeout)
     logging.debug("PostgreSQL connection established: %s", dsn)
-
-    if row_factory:
-        conn.row_factory = sqlite3.Row
 
     return conn
 
@@ -61,17 +57,17 @@ class DatabaseConnection:
     """기존 코드 호환용 클래스 - 내부에서 get_db_connection 사용"""
 
     @staticmethod
-    def get_connection(db_path: str, timeout: float = 10.0, row_factory: bool = False):
+    def get_connection(db_path: str, timeout: float = 10.0, **legacy_options):
         """
         기존 코드 호환용 - 내부적으로 새로운 get_db_connection 사용
         """
-        return get_db_connection(db_path, timeout, row_factory)
+        return get_db_connection(db_path, timeout, **legacy_options)
     
     @staticmethod
     def execute_query(conn, query: str, params: tuple = (), 
                       fetch_one: bool = False, fetch_all: bool = True) -> Optional[any]:
         """
-        쿼리 실행 헬퍼 함수 - CompatConnection에서도 동작
+        쿼리 실행 헬퍼 함수
         """
         try:
             cursor = conn.cursor()
@@ -91,7 +87,7 @@ class DatabaseConnection:
     @staticmethod
     def close_connection(conn):
         """
-        연결 안전하게 종료 - CompatConnection에서도 동작
+        연결 안전하게 종료
         """
         if conn:
             try:
@@ -105,14 +101,14 @@ class DatabaseConnection:
 class DatabaseContextManager:
     """with 문과 함께 사용할 수 있는 데이터베이스 컨텍스트 매니저 - v7 호환"""
     
-    def __init__(self, db_path: str = None, timeout: float = 10.0, row_factory: bool = False):
+    def __init__(self, db_path: str = None, timeout: float = 10.0, **legacy_options):
         self.db_path = db_path
         self.timeout = timeout
-        self.row_factory = row_factory
+        self.legacy_options = legacy_options
         self.conn = None
     
     def __enter__(self):
-        self.conn = get_db_connection(self.db_path, self.timeout, self.row_factory)
+        self.conn = get_db_connection(self.db_path, self.timeout, **self.legacy_options)
         return self.conn
     
     def __exit__(self, exc_type, exc_val, exc_tb):

@@ -23,6 +23,8 @@ MENU_PERMISSION_MAP = {
     'partner-standards': 'VENDOR_MGT',
     'partner-change-request': 'REFERENCE_CHANGE',
     'partner-change-request-detail': 'REFERENCE_CHANGE',
+    'partner-access': 'PARTNER_ACCESS',
+    'ai-assistant': 'AI_ASSISTANT',
     'accident': 'ACCIDENT_MGT',
     'accident-register': 'ACCIDENT_MGT',
     'accident-detail': 'ACCIDENT_MGT',
@@ -53,6 +55,57 @@ MENU_PERMISSION_MAP = {
     'full-process-detail': 'FULL_PROCESS',
     'full-process-update': 'FULL_PROCESS',
     'safety-council': 'SAFETY_COUNCIL',
+}
+
+BOARD_PERMISSION_MAP = {
+    'partner': 'VENDOR_MGT',
+    'partners': 'VENDOR_MGT',
+    'vendor': 'VENDOR_MGT',
+    'vendor_mgt': 'VENDOR_MGT',
+    'vendor-management': 'VENDOR_MGT',
+    'partner-standards': 'VENDOR_MGT',
+    'change-request': 'REFERENCE_CHANGE',
+    'change-requests': 'REFERENCE_CHANGE',
+    'change_request': 'REFERENCE_CHANGE',
+    'change_requests': 'REFERENCE_CHANGE',
+    'partner-change-request': 'REFERENCE_CHANGE',
+    'partner_change_request': 'REFERENCE_CHANGE',
+    'accident': 'ACCIDENT_MGT',
+    'accidents': 'ACCIDENT_MGT',
+    'partner-accident': 'ACCIDENT_MGT',
+    'accident_mgt': 'ACCIDENT_MGT',
+    'safety-instruction': 'SAFETY_INSTRUCTION',
+    'safety-instructions': 'SAFETY_INSTRUCTION',
+    'safety_instruction': 'SAFETY_INSTRUCTION',
+    'safety_instructions': 'SAFETY_INSTRUCTION',
+    'follow-sop': 'FOLLOW_SOP',
+    'follow_sop': 'FOLLOW_SOP',
+    'followsop': 'FOLLOW_SOP',
+    'full-process': 'FULL_PROCESS',
+    'full_process': 'FULL_PROCESS',
+    'fullprocess': 'FULL_PROCESS',
+    'safe-workplace': 'SAFE_WORKPLACE',
+    'safe_workplace': 'SAFE_WORKPLACE',
+    'safeplace': 'SAFE_WORKPLACE',
+    'subcontract-approval': 'SUBCONTRACT_APPROVAL',
+    'subcontract_approval': 'SUBCONTRACT_APPROVAL',
+    'subcontract-report': 'SUBCONTRACT_REPORT',
+    'subcontract_report': 'SUBCONTRACT_REPORT',
+}
+
+MENU_ICON_MAP = {
+    'VENDOR_MGT': 'fas fa-building',
+    'REFERENCE_CHANGE': 'fas fa-exchange-alt',
+    'PARTNER_ACCESS': 'fas fa-id-card',
+    'AI_ASSISTANT': 'fas fa-robot',
+    'ACCIDENT_MGT': 'fas fa-exclamation-triangle',
+    'SAFETY_INSTRUCTION': 'fas fa-clipboard-check',
+    'FOLLOW_SOP': 'fas fa-tasks',
+    'FULL_PROCESS': 'fas fa-project-diagram',
+    'SAFE_WORKPLACE': 'fas fa-hard-hat',
+    'SUBCONTRACT_APPROVAL': 'fas fa-file-signature',
+    'SUBCONTRACT_REPORT': 'fas fa-file-alt',
+    'SAFETY_COUNCIL': 'fas fa-users',
 }
 
 _SUFFIXES = (
@@ -89,6 +142,32 @@ def resolve_menu_code(slug: str) -> str:
     if fallback == '':
         return 'HOME'
     return fallback
+
+def resolve_board_permission_code(board_type: str) -> str:
+    """Resolve a board/table/API slug to the canonical menu permission code."""
+    if not board_type:
+        return ''
+
+    key = str(board_type).strip('/').strip().lower()
+    if not key:
+        return ''
+
+    normalized = key.replace(' ', '-')
+    candidates = [
+        normalized,
+        normalized.replace('-', '_'),
+        normalized.replace('_', '-'),
+    ]
+
+    for candidate in candidates:
+        if candidate in BOARD_PERMISSION_MAP:
+            return BOARD_PERMISSION_MAP[candidate]
+
+    menu_code = resolve_menu_code(normalized)
+    if menu_code and menu_code != normalized.replace('-', '_').upper():
+        return menu_code
+
+    return BOARD_PERMISSION_MAP.get(normalized.rstrip('s'), menu_code)
 
 def build_user_menu_config():
     try:
@@ -134,13 +213,20 @@ def get_user_permission_level(menu_code, permission_type='read'):
         if is_super_admin():
             return 3  # 슈퍼어드민은 항상 최고 권한
 
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
         dept_id = session.get('deptid')
 
         if not login_id:
             return 0
+
+        if dept_id:
+            try:
+                from scoped_permission_check import get_permission_level
+                return get_permission_level(login_id, dept_id, menu_code, permission_type)
+            except Exception as scoped_exc:
+                logger.debug("Scoped permission check failed, falling back to legacy check: %s", scoped_exc)
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
 
         # 개인 권한 확인
         cursor.execute("""
@@ -152,7 +238,7 @@ def get_user_permission_level(menu_code, permission_type='read'):
 
         user_perm = cursor.fetchone()
 
-        # 부서 권한 확인
+        # 부서 권한 확인 (legacy fallback)
         dept_perm = None
         if dept_id:
             cursor.execute("""
@@ -238,8 +324,25 @@ def enforce_permission(menu_code, action='view', response_type='html'):
 
     status_code = status or 403
     if response_type == 'json':
-        return jsonify({'error': '권한이 없습니다.'}), status_code
+        return jsonify({
+            'success': False,
+            'error': '권한이 없습니다.',
+            'message': '권한이 없습니다.',
+        }), status_code
     return (error_html or '권한이 없습니다.'), status_code
+
+def enforce_board_permission(board_type, action='view', response_type='json'):
+    """Apply permission checks to dynamic board endpoints."""
+    menu_code = resolve_board_permission_code(board_type)
+    if not menu_code:
+        if response_type == 'json':
+            return jsonify({
+                'success': False,
+                'error': '알 수 없는 게시판 권한입니다.',
+                'message': '알 수 없는 게시판 권한입니다.',
+            }), 400
+        return '알 수 없는 게시판 권한입니다.', 400
+    return enforce_permission(menu_code, action, response_type=response_type)
 
 def get_user_accessible_menus():
     """
@@ -255,6 +358,8 @@ def get_user_accessible_menus():
             return [
                 {'code': 'VENDOR_MGT', 'name': '협력사 기준정보', 'url': '/vendor-management', 'icon': 'fas fa-building', 'read_level': 3, 'write_level': 3},
                 {'code': 'REFERENCE_CHANGE', 'name': '기준정보 변경요청', 'url': '/reference-change', 'icon': 'fas fa-exchange-alt', 'read_level': 3, 'write_level': 3},
+                {'code': 'PARTNER_ACCESS', 'name': '협력사 실시간 출입정보', 'url': '/partner-access', 'icon': 'fas fa-id-card', 'read_level': 3, 'write_level': 3},
+                {'code': 'AI_ASSISTANT', 'name': 'AI 조회 도우미', 'url': '/ai-assistant', 'icon': 'fas fa-robot', 'read_level': 3, 'write_level': 3},
                 {'code': 'ACCIDENT_MGT', 'name': '협력사 사고', 'url': '/accident-management', 'icon': 'fas fa-exclamation-triangle', 'read_level': 3, 'write_level': 3},
                 {'code': 'SAFETY_INSTRUCTION', 'name': '환경안전 지시서', 'url': '/safety-instruction', 'icon': 'fas fa-clipboard-check', 'read_level': 3, 'write_level': 3},
                 {'code': 'FOLLOW_SOP', 'name': 'Follow SOP', 'url': '/follow-sop', 'icon': 'fas fa-tasks', 'read_level': 3, 'write_level': 3},
@@ -265,95 +370,30 @@ def get_user_accessible_menus():
                 {'code': 'SAFETY_COUNCIL', 'name': '안전보건 협의체', 'url': '/safety-council', 'icon': 'fas fa-users', 'read_level': 3, 'write_level': 3},
             ]
 
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        dept_id = session.get('deptid')
-
         if not login_id:
             return []
 
-        # 모든 메뉴와 권한 조회
-        cursor.execute("""
-            WITH user_perms AS (
-                SELECT menu_code, read_level, write_level
-                FROM user_menu_permissions
-                WHERE login_id = %s AND is_active = true
-            ),
-            dept_perms AS (
-                SELECT menu_code, read_level, write_level
-                FROM dept_menu_permissions
-                WHERE dept_id = %s AND is_active = true
-            ),
-            all_menus AS (
-                SELECT 'VENDOR_MGT' as code, '협력사 기준정보' as name, '/vendor-management' as url, 'fas fa-building' as icon
-                UNION ALL
-                SELECT 'REFERENCE_CHANGE', '기준정보 변경요청', '/reference-change', 'fas fa-exchange-alt'
-                UNION ALL
-                SELECT 'ACCIDENT_MGT', '협력사 사고', '/accident-management', 'fas fa-exclamation-triangle'
-                UNION ALL
-                SELECT 'SAFETY_INSTRUCTION', '환경안전 지시서', '/safety-instruction', 'fas fa-clipboard-check'
-                UNION ALL
-                SELECT 'FOLLOW_SOP', 'Follow SOP', '/follow-sop', 'fas fa-tasks'
-                UNION ALL
-                SELECT 'FULL_PROCESS', 'FullProcess', '/full-process', 'fas fa-project-diagram'
-                UNION ALL
-                SELECT 'SAFE_WORKPLACE', '안전한 일터', '/safe-workplace', 'fas fa-hard-hat'
-                UNION ALL
-                SELECT 'SUBCONTRACT_APPROVAL', '산안법 도급승인', '/subcontract-approval', 'fas fa-file-signature'
-                UNION ALL
-                SELECT 'SUBCONTRACT_REPORT', '화관법 도급신고', '/subcontract-report', 'fas fa-file-alt'
-                UNION ALL
-                SELECT 'SAFETY_COUNCIL', '안전보건 협의체', '/safety-council', 'fas fa-users'
-            )
-            SELECT
-                m.code,
-                m.name,
-                m.url,
-                m.icon,
-                GREATEST(
-                    COALESCE(up.read_level, 0),
-                    COALESCE(dp.read_level, 0)
-                ) as read_level,
-                GREATEST(
-                    COALESCE(up.write_level, 0),
-                    COALESCE(dp.write_level, 0)
-                ) as write_level
-            FROM all_menus m
-            LEFT JOIN user_perms up ON m.code = up.menu_code
-            LEFT JOIN dept_perms dp ON m.code = dp.menu_code
-            WHERE GREATEST(
-                COALESCE(up.read_level, 0),
-                COALESCE(dp.read_level, 0)
-            ) > 0
-            ORDER BY
-                CASE m.code
-                    WHEN 'VENDOR_MGT' THEN 1
-                    WHEN 'REFERENCE_CHANGE' THEN 2
-                    WHEN 'ACCIDENT_MGT' THEN 3
-                    WHEN 'SAFETY_INSTRUCTION' THEN 4
-                    WHEN 'FOLLOW_SOP' THEN 5
-                    WHEN 'FULL_PROCESS' THEN 6
-                    WHEN 'SAFE_WORKPLACE' THEN 7
-                    WHEN 'SUBCONTRACT_APPROVAL' THEN 8
-                    WHEN 'SUBCONTRACT_REPORT' THEN 9
-                    WHEN 'SAFETY_COUNCIL' THEN 10
-                END
-        """, (login_id, dept_id or ''))
-
         menus = []
-        for row in cursor.fetchall():
-            menus.append({
-                'code': row[0],
-                'name': row[1],
-                'url': row[2],
-                'icon': row[3],
-                'read_level': row[4],
-                'write_level': row[5]
-            })
-
-        cursor.close()
-        conn.close()
+        seen_codes = set()
+        for section in MENU_CONFIG:
+            for item in section.get('submenu', []):
+                slug = item.get('url') or ''
+                code = resolve_menu_code(slug)
+                if not code or code in seen_codes:
+                    continue
+                read_level = get_user_permission_level(code, 'read')
+                write_level = get_user_permission_level(code, 'write')
+                if read_level <= 0:
+                    continue
+                seen_codes.add(code)
+                menus.append({
+                    'code': code,
+                    'name': item.get('title') or code,
+                    'url': f'/{slug}',
+                    'icon': MENU_ICON_MAP.get(code, 'fas fa-circle'),
+                    'read_level': read_level,
+                    'write_level': write_level,
+                })
 
         return menus
 

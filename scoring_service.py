@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 from typing import Dict, Any, List, Tuple
 
-import sqlite3
 from db_connection import get_db_connection
+from utils.sql_filters import sql_is_active_true, sql_is_deleted_false
 
 
 DEFAULT_CRITERIA = {
@@ -28,10 +28,15 @@ def _normalize_board(board: str) -> str:
 
 
 def _load_columns(board: str, db_path: str) -> List[Dict[str, Any]]:
-    conn = get_db_connection(db_path, row_factory=True)
+    conn = get_db_connection(db_path)
     table = f"{board}_column_config"
     rows = conn.execute(
-        f"SELECT * FROM {table} WHERE (is_deleted = 0 OR is_deleted IS NULL) AND is_active = 1 ORDER BY column_order, id"
+        f"""
+        SELECT * FROM {table}
+        WHERE {sql_is_deleted_false('is_deleted', conn)}
+          AND {sql_is_active_true('is_active', conn)}
+        ORDER BY column_order, id
+        """
     ).fetchall()
     conn.close()
     cols: List[Dict[str, Any]] = []

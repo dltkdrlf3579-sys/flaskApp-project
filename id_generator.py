@@ -4,6 +4,7 @@ from typing import Iterable, Optional
 
 from timezone_config import get_korean_time
 from db_connection import get_db_connection
+from db.schema import table_exists
 
 
 def _resolve_existing_table(conn, primary: str, candidates: Optional[Iterable[str]] = None) -> str:
@@ -21,23 +22,7 @@ def _resolve_existing_table(conn, primary: str, candidates: Optional[Iterable[st
 
     for name in names:
         try:
-            cursor = conn.cursor()
-            try:
-                if getattr(conn, 'is_postgres', False):
-                    cursor.execute("SELECT to_regclass(%s)", (name,))
-                    row = cursor.fetchone()
-                    exists = bool(row and row[0])
-                else:
-                    cursor.execute(
-                        "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
-                        (name,),
-                    )
-                    exists = cursor.fetchone() is not None
-            finally:
-                try:
-                    cursor.close()
-                except Exception:
-                    pass
+            exists = table_exists(conn, name)
         except Exception:
             exists = False
 
@@ -80,17 +65,12 @@ def generate_unique_id(prefix, db_path, table_name, id_column, base_datetime=Non
         resolved_table = _resolve_existing_table(conn, table_name, table_candidates)
         cursor = conn.cursor()
 
-        if getattr(conn, 'is_postgres', False):
-            cursor.execute("BEGIN")
-        else:
-            cursor.execute("BEGIN EXCLUSIVE")
-
         pattern = f"{prefix}{base_id}%"
         cursor.execute(
             f"""
             SELECT {id_column}
             FROM {resolved_table}
-            WHERE {id_column} LIKE ?
+            WHERE {id_column} LIKE %s
             ORDER BY {id_column} DESC
             LIMIT 1
             """,
@@ -223,7 +203,7 @@ def generate_safeplace_number(db_path, base_datetime=None):
             f"""
             SELECT safeplace_no
             FROM {table_name}
-            WHERE safeplace_no LIKE ?
+            WHERE safeplace_no LIKE %s
             ORDER BY safeplace_no DESC
             LIMIT 1
             """,

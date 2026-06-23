@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import sqlite3
 import math
 from contextlib import contextmanager
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
@@ -13,6 +12,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 from werkzeug.datastructures import FileStorage
 
 from db_connection import get_db_connection
+from db.schema import column_names, table_exists
 from db.upsert import safe_upsert
 from repositories.common.board_config import get_board_config
 from utils.board_layout import order_value, sort_columns, sort_sections
@@ -100,7 +100,6 @@ class DynamicBoardRepository:
     @contextmanager
     def connection(self):
         conn = get_db_connection(self._db_path)
-        conn.row_factory = sqlite3.Row
         try:
             yield conn
         finally:
@@ -110,42 +109,10 @@ class DynamicBoardRepository:
     # Internal metadata helpers
 
     def _table_exists(self, conn, table_name: str) -> bool:
-        cursor = conn.cursor()
-        table_key = (table_name or "").lower()
         try:
-            if getattr(conn, "is_postgres", False):
-                cursor.execute(
-                    """
-                    SELECT EXISTS (
-                        SELECT 1 FROM information_schema.tables
-                        WHERE table_schema = %s AND table_name = %s
-                    )
-                    """,
-                    ("public", table_key),
-                )
-                row = cursor.fetchone()
-            else:
-                cursor.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name = %s",
-                    (table_key,),
-                )
-                row = cursor.fetchone()
+            return table_exists(conn, table_name)
         except Exception:
             return False
-
-        if row is None:
-            return False
-
-        if isinstance(row, dict):
-            try:
-                return any(bool(value) for value in row.values())
-            except Exception:
-                return False
-
-        if isinstance(row, (list, tuple)):
-            return bool(row[0])
-
-        return bool(row)
 
     def _resolve_table_name(self, conn) -> str:
         if self._resolved_table:
@@ -190,32 +157,8 @@ class DynamicBoardRepository:
         if table_key in self._columns_cache:
             return self._columns_cache[table_key]
 
-        cursor = conn.cursor()
-        columns: List[str] = []
-
         try:
-            if getattr(conn, "is_postgres", False):
-                cursor.execute(
-                    """
-                    SELECT column_name
-                    FROM information_schema.columns
-                    WHERE table_schema = %s AND table_name = %s
-                    ORDER BY ordinal_position
-                    """,
-                    ("public", table_key),
-                )
-                for row in cursor.fetchall():
-                    if isinstance(row, dict):
-                        columns.append(str(row.get("column_name")))
-                    else:
-                        columns.append(str(row[0]))
-            else:
-                cursor.execute(f"PRAGMA table_info({table_key})")
-                for row in cursor.fetchall():
-                    try:
-                        columns.append(str(row["name"]))
-                    except Exception:
-                        columns.append(str(row[1]))
+            columns = column_names(conn, table_key)
         except Exception:
             columns = []
 

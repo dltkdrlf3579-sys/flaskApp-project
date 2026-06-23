@@ -55,7 +55,8 @@
         show_delete=True,
         show_final_check=True,
         final_check_label='검토완료 처리',
-        final_check_callback='requestFullProcessFinalCheck()'
+        final_check_callback='requestFullProcessFinalCheck()',
+        can_write=can_write|default(true)
     ) }}
     <div class="table-wrapper">
         <table class="data-table">
@@ -882,12 +883,12 @@ function requestFullProcessFinalCheck() {
         return;
     }
 
-    PwModal.show(() => markFullProcessFinalCheck(), { boardType: 'full_process' });
+    markFullProcessFinalCheck();
 }
 
-// 비밀번호 확인 후 선택한 항목 삭제
+// 권한 확인 후 선택한 항목 삭제
 function deleteSelectedWithPassword() {
-    PwModal.show(deleteSelected, { boardType: 'full_process' });
+    deleteSelected();
 }
 
 function markFullProcessFinalCheck() {
@@ -979,8 +980,5 @@ function deleteSelected() {
 
 document.addEventListener('DOMContentLoaded', updateDeleteButton);
 </script>
-
-<!-- 비밀번호 모달 포함 -->
-{% include 'includes/password_modal.html' %}
 
 {% endblock %}

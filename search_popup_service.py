@@ -3,7 +3,6 @@
 모든 보드에서 사용하는 검색 팝업 통합 관리
 실시간 외부 DB 연계 지원
 """
-import sqlite3
 import logging
 import configparser
 import os
@@ -11,6 +10,8 @@ import sys
 from typing import List, Dict, Any, Optional
 import math
 from db_connection import get_db_connection
+from db.schema import table_exists
+from utils.sql_filters import sql_is_active_true
 from datetime import datetime, timedelta
 import hashlib
 import json
@@ -317,19 +318,14 @@ class SearchPopupService:
             return
             
         try:
-            conn = get_db_connection(self.db_path, row_factory=True)
+            conn = get_db_connection(self.db_path)
             cursor = conn.cursor()
             
             # 보드별 컬럼 설정 테이블명
             column_table = f"{self.board_type}_column_config"
             
             # 테이블 존재 확인
-            cursor.execute("""
-                SELECT COUNT(*) FROM sqlite_master 
-                WHERE type='table' AND name=?
-            """, (column_table,))
-            
-            if cursor.fetchone()[0] == 0:
+            if not table_exists(conn, column_table):
                 conn.close()
                 return
             
@@ -337,7 +333,7 @@ class SearchPopupService:
             cursor.execute(f"""
                 SELECT column_key, column_name, column_type
                 FROM {column_table}
-                WHERE is_active = 1
+                WHERE {sql_is_active_true('is_active', conn)}
                 ORDER BY column_order
             """)
             
@@ -476,7 +472,7 @@ class SearchPopupService:
 
             # 모든 타입이 로컬 캐시 테이블 사용
             if config.get('use_cache') and config.get('table'):
-                conn = get_db_connection(self.db_path, row_factory=True)
+                conn = get_db_connection(self.db_path)
                 cursor = conn.cursor()
 
                 table_name = config['table']
@@ -501,16 +497,10 @@ class SearchPopupService:
                         value = filt['value']
                         dynamic_field = is_dynamic_field(field)
                         like_param = f"%{value}%"
-                        if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                            if dynamic_field:
-                                where_clauses.append(f"(custom_data->>'{field}') ILIKE %s")
-                            else:
-                                where_clauses.append(f"{field} ILIKE %s")
+                        if dynamic_field:
+                            where_clauses.append(f"(custom_data->>'{field}') ILIKE %s")
                         else:
-                            if dynamic_field:
-                                where_clauses.append(f"json_extract(custom_data, '$.{field}') LIKE ?")
-                            else:
-                                where_clauses.append(f"{field} LIKE ?")
+                            where_clauses.append(f"{field} ILIKE %s")
                         base_params.append(like_param)
 
                     if not where_clauses:
@@ -528,28 +518,16 @@ class SearchPopupService:
                     where_sql = ' AND '.join(where_clauses) if config.get('advanced_filter_operator', 'and').lower() == 'and' else ' OR '.join(where_clauses)
                     order_clause = config.get('order_by', config.get('id_field', 'id'))
 
-                    if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                        query_sql = f"""
-                            SELECT * FROM {table_name}
-                            WHERE {where_sql}
-                            ORDER BY {order_clause}
-                            LIMIT %s OFFSET %s
-                        """
-                        count_sql = f"""
-                            SELECT COUNT(*) FROM {table_name}
-                            WHERE {where_sql}
-                        """
-                    else:
-                        query_sql = f"""
-                            SELECT * FROM {table_name}
-                            WHERE {where_sql}
-                            ORDER BY {order_clause}
-                            LIMIT ? OFFSET ?
-                        """
-                        count_sql = f"""
-                            SELECT COUNT(*) FROM {table_name}
-                            WHERE {where_sql}
-                        """
+                    query_sql = f"""
+                        SELECT * FROM {table_name}
+                        WHERE {where_sql}
+                        ORDER BY {order_clause}
+                        LIMIT %s OFFSET %s
+                    """
+                    count_sql = f"""
+                        SELECT COUNT(*) FROM {table_name}
+                        WHERE {where_sql}
+                    """
 
                     count_params = list(base_params)
                     query_params = list(base_params)
@@ -561,35 +539,20 @@ class SearchPopupService:
                     like_param = f"%{query}%"
 
                     if is_dynamic:
-                        if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                            condition = f"(custom_data->>'{search_field}') ILIKE %s"
-                        else:
-                            condition = f"json_extract(custom_data, '$.{search_field}') LIKE ?"
+                        condition = f"(custom_data->>'{search_field}') ILIKE %s"
                     else:
-                        condition = f"{search_field} ILIKE %s" if hasattr(conn, 'is_postgres') and conn.is_postgres else f"{search_field} LIKE ?"
+                        condition = f"{search_field} ILIKE %s"
 
-                    if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                        query_sql = f"""
-                            SELECT * FROM {table_name}
-                            WHERE {condition}
-                            ORDER BY {order_clause}
-                            LIMIT %s OFFSET %s
-                        """
-                        count_sql = f"""
-                            SELECT COUNT(*) FROM {table_name}
-                            WHERE {condition}
-                        """
-                    else:
-                        query_sql = f"""
-                            SELECT * FROM {table_name}
-                            WHERE {condition}
-                            ORDER BY {order_clause}
-                            LIMIT ? OFFSET ?
-                        """
-                        count_sql = f"""
-                            SELECT COUNT(*) FROM {table_name}
-                            WHERE {condition}
-                        """
+                    query_sql = f"""
+                        SELECT * FROM {table_name}
+                        WHERE {condition}
+                        ORDER BY {order_clause}
+                        LIMIT %s OFFSET %s
+                    """
+                    count_sql = f"""
+                        SELECT COUNT(*) FROM {table_name}
+                        WHERE {condition}
+                    """
 
                     count_params = [like_param]
                     query_params = [like_param, query_limit, offset]
@@ -602,51 +565,30 @@ class SearchPopupService:
                             field = field_info['field']
                             is_dynamic = field_info.get('is_dynamic', False)
                             like_param = f"%{query}%"
-                            if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                                if is_dynamic:
-                                    where_clauses.append(f"(custom_data->>'{field}') ILIKE %s")
-                                else:
-                                    where_clauses.append(f"{field} ILIKE %s")
+                            if is_dynamic:
+                                where_clauses.append(f"(custom_data->>'{field}') ILIKE %s")
                             else:
-                                if is_dynamic:
-                                    where_clauses.append(f"json_extract(custom_data, '$.{field}') LIKE ?")
-                                else:
-                                    where_clauses.append(f"{field} LIKE ?")
+                                where_clauses.append(f"{field} ILIKE %s")
                             base_params.append(like_param)
                         else:
                             field = field_info
                             like_param = f"%{query}%"
-                            if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                                where_clauses.append(f"{field} ILIKE %s")
-                            else:
-                                where_clauses.append(f"{field} LIKE ?")
+                            where_clauses.append(f"{field} ILIKE %s")
                             base_params.append(like_param)
 
                     where_sql = ' OR '.join(where_clauses)
                     order_clause = config.get('order_by', config.get('id_field', 'id'))
 
-                    if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                        query_sql = f"""
-                            SELECT * FROM {table_name}
-                            WHERE {where_sql}
-                            ORDER BY {order_clause}
-                            LIMIT %s OFFSET %s
-                        """
-                        count_sql = f"""
-                            SELECT COUNT(*) FROM {table_name}
-                            WHERE {where_sql}
-                        """
-                    else:
-                        query_sql = f"""
-                            SELECT * FROM {table_name}
-                            WHERE {where_sql}
-                            ORDER BY {order_clause}
-                            LIMIT ? OFFSET ?
-                        """
-                        count_sql = f"""
-                            SELECT COUNT(*) FROM {table_name}
-                            WHERE {where_sql}
-                        """
+                    query_sql = f"""
+                        SELECT * FROM {table_name}
+                        WHERE {where_sql}
+                        ORDER BY {order_clause}
+                        LIMIT %s OFFSET %s
+                    """
+                    count_sql = f"""
+                        SELECT COUNT(*) FROM {table_name}
+                        WHERE {where_sql}
+                    """
 
                     count_params = list(base_params)
                     query_params = list(base_params)
@@ -861,13 +803,13 @@ class SearchPopupService:
         try:
             # 모든 타입이 로컬 캐시 테이블에서 조회
             if config.get('use_cache') and config.get('table'):
-                conn = get_db_connection(self.db_path, row_factory=True)
+                conn = get_db_connection(self.db_path)
                 cursor = conn.cursor()
                 
                 table_name = config['table']
                 cursor.execute(f"""
                     SELECT * FROM {table_name}
-                    WHERE {config['id_field']} = ?
+                    WHERE {config['id_field']} = %s
                 """, (item_id,))
                 
                 row = cursor.fetchone()

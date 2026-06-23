@@ -69,7 +69,7 @@ td[data-col] .list-item-display {
 
 <!-- 목록 테이블 -->
 <div class="table-section">
-    {{ render_table_controls(total_count, show_excel=True, show_register=True) }}
+    {{ render_table_controls(total_count, show_excel=True, show_register=True, can_write=can_write|default(true)) }}
     <div class="table-wrapper">
         <table class="data-table">
             <thead>
@@ -868,9 +868,9 @@ function updateDeleteButton() {
     }
 }
 
-// 비밀번호 확인 후 선택한 항목 삭제
+// 권한 확인 후 선택한 항목 삭제
 function deleteSelectedWithPassword() {
-    PwModal.show(deleteSelected, { boardType: 'safety_instruction' });
+    deleteSelected();
 }
 
 // 선택한 항목 삭제
@@ -913,8 +913,5 @@ function deleteSelected() {
     });
 }
 </script>
-
-<!-- 비밀번호 모달 포함 -->
-{% include 'includes/password_modal.html' %}
 
 {% endblock %}

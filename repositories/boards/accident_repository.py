@@ -8,9 +8,11 @@ import os
 from contextlib import contextmanager
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
+from flask import session
 from werkzeug.datastructures import FileStorage
 
 from db_connection import get_db_connection
+from db.schema import column_exists
 from db.upsert import safe_upsert
 from section_service import SectionConfigService
 from utils.sql_filters import sql_is_active_true, sql_is_deleted_false
@@ -20,6 +22,15 @@ from list_schema_utils import resolve_child_schema, deserialize_list_rows
 
 class AccidentRepository:
     """Encapsulates database operations used by the accident controller."""
+
+    scope_columns = {
+        'created_by_login': 'TEXT',
+        'created_by_dept_id': 'TEXT',
+        'created_by_dept_name': 'TEXT',
+        'updated_by_login': 'TEXT',
+        'updated_by_dept_id': 'TEXT',
+        'updated_by_dept_name': 'TEXT',
+    }
 
     def __init__(self, db_path: str) -> None:
         self._db_path = db_path
@@ -54,6 +65,139 @@ class AccidentRepository:
             return login_id
         return 'SYSTEM'
 
+    def _current_scope_values(self) -> Dict[str, str]:
+        return {
+            'login_id': session.get('user_id') or session.get('loginid') or '',
+            'dept_id': session.get('deptid') or session.get('dept_id') or '',
+            'dept_name': session.get('deptname') or session.get('dept_name') or '',
+        }
+
+    def _ensure_scope_columns(self, conn) -> None:
+        altered = False
+        for column_name, column_type in self.scope_columns.items():
+            try:
+                if not self._table_has_column(conn, 'accidents_cache', column_name):
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        f"ALTER TABLE accidents_cache ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
+                    )
+                    altered = True
+            except Exception as exc:
+                logging.debug("[ACCIDENT] scope column ensure skipped for %s: %s", column_name, exc)
+        if altered:
+            try:
+                conn.commit()
+            except Exception as exc:
+                logging.debug("[ACCIDENT] scope column commit skipped: %s", exc)
+
+    def _accident_permission_level(self, action: str) -> int:
+        try:
+            from permission_helpers import get_user_permission_level
+            permission_type = 'read' if action == 'read' else 'write'
+            return int(get_user_permission_level('ACCIDENT_MGT', permission_type) or 0)
+        except Exception as exc:
+            logging.debug("[ACCIDENT] permission level lookup failed: %s", exc)
+            return 0
+
+    def _legacy_actor_matches(self, value: Any, login_id: str) -> bool:
+        if not value or not login_id:
+            return False
+        text = str(value).strip()
+        return text == login_id or text.endswith(f"/{login_id}") or text.endswith(f"({login_id})")
+
+    def _record_matches_scope(self, record: Mapping[str, Any], action: str) -> bool:
+        level = self._accident_permission_level(action)
+        if level >= 3:
+            return True
+        if level <= 0:
+            return False
+
+        scope = self._current_scope_values()
+        login_id = scope['login_id']
+        dept_id = scope['dept_id']
+        dept_name = scope['dept_name']
+        if not login_id:
+            return False
+
+        owner_values = [
+            record.get('created_by_login'),
+            record.get('updated_by_login'),
+        ]
+        if any(value and str(value) == login_id for value in owner_values):
+            return True
+
+        legacy_owner_values = [
+            record.get('created_by'),
+            record.get('updated_by'),
+        ]
+        if any(self._legacy_actor_matches(value, login_id) for value in legacy_owner_values):
+            return True
+
+        if level < 2:
+            return False
+
+        dept_id_values = [
+            record.get('created_by_dept_id'),
+            record.get('updated_by_dept_id'),
+        ]
+        if dept_id and any(value and str(value) == dept_id for value in dept_id_values):
+            return True
+
+        dept_name_values = [
+            record.get('created_by_dept_name'),
+            record.get('updated_by_dept_name'),
+            record.get('department'),
+        ]
+        if dept_name and any(value and str(value) == dept_name for value in dept_name_values):
+            return True
+
+        return False
+
+    def _build_scope_filter(self, conn, action: str, alias: str = 's') -> Tuple[str, List[Any]]:
+        level = self._accident_permission_level(action)
+        if level >= 3:
+            return "1=1", []
+        if level <= 0:
+            return "1=0", []
+
+        scope = self._current_scope_values()
+        login_id = scope['login_id']
+        dept_id = scope['dept_id']
+        dept_name = scope['dept_name']
+        if not login_id:
+            return "1=0", []
+
+        prefix = f"{alias}." if alias else ""
+        clauses: List[str] = []
+        params: List[Any] = []
+
+        for column_name in ('created_by_login', 'updated_by_login'):
+            if self._table_has_column(conn, 'accidents_cache', column_name):
+                clauses.append(f"COALESCE({prefix}{column_name}, '') = %s")
+                params.append(login_id)
+
+        for column_name in ('created_by', 'updated_by'):
+            if self._table_has_column(conn, 'accidents_cache', column_name):
+                clauses.append(
+                    f"(COALESCE({prefix}{column_name}, '') = %s OR COALESCE({prefix}{column_name}, '') LIKE %s)"
+                )
+                params.extend([login_id, f"%/{login_id}"])
+
+        if level >= 2:
+            for column_name in ('created_by_dept_id', 'updated_by_dept_id'):
+                if dept_id and self._table_has_column(conn, 'accidents_cache', column_name):
+                    clauses.append(f"COALESCE({prefix}{column_name}, '') = %s")
+                    params.append(dept_id)
+
+            for column_name in ('created_by_dept_name', 'updated_by_dept_name', 'department'):
+                if dept_name and self._table_has_column(conn, 'accidents_cache', column_name):
+                    clauses.append(f"COALESCE({prefix}{column_name}, '') = %s")
+                    params.append(dept_name)
+
+        if not clauses:
+            return "1=0", []
+        return "(" + " OR ".join(clauses) + ")", params
+
     @contextmanager
     def connection(self):
         conn = get_db_connection(self._db_path)
@@ -74,6 +218,7 @@ class AccidentRepository:
         page, per_page = pagination
 
         with self.connection() as conn:
+            self._ensure_scope_columns(conn)
             section_service = SectionConfigService('accident', self.db_path)
             sections = section_service.get_sections() or []
 
@@ -122,10 +267,13 @@ class AccidentRepository:
         from common_mapping import smart_apply_mappings
 
         with self.connection() as conn:
+            self._ensure_scope_columns(conn)
             sections = self._load_sections_for_detail(conn)
             accident, custom_data = self._load_accident_record(conn, accident_id)
             if accident is None:
                 return {}
+            if not self._record_matches_scope(accident, 'read'):
+                return {'_permission_denied': True}
 
             dynamic_columns = self._fetch_dynamic_columns(conn, include_deleted=True)
             self._normalise_popup_types(dynamic_columns, {c.get('column_key') for c in dynamic_columns if c.get('column_key')})
@@ -195,9 +343,19 @@ class AccidentRepository:
             return {'success': False, 'message': validation_errors[0], 'errors': validation_errors}, 400
 
         with self.connection() as conn:
+            self._ensure_scope_columns(conn)
             cursor = conn.cursor()
 
             accident_number, payload, custom_data = self._prepare_save_payload(request, cursor)
+            scope = self._current_scope_values()
+            payload.update({
+                'created_by_login': scope['login_id'],
+                'created_by_dept_id': scope['dept_id'],
+                'created_by_dept_name': scope['dept_name'],
+                'updated_by_login': scope['login_id'],
+                'updated_by_dept_id': scope['dept_id'],
+                'updated_by_dept_name': scope['dept_name'],
+            })
 
             logging.info("[ACCIDENT] create request for %s", accident_number)
             logging.info("[ACCIDENT] detailed_content length incoming=%s", len(data.get('detailed_content', '') or ''))
@@ -213,7 +371,7 @@ class AccidentRepository:
                 'accidents_cache',
                 payload,
                 conflict_cols=['accident_number'],
-                update_cols=['accident_name', 'workplace', 'accident_grade', 'major_category', 'injury_form', 'injury_type', 'accident_date', 'created_at', 'updated_at', 'report_date', 'day_of_week', 'building', 'floor', 'location_category', 'location_detail', 'custom_data', 'created_by', 'updated_by']
+                update_cols=['accident_name', 'workplace', 'accident_grade', 'major_category', 'injury_form', 'injury_type', 'accident_date', 'created_at', 'updated_at', 'report_date', 'day_of_week', 'building', 'floor', 'location_category', 'location_detail', 'custom_data', 'created_by', 'updated_by', 'updated_by_login', 'updated_by_dept_id', 'updated_by_dept_name']
             )
 
             safe_upsert(
@@ -332,6 +490,12 @@ class AccidentRepository:
         payload['updated_at'] = get_korean_time().strftime('%Y-%m-%d')
         if actor_label:
             payload['updated_by'] = actor_label
+        scope = self._current_scope_values()
+        payload.update({
+            'updated_by_login': scope['login_id'],
+            'updated_by_dept_id': scope['dept_id'],
+            'updated_by_dept_name': scope['dept_name'],
+        })
 
         deleted_raw = data.get('deleted_attachments', '[]')
         try:
@@ -348,11 +512,16 @@ class AccidentRepository:
             attachment_meta = []
 
         with self.connection() as conn:
+            self._ensure_scope_columns(conn)
             existing_row = conn.execute(
                 "SELECT * FROM accidents_cache WHERE accident_number = %s",
                 (accident_number,)
             ).fetchone()
             existing = dict(existing_row) if existing_row else {}
+            if not existing:
+                return {'success': False, 'message': '사고 정보를 찾을 수 없습니다.'}, 404
+            if not self._record_matches_scope(existing, 'write'):
+                return {'success': False, 'message': '해당 사고를 수정할 권한이 없습니다.'}, 403
 
             for key in ['accident_name', 'workplace', 'accident_grade', 'major_category', 'injury_form', 'injury_type',
                          'accident_date', 'report_date', 'day_of_week', 'building', 'floor', 'location_category', 'location_detail']:
@@ -367,7 +536,8 @@ class AccidentRepository:
                 update_cols=[
                     'accident_name', 'workplace', 'accident_grade', 'major_category', 'injury_form',
                     'injury_type', 'accident_date', 'report_date', 'day_of_week', 'building', 'floor',
-                    'location_category', 'location_detail', 'custom_data', 'updated_at', 'updated_by'
+                    'location_category', 'location_detail', 'custom_data', 'updated_at', 'updated_by',
+                    'updated_by_login', 'updated_by_dept_id', 'updated_by_dept_name'
                 ],
             )
 
@@ -583,24 +753,25 @@ class AccidentRepository:
         page: int,
         per_page: int,
     ) -> Tuple[int, List[Dict[str, Any]]]:
-        where_deleted = sql_is_deleted_false('is_deleted', conn)
-        query = f"SELECT * FROM accidents_cache WHERE {where_deleted}"
-        params: List[Any] = []
+        where_deleted = sql_is_deleted_false('s.is_deleted', conn)
+        scope_sql, scope_params = self._build_scope_filter(conn, 'read', alias='s')
+        query = f"SELECT s.* FROM accidents_cache s WHERE {where_deleted} AND {scope_sql}"
+        params: List[Any] = list(scope_params)
 
         if filters.get('accident_date_start'):
-            query += " AND accident_date >= %s"
+            query += " AND s.accident_date >= %s"
             params.append(filters['accident_date_start'])
 
         if filters.get('accident_date_end'):
-            query += " AND accident_date <= %s"
+            query += " AND s.accident_date <= %s"
             params.append(filters['accident_date_end'])
 
         if filters.get('workplace'):
-            query += " AND workplace LIKE %s"
+            query += " AND s.workplace LIKE %s"
             params.append(f"%{filters['workplace']}%")
 
         if filters.get('accident_grade'):
-            query += " AND accident_grade LIKE %s"
+            query += " AND s.accident_grade LIKE %s"
             params.append(f"%{filters['accident_grade']}%")
 
         count_query = f"SELECT COUNT(*) FROM ({query}) AS total"
@@ -618,14 +789,14 @@ class AccidentRepository:
 
         if self._table_has_column(conn, 'accidents_cache', 'created_at'):
             if getattr(conn, 'is_postgres', False):
-                order_clause = " ORDER BY created_at DESC NULLS LAST, accident_number DESC"
+                order_clause = " ORDER BY s.created_at DESC NULLS LAST, s.accident_number DESC"
             else:
-                order_clause = " ORDER BY (created_at IS NULL), created_at DESC, accident_number DESC"
+                order_clause = " ORDER BY (s.created_at IS NULL), s.created_at DESC, s.accident_number DESC"
         else:
             if getattr(conn, 'is_postgres', False):
-                order_clause = " ORDER BY report_date DESC NULLS LAST, accident_number DESC"
+                order_clause = " ORDER BY s.report_date DESC NULLS LAST, s.accident_number DESC"
             else:
-                order_clause = " ORDER BY (report_date IS NULL), report_date DESC, accident_number DESC"
+                order_clause = " ORDER BY (s.report_date IS NULL), s.report_date DESC, s.accident_number DESC"
 
         query += f"{order_clause} LIMIT %s OFFSET %s"
         offset = (page - 1) * per_page
@@ -634,34 +805,10 @@ class AccidentRepository:
         return total_count, accidents
 
     def _table_has_column(self, conn, table_name: str, column_name: str) -> bool:
-        cursor = conn.cursor()
         try:
-            if getattr(conn, 'is_postgres', False):
-                cursor.execute(
-                    """
-                    SELECT 1
-                    FROM information_schema.columns
-                    WHERE table_name = %s AND column_name = %s
-                    """,
-                    (table_name, column_name),
-                )
-                return cursor.fetchone() is not None
-            cursor.execute(f"PRAGMA table_info({table_name})")
-            for row in cursor.fetchall():
-                try:
-                    name = row['name']
-                except Exception:
-                    name = row[1] if len(row) > 1 else None
-                if (name or '').lower() == column_name.lower():
-                    return True
-            return False
+            return column_exists(conn, table_name, column_name)
         except Exception:
             return False
-        finally:
-            try:
-                cursor.close()
-            except Exception:
-                pass
 
     def _post_process_accidents(
         self,

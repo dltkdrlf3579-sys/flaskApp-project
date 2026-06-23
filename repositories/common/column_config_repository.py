@@ -131,14 +131,15 @@ class ColumnConfigRepository:
             placeholders = ', '.join(['%s'] * len(values))
             column_clause = ', '.join(columns)
 
-            cursor.execute_with_returning_id(
+            cursor.execute(
                 f"""
                 INSERT INTO {self.table} ({column_clause}, created_at, updated_at)
                 VALUES ({placeholders}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                RETURNING id
                 """,
                 values,
             )
-            new_id = cursor.lastrowid
+            new_id = cursor.fetchone()[0]
             conn.commit()
             return new_id
         finally:

@@ -12,7 +12,7 @@
 {% block title %}사고 상세정보{% endblock %}
 {% block popup_title %}{{ accident.accident_number }} - 사고 상세정보{% endblock %}
 {% block content %}
-{% from 'includes/board_form/save_controls.html' import render_save_button, render_password_modal %}
+{% from 'includes/board_form/save_controls.html' import render_save_button %}
 {% from 'includes/board_form/detail_content.html' import render_detail_content %}
 
 {% set feature_toggles = feature_toggles or {} %}
@@ -467,14 +467,10 @@
     {% from 'includes/attachment_section.html' import render_attachment_section %}
     {{ render_attachment_section(attachments, 'accident') }}
 
-    {{ render_save_button('showEditPasswordModal()') }}
+    {% if can_write|default(true) %}
+        {{ render_save_button('updateAccident()') }}
+    {% endif %}
 
-    {{ render_password_modal(
-        modal_id='edit-password-modal',
-        input_id='edit-password-input',
-        confirm_onclick='verifyPasswordAndSave()',
-        cancel_onclick='closeEditPasswordModal()'
-    ) }}
 </div>
 
 <!-- Detail scripts -->
@@ -562,49 +558,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-function showEditPasswordModal() {
-    if (!CAN_WRITE) {
-        alert('등록/수정 권한이 없습니다. 권한 신청 후 승인을 받아주세요.');
-        return;
-    }
-    document.getElementById('edit-password-modal').style.display = 'block';
-    document.getElementById('edit-password-input').focus();
-}
-
-function closeEditPasswordModal() {
-    document.getElementById('edit-password-modal').style.display = 'none';
-    document.getElementById('edit-password-input').value = '';
-}
-
-function verifyPasswordAndSave() {
-    const input = document.getElementById('edit-password-input');
-    const password = input ? input.value : '';
-
-    if (!password) {
-        alert('비밀번호를 입력해주세요.');
-        if (input) {
-            input.focus();
-        }
-        return;
-    }
-
-    BoardDetail.verifyPassword({ boardType: 'accident', password })
-        .then(() => {
-            closeEditPasswordModal();
-            updateAccident();
-        })
-        .catch((error) => {
-            alert(error && error.message ? error.message : '비밀번호가 올바르지 않습니다.');
-            if (input) {
-                input.value = '';
-                input.focus();
-            }
-        });
-}
-
-window.verifyPasswordAndSave = verifyPasswordAndSave;
-window.showEditPasswordModal = showEditPasswordModal;
-window.closeEditPasswordModal = closeEditPasswordModal;
 </script>
 
 {% if is_popup %}

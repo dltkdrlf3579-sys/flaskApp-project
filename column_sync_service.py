@@ -3,13 +3,13 @@ JSON 기반 컬럼 설정 동기화 서비스
 JSON 파일의 컬럼 설정을 DB로 동기화
 """
 import json
-import sqlite3
 import os
 import logging
 from typing import Dict, List, Any
 from datetime import datetime
 from db_connection import get_db_connection
 from db.upsert import safe_upsert
+from utils.sql_filters import sql_is_active_true
 
 class ColumnSyncService:
     """
@@ -125,7 +125,7 @@ class ColumnSyncService:
         """
         cursor.execute(f"""
             CREATE TABLE IF NOT EXISTS {table_name} (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 column_key TEXT UNIQUE NOT NULL,
                 column_name TEXT NOT NULL,
                 column_type TEXT DEFAULT 'text',
@@ -149,7 +149,7 @@ class ColumnSyncService:
         # dropdown_option_codes_v2 테이블 확인
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS dropdown_option_codes_v2 (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id SERIAL PRIMARY KEY,
                 board_type TEXT NOT NULL,
                 column_key TEXT NOT NULL,
                 option_code TEXT NOT NULL,
@@ -171,7 +171,7 @@ class ColumnSyncService:
                 cursor.execute("""
                     UPDATE dropdown_option_codes_v2
                     SET is_active = 0
-                    WHERE board_type = ? AND column_key = ?
+                    WHERE board_type = %s AND column_key = %s
                 """, (board_type, col['key']))
                 
                 # 새 옵션 추가/업데이트
@@ -207,7 +207,7 @@ class ColumnSyncService:
             성공 여부
         """
         try:
-            conn = get_db_connection(self.db_path, row_factory=True)
+            conn = get_db_connection(self.db_path)
             cursor = conn.cursor()
             
             table_name = f'{board_type}_column_config'
@@ -218,7 +218,7 @@ class ColumnSyncService:
                        column_order, is_active, is_required,
                        dropdown_options, table_name, table_type
                 FROM {table_name}
-                WHERE is_active = 1
+                WHERE {sql_is_active_true('is_active', conn)}
                 ORDER BY column_order
             """)
             

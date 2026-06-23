@@ -1,0 +1,844 @@
+{% extends "base.html" %}
+{% block title %}AI 조회 도우미{% endblock %}
+
+{% block content %}
+<style>
+.page-header {
+    background: #fff;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #2f5fd3;
+}
+.page-title {
+    color: #333;
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0;
+}
+.assistant-shell {
+    display: grid;
+    grid-template-columns: 250px minmax(0, 1fr) 280px;
+    gap: 18px;
+}
+.chat-panel,
+.session-panel,
+.domain-panel {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+.chat-panel {
+    min-height: 620px;
+    display: flex;
+    flex-direction: column;
+}
+.chat-history {
+    flex: 1;
+    padding: 24px;
+    overflow-y: auto;
+    background: linear-gradient(180deg, #f8fafc 0%, #fff 100%);
+}
+.chat-empty {
+    max-width: 720px;
+    margin: 80px auto 0;
+    text-align: center;
+    color: #64748b;
+}
+.chat-empty h2 {
+    color: #1f2937;
+    font-size: 24px;
+    margin-bottom: 10px;
+}
+.example-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 10px;
+    margin-top: 24px;
+}
+.example-button {
+    border: 1px solid #dbe3f0;
+    background: #fff;
+    color: #334155;
+    border-radius: 8px;
+    padding: 12px;
+    text-align: left;
+    cursor: pointer;
+}
+.example-button:hover {
+    border-color: #2f5fd3;
+    color: #1d4ed8;
+}
+.message-row {
+    display: flex;
+    margin-bottom: 18px;
+}
+.message-row.user {
+    justify-content: flex-end;
+}
+.message-row.assistant {
+    justify-content: flex-start;
+}
+.message-bubble {
+    max-width: 78%;
+    padding: 13px 15px;
+    border-radius: 14px;
+    white-space: pre-wrap;
+    line-height: 1.55;
+    font-size: 14px;
+}
+.message-row.user .message-bubble {
+    background: #2f5fd3;
+    color: #fff;
+    border-bottom-right-radius: 4px;
+}
+.message-row.assistant .message-bubble {
+    width: min(980px, 100%);
+    max-width: 100%;
+    background: transparent;
+    color: #1f2937;
+    border-radius: 0;
+    padding: 8px 0;
+}
+.message-content {
+    min-height: 1.4em;
+}
+.message-bubble.streaming {
+    min-width: 280px;
+}
+.stream-status-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+    color: #475569;
+    font-size: 12px;
+}
+.status-line {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+.status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #2f5fd3;
+    box-shadow: 0 0 0 4px rgba(47, 95, 211, 0.12);
+}
+.typing-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 4px;
+}
+.typing-dots span {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #64748b;
+    animation: typingPulse 1s infinite ease-in-out;
+}
+.typing-dots span:nth-child(2) {
+    animation-delay: 0.15s;
+}
+.typing-dots span:nth-child(3) {
+    animation-delay: 0.3s;
+}
+@keyframes typingPulse {
+    0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+    40% { opacity: 1; transform: translateY(-2px); }
+}
+.message-meta {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #64748b;
+}
+.chat-input-bar {
+    border-top: 1px solid #e5e7eb;
+    padding: 16px;
+    background: #fff;
+    border-radius: 0 0 10px 10px;
+}
+.chat-form {
+    display: flex;
+    gap: 10px;
+}
+.chat-form textarea {
+    flex: 1;
+    min-height: 48px;
+    max-height: 140px;
+    resize: vertical;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 14px;
+    line-height: 1.5;
+}
+.chat-form textarea:focus {
+    outline: none;
+    border-color: #2f5fd3;
+    box-shadow: 0 0 0 2px rgba(47, 95, 211, 0.12);
+}
+.send-button {
+    width: 92px;
+    border: none;
+    border-radius: 8px;
+    background: #2f5fd3;
+    color: #fff;
+    font-weight: 700;
+    cursor: pointer;
+}
+.send-button:disabled {
+    background: #94a3b8;
+    cursor: not-allowed;
+}
+.session-panel {
+    padding: 14px;
+    align-self: stretch;
+    min-height: 620px;
+}
+.session-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+.session-header h3 {
+    font-size: 15px;
+    margin: 0;
+    color: #1f2937;
+}
+.new-session-button {
+    border: 1px solid #dbe3f0;
+    background: #f8fafc;
+    color: #1d4ed8;
+    border-radius: 7px;
+    padding: 6px 9px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.new-session-button:hover {
+    border-color: #2f5fd3;
+    background: #eff6ff;
+}
+.session-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 560px;
+    overflow-y: auto;
+}
+.session-empty {
+    color: #94a3b8;
+    font-size: 13px;
+    line-height: 1.45;
+    padding: 12px 6px;
+}
+.session-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 9px 8px;
+    background: #fff;
+    cursor: pointer;
+}
+.session-item:hover {
+    background: #f8fafc;
+    border-color: #e2e8f0;
+}
+.session-item.active {
+    background: #eff6ff;
+    border-color: #bfdbfe;
+}
+.session-title {
+    color: #334155;
+    font-size: 13px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.session-date {
+    color: #94a3b8;
+    font-size: 11px;
+    margin-top: 3px;
+}
+.session-delete {
+    border: none;
+    background: transparent;
+    color: #94a3b8;
+    cursor: pointer;
+    font-size: 15px;
+    padding: 2px 4px;
+}
+.session-delete:hover {
+    color: #ef4444;
+}
+.domain-panel {
+    padding: 18px;
+    align-self: start;
+}
+.domain-panel h3 {
+    font-size: 16px;
+    margin: 0 0 12px;
+    color: #1f2937;
+}
+.status-card {
+    border: 1px solid #dbeafe;
+    background: #eff6ff;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 14px;
+    font-size: 13px;
+    color: #1e3a8a;
+}
+.domain-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.domain-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 11px;
+    background: #fafafa;
+}
+.domain-name {
+    font-weight: 700;
+    color: #334155;
+    margin-bottom: 4px;
+}
+.domain-desc {
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.45;
+}
+.domain-db {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    color: #334155;
+    font-size: 11px;
+}
+@media (max-width: 1180px) {
+    .assistant-shell {
+        grid-template-columns: 1fr;
+    }
+    .session-panel {
+        min-height: auto;
+    }
+    .session-list {
+        max-height: 220px;
+    }
+    .message-bubble {
+        max-width: 92%;
+    }
+    .message-row.assistant .message-bubble {
+        max-width: 100%;
+    }
+}
+</style>
+
+<div class="page-header">
+    <h1 class="page-title">AI 조회 도우미</h1>
+</div>
+
+<div class="assistant-shell">
+    <aside class="session-panel">
+        <div class="session-header">
+            <h3>대화</h3>
+            <button id="newSessionButton" type="button" class="new-session-button">새 대화</button>
+        </div>
+        <div id="sessionList" class="session-list">
+            <div class="session-empty">저장된 대화가 없습니다.</div>
+        </div>
+    </aside>
+
+    <section class="chat-panel">
+        <div id="chatHistory" class="chat-history">
+            <div id="chatEmpty" class="chat-empty">
+                <h2>무엇을 조회할까요?</h2>
+                <p>지금은 mock 모드라 실제 사내 AI/API 호출 없이 질문 의도만 확인합니다.</p>
+                <div class="example-list">
+                    <button type="button" class="example-button" data-example="기흥 A동 1층 재실인원 알려줘">
+                        기흥 A동 1층 재실인원 알려줘
+                    </button>
+                    <button type="button" class="example-button" data-example="홍길동 최근 안전교육 이력 알려줘">
+                        홍길동 최근 안전교육 이력 알려줘
+                    </button>
+                    <button type="button" class="example-button" data-example="협력사 점검 조치현황 요약해줘">
+                        협력사 점검 조치현황 요약해줘
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="chat-input-bar">
+            <form id="chatForm" class="chat-form">
+                <textarea id="questionInput" placeholder="질문을 입력하세요. 예: 기흥 A동 1층 재실인원 알려줘"></textarea>
+                <button id="sendButton" type="submit" class="send-button">전송</button>
+            </form>
+        </div>
+    </section>
+
+    <aside class="domain-panel">
+        <h3>AI 상태</h3>
+        <div class="status-card">
+            모드: <strong>{{ ai_mode }}</strong><br>
+            상태: <strong>{{ '활성화' if ai_enabled else '비활성화' }}</strong>
+        </div>
+
+        <h3>허용 도메인</h3>
+        <div class="domain-list">
+            {% for domain in domains %}
+            <div class="domain-card">
+                <div class="domain-name">{{ domain.name }}</div>
+                <div class="domain-desc">{{ domain.description }}</div>
+                <span class="domain-db">{{ domain.db }}</span>
+            </div>
+            {% else %}
+            <div class="domain-card">
+                <div class="domain-name">도메인 없음</div>
+                <div class="domain-desc">config.ini에 AI_DOMAIN_* 섹션을 추가해 주세요.</div>
+            </div>
+            {% endfor %}
+        </div>
+    </aside>
+</div>
+
+<script>
+let currentSessionId = null;
+let sessions = [];
+
+const chatHistory = document.getElementById('chatHistory');
+const chatEmpty = document.getElementById('chatEmpty');
+const chatForm = document.getElementById('chatForm');
+const questionInput = document.getElementById('questionInput');
+const sendButton = document.getElementById('sendButton');
+const sessionList = document.getElementById('sessionList');
+const newSessionButton = document.getElementById('newSessionButton');
+
+function hideEmptyState() {
+    if (chatEmpty) {
+        chatEmpty.style.display = 'none';
+    }
+}
+
+function showEmptyState() {
+    if (chatEmpty) {
+        chatEmpty.style.display = 'block';
+    }
+}
+
+function clearMessages() {
+    chatHistory.querySelectorAll('.message-row').forEach((node) => node.remove());
+    showEmptyState();
+}
+
+function formatDateTime(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function formatMessageMeta(message) {
+    const metadata = message.metadata || {};
+    const domainName = metadata.domain && metadata.domain.name ? metadata.domain.name : '';
+    const mode = metadata.mode || '';
+    const parts = [];
+    if (domainName) parts.push(`도메인: ${domainName}`);
+    if (mode) parts.push(`모드: ${mode}`);
+    return parts.join(' · ');
+}
+
+function upsertSession(chatSession) {
+    if (!chatSession || !chatSession.id) return;
+    const index = sessions.findIndex((item) => String(item.id) === String(chatSession.id));
+    if (index >= 0) {
+        sessions[index] = { ...sessions[index], ...chatSession };
+    } else {
+        sessions.unshift(chatSession);
+    }
+}
+
+function renderSessionList() {
+    sessionList.innerHTML = '';
+    if (!sessions.length) {
+        const empty = document.createElement('div');
+        empty.className = 'session-empty';
+        empty.textContent = '저장된 대화가 없습니다.';
+        sessionList.appendChild(empty);
+        return;
+    }
+
+    sessions.forEach((item) => {
+        const row = document.createElement('div');
+        row.className = `session-item ${String(item.id) === String(currentSessionId) ? 'active' : ''}`;
+        row.dataset.sessionId = item.id;
+
+        const textWrap = document.createElement('div');
+        const title = document.createElement('div');
+        title.className = 'session-title';
+        title.textContent = item.title || '새 대화';
+        const date = document.createElement('div');
+        date.className = 'session-date';
+        date.textContent = formatDateTime(item.updated_at);
+        textWrap.appendChild(title);
+        textWrap.appendChild(date);
+
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'session-delete';
+        del.title = '대화 삭제';
+        del.textContent = '×';
+        del.addEventListener('click', async (event) => {
+            event.stopPropagation();
+            await deleteSession(item.id);
+        });
+
+        row.appendChild(textWrap);
+        row.appendChild(del);
+        row.addEventListener('click', () => loadSession(item.id));
+        sessionList.appendChild(row);
+    });
+}
+
+async function loadSessions(selectLatest = false) {
+    const response = await fetch('/api/ai-assistant/sessions', {
+        headers: { 'Accept': 'application/json' }
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+        throw new Error(data.message || '대화 목록을 불러오지 못했습니다.');
+    }
+    sessions = data.sessions || [];
+    renderSessionList();
+    if (selectLatest && sessions.length && !currentSessionId) {
+        await loadSession(sessions[0].id);
+    }
+}
+
+async function loadSession(sessionId) {
+    const response = await fetch(`/api/ai-assistant/sessions/${sessionId}/messages`, {
+        headers: { 'Accept': 'application/json' }
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+        alert(data.message || '대화 내용을 불러오지 못했습니다.');
+        return;
+    }
+    currentSessionId = data.session.id;
+    upsertSession(data.session);
+    renderSessionList();
+    clearMessages();
+    (data.messages || []).forEach((message) => {
+        appendMessage(message.role === 'user' ? 'user' : 'assistant', message.content || '', formatMessageMeta(message));
+    });
+    if (!(data.messages || []).length) {
+        showEmptyState();
+    }
+}
+
+function startNewSession() {
+    currentSessionId = null;
+    clearMessages();
+    renderSessionList();
+    questionInput.focus();
+}
+
+async function deleteSession(sessionId) {
+    const response = await fetch(`/api/ai-assistant/sessions/${sessionId}`, {
+        method: 'DELETE',
+        headers: { 'Accept': 'application/json' }
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+        alert(data.message || '대화 삭제에 실패했습니다.');
+        return;
+    }
+    sessions = sessions.filter((item) => String(item.id) !== String(sessionId));
+    if (String(currentSessionId) === String(sessionId)) {
+        currentSessionId = null;
+        clearMessages();
+    }
+    renderSessionList();
+}
+
+function appendMessage(role, text, meta = '') {
+    hideEmptyState();
+    const row = document.createElement('div');
+    row.className = `message-row ${role}`;
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble';
+    const contentNode = document.createElement('div');
+    contentNode.className = 'message-content';
+    contentNode.textContent = text;
+    bubble.appendChild(contentNode);
+    if (meta) {
+        const metaNode = document.createElement('div');
+        metaNode.className = 'message-meta';
+        metaNode.textContent = meta;
+        bubble.appendChild(metaNode);
+    }
+    row.appendChild(bubble);
+    chatHistory.appendChild(row);
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+    return row;
+}
+
+function appendStreamingMessage() {
+    hideEmptyState();
+    const row = document.createElement('div');
+    row.className = 'message-row assistant';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble streaming';
+
+    const statusList = document.createElement('div');
+    statusList.className = 'stream-status-list';
+
+    const contentNode = document.createElement('div');
+    contentNode.className = 'message-content';
+
+    const typing = document.createElement('span');
+    typing.className = 'typing-dots';
+    typing.innerHTML = '<span></span><span></span><span></span>';
+
+    const metaNode = document.createElement('div');
+    metaNode.className = 'message-meta';
+    metaNode.textContent = '응답 대기 중';
+
+    contentNode.appendChild(typing);
+    bubble.appendChild(statusList);
+    bubble.appendChild(contentNode);
+    bubble.appendChild(metaNode);
+    row.appendChild(bubble);
+    chatHistory.appendChild(row);
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+
+    return { row, bubble, statusList, contentNode, metaNode, typing, text: '' };
+}
+
+function addStatus(streamMessage, message) {
+    const line = document.createElement('div');
+    line.className = 'status-line';
+
+    const dot = document.createElement('span');
+    dot.className = 'status-dot';
+
+    const text = document.createElement('span');
+    text.textContent = message;
+
+    line.appendChild(dot);
+    line.appendChild(text);
+    streamMessage.statusList.appendChild(line);
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+}
+
+function appendStreamText(streamMessage, text) {
+    if (streamMessage.typing) {
+        streamMessage.typing.remove();
+        streamMessage.typing = null;
+    }
+    streamMessage.text += text;
+    streamMessage.contentNode.textContent = streamMessage.text;
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+}
+
+function setStreamMeta(streamMessage, meta) {
+    const domainName = meta.domain && meta.domain.name ? meta.domain.name : '미분류';
+    const mode = meta.mode || 'stream';
+    streamMessage.metaNode.textContent = `도메인: ${domainName} · 모드: ${mode}`;
+}
+
+function parseSseBlock(block) {
+    const event = { event: 'message', data: '' };
+    block.split(/\r?\n/).forEach((line) => {
+        if (line.startsWith('event:')) {
+            event.event = line.slice(6).trim();
+        } else if (line.startsWith('data:')) {
+            event.data += line.slice(5).trim();
+        }
+    });
+    if (!event.data) {
+        return null;
+    }
+    try {
+        event.payload = JSON.parse(event.data);
+    } catch (error) {
+        event.payload = { text: event.data };
+    }
+    return event;
+}
+
+async function readEventStream(response, onEvent) {
+    if (!response.body || !window.TextDecoder) {
+        throw new Error('이 브라우저는 스트리밍 응답을 지원하지 않습니다.');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done) {
+            break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary >= 0) {
+            const block = buffer.slice(0, boundary).trim();
+            buffer = buffer.slice(boundary + 2);
+            const event = parseSseBlock(block);
+            if (event) {
+                onEvent(event);
+            }
+            boundary = buffer.indexOf('\n\n');
+        }
+    }
+
+    const tail = buffer.trim();
+    if (tail) {
+        const event = parseSseBlock(tail);
+        if (event) {
+            onEvent(event);
+        }
+    }
+}
+
+async function submitQuestionFallback(trimmed, streamMessage) {
+    window.__aiAssistantLastTransport = 'fallback';
+    addStatus(streamMessage, '스트리밍 연결이 제한되어 일반 응답으로 전환합니다.');
+    const response = await fetch('/api/ai-assistant/chat', {
+        method: 'POST',
+        headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ question: trimmed, session_id: currentSessionId })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+        throw new Error(data.message || 'AI 조회 중 오류가 발생했습니다.');
+    }
+    if (data.session && data.session.id) {
+        currentSessionId = data.session.id;
+        upsertSession(data.session);
+        renderSessionList();
+    }
+    const result = data.data || {};
+    setStreamMeta(streamMessage, {
+        mode: result.mode || 'mock',
+        domain: result.domain || {}
+    });
+    appendStreamText(streamMessage, result.answer || '');
+}
+
+async function submitQuestion(question) {
+    const trimmed = question.trim();
+    if (!trimmed) {
+        alert('질문을 입력해 주세요.');
+        return;
+    }
+
+    appendMessage('user', trimmed);
+    questionInput.value = '';
+    sendButton.disabled = true;
+    const streamMessage = appendStreamingMessage();
+    window.__aiAssistantLastTransport = 'stream-started';
+
+    try {
+        const response = await fetch('/api/ai-assistant/chat-stream', {
+            method: 'POST',
+            headers: {
+                'Accept': 'text/event-stream',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ question: trimmed, session_id: currentSessionId })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || 'AI 조회 중 오류가 발생했습니다.');
+        }
+
+        await readEventStream(response, (event) => {
+            const payload = event.payload || {};
+            if (event.event === 'session') {
+                currentSessionId = payload.id;
+                upsertSession(payload);
+                renderSessionList();
+            } else if (event.event === 'status') {
+                addStatus(streamMessage, payload.message || '처리 중입니다.');
+            } else if (event.event === 'meta') {
+                setStreamMeta(streamMessage, payload);
+            } else if (event.event === 'chunk') {
+                appendStreamText(streamMessage, payload.text || '');
+            } else if (event.event === 'error') {
+                throw new Error(payload.message || '스트리밍 처리 중 오류가 발생했습니다.');
+            } else if (event.event === 'done') {
+                if (streamMessage.typing) {
+                    streamMessage.typing.remove();
+                    streamMessage.typing = null;
+                }
+                streamMessage.bubble.classList.remove('streaming');
+                window.__aiAssistantLastTransport = 'stream';
+            }
+        });
+    } catch (error) {
+        try {
+            await submitQuestionFallback(trimmed, streamMessage);
+        } catch (fallbackError) {
+            window.__aiAssistantLastTransport = 'error';
+            streamMessage.statusList.innerHTML = '';
+            streamMessage.contentNode.textContent = `요청 중 오류가 발생했습니다: ${fallbackError.message || fallbackError}`;
+            streamMessage.metaNode.textContent = '오류';
+        }
+    } finally {
+        try {
+            await loadSessions(false);
+        } catch (error) {
+            console.warn('대화 목록 갱신 실패:', error);
+        }
+        sendButton.disabled = false;
+        questionInput.focus();
+    }
+}
+
+chatForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    submitQuestion(questionInput.value);
+});
+
+questionInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        submitQuestion(questionInput.value);
+    }
+});
+
+document.querySelectorAll('.example-button').forEach((button) => {
+    button.addEventListener('click', () => {
+        const example = button.getAttribute('data-example') || '';
+        questionInput.value = example;
+        questionInput.focus();
+    });
+});
+
+newSessionButton.addEventListener('click', startNewSession);
+
+loadSessions(true).catch((error) => {
+    console.warn('대화 목록 로딩 실패:', error);
+});
+</script>
+{% endblock %}

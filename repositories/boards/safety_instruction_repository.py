@@ -8,11 +8,10 @@ from contextlib import contextmanager
 import os
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
-import sqlite3
-
 from werkzeug.datastructures import FileStorage
 
 from db_connection import get_db_connection
+from db.schema import column_names
 from db.upsert import safe_upsert
 from upload_utils import validate_uploaded_files
 from utils.sql_filters import sql_is_active_true, sql_is_deleted_false
@@ -39,7 +38,6 @@ class SafetyInstructionRepository:
     @contextmanager
     def connection(self):
         conn = get_db_connection(self._db_path)
-        conn.row_factory = sqlite3.Row
         try:
             yield conn
         finally:
@@ -79,46 +77,10 @@ class SafetyInstructionRepository:
         if key in self._columns_cache:
             return self._columns_cache[key]
 
-        columns: List[str] = []
-        cursor = conn.cursor()
         try:
-            if getattr(conn, 'is_postgres', False):
-                cursor.execute(
-                    """
-                    SELECT column_name
-                    FROM information_schema.columns
-                    WHERE table_schema = %s AND table_name = %s
-                    ORDER BY ordinal_position
-                    """,
-                    ('public', key),
-                )
-                rows = cursor.fetchall()
-                for row in rows:
-                    if isinstance(row, dict):
-                        columns.append(str(row.get('column_name')))
-                    else:
-                        try:
-                            columns.append(str(row[0]))
-                        except Exception:
-                            pass
-            else:
-                cursor.execute(f"PRAGMA table_info({key})")
-                rows = cursor.fetchall()
-                for row in rows:
-                    try:
-                        columns.append(str(row['name']))
-                    except Exception:
-                        try:
-                            columns.append(str(row[1]))
-                        except Exception:
-                            pass
+            columns = column_names(conn, key)
         except Exception:
             columns = []
-        finally:
-            try:
-                cursor.close()
-            except Exception:
-                pass
 
         filtered = [col for col in columns if col]
         self._columns_cache[key] = filtered
@@ -802,8 +764,6 @@ class SafetyInstructionRepository:
     ) -> Tuple[int, List[Dict[str, Any]]]:
         table_name = 'safety_instructions'
         table_columns = set(self._get_table_columns(conn, table_name))
-        is_postgres = getattr(conn, 'is_postgres', False)
-
         where_deleted = sql_is_deleted_false('is_deleted', conn)
         query = f"SELECT * FROM {table_name} WHERE {where_deleted}"
         params: List[Any] = []
@@ -823,17 +783,11 @@ class SafetyInstructionRepository:
             ])
 
         if filters.get('violation_date_from'):
-            if getattr(conn, 'is_postgres', False):
-                query += " AND (custom_data->>'violation_date') >= %s"
-            else:
-                query += " AND json_extract(custom_data, '$.violation_date') >= %s"
+            query += " AND (custom_data->>'violation_date') >= %s"
             params.append(filters['violation_date_from'])
 
         if filters.get('violation_date_to'):
-            if getattr(conn, 'is_postgres', False):
-                query += " AND (custom_data->>'violation_date') <= %s"
-            else:
-                query += " AND json_extract(custom_data, '$.violation_date') <= %s"
+            query += " AND (custom_data->>'violation_date') <= %s"
             params.append(filters['violation_date_to'])
 
         count_query = f"SELECT COUNT(*) FROM ({query}) AS total"
@@ -855,25 +809,13 @@ class SafetyInstructionRepository:
         has_violation_date = 'violation_date' in table_columns
 
         if has_created_at:
-            if is_postgres:
-                order_clause = " ORDER BY created_at DESC NULLS LAST, issue_number DESC"
-            else:
-                order_clause = " ORDER BY (created_at IS NULL), created_at DESC, issue_number DESC"
+            order_clause = " ORDER BY created_at DESC NULLS LAST, issue_number DESC"
         elif has_violation_date:
-            if is_postgres:
-                order_clause = " ORDER BY violation_date DESC NULLS LAST, issue_number DESC"
-            else:
-                order_clause = " ORDER BY (violation_date IS NULL), violation_date DESC, issue_number DESC"
+            order_clause = " ORDER BY violation_date DESC NULLS LAST, issue_number DESC"
         else:
-            if is_postgres:
-                order_clause = (
-                    " ORDER BY (custom_data->>'violation_date') DESC NULLS LAST, issue_number DESC"
-                )
-            else:
-                order_clause = (
-                    " ORDER BY (json_extract(custom_data, '$.violation_date') IS NULL), "
-                    "json_extract(custom_data, '$.violation_date') DESC, issue_number DESC"
-                )
+            order_clause = (
+                " ORDER BY (custom_data->>'violation_date') DESC NULLS LAST, issue_number DESC"
+            )
         query += f"{order_clause} LIMIT %s OFFSET %s"
         items = conn.execute(query, (*params, per_page, offset)).fetchall()
         return total_count, [dict(row) for row in items]

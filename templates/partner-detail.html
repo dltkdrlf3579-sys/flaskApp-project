@@ -4,7 +4,7 @@
 {% extends "base.html" %}
 {% endif %}
 
-{% from 'includes/board_form/save_controls.html' import render_save_button, render_password_modal %}
+{% from 'includes/board_form/save_controls.html' import render_save_button %}
 
 {% block head %}
     {{ super() }}
@@ -31,9 +31,6 @@
     <div class="section basic-info-section">
         <div class="section-header">
             <h3 class="section-title">기본정보</h3>
-            <button class="collapse-btn" onclick="toggleSection('basic-info')">
-                <span class="collapse-icon">▲</span>
-            </button>
         </div>
         <div class="section-content" id="basic-info-content">
             <div class="info-table">
@@ -56,42 +53,6 @@
                         <div class="value">{{ partner.business_type_major or '-' }}</div>
                     </div>
                 </div>
-                <div class="info-row">
-                    <div class="info-cell">
-                        <label>업종(소분류)</label>
-                        <div class="value">{{ partner.business_type_minor or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>위험작업여부</label>
-                        <div class="value">{{ 'O' if partner.hazard_work_flag == 'O' else 'X' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>대표자성명</label>
-                        <div class="value">{{ partner.representative or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>주소</label>
-                        <div class="value">{{ partner.address or '-' }}</div>
-                    </div>
-                </div>
-                <div class="info-row">
-                    <div class="info-cell">
-                        <label>평균연령</label>
-                        <div class="value">{{ partner.average_age if partner.average_age else '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>매출액</label>
-                        <div class="value">{{ "{:,}".format(partner.annual_revenue // 100000) if partner.annual_revenue else '-' }}억원</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>거래차수</label>
-                        <div class="value">{{ partner.transaction_count or '-' }}</div>
-                    </div>
-                    <div class="info-cell">
-                        <label>상시근로자</label>
-                        <div class="value">{{ partner.permanent_workers if partner.permanent_workers else '-' }}명</div>
-                    </div>
-                </div>
             </div>
         </div>
     </div>
@@ -100,8 +61,12 @@
     <div class="section detail-content-section">
         <div class="section-header">
             <h3 class="section-title">업체 상세내용</h3>
+            <button type="button" class="collapse-btn" onclick="toggleSection('detail-content')" aria-expanded="false" aria-controls="detail-content-content">
+                <span class="collapse-text">펼치기</span>
+                <span class="collapse-icon">▼</span>
+            </button>
         </div>
-        <div class="section-content">
+        <div class="section-content" id="detail-content-content" style="display: none;">
             <div class="content-editor">
                 <!-- CKEditor textarea -->
                 <textarea id="detailed-content" 
@@ -117,14 +82,10 @@
     {% from 'includes/attachment_section.html' import render_attachment_section %}
     {{ render_attachment_section(attachments, 'partner') }}
 
-    {{ render_save_button('showEditPasswordModal()') }}
+    {% if can_write|default(true) %}
+        {{ render_save_button('saveChanges()') }}
+    {% endif %}
 
-    {{ render_password_modal(
-        modal_id='edit-password-modal',
-        input_id='edit-password-input',
-        confirm_onclick='verifyPasswordAndSave()',
-        cancel_onclick='closeEditPasswordModal()'
-    ) }}
 
     {% if not is_popup %}
     <div class="action-buttons">
@@ -228,6 +189,11 @@
     border: none;
     cursor: pointer;
     padding: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #666;
+    font-size: 13px;
 }
 
 .collapse-icon {
@@ -739,14 +705,28 @@
 
 function toggleSection(sectionId) {
     const content = document.getElementById(sectionId + '-content');
-    const icon = document.querySelector(`[onclick="toggleSection('${sectionId}')"] .collapse-icon`);
+    const button = document.querySelector(`[onclick="toggleSection('${sectionId}')"]`);
+    const icon = button ? button.querySelector('.collapse-icon') : null;
+    const text = button ? button.querySelector('.collapse-text') : null;
+
+    if (!content || !button || !icon) {
+        return;
+    }
     
     if (content.style.display === 'none') {
         content.style.display = 'block';
         icon.textContent = '▲';
+        if (text) {
+            text.textContent = '접기';
+        }
+        button.setAttribute('aria-expanded', 'true');
     } else {
         content.style.display = 'none';
         icon.textContent = '▼';
+        if (text) {
+            text.textContent = '펼치기';
+        }
+        button.setAttribute('aria-expanded', 'false');
     }
 }
 
@@ -818,61 +798,6 @@ function updateRowNumbers() {
         const noCell = row.querySelector('.col-no');
         noCell.textContent = index + 1;
     });
-}
-
-function showEditPasswordModal() {
-    console.log('showEditPasswordModal called!');
-    const modal = document.getElementById('edit-password-modal');
-    if (!modal) {
-        alert('비밀번호 모달을 찾을 수 없습니다.');
-        console.error('Modal not found: edit-password-modal');
-        return;
-    }
-    modal.style.display = 'block';
-    
-    const input = document.getElementById('edit-password-input');
-    if (input) {
-        input.focus();
-        // Enter 키 이벤트 추가
-        input.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                verifyPasswordAndSave();
-            }
-        });
-    } else {
-        console.error('Password input not found: edit-password-input');
-    }
-}
-
-function closeEditPasswordModal() {
-    document.getElementById('edit-password-modal').style.display = 'none';
-    document.getElementById('edit-password-input').value = '';
-}
-
-function verifyPasswordAndSave() {
-    const input = document.getElementById('edit-password-input');
-    const password = input ? input.value : '';
-
-    if (!password) {
-        alert('비밀번호를 입력해주세요.');
-        if (input) {
-            input.focus();
-        }
-        return;
-    }
-
-    BoardDetail.verifyPassword({ boardType: 'partner', password })
-        .then(() => {
-            closeEditPasswordModal();
-            saveChanges();
-        })
-        .catch((error) => {
-            alert(error && error.message ? error.message : '비밀번호가 올바르지 않습니다.');
-            if (input) {
-                input.value = '';
-                input.focus();
-            }
-        });
 }
 
 function saveChanges_OLD_REMOVE() {

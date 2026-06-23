@@ -5,7 +5,7 @@
 {% endif %}
 
 {% from 'includes/board_form/detail_content.html' import render_detail_content %}
-{% from 'includes/board_form/save_controls.html' import render_save_button, render_password_modal %}
+{% from 'includes/board_form/save_controls.html' import render_save_button %}
 
 {% block head %}
     {{ super() }}
@@ -479,7 +479,9 @@
 {% from 'includes/attachment_section.html' import render_attachment_section %}
 {{ render_attachment_section(attachments, 'subcontract_approval') }}
 
-    {{ render_save_button('showEditPasswordModal()') }}
+    {% if can_write|default(true) %}
+        {{ render_save_button('updateSubcontractApproval()') }}
+    {% endif %}
 
 </div>
 
@@ -517,127 +519,8 @@ const updateSubcontractApproval = BoardDetail.createUpdater({
 
 window.updateSubcontractApproval = updateSubcontractApproval;
 
-
-function showEditPasswordModal() {
-
-    if (!CAN_WRITE) {
-
-        alert('등록/수정 권한이 없습니다. 권한 신청 후 승인을 받아주세요.');
-
-        return;
-
-    }
-
-    const modal = document.getElementById('edit-password-modal');
-
-    const input = document.getElementById('edit-password-input');
-
-    if (modal) {
-
-        modal.style.display = 'block';
-
-    }
-
-    if (input) {
-
-        input.value = '';
-
-        input.focus();
-
-    }
-
-}
-
-
-
-function closeEditPasswordModal() {
-
-    const modal = document.getElementById('edit-password-modal');
-
-    const input = document.getElementById('edit-password-input');
-
-    if (modal) {
-
-        modal.style.display = 'none';
-
-    }
-
-    if (input) {
-
-        input.value = '';
-
-    }
-
-}
-
-
-
-function verifyPasswordAndSave() {
-
-    const input = document.getElementById('edit-password-input');
-
-    const password = input ? input.value : '';
-
-
-
-    if (!password) {
-
-        alert('비밀번호를 입력해주세요.');
-
-        if (input) {
-
-            input.focus();
-
-        }
-
-        return;
-
-    }
-
-
-
-    BoardDetail.verifyPassword({ boardType: 'subcontract_approval', password })
-
-        .then(() => {
-
-            closeEditPasswordModal();
-
-            updateSubcontractApproval();
-
-        })
-
-        .catch((error) => {
-
-            alert(error && error.message ? error.message : '비밀번호가 올바르지 않습니다.');
-
-            if (input) {
-
-                input.value = '';
-
-                input.focus();
-
-            }
-
-        });
-
-}
-
-
-
-window.showEditPasswordModal = showEditPasswordModal;
-
-window.closeEditPasswordModal = closeEditPasswordModal;
-
-window.verifyPasswordAndSave = verifyPasswordAndSave;
-
 </script>
 
-{{ render_password_modal(
-    modal_id='edit-password-modal',
-    input_id='edit-password-input',
-    confirm_onclick='verifyPasswordAndSave()',
-    cancel_onclick='closeEditPasswordModal()'
-) }}
 <!-- 공통 첨부파일 스크립트와 스타일 import -->
 {% from 'includes/attachment_section.html' import attachment_scripts, attachment_styles %}
 {{ attachment_styles() }}

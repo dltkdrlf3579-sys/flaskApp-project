@@ -83,42 +83,23 @@ class NotificationService:
         conn = get_db_connection()
         cursor = conn.cursor()
         try:
-            if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS notification_logs (
-                        id SERIAL PRIMARY KEY,
-                        channel VARCHAR(50) NOT NULL,
-                        recipient_type VARCHAR(50),
-                        recipient_id VARCHAR(255),
-                        template_key VARCHAR(100),
-                        payload TEXT,
-                        status VARCHAR(20),
-                        response_code INTEGER,
-                        response_body TEXT,
-                        error_message TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                    """
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS notification_logs (
+                    id SERIAL PRIMARY KEY,
+                    channel VARCHAR(50) NOT NULL,
+                    recipient_type VARCHAR(50),
+                    recipient_id VARCHAR(255),
+                    template_key VARCHAR(100),
+                    payload TEXT,
+                    status VARCHAR(20),
+                    response_code INTEGER,
+                    response_body TEXT,
+                    error_message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-            else:
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS notification_logs (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        channel TEXT NOT NULL,
-                        recipient_type TEXT,
-                        recipient_id TEXT,
-                        template_key TEXT,
-                        payload TEXT,
-                        status TEXT,
-                        response_code INTEGER,
-                        response_body TEXT,
-                        error_message TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                    """
-                )
+                """
+            )
             conn.commit()
         finally:
             cursor.close()
@@ -202,48 +183,26 @@ class NotificationService:
         payload_json = json.dumps(payload, ensure_ascii=False)
 
         try:
-            if hasattr(conn, 'is_postgres') and conn.is_postgres:
-                cursor.execute(
-                    """
-                    INSERT INTO notification_logs (
-                        channel, recipient_type, recipient_id,
-                        template_key, payload, status,
-                        response_code, response_body, error_message
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        channel,
-                        recipient_type,
-                        recipient_id,
-                        event,
-                        payload_json,
-                        status,
-                        response_code,
-                        response_body,
-                        error_message,
-                    ),
-                )
-            else:
-                cursor.execute(
-                    """
-                    INSERT INTO notification_logs (
-                        channel, recipient_type, recipient_id,
-                        template_key, payload, status,
-                        response_code, response_body, error_message
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        channel,
-                        recipient_type,
-                        recipient_id,
-                        event,
-                        payload_json,
-                        status,
-                        response_code,
-                        response_body,
-                        error_message,
-                    ),
-                )
+            cursor.execute(
+                """
+                INSERT INTO notification_logs (
+                    channel, recipient_type, recipient_id,
+                    template_key, payload, status,
+                    response_code, response_body, error_message
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    channel,
+                    recipient_type,
+                    recipient_id,
+                    event,
+                    payload_json,
+                    status,
+                    response_code,
+                    response_body,
+                    error_message,
+                ),
+            )
             conn.commit()
         except Exception:
             logger.exception("Failed to log notification event")

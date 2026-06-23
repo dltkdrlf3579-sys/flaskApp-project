@@ -6,7 +6,7 @@ from typing import Any
 
 def sql_is_active_true(field_expr: str, conn: Any) -> str:
     """Return SQL fragment that checks a boolean/int column is true."""
-    # Postgres connection exposes is_postgres attribute in CompatConnection.
+    # Postgres connection exposes an is_postgres attribute.
     # SQLite 지원은 제거 대상이지만, 남은 코드가 conn.is_postgres를 참고하므로
     # Postgres가 아니면 단순 비교를 사용한다.
     if getattr(conn, 'is_postgres', False):
