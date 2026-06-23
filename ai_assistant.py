@@ -496,12 +496,14 @@ def _mock_answer(
     intent = context["intent"]
     history_count = int(context.get("history_count") or 0)
     result_count = int(context.get("result_count") or 0)
+    domain_name = domain.get("name") or "\ubbf8\ubd84\ub958"
+    domain_db = domain.get("db") or "\ubbf8\uc9c0\uc815"
 
     lines = [
         "\ud604\uc7ac\ub294 AI \uc870\ud68c \ub3c4\uc6b0\ubbf8 mock \ubaa8\ub4dc\uc785\ub2c8\ub2e4.",
         "",
-        f"\uc778\uc2dd\ud55c \ub3c4\uba54\uc778: {domain.get('name', '\ubbf8\ubd84\ub958')}",
-        f"\ub300\uc0c1 DB: {domain.get('db') or '\ubbf8\uc9c0\uc815'}",
+        f"\uc778\uc2dd\ud55c \ub3c4\uba54\uc778: {domain_name}",
+        f"\ub300\uc0c1 DB: {domain_db}",
         f"\uc778\uc2dd\ud55c \uc758\ub3c4: {intent}",
         f"\ucc38\uace0 \ub300\ud654 \uc218: {history_count}\uac74",
         f"\ucc38\uace0 \uacb0\uacfc \uc218: {result_count}\uac74",
