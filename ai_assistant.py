@@ -653,12 +653,13 @@ def _mock_stream_answer(
     intent = context["intent"]
     history_count = int(context.get("history_count") or 0)
     result_count = int(context.get("result_count") or 0)
+    domain_name = domain.get("name") or "\ubbf8\ubd84\ub958"
 
     status_steps = [
         "\uc9c8\ubb38 \uc758\ub3c4\ub97c \ubd84\uc11d\ud558\uace0 \uc788\uc2b5\ub2c8\ub2e4.",
         f"\ucd5c\uadfc \ub300\ud654 {history_count}\uac74\uc744 \ud568\uaed8 \ud655\uc778\ud588\uc2b5\ub2c8\ub2e4.",
         f"\ucd5c\uadfc \uc870\ud68c \uacb0\uacfc {result_count}\uac74\uc744 \ud568\uaed8 \ud655\uc778\ud588\uc2b5\ub2c8\ub2e4.",
-        f"\uad00\ub828 \ub3c4\uba54\uc778\uc744 \ud655\uc778\ud588\uc2b5\ub2c8\ub2e4: {domain.get('name', '\ubbf8\ubd84\ub958')}",
+        f"\uad00\ub828 \ub3c4\uba54\uc778\uc744 \ud655\uc778\ud588\uc2b5\ub2c8\ub2e4: {domain_name}",
         "\ub2f5\ubcc0\uc744 \uc815\ub9ac\ud558\uace0 \uc788\uc2b5\ub2c8\ub2e4.",
     ]
     for step in status_steps:
