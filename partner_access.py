@@ -24,6 +24,13 @@ partner_access_bp = Blueprint("partner_access", __name__)
 PARTNER_ACCESS_MENU_CODE = "PARTNER_ACCESS"
 DEFAULT_RESULT_LIMIT = 1000
 DEFAULT_DISTINCT_LIMIT = 200
+DEFAULT_LOCATION_LOOKUP_TABLE = "vw_card_reader_info_dedup"
+DEFAULT_LOCATION_LOOKUP_COLUMNS = {
+    "site_name": "site_nm",
+    "building_name": "line_nm",
+    "floor_name": "area_nm",
+    "detail_location": "gubun",
+}
 
 DEFAULT_SITE_OPTIONS: Tuple[Dict[str, Optional[str]], ...] = (
     {"key": "giheung", "label": "기흥", "table": "vw_eventlog_gh", "site_filter": None},
@@ -138,6 +145,27 @@ def _safe_table_name(table_name: str) -> str:
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?", table_name):
         raise ValueError(f"출입정보 테이블 설정이 올바르지 않습니다: {table_name}")
     return table_name
+
+
+def _safe_column_name(column_name: str) -> str:
+    column_name = (column_name or "").strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", column_name):
+        raise ValueError(f"출입정보 컬럼 설정이 올바르지 않습니다: {column_name}")
+    return column_name
+
+
+def _get_location_lookup_config() -> Dict[str, Any]:
+    section = _get_partner_access_config()
+    table_name = _safe_table_name(
+        section.get("location_lookup_table", fallback=DEFAULT_LOCATION_LOOKUP_TABLE)
+    )
+    columns = {
+        alias: _safe_column_name(
+            section.get(f"location_{alias}_column", fallback=fallback)
+        )
+        for alias, fallback in DEFAULT_LOCATION_LOOKUP_COLUMNS.items()
+    }
+    return {"table": table_name, "columns": columns}
 
 
 def _get_site_options() -> Tuple[Dict[str, Optional[str]], ...]:
@@ -336,25 +364,38 @@ def _query_distinct_values(
     floor_names: Optional[List[str]] = None,
 ) -> List[str]:
     site = _get_site(site_key)
-    table_name = site["table"]
-    where = [f"{target_column} IS NOT NULL", f"TRIM({target_column}::text) <> ''"]
-    params: List[Any] = []
-    _append_site_filter(where, params, site)
+    lookup = _get_location_lookup_config()
+    table_name = lookup["table"]
+    columns = lookup["columns"]
+    if target_column not in {"building_name", "floor_name", "detail_location"}:
+        raise ValueError(f"지원하지 않는 출입정보 조회 컬럼입니다: {target_column}")
+
+    target_lookup_column = columns[target_column]
+    site_lookup_column = columns["site_name"]
+    building_lookup_column = columns["building_name"]
+    floor_lookup_column = columns["floor_name"]
+
+    where = [
+        f"{site_lookup_column} = %s",
+        f"{target_lookup_column} IS NOT NULL",
+        f"TRIM({target_lookup_column}::text) <> ''",
+    ]
+    params: List[Any] = [site.get("site_filter") or site["label"]]
 
     if building_name:
-        where.append("building_name = %s")
+        where.append(f"{building_lookup_column} = %s")
         params.append(building_name)
     if floor_names:
-        _append_in_filter(where, params, "floor_name", floor_names)
+        _append_in_filter(where, params, floor_lookup_column, floor_names)
     if search_term:
-        where.append(f"{target_column} ILIKE %s")
+        where.append(f"{target_lookup_column} ILIKE %s")
         params.append(f"%{search_term}%")
 
     sql = f"""
-        SELECT DISTINCT {target_column} AS value
-        FROM ({_build_eventlog_subquery(table_name)}) eventlog
+        SELECT DISTINCT {target_lookup_column} AS value
+        FROM {table_name}
         WHERE {" AND ".join(where)}
-        ORDER BY {target_column}
+        ORDER BY {target_lookup_column}
         LIMIT %s
     """
     params.append(_get_distinct_limit())

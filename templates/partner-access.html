@@ -765,7 +765,9 @@ async function loadBuildings() {
 function selectTempBuilding(building) {
     partnerAccessState.tempBuildingName = building;
     partnerAccessState.tempFloorNames = [];
-    loadBuildings();
+    document.querySelectorAll('[data-building]').forEach(button => {
+        button.classList.toggle('active', button.dataset.building === building);
+    });
     loadFloors(building);
 }
 
