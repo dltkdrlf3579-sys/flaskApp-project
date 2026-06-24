@@ -392,10 +392,16 @@ def _query_distinct_values(
         params.append(f"%{search_term}%")
 
     sql = f"""
-        SELECT DISTINCT {target_lookup_column} AS value
-        FROM {table_name}
-        WHERE {" AND ".join(where)}
-        ORDER BY {target_lookup_column}
+        SELECT value
+        FROM (
+            SELECT DISTINCT TRIM({target_lookup_column}::text) AS value
+            FROM {table_name}
+            WHERE {" AND ".join(where)}
+        ) distinct_values
+        ORDER BY
+            CASE WHEN value ~ '^[0-9]+$' THEN 0 ELSE 1 END,
+            CASE WHEN value ~ '^[0-9]+$' THEN value::integer END NULLS LAST,
+            value
         LIMIT %s
     """
     params.append(_get_distinct_limit())
