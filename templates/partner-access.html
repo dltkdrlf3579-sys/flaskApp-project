@@ -263,7 +263,7 @@
 .data-table .col-floor_name { width: 90px; min-width: 90px; }
 .data-table .col-detail_location { width: 220px; min-width: 220px; }
 .data-table .col-access_level { width: 90px; min-width: 90px; }
-.data-table .col-reader_name { width: 285px; min-width: 285px; }
+.data-table .col-reader_name { width: 450px; min-width: 450px; }
 .data-table tbody tr:hover {
     background: #f9fafb;
 }
@@ -600,7 +600,7 @@ const resultColumns = {
         ['phone_number', '연락처'],
         ['company_name', '협력사명'],
         ['company_cd', '사업자번호'],
-        ['employee_no', '사번'],
+        ['employee_no', 'ID'],
         ['employee_type', '임직원구분'],
         ['card_type', '카드구분'],
         ['domain_id', 'DomainID'],
@@ -618,7 +618,7 @@ const resultColumns = {
         ['phone_number', '연락처'],
         ['company_name', '협력사명'],
         ['company_cd', '사업자번호'],
-        ['employee_no', '사번'],
+        ['employee_no', 'ID'],
         ['employee_type', '임직원구분'],
         ['card_type', '카드구분'],
         ['domain_id', 'DomainID'],
@@ -678,6 +678,7 @@ function syncSiteModeUI() {
     const allOption = siteSelect.querySelector('option[value="all"]');
     if (allOption) {
         allOption.disabled = mode !== 'history';
+        allOption.hidden = mode !== 'history';
         if (mode !== 'history' && siteSelect.value === 'all') {
             siteSelect.selectedIndex = 0;
         }
