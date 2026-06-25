@@ -167,6 +167,11 @@ def main() -> None:
     log.info('Employees fetched: %d', len(employees))
     log.info('Departments fetched: %d', len(departments))
 
+    if not employees:
+        raise RuntimeError('LOCAL_DATA_QUERIES.employee_query returned no rows; aborting permission sync.')
+    if not departments:
+        raise RuntimeError('MASTER_DATA_QUERIES.department_query returned no rows; aborting permission sync.')
+
     conn = get_db_connection()
     try:
         # system_users

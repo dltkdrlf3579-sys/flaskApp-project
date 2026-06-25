@@ -815,6 +815,10 @@ boot_sync_done = False
 _master_sync_lock = threading.Lock()
 _background_master_sync_started = False
 _background_master_sync_thread = None
+_permission_master_sync_lock = threading.Lock()
+_background_permission_master_sync_started = False
+_background_permission_master_sync_thread = None
+_permission_master_last_sync_date = None
 
 def boot_sync_once():
     """
@@ -956,6 +960,98 @@ def start_background_master_sync_scheduler():
         check_minutes,
     )
 
+
+def _get_permission_master_sync_schedule_config():
+    permission_on = db_config.config.getboolean('PERMISSION', 'ENABLED', fallback=False)
+    daily_on = db_config.config.getboolean('PERMISSION', 'MASTER_SYNC_DAILY', fallback=True)
+    hour = db_config.config.getint('PERMISSION', 'MASTER_SYNC_HOUR', fallback=3)
+    minute = db_config.config.getint('PERMISSION', 'MASTER_SYNC_MINUTE', fallback=20)
+    check_minutes = db_config.config.getint('PERMISSION', 'MASTER_SYNC_CHECK_MINUTES', fallback=10)
+
+    hour = max(0, min(23, hour))
+    minute = max(0, min(59, minute))
+    check_minutes = max(1, check_minutes)
+
+    return permission_on, daily_on, hour, minute, check_minutes
+
+
+def _run_permission_master_sync():
+    from importlib import import_module
+
+    sync_module = import_module('scripts.sync_permission_master_data')
+    sync_module.main()
+
+
+def _run_background_permission_master_sync_loop():
+    global _permission_master_last_sync_date
+
+    logging.info("[PERMISSION MASTER SYNC] Background scheduler thread started.")
+
+    while True:
+        try:
+            permission_on, daily_on, hour, minute, check_minutes = _get_permission_master_sync_schedule_config()
+            sleep_seconds = max(60, check_minutes * 60)
+            if not permission_on or not daily_on:
+                time.sleep(sleep_seconds)
+                continue
+
+            now_kst = get_korean_time()
+            if not _is_master_sync_time(now_kst, hour, minute):
+                time.sleep(sleep_seconds)
+                continue
+
+            today = now_kst.date()
+            if _permission_master_last_sync_date == today:
+                time.sleep(sleep_seconds)
+                continue
+
+            with _permission_master_sync_lock:
+                if _permission_master_last_sync_date == today:
+                    time.sleep(sleep_seconds)
+                    continue
+
+                logging.info("[PERMISSION MASTER SYNC] Scheduled daily sync started.")
+                _run_permission_master_sync()
+                _permission_master_last_sync_date = today
+                logging.info("[PERMISSION MASTER SYNC] Scheduled daily sync finished.")
+
+            time.sleep(sleep_seconds)
+        except Exception as exc:
+            logging.error("[PERMISSION MASTER SYNC] Background scheduler error: %s", exc, exc_info=True)
+            time.sleep(300)
+
+
+def start_background_permission_master_sync_scheduler():
+    global _background_permission_master_sync_started, _background_permission_master_sync_thread
+
+    if _background_permission_master_sync_started:
+        return
+
+    permission_on, daily_on, hour, minute, check_minutes = _get_permission_master_sync_schedule_config()
+    if not permission_on or not daily_on:
+        logging.info(
+            "[PERMISSION MASTER SYNC] Background scheduler disabled "
+            "(PERMISSION.ENABLED=%s, MASTER_SYNC_DAILY=%s).",
+            permission_on,
+            daily_on,
+        )
+        return
+
+    _background_permission_master_sync_started = True
+    _background_permission_master_sync_thread = threading.Thread(
+        target=_run_background_permission_master_sync_loop,
+        name="permission-master-sync",
+        daemon=True,
+    )
+    _background_permission_master_sync_thread.start()
+    logging.info(
+        "[PERMISSION MASTER SYNC] Background scheduler enabled at %02d:%02d KST "
+        "(check every %d minute(s)).",
+        hour,
+        minute,
+        check_minutes,
+    )
+
 # Flask 2.3+ 호환 방식으로 첫 요청 훅 등록
 @app.before_request
 def check_first_request():
@@ -965,6 +1061,7 @@ def check_first_request():
 
 
 start_background_master_sync_scheduler()
+start_background_permission_master_sync_scheduler()
 
 WRITE_PERMISSION_BY_PATH = {
     '/register-change-request': 'REFERENCE_CHANGE',
@@ -10609,6 +10706,7 @@ if __name__ == "__main__":
         print("DB의 컬럼 설정을 그대로 사용합니다.", flush=True)
     
     start_background_master_sync_scheduler()
+    start_background_permission_master_sync_scheduler()
     
     print(f"partner-accident 라우트 등록됨: {'/partner-accident' in [rule.rule for rule in app.url_map.iter_rules()]}", flush=True)
 
