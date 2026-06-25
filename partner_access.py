@@ -40,6 +40,13 @@ DEFAULT_SITE_OPTIONS: Tuple[Dict[str, Optional[str]], ...] = (
     {"key": "cheonan", "label": "천안", "table": "vw_eventlogcaoy", "site_filter": "천안"},
     {"key": "onyang", "label": "온양", "table": "vw_eventlogcaoy", "site_filter": "온양"},
 )
+ALL_SITE_KEY = "all"
+ALL_SITE_OPTION: Dict[str, Optional[str]] = {
+    "key": ALL_SITE_KEY,
+    "label": "전체(사람이름검색)",
+    "table": None,
+    "site_filter": None,
+}
 
 DEFAULT_COLUMN_EXPRESSIONS = {
     "event_time": "event_time",
@@ -195,6 +202,10 @@ def _get_site_options() -> Tuple[Dict[str, Optional[str]], ...]:
     return tuple(site_options)
 
 
+def _get_selectable_site_options() -> Tuple[Dict[str, Optional[str]], ...]:
+    return (*_get_site_options(), dict(ALL_SITE_OPTION))
+
+
 def _get_column_expressions() -> Dict[str, str]:
     section = _get_partner_access_config()
     expressions = {}
@@ -243,7 +254,7 @@ def _build_eventlog_subquery(table_name: str) -> str:
 
 
 def _get_site(site_key: str) -> Dict[str, Optional[str]]:
-    site_map = {site["key"]: site for site in _get_site_options()}
+    site_map = {site["key"]: site for site in _get_selectable_site_options()}
     site = site_map.get((site_key or "").strip())
     if not site:
         raise ValueError("사업장을 선택해 주세요.")
@@ -299,6 +310,17 @@ def _append_site_filter(where: List[str], params: List[Any], site: Dict[str, Opt
         params.append(f"%{site_filter}%")
 
 
+def _append_selected_site_filter(
+    where: List[str],
+    params: List[Any],
+    site: Dict[str, Optional[str]],
+) -> None:
+    site_filter = (site.get("site_filter") or site.get("label") or "").strip()
+    if site_filter:
+        where.append("site_name ILIKE %s")
+        params.append(f"%{site_filter}%")
+
+
 def _append_in_filter(
     where: List[str],
     params: List[Any],
@@ -347,6 +369,26 @@ def _has_required_discriminator(filters: Dict[str, Any]) -> bool:
         [
             _normalize_text(filters.get("company_name")),
             _normalize_text(filters.get("employee_name")),
+            _normalize_text(filters.get("building_name")),
+            _normalize_list(filters.get("floor_names")),
+            _normalize_list(filters.get("detail_locations")),
+            _normalize_text(filters.get("detail_text")),
+        ]
+    )
+
+
+def _has_person_filter(filters: Dict[str, Any]) -> bool:
+    return any(
+        [
+            _normalize_text(filters.get("company_name")),
+            _normalize_text(filters.get("employee_name")),
+        ]
+    )
+
+
+def _has_location_filter(filters: Dict[str, Any]) -> bool:
+    return any(
+        [
             _normalize_text(filters.get("building_name")),
             _normalize_list(filters.get("floor_names")),
             _normalize_list(filters.get("detail_locations")),
@@ -447,6 +489,9 @@ def _search_history(site: Dict[str, Optional[str]], payload: Dict[str, Any]) -> 
     if started_at > ended_at:
         raise ValueError("시작시각은 종료시각보다 늦을 수 없습니다.")
 
+    if site.get("key") == ALL_SITE_KEY:
+        return _search_all_site_history(started_at, ended_at, payload)
+
     where = ["event_time >= %s", "event_time <= %s"]
     params: List[Any] = [started_at, ended_at]
     _append_site_filter(where, params, site)
@@ -464,23 +509,62 @@ def _search_history(site: Dict[str, Optional[str]], payload: Dict[str, Any]) -> 
     return _execute_rows(sql, params)
 
 
+def _search_all_site_history(
+    started_at: datetime,
+    ended_at: datetime,
+    payload: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    base_queries: List[str] = []
+    base_params: List[Any] = []
+    for source_site in _get_site_options():
+        source_where = ["event_time >= %s", "event_time <= %s"]
+        source_params: List[Any] = [started_at, ended_at]
+        _append_site_filter(source_where, source_params, source_site)
+        _append_person_filters(source_where, source_params, payload)
+        base_queries.append(f"""
+            SELECT *
+            FROM ({_build_eventlog_subquery(source_site["table"])}) eventlog
+            WHERE {" AND ".join(source_where)}
+        """)
+        base_params.extend(source_params)
+
+    sql = f"""
+        WITH base AS (
+            {" UNION ALL ".join(base_queries)}
+        )
+        SELECT *
+        FROM base
+        ORDER BY event_time DESC
+        LIMIT %s
+    """
+    return _execute_rows(sql, [*base_params, _get_result_limit()])
+
+
 def _search_occupancy(site: Dict[str, Optional[str]], payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     as_of = _parse_datetime(payload.get("as_of"), "기준시각")
 
-    base_where = ["event_time <= %s"]
-    base_params: List[Any] = [as_of]
-    _append_site_filter(base_where, base_params, site)
-    _append_person_filters(base_where, base_params, payload)
+    base_queries: List[str] = []
+    base_params: List[Any] = []
+    for source_site in _get_site_options():
+        source_where = ["event_time <= %s"]
+        source_params: List[Any] = [as_of]
+        _append_site_filter(source_where, source_params, source_site)
+        _append_person_filters(source_where, source_params, payload)
+        base_queries.append(f"""
+            SELECT *
+            FROM ({_build_eventlog_subquery(source_site["table"])}) eventlog
+            WHERE {" AND ".join(source_where)}
+        """)
+        base_params.extend(source_params)
 
     latest_where = ["UPPER(TRIM(COALESCE(direction::text, ''))) = 'IN'"]
     latest_params: List[Any] = []
+    _append_selected_site_filter(latest_where, latest_params, site)
     _append_location_filters(latest_where, latest_params, payload)
 
     sql = f"""
         WITH base AS (
-            SELECT *
-            FROM ({_build_eventlog_subquery(site["table"])}) eventlog
-            WHERE {" AND ".join(base_where)}
+            {" UNION ALL ".join(base_queries)}
         ),
         latest AS (
             SELECT DISTINCT ON (person_key) *
@@ -503,12 +587,20 @@ def _validate_search_payload(payload: Dict[str, Any]) -> Tuple[str, Dict[str, Op
 
     if mode not in {"occupancy", "history"}:
         raise ValueError("조회 모드가 올바르지 않습니다.")
+    if mode == "occupancy" and site.get("key") == ALL_SITE_KEY:
+        raise ValueError("전체 사업장 조회는 출입이력 확인에서만 사용할 수 있습니다.")
     if mode == "occupancy" and not _normalize_text(payload.get("as_of")):
         raise ValueError("기준시각을 입력해 주세요.")
     if mode == "history" and (
         not _normalize_text(payload.get("start_at")) or not _normalize_text(payload.get("end_at"))
     ):
         raise ValueError("조회기간을 입력해 주세요.")
+    if mode == "history" and site.get("key") == ALL_SITE_KEY:
+        if _has_location_filter(payload):
+            raise ValueError("전체 사업장 조회는 건물/층, 상세위치 조건을 사용할 수 없습니다.")
+        if not _has_person_filter(payload):
+            raise ValueError("전체 사업장 조회는 성명 또는 협력사명을 입력해 주세요.")
+        return mode, site
     if not _has_required_discriminator(payload):
         raise ValueError("성명, 협력사명, 건물/층, 상세위치 중 하나 이상 입력해 주세요.")
     return mode, site
@@ -576,7 +668,7 @@ def partner_access_page():
     return render_template(
         "partner-access.html",
         menu=MENU_CONFIG,
-        sites=list(_get_site_options()),
+        sites=list(_get_selectable_site_options()),
         result_limit=_get_result_limit(),
     )
 

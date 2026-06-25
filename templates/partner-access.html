@@ -457,7 +457,7 @@
                     <input id="buildingFloorDisplay" type="text" readonly placeholder="건물/층 선택">
                     <button type="button" class="clear-inside" aria-label="건물/층 초기화" onclick="clearBuildingSelection()">×</button>
                 </div>
-                <button type="button" class="picker-button" title="건물/층 선택" onclick="openBuildingModal()">🔍</button>
+                <button type="button" class="picker-button" id="buildingPickerButton" title="건물/층 선택" onclick="openBuildingModal()">🔍</button>
             </div>
         </div>
 
@@ -478,7 +478,7 @@
                     <input id="detailLocationText" type="text" placeholder="상세위치 입력 또는 선택">
                     <button type="button" class="clear-inside" aria-label="상세위치 초기화" onclick="clearLocationSelection()">×</button>
                 </div>
-                <button type="button" class="picker-button" title="상세위치 선택" onclick="openLocationModal()">🔍</button>
+                <button type="button" class="picker-button" id="locationPickerButton" title="상세위치 선택" onclick="openLocationModal()">🔍</button>
             </div>
         </div>
 
@@ -642,6 +642,10 @@ function getSiteKey() {
     return document.getElementById('siteKey').value;
 }
 
+function isAllSiteHistory() {
+    return currentMode() === 'history' && getSiteKey() === 'all';
+}
+
 function toDatetimeLocal(date) {
     const pad = value => String(value).padStart(2, '0');
     return [
@@ -664,7 +668,37 @@ function syncModeUI() {
     const mode = currentMode();
     document.getElementById('occupancyTimeGroup').style.display = mode === 'occupancy' ? 'flex' : 'none';
     document.getElementById('historyTimeGroup').style.display = mode === 'history' ? 'flex' : 'none';
+    syncSiteModeUI();
     renderTable([], '');
+}
+
+function syncSiteModeUI() {
+    const mode = currentMode();
+    const siteSelect = document.getElementById('siteKey');
+    const allOption = siteSelect.querySelector('option[value="all"]');
+    if (allOption) {
+        allOption.disabled = mode !== 'history';
+        if (mode !== 'history' && siteSelect.value === 'all') {
+            siteSelect.selectedIndex = 0;
+        }
+    }
+
+    const disableLocation = isAllSiteHistory();
+    if (disableLocation) {
+        clearBuildingSelection();
+        clearLocationSelection();
+    }
+
+    document.getElementById('buildingFloorDisplay').disabled = disableLocation;
+    document.getElementById('buildingPickerButton').disabled = disableLocation;
+    document.getElementById('detailLocationText').disabled = disableLocation;
+    document.getElementById('locationPickerButton').disabled = disableLocation;
+    document.getElementById('buildingFloorDisplay').placeholder = disableLocation
+        ? '전체 조회에서는 사용 안 함'
+        : '건물/층 선택';
+    document.getElementById('detailLocationText').placeholder = disableLocation
+        ? '전체 조회에서는 사용 안 함'
+        : '상세위치 입력 또는 선택';
 }
 
 function openModal(id) {
@@ -742,6 +776,10 @@ function updateLocationDisplay() {
 }
 
 function openBuildingModal() {
+    if (isAllSiteHistory()) {
+        alert('전체 사업장 조회는 건물/층 조건을 사용할 수 없습니다.');
+        return;
+    }
     partnerAccessState.tempBuildingName = partnerAccessState.buildingName;
     partnerAccessState.tempFloorNames = [...partnerAccessState.floorNames];
     document.getElementById('buildingSearchInput').value = '';
@@ -846,6 +884,10 @@ function confirmBuildingSelection() {
 }
 
 function openLocationModal() {
+    if (isAllSiteHistory()) {
+        alert('전체 사업장 조회는 상세위치 조건을 사용할 수 없습니다.');
+        return;
+    }
     partnerAccessState.tempDetailLocations = [...partnerAccessState.detailLocations];
     document.getElementById('locationSearchInput').value = '';
     openModal('locationModal');
@@ -910,15 +952,18 @@ function confirmLocationSelection() {
 
 function getSearchPayload() {
     const mode = currentMode();
+    const allSiteHistory = isAllSiteHistory();
     const payload = {
         mode,
         site_key: getSiteKey(),
         company_name: document.getElementById('companyName').value.trim(),
         employee_name: document.getElementById('employeeName').value.trim(),
-        building_name: partnerAccessState.buildingName,
-        floor_names: partnerAccessState.floorNames,
-        detail_locations: partnerAccessState.detailLocations,
-        detail_text: partnerAccessState.detailLocations.length ? '' : document.getElementById('detailLocationText').value.trim()
+        building_name: allSiteHistory ? '' : partnerAccessState.buildingName,
+        floor_names: allSiteHistory ? [] : partnerAccessState.floorNames,
+        detail_locations: allSiteHistory ? [] : partnerAccessState.detailLocations,
+        detail_text: allSiteHistory || partnerAccessState.detailLocations.length
+            ? ''
+            : document.getElementById('detailLocationText').value.trim()
     };
     if (mode === 'occupancy') {
         payload.as_of = document.getElementById('asOfTime').value;
@@ -932,7 +977,11 @@ function getSearchPayload() {
 function validatePayload(payload) {
     if (!payload.site_key) return '사업장을 선택해 주세요.';
     if (payload.mode === 'occupancy' && !payload.as_of) return '기준시각을 입력해 주세요.';
+    if (payload.mode === 'occupancy' && payload.site_key === 'all') return '전체 사업장 조회는 출입이력 확인에서만 사용할 수 있습니다.';
     if (payload.mode === 'history' && (!payload.start_at || !payload.end_at)) return '조회기간을 입력해 주세요.';
+    if (payload.mode === 'history' && payload.site_key === 'all' && !(payload.company_name || payload.employee_name)) {
+        return '전체 사업장 조회는 성명 또는 협력사명을 입력해 주세요.';
+    }
     const hasFilter = Boolean(
         payload.company_name ||
         payload.employee_name ||
@@ -1060,6 +1109,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('siteKey').addEventListener('change', () => {
         clearBuildingSelection();
         clearLocationSelection();
+        syncSiteModeUI();
         renderTable([], '');
     });
     document.getElementById('detailLocationText').addEventListener('input', () => {
@@ -1078,6 +1128,7 @@ document.addEventListener('DOMContentLoaded', () => {
             searchPartnerAccess();
         }
     });
+    syncSiteModeUI();
 });
 </script>
 {% endblock %}
