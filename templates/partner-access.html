@@ -250,17 +250,20 @@
 }
 .data-table .col-event_time { width: 165px; min-width: 165px; }
 .data-table .col-direction { width: 90px; min-width: 90px; }
-.data-table .col-employee_name { width: 110px; min-width: 110px; }
+.data-table .col-employee_name { width: 100px; min-width: 100px; }
+.data-table .col-phone_number { width: 140px; min-width: 140px; }
 .data-table .col-company_name { width: 180px; min-width: 180px; }
+.data-table .col-company_cd { width: 130px; min-width: 130px; }
 .data-table .col-employee_no { width: 130px; min-width: 130px; }
 .data-table .col-employee_type { width: 120px; min-width: 120px; }
+.data-table .col-card_type { width: 90px; min-width: 90px; }
 .data-table .col-domain_id { width: 150px; min-width: 150px; }
 .data-table .col-site_name { width: 90px; min-width: 90px; }
 .data-table .col-building_name { width: 140px; min-width: 140px; }
 .data-table .col-floor_name { width: 90px; min-width: 90px; }
 .data-table .col-detail_location { width: 220px; min-width: 220px; }
 .data-table .col-access_level { width: 90px; min-width: 90px; }
-.data-table .col-reader_name { width: 190px; min-width: 190px; }
+.data-table .col-reader_name { width: 285px; min-width: 285px; }
 .data-table tbody tr:hover {
     background: #f9fafb;
 }
@@ -593,10 +596,13 @@ const resultColumns = {
     occupancy: [
         ['event_time', '최종출입시각'],
         ['direction', '최종상태'],
-        ['employee_name', '성명'],
+        ['employee_name', '성함'],
+        ['phone_number', '연락처'],
         ['company_name', '협력사명'],
+        ['company_cd', '사업자번호'],
         ['employee_no', '사번'],
         ['employee_type', '임직원구분'],
+        ['card_type', '카드구분'],
         ['domain_id', 'DomainID'],
         ['site_name', '사업장'],
         ['building_name', '건물'],
@@ -608,10 +614,13 @@ const resultColumns = {
     history: [
         ['event_time', '출입시각'],
         ['direction', 'IN/OUT'],
-        ['employee_name', '성명'],
+        ['employee_name', '성함'],
+        ['phone_number', '연락처'],
         ['company_name', '협력사명'],
+        ['company_cd', '사업자번호'],
         ['employee_no', '사번'],
         ['employee_type', '임직원구분'],
+        ['card_type', '카드구분'],
         ['domain_id', 'DomainID'],
         ['site_name', '사업장'],
         ['building_name', '건물'],
