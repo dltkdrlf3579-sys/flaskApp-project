@@ -11,7 +11,13 @@ from __future__ import annotations
 
 import logging
 import configparser
+import sys
+from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from db_connection import get_db_connection
 from database_config import execute_SQL, execute_local_query
@@ -22,7 +28,7 @@ log = logging.getLogger(__name__)
 
 def load_config() -> configparser.ConfigParser:
     cfg = configparser.ConfigParser()
-    read_files = cfg.read('config.ini', encoding='utf-8')
+    read_files = cfg.read(PROJECT_ROOT / 'config.ini', encoding='utf-8')
     if not read_files:
         raise RuntimeError('config.ini not found – run inside project root.')
     return cfg

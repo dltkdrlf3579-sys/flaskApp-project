@@ -5,13 +5,15 @@
 
 ## 1. 결론부터 읽기
 
-가장 먼저 아래 3개만 읽으면 된다.
+가장 먼저 아래 4개만 읽으면 된다.
 
-1. `02_STABILIZATION_PLAN.md`
+1. `04_RUNTIME_SCOPE.md`
+   - 현재 실제 런타임 파일과 기본 분석 제외 영역을 정리한 최신 기준.
+2. `02_STABILIZATION_PLAN.md`
    - 실제로 무엇부터 해야 하는지 정리한 운영 안정화 계획.
-2. `03_TECH_DEBT_ROADMAP.md`
+3. `03_TECH_DEBT_ROADMAP.md`
    - 어떤 기술부채가 있고, 무엇을 나중으로 미뤄도 되는지 정리한 로드맵.
-3. `01_ANALYSIS_CHECKLIST.md`
+4. `01_ANALYSIS_CHECKLIST.md`
    - 0~10단계 분석이 어디까지 끝났는지 확인하는 체크리스트.
 
 ## 2. 세부 보고서 읽는 순서
@@ -53,3 +55,4 @@
 
 > `docs/refactor-audit/00_README.md`를 읽고, `STABILIZATION_PLAN.md` 기준으로 첫 번째 국소수술 작업을 골라줘.
 
+이때 반드시 `04_RUNTIME_SCOPE.md`와 `.rgignore`를 기준으로 레거시 파일을 기본 분석에서 제외한다.

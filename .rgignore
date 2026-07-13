@@ -1,0 +1,47 @@
+# Generated/runtime artifacts
+.tmp/
+__pycache__/
+.pytest_cache/
+venv/
+.venv/
+.wslvenv/
+uploads/
+logs/
+reports/
+screenshot/
+screenshots/
+*.log
+*.db
+*.dmp
+
+# Archived or forensic-only sources
+legacy/
+backup/
+deletelist/
+sso_backup_20250116/
+migration_scripts/
+needtodevelop/
+scripts/operations/
+scripts/
+tools/
+
+# Root-level one-off scripts. Search explicitly only for forensic work.
+test*.py
+check_*.py
+debug_*.py
+analyze_*.py
+fix_*.py
+verify_*.py
+create_*.py
+update_*.py
+restore_*.py
+reset_*.py
+insert_*.py
+populate_*.py
+setup_*.py
+COMPLETE_*.py
+FINAL_*.py
+RUN_*.py
+FIX_*.py
+TEST_*.py
+recreate_*.py

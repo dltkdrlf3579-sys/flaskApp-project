@@ -7,6 +7,7 @@ import shutil
 import json
 from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, send_from_directory, abort
 import configparser
+import hmac
 from timezone_config import KST, get_korean_time, get_korean_time_str
 from config.menu import MENU_CONFIG
 from database_config import db_config, partner_manager
@@ -1063,6 +1064,10 @@ def check_first_request():
 start_background_master_sync_scheduler()
 start_background_permission_master_sync_scheduler()
 
+AUTO_UPLOAD_PATH = '/api/auto-upload-partner-files'
+AUTO_UPLOAD_TOKEN_HEADER = 'X-Auto-Upload-Token'
+
+
 WRITE_PERMISSION_BY_PATH = {
     '/register-change-request': 'REFERENCE_CHANGE',
     '/update-change-request': 'REFERENCE_CHANGE',
@@ -1070,7 +1075,7 @@ WRITE_PERMISSION_BY_PATH = {
     '/api/partner-change-request': 'REFERENCE_CHANGE',
     '/api/change-requests/delete': 'REFERENCE_CHANGE',
     '/update-partner': 'VENDOR_MGT',
-    '/api/auto-upload-partner-files': 'VENDOR_MGT',
+    AUTO_UPLOAD_PATH: 'VENDOR_MGT',
     '/api/partners/delete': 'VENDOR_MGT',
     '/api/partners/restore': 'VENDOR_MGT',
     '/register-accident': 'ACCIDENT_MGT',
@@ -1091,6 +1096,20 @@ WRITE_PERMISSION_BY_PATH = {
     '/api/full-process/restore': 'FULL_PROCESS',
     '/api/full-process/final-check': 'FULL_PROCESS',
 }
+
+
+def _has_valid_auto_upload_token() -> bool:
+    try:
+        config = configparser.ConfigParser(interpolation=None)
+        config_path = Path(__file__).resolve().parent / 'config.ini'
+        config.read(config_path, encoding='utf-8')
+        expected = config.get('AUTO_UPLOAD', 'token', fallback='').strip()
+    except Exception as exc:
+        logging.warning("Failed to load auto-upload token configuration: %s", exc)
+        return False
+
+    provided = request.headers.get(AUTO_UPLOAD_TOKEN_HEADER, '').strip()
+    return bool(expected and provided) and hmac.compare_digest(provided, expected)
 
 ADMIN_MUTATION_MARKERS = (
     '-columns',
@@ -1131,6 +1150,9 @@ def enforce_mutation_permissions():
         return None
 
     path = request.path.rstrip('/') or '/'
+
+    if path == AUTO_UPLOAD_PATH and _has_valid_auto_upload_token():
+        return None
 
     if _requires_admin_for_config_mutation(path):
         if session.get('admin_authenticated') or is_super_admin():
@@ -8714,26 +8736,6 @@ def delete_partners():
         return jsonify({"success": False, "message": str(e)}), 500
 
 # 새로운 메뉴들의 라우트
-@app.route('/work-safety')
-def work_safety():
-    """작업안전 현황 페이지"""
-    return render_template('work-safety.html', menu=menu)
-
-@app.route('/risk-assessment')
-def risk_assessment():
-    """위험성평가 현황 페이지"""
-    return render_template('risk-assessment.html', menu=menu)
-
-@app.route('/qualification-assessment')
-def qualification_assessment():
-    """적격성평가 현황 페이지"""
-    return render_template('qualification-assessment.html', menu=menu)
-
-@app.route('/safety-culture')
-def safety_culture():
-    """안전문화 현황 페이지"""
-    return render_template('safety-culture.html', menu=menu)
-
 @app.after_request
 def add_header(response):
     """응답 헤더 추가 - 캐시 무효화"""
@@ -10529,145 +10531,6 @@ def unauthorized(e):
     return redirect(url_for('login', next=request.url))
 
 # ===== Day 2 권한 관리 라우트 =====
-from permission_utils import check_permission, get_user_menus, clear_user_cache
-
-@app.route('/admin/permissions')
-@check_permission('permission_admin', 'view')
-def permission_dashboard():
-    """권한 관리 대시보드"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    try:
-        # 통계 데이터 조회
-        cursor.execute("""
-            SELECT
-                (SELECT COUNT(*) FROM system_users) as user_count,
-                (SELECT COUNT(*) FROM system_roles) as role_count,
-                (SELECT COUNT(*) FROM user_role_mapping) as mapping_count,
-                (SELECT COUNT(*) FROM access_audit_log
-                 WHERE created_at > CURRENT_DATE) as today_access
-        """)
-
-        stats = cursor.fetchone()
-        return render_template('admin/permission_dashboard.html',
-                             stats=stats, menu=MENU_CONFIG)
-    finally:
-        cursor.close()
-        conn.close()
-
-@app.route('/admin/permissions/users')
-@check_permission('permission_admin', 'view')
-def permission_users():
-    """사용자별 권한 관리"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute("""
-            SELECT u.emp_id, u.login_id, u.user_name, u.dept_name,
-                   STRING_AGG(r.role_name, ', ') as roles
-            FROM system_users u
-            LEFT JOIN user_role_mapping um ON u.emp_id = um.emp_id
-            LEFT JOIN system_roles r ON um.role_code = r.role_code
-            GROUP BY u.emp_id, u.login_id, u.user_name, u.dept_name
-            ORDER BY u.user_name
-        """)
-
-        users = cursor.fetchall()
-        return render_template('admin/permission_users.html',
-                             users=users, menu=MENU_CONFIG)
-    finally:
-        cursor.close()
-        conn.close()
-
-@app.route('/admin/permissions/audit')
-@check_permission('permission_admin', 'view')
-def permission_audit():
-    """접근 로그 조회"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute("""
-            SELECT a.emp_id, a.login_id, a.action, a.menu_code,
-                   a.resource_id, a.ip_address, a.success, a.error_message,
-                   a.created_at, u.user_name
-            FROM access_audit_log a
-            LEFT JOIN system_users u ON a.emp_id = u.emp_id
-            ORDER BY a.created_at DESC
-            LIMIT 100
-        """)
-
-        logs = cursor.fetchall()
-        return render_template('admin/permission_audit.html',
-                             logs=logs, menu=MENU_CONFIG)
-    finally:
-        cursor.close()
-        conn.close()
-
-@app.route('/api/permissions/grant', methods=['POST'])
-@check_permission('permission_admin', 'create')
-def api_grant_permission():
-    """권한 부여 API"""
-    data = request.json
-    emp_id = data.get('emp_id')
-    menu_code = data.get('menu_code')
-    permissions = data.get('permissions', {})
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute("""
-            INSERT INTO user_menu_permissions
-            (emp_id, menu_code, can_view, can_create, can_edit, can_delete, data_scope, granted_by)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (emp_id, menu_code) DO UPDATE SET
-                can_view = EXCLUDED.can_view,
-                can_create = EXCLUDED.can_create,
-                can_edit = EXCLUDED.can_edit,
-                can_delete = EXCLUDED.can_delete,
-                data_scope = EXCLUDED.data_scope,
-                granted_at = CURRENT_TIMESTAMP
-        """, (
-            emp_id, menu_code,
-            permissions.get('can_view', False),
-            permissions.get('can_create', False),
-            permissions.get('can_edit', False),
-            permissions.get('can_delete', False),
-            permissions.get('data_scope', 'own'),
-            session.get('emp_id')
-        ))
-
-        conn.commit()
-
-        # 캐시 클리어
-        clear_user_cache(emp_id)
-
-        return jsonify({'success': True})
-
-    except Exception as e:
-        conn.rollback()
-        logging.error(f"권한 부여 실패: {e}")
-        return jsonify({'success': False, 'error': str(e)})
-    finally:
-        cursor.close()
-        conn.close()
-
-@app.route('/api/permissions/cache/clear', methods=['POST'])
-@check_permission('permission_admin', 'edit')
-def api_clear_cache():
-    """권한 캐시 클리어"""
-    emp_id = request.json.get('emp_id') if request.json else None
-
-    if emp_id:
-        clear_user_cache(emp_id)
-    else:
-        clear_user_cache()  # 전체 캐시 클리어
-
-    return jsonify({'success': True})
-
 if __name__ == "__main__":
     print("Flask 앱 시작 중...", flush=True)
     

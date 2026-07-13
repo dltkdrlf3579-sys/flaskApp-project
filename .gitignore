@@ -16,6 +16,8 @@ static/logo-sample.png
 *.md
 !docs/refactor-audit/**/*.md
 !docs/refactor-audit/*.md
+!legacy/AGENTS.md
+!scripts/operations/README.md
 nul
 
 # IDE 및 에디터 설정 폴더 제외
@@ -27,6 +29,7 @@ nul
 backup/
 columns/backup/
 *backup*/
+legacy/one-off-scripts/
 
 # 데이터베이스 파일 제외
 portal.db
@@ -66,7 +69,7 @@ config.ini.*_backup
 app.py.backup
 
 # 기타 임시 파일들
-wsgi.py
+.tmp/
 run_production.bat
 *.bat.wslvenv/
 
