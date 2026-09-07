@@ -1,0 +1,64 @@
+{% extends "popup-base.html" if is_popup else "base.html" %}
+{% from 'includes/attachment_section.html' import attachment_styles %}
+{% block title %}AI 학습자료 {{ '상세정보' if material else '등록' }}{% endblock %}
+{% block popup_title %}AI 학습자료 {{ '상세정보' if material else '등록' }}{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/board-form.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ai-training-materials.css') }}">
+{{ attachment_styles() }}
+<form id="training-form" class="board-form-container training-detail" method="post" enctype="multipart/form-data"
+      action="{{ url_for('ai_training_materials.save_api', material_id=material.id) if material else url_for('ai_training_materials.save_api') }}"
+      data-max-mb="{{ settings.max_mb }}" data-extensions="{{ settings.extensions|sort|join(',') }}"
+      data-list-url="{{ url_for('ai_training_materials.materials_page') }}">
+    {% if not is_popup %}<div class="page-header"><h2 class="page-title">AI 학습자료 {{ '상세정보' if material else '등록' }}</h2></div>{% endif %}
+    <div id="training-error" class="alert alert-danger" role="alert" hidden></div>
+    <input type="hidden" name="version" value="{{ material.updated_at.isoformat() if material else '' }}">
+    <div class="section">
+        <div class="section-header"><h3 class="section-title">기본정보</h3></div>
+        <div class="section-content info-table">
+            <div class="info-row">
+                <div class="info-cell span-2"><label>요청번호</label><div class="value">{{ request_number if material else '등록 시 자동 생성' }}</div></div>
+                <div class="info-cell span-2"><label>등록일</label><div class="value">{{ (material.created_at if material else today).strftime('%Y-%m-%d %H:%M:%S') }}</div></div>
+                <div class="info-cell span-2"><label>작성자</label><div class="value">{{ material.author_name if material else author.author_name }}</div></div>
+                <div class="info-cell span-2"><label>작성부서</label><div class="value">{{ (material.department_name if material else author.department_name) or '-' }}</div></div>
+            </div>
+            <div class="info-row">
+                <div class="info-cell span-6"><label for="training-title">제목</label><input id="training-title" name="title" value="{{ material.title if material else '' }}" maxlength="300" required {{ 'readonly' if not can_write else '' }} placeholder="학습시킬 자료의 제목을 입력하세요"></div>
+                <div class="info-cell span-2"><label>수정일</label><div class="value">{{ material.updated_at.strftime('%Y-%m-%d %H:%M:%S') if material else '-' }}</div></div>
+            </div>
+        </div>
+    </div>
+    <div class="section attachments-section">
+        <div class="section-header">
+            <h3 class="section-title">첨부파일</h3>
+            <div class="attachments-header-right">
+                {% if can_write %}<button class="btn-add-file" type="button" id="training-add">추가</button>{% endif %}
+                <span class="file-count">총 <span id="training-file-count">{{ attachments|length }}</span>개 · 파일당 {{ settings.max_mb }}MB 이하</span>
+            </div>
+        </div>
+        <div class="section-content">
+            {% if can_write %}<input type="file" id="training-files" multiple hidden accept="{{ '.' + (settings.extensions|sort|join(',.')) }}">{% endif %}
+            <div class="training-file-table">
+                <table>
+                    <thead><tr><th>파일명</th><th>용량</th>{% if can_write %}<th>관리</th>{% endif %}</tr></thead>
+                    <tbody id="training-file-body">
+                        {% for attachment in attachments %}
+                        <tr data-file-id="{{ attachment.id }}">
+                            <td><a href="{{ url_for('ai_training_materials.download_file', file_id=attachment.id) }}" download>{{ attachment.file_name }}</a></td>
+                            <td>{{ (attachment.file_size / 1024 / 1024)|round(2) }} MB</td>
+                            {% if can_write %}<td><button type="button" class="btn btn-outline-danger btn-sm training-remove">삭제</button></td>{% endif %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <p id="training-empty" class="empty-message" {% if attachments %}hidden{% endif %}>첨부파일을 추가해 주세요.</p>
+            </div>
+        </div>
+    </div>
+    <div class="training-save-actions">
+        {% if can_write %}<button type="submit" id="training-save" class="btn btn-primary">{{ '수정완료' if material else '등록' }}</button>{% endif %}
+        <button type="button" id="training-close" class="btn btn-secondary">닫기</button>
+    </div>
+</form>
+<script src="{{ url_for('static', filename='js/ai-training-materials.js') }}" defer></script>
+{% endblock %}

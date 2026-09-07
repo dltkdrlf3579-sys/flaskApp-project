@@ -25,6 +25,7 @@ MENU_PERMISSION_MAP = {
     'partner-change-request-detail': 'REFERENCE_CHANGE',
     'partner-access': 'PARTNER_ACCESS',
     'ai-assistant': 'AI_ASSISTANT',
+    'ai-training-materials': 'AI_TRAINING_MATERIALS',
     'accident': 'ACCIDENT_MGT',
     'accident-register': 'ACCIDENT_MGT',
     'accident-detail': 'ACCIDENT_MGT',
@@ -58,6 +59,8 @@ MENU_PERMISSION_MAP = {
 }
 
 BOARD_PERMISSION_MAP = {
+    'ai-training-materials': 'AI_TRAINING_MATERIALS',
+    'ai_training_materials': 'AI_TRAINING_MATERIALS',
     'partner': 'VENDOR_MGT',
     'partners': 'VENDOR_MGT',
     'vendor': 'VENDOR_MGT',
@@ -98,6 +101,7 @@ MENU_ICON_MAP = {
     'REFERENCE_CHANGE': 'fas fa-exchange-alt',
     'PARTNER_ACCESS': 'fas fa-id-card',
     'AI_ASSISTANT': 'fas fa-robot',
+    'AI_TRAINING_MATERIALS': 'fas fa-file-upload',
     'ACCIDENT_MGT': 'fas fa-exclamation-triangle',
     'SAFETY_INSTRUCTION': 'fas fa-clipboard-check',
     'FOLLOW_SOP': 'fas fa-tasks',
@@ -360,6 +364,7 @@ def get_user_accessible_menus():
                 {'code': 'REFERENCE_CHANGE', 'name': '기준정보 변경요청', 'url': '/reference-change', 'icon': 'fas fa-exchange-alt', 'read_level': 3, 'write_level': 3},
                 {'code': 'PARTNER_ACCESS', 'name': '협력사 실시간 출입정보', 'url': '/partner-access', 'icon': 'fas fa-id-card', 'read_level': 3, 'write_level': 3},
                 {'code': 'AI_ASSISTANT', 'name': 'AI 조회 도우미', 'url': '/ai-assistant', 'icon': 'fas fa-robot', 'read_level': 3, 'write_level': 3},
+                {'code': 'AI_TRAINING_MATERIALS', 'name': 'AI 학습자료 업로드', 'url': '/ai-training-materials', 'icon': 'fas fa-file-upload', 'read_level': 3, 'write_level': 3},
                 {'code': 'ACCIDENT_MGT', 'name': '협력사 사고', 'url': '/accident-management', 'icon': 'fas fa-exclamation-triangle', 'read_level': 3, 'write_level': 3},
                 {'code': 'SAFETY_INSTRUCTION', 'name': '환경안전 지시서', 'url': '/safety-instruction', 'icon': 'fas fa-clipboard-check', 'read_level': 3, 'write_level': 3},
                 {'code': 'FOLLOW_SOP', 'name': 'Follow SOP', 'url': '/follow-sop', 'icon': 'fas fa-tasks', 'read_level': 3, 'write_level': 3},

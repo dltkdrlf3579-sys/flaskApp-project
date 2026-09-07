@@ -53,6 +53,7 @@ from add_page_routes import (
 from boards.safety_instruction import safety_instruction_bp
 from partner_access import partner_access_bp
 from ai_assistant import ai_assistant_bp
+from ai_training_materials import ai_training_materials_bp
 from controllers.boards.accident_controller import (
     AccidentController,
     build_accident_config,
@@ -120,6 +121,7 @@ app.register_blueprint(subcontract_approval_bp)
 app.register_blueprint(subcontract_report_bp)
 app.register_blueprint(partner_access_bp)
 app.register_blueprint(ai_assistant_bp)
+app.register_blueprint(ai_training_materials_bp)
 register_permission_routes(app)
 
 CHANGE_REQUEST_DATE_COLUMNS = {'final_check_date'}
@@ -9607,6 +9609,7 @@ def page_view(url):
         'partner-standards': 'partner_standards_route',
         'partner-access': 'partner_access.partner_access_page',
         'ai-assistant': 'ai_assistant.ai_assistant_page',
+        'ai-training-materials': 'ai_training_materials.materials_page',
         # 구 라우트 호환: /change-request -> /partner-change-request
         'change-request': 'partner_change_request_route',
     }

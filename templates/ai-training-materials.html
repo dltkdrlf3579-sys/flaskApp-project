@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from 'includes/table_controls.html' import render_table_controls %}
+{% block title %}AI 학습자료 업로드{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ai-training-materials.css') }}">
+<div class="training-list" data-register-url="{{ url_for('ai_training_materials.register_page', popup=1) }}">
+    <div class="page-header"><h2 class="page-title">AI 학습자료 업로드</h2></div>
+    <form class="search-section" method="get">
+        <label for="training-search">제목 / 첨부파일명</label>
+        <input id="training-search" name="q" value="{{ query }}" type="text" placeholder="검색어 입력">
+        <input type="hidden" name="per_page" value="{{ per_page }}">
+        <div class="search-actions">
+            <a class="btn btn-secondary" href="{{ url_for('ai_training_materials.materials_page') }}">초기화</a>
+            <button class="btn btn-primary" type="submit">검색</button>
+        </div>
+    </form>
+    <div class="table-section">
+        {{ render_table_controls(total_count, show_excel=False, show_delete=False, can_write=can_write) }}
+        <div class="table-wrapper">
+            <table class="data-table">
+                <thead><tr><th>제목</th><th>첨부파일명</th><th>등록자</th><th>등록일</th><th>수정일</th><th>등록부서</th></tr></thead>
+                <tbody>
+                {% for material in materials %}
+                    <tr>
+                        <td><a href="{{ url_for('ai_training_materials.detail_page', material_id=material.id, popup=1) }}" data-training-popup title="{{ material.title }}">{{ material.title }}</a></td>
+                        <td title="{{ material.file_names }}">{{ material.file_names }}</td>
+                        <td>{{ material.author_name }}</td>
+                        <td>{{ material.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                        <td>{{ material.updated_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                        <td>{{ material.department_name or '-' }}</td>
+                    </tr>
+                {% else %}
+                    <tr><td colspan="6" class="empty-message">등록된 학습자료가 없습니다.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <nav class="training-pagination" aria-label="목록 페이지">
+        {% if page > 1 %}<a class="btn btn-outline-secondary btn-sm" href="{{ url_for('ai_training_materials.materials_page', page=page-1, per_page=per_page, q=query) }}">이전</a>{% endif %}
+        <span>{{ page }} / {{ total_pages }}</span>
+        {% if page < total_pages %}<a class="btn btn-outline-secondary btn-sm" href="{{ url_for('ai_training_materials.materials_page', page=page+1, per_page=per_page, q=query) }}">다음</a>{% endif %}
+    </nav>
+</div>
+<script src="{{ url_for('static', filename='js/ai-training-materials.js') }}" defer></script>
+{% endblock %}

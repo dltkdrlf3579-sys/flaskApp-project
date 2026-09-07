@@ -7,6 +7,7 @@ MENU_CONFIG = [
             {"title": "기준정보 변경요청", "url": "partner-change-request"},
             {"title": "협력사 실시간 출입정보", "url": "partner-access"},
             {"title": "AI 조회 도우미", "url": "ai-assistant"},
+            {"title": "AI 학습자료 업로드", "url": "ai-training-materials"},
         ],
     },
     {
