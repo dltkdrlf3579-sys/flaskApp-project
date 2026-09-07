@@ -1304,7 +1304,7 @@ def _is_dashboard_team_department(current_dept_id, root_dept_id):
                       COALESCE(current_dept.dept_full_path, current_dept.dept_code)
                           = COALESCE(root_dept.dept_full_path, root_dept.dept_code)
                       OR COALESCE(current_dept.dept_full_path, current_dept.dept_code)
-                          LIKE COALESCE(root_dept.dept_full_path, root_dept.dept_code) || '|%'
+                          LIKE COALESCE(root_dept.dept_full_path, root_dept.dept_code) || '|%%'
                   )
             ) AS is_team_department
             """,
