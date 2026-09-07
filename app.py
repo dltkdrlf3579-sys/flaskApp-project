@@ -1277,13 +1277,96 @@ def api_search_popup_autocomplete():
             'items': []
         }), 500
 
+def _is_dashboard_team_department(current_dept_id, root_dept_id):
+    current_dept_id = str(current_dept_id or '').strip()
+    root_dept_id = str(root_dept_id or '').strip()
+    if not current_dept_id or not root_dept_id:
+        return False
+    if current_dept_id == root_dept_id:
+        return True
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM departments_external current_dept
+                JOIN departments_external root_dept
+                  ON root_dept.dept_id = %s
+                 AND root_dept.is_active = true
+                WHERE current_dept.dept_id = %s
+                  AND current_dept.is_active = true
+                  AND (
+                      COALESCE(current_dept.dept_full_path, current_dept.dept_code)
+                          = COALESCE(root_dept.dept_full_path, root_dept.dept_code)
+                      OR COALESCE(current_dept.dept_full_path, current_dept.dept_code)
+                          LIKE COALESCE(root_dept.dept_full_path, root_dept.dept_code) || '|%'
+                  )
+            ) AS is_team_department
+            """,
+            (root_dept_id, current_dept_id),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return False
+        try:
+            return bool(row['is_team_department'])
+        except (KeyError, TypeError):
+            return bool(row[0])
+    except Exception as exc:
+        logging.warning(
+            "대시보드 부서 분기 조회 실패(dept_id=%s, root_dept_id=%s): %s",
+            current_dept_id,
+            root_dept_id,
+            exc,
+        )
+        return False
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if conn:
+            conn.close()
+
+
 @app.route("/")
 def index():
-    # 대시보드 설정 가져오기 (단순화)
-    dashboard_url = db_config.config.get('DASHBOARD', 'DASHBOARD_URL', fallback='').strip()
+    # 기존 dashboard_url은 새 URL 설정이 비어 있을 때 사용하는 호환용 기본값이다.
+    legacy_dashboard_url = db_config.config.get('DASHBOARD', 'DASHBOARD_URL', fallback='').strip()
+    team_dashboard_url = db_config.config.get(
+        'DASHBOARD',
+        'TEAM_DASHBOARD_URL',
+        fallback='',
+    ).strip()
+    general_dashboard_url = db_config.config.get(
+        'DASHBOARD',
+        'GENERAL_DASHBOARD_URL',
+        fallback='',
+    ).strip()
+    team_root_dept_id = db_config.config.get(
+        'DASHBOARD',
+        'TEAM_ROOT_DEPT_ID',
+        fallback='',
+    ).strip()
     dashboard_enabled = db_config.config.getboolean('DASHBOARD', 'DASHBOARD_ENABLED', fallback=True)
     dashboard_mode = db_config.config.get('DASHBOARD', 'DASHBOARD_MODE', fallback='iframe').strip().lower()
     fallback_image = db_config.config.get('DASHBOARD', 'FALLBACK_DASHBOARD_IMAGE', fallback='').strip()
+
+    current_dept_id = session.get('deptid')
+    is_team_dashboard_user = _is_dashboard_team_department(
+        current_dept_id,
+        team_root_dept_id,
+    )
+    if is_team_dashboard_user:
+        dashboard_url = team_dashboard_url or legacy_dashboard_url
+    else:
+        dashboard_url = general_dashboard_url or legacy_dashboard_url
 
     if dashboard_mode not in ('iframe', 'image'):
         dashboard_mode = 'iframe'
