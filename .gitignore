@@ -17,6 +17,7 @@ static/logo-sample.png
 !docs/refactor-audit/**/*.md
 !docs/refactor-audit/*.md
 !docs/ai-training-materials.md
+!docs/ai-assistant-internal-checklist.md
 !legacy/AGENTS.md
 !scripts/operations/README.md
 nul
@@ -71,6 +72,7 @@ app.py.backup
 
 # 기타 임시 파일들
 .tmp/
+.cache/ai_previews/
 run_production.bat
 *.bat.wslvenv/
 

@@ -345,6 +345,23 @@
         max-width: 100%;
     }
 }
+.ai-formatted, .ai-resources { white-space: normal; overflow-wrap: anywhere; }
+.ai-formatted p { margin: 0 0 12px; line-height: 1.8; }
+.ai-formatted h3, .ai-formatted h4 { margin: 20px 0 10px; }
+.ai-formatted ul, .ai-formatted ol { padding-left: 24px; }
+.ai-formatted li { margin-bottom: 6px; }
+.ai-formatted pre { white-space: pre-wrap; padding: 14px; background: #f1f5f9; border-radius: 8px; }
+.ai-table-wrap { overflow-x: auto; margin: 14px 0; }
+.ai-table-wrap table { border-collapse: collapse; width: 100%; }
+.ai-table-wrap th, .ai-table-wrap td { border: 1px solid #dce3ed; padding: 10px; text-align: left; }
+.ai-table-wrap th { background: #f1f5f9; }
+.ai-resources { border-top: 1px solid #e2e8f0; margin-top: 20px; padding-top: 8px; }
+.ai-resources h4 { font-size: 14px; margin: 14px 0 8px; }
+.ai-file-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.ai-resource-card { display: flex; flex-direction: column; gap: 8px; border: 1px solid #dce3ed; border-radius: 8px; padding: 10px 14px; background: white; color: #294f99; font-size: 13px; }
+.ai-image-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 12px; }
+.ai-image-grid img { width: 100%; max-height: 400px; object-fit: contain; background: #f8fafc; }
+.assistant-shell[aria-busy="true"] .session-panel { opacity: .65; pointer-events: none; }
 </style>
 
 <div class="page-header">
@@ -366,23 +383,23 @@
         <div id="chatHistory" class="chat-history">
             <div id="chatEmpty" class="chat-empty">
                 <h2>무엇을 조회할까요?</h2>
-                <p>지금은 mock 모드라 실제 사내 AI/API 호출 없이 질문 의도만 확인합니다.</p>
+                <p>{% if ai_mode == 'mock' %}현재는 데모 모드입니다. 사내 API와 자료 검색은 실행하지 않습니다.{% elif knowledge_enabled %}사내 자료를 찾아 설명하고, 관련 파일과 페이지를 보여드립니다.{% else %}사내 AI와 텍스트로 대화합니다. 자료 검색은 꺼져 있습니다.{% endif %}</p>
                 <div class="example-list">
-                    <button type="button" class="example-button" data-example="기흥 A동 1층 재실인원 알려줘">
-                        기흥 A동 1층 재실인원 알려줘
+                    <button type="button" class="example-button" data-example="협력사 안전교육 관련 규정을 찾아줘">
+                        협력사 안전교육 관련 규정을 찾아줘
                     </button>
-                    <button type="button" class="example-button" data-example="홍길동 최근 안전교육 이력 알려줘">
-                        홍길동 최근 안전교육 이력 알려줘
+                    <button type="button" class="example-button" data-example="방금 설명한 규정의 원본 파일을 줘">
+                        방금 설명한 규정의 원본 파일을 줘
                     </button>
-                    <button type="button" class="example-button" data-example="협력사 점검 조치현황 요약해줘">
-                        협력사 점검 조치현황 요약해줘
+                    <button type="button" class="example-button" data-example="그 내용이 있는 페이지를 이미지로 보여줘">
+                        그 내용이 있는 페이지를 이미지로 보여줘
                     </button>
                 </div>
             </div>
         </div>
         <div class="chat-input-bar">
             <form id="chatForm" class="chat-form">
-                <textarea id="questionInput" placeholder="질문을 입력하세요. 예: 기흥 A동 1층 재실인원 알려줘"></textarea>
+                <textarea id="questionInput" maxlength="2000" placeholder="궁금한 규정이나 자료를 질문하세요. (텍스트 질문만 지원)"></textarea>
                 <button id="sendButton" type="submit" class="send-button">전송</button>
             </form>
         </div>
@@ -395,27 +412,27 @@
             상태: <strong>{{ '활성화' if ai_enabled else '비활성화' }}</strong>
         </div>
 
-        <h3>허용 도메인</h3>
+        <h3>이용 범위</h3>
         <div class="domain-list">
-            {% for domain in domains %}
             <div class="domain-card">
-                <div class="domain-name">{{ domain.name }}</div>
-                <div class="domain-desc">{{ domain.description }}</div>
-                <span class="domain-db">{{ domain.db }}</span>
+                <div class="domain-name">사내 자료 안내</div>
+                <div class="domain-desc">등록된 규정·교육자료의 내용, 원본 파일과 관련 페이지 이미지</div>
+                <span class="domain-db">{{ '데모 · 실제 조회 안 함' if ai_mode == 'mock' else ('자료 검색 켜짐' if knowledge_enabled else '일반 대화만') }}</span>
             </div>
-            {% else %}
             <div class="domain-card">
-                <div class="domain-name">도메인 없음</div>
-                <div class="domain-desc">config.ini에 AI_DOMAIN_* 섹션을 추가해 주세요.</div>
+                <div class="domain-name">대화 이어가기</div>
+                <div class="domain-desc">최근 대화와 출처를 참고합니다. 주제가 바뀌면 새 대화를 시작하세요. 실시간 출입·교육이력 DB 조회는 아직 연결되지 않았습니다.</div>
             </div>
-            {% endfor %}
         </div>
     </aside>
 </div>
 
+<script src="{{ url_for('static', filename='js/ai-assistant-render.js') }}?v=20260908"></script>
 <script>
 let currentSessionId = null;
 let sessions = [];
+let requestBusy = false;
+let viewRevision = 0;
 
 const chatHistory = document.getElementById('chatHistory');
 const chatEmpty = document.getElementById('chatEmpty');
@@ -454,8 +471,14 @@ function formatMessageMeta(message) {
     const domainName = metadata.domain && metadata.domain.name ? metadata.domain.name : '';
     const mode = metadata.mode || '';
     const parts = [];
+    if (metadata.intent === 'handler_error') parts.push('미완료 응답');
     if (domainName) parts.push(`도메인: ${domainName}`);
     if (mode) parts.push(`모드: ${mode}`);
+    if (metadata.answer_model) {
+        const roles = { luna: '루나', terra: '테라', sol: '솔' };
+        const role = roles[metadata.author_choice];
+        parts.push(`답변 모델: ${role ? role + ' · ' : ''}${metadata.answer_model}`);
+    }
     return parts.join(' · ');
 }
 
@@ -512,6 +535,7 @@ function renderSessionList() {
 }
 
 async function loadSessions(selectLatest = false) {
+    const revision = viewRevision;
     const response = await fetch('/api/ai-assistant/sessions', {
         headers: { 'Accept': 'application/json' }
     });
@@ -521,16 +545,19 @@ async function loadSessions(selectLatest = false) {
     }
     sessions = data.sessions || [];
     renderSessionList();
-    if (selectLatest && sessions.length && !currentSessionId) {
+    if (selectLatest && sessions.length && !currentSessionId && !requestBusy && revision === viewRevision) {
         await loadSession(sessions[0].id);
     }
 }
 
 async function loadSession(sessionId) {
+    if (requestBusy) return;
+    const revision = ++viewRevision;
     const response = await fetch(`/api/ai-assistant/sessions/${sessionId}/messages`, {
         headers: { 'Accept': 'application/json' }
     });
     const data = await response.json();
+    if (revision !== viewRevision || requestBusy) return;
     if (!response.ok || !data.success) {
         alert(data.message || '대화 내용을 불러오지 못했습니다.');
         return;
@@ -540,7 +567,7 @@ async function loadSession(sessionId) {
     renderSessionList();
     clearMessages();
     (data.messages || []).forEach((message) => {
-        appendMessage(message.role === 'user' ? 'user' : 'assistant', message.content || '', formatMessageMeta(message));
+        appendMessage(message.role === 'user' ? 'user' : 'assistant', message.content || '', formatMessageMeta(message), (message.metadata || {}).resources);
     });
     if (!(data.messages || []).length) {
         showEmptyState();
@@ -548,6 +575,8 @@ async function loadSession(sessionId) {
 }
 
 function startNewSession() {
+    if (requestBusy) return;
+    viewRevision += 1;
     currentSessionId = null;
     clearMessages();
     renderSessionList();
@@ -555,6 +584,7 @@ function startNewSession() {
 }
 
 async function deleteSession(sessionId) {
+    if (requestBusy) return;
     const response = await fetch(`/api/ai-assistant/sessions/${sessionId}`, {
         method: 'DELETE',
         headers: { 'Accept': 'application/json' }
@@ -572,7 +602,7 @@ async function deleteSession(sessionId) {
     renderSessionList();
 }
 
-function appendMessage(role, text, meta = '') {
+function appendMessage(role, text, meta = '', resources = null) {
     hideEmptyState();
     const row = document.createElement('div');
     row.className = `message-row ${role}`;
@@ -581,6 +611,7 @@ function appendMessage(role, text, meta = '') {
     const contentNode = document.createElement('div');
     contentNode.className = 'message-content';
     contentNode.textContent = text;
+    if (role === 'assistant') PortalAiRender.text(contentNode, text);
     bubble.appendChild(contentNode);
     if (meta) {
         const metaNode = document.createElement('div');
@@ -589,6 +620,7 @@ function appendMessage(role, text, meta = '') {
         bubble.appendChild(metaNode);
     }
     row.appendChild(bubble);
+    if (role === 'assistant') PortalAiRender.resources(bubble, resources);
     chatHistory.appendChild(row);
     chatHistory.scrollTop = chatHistory.scrollHeight;
     return row;
@@ -654,9 +686,8 @@ function appendStreamText(streamMessage, text) {
 }
 
 function setStreamMeta(streamMessage, meta) {
-    const domainName = meta.domain && meta.domain.name ? meta.domain.name : '미분류';
-    const mode = meta.mode || 'stream';
-    streamMessage.metaNode.textContent = `도메인: ${domainName} · 모드: ${mode}`;
+    streamMessage.metaNode.textContent = formatMessageMeta({ metadata: meta });
+    if (meta.resources) PortalAiRender.resources(streamMessage.bubble, meta.resources);
 }
 
 function parseSseBlock(block) {
@@ -688,75 +719,51 @@ async function readEventStream(response, onEvent) {
     const decoder = new TextDecoder('utf-8');
     let buffer = '';
 
-    while (true) {
-        const { value, done } = await reader.read();
-        if (done) {
-            break;
-        }
-        buffer += decoder.decode(value, { stream: true });
-
-        let boundary = buffer.indexOf('\n\n');
-        while (boundary >= 0) {
-            const block = buffer.slice(0, boundary).trim();
-            buffer = buffer.slice(boundary + 2);
-            const event = parseSseBlock(block);
-            if (event) {
-                onEvent(event);
+    try {
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            if (buffer.length > 2000000) throw new Error('응답 조각이 허용 크기를 초과했습니다.');
+            let boundary = buffer.indexOf('\n\n');
+            while (boundary >= 0) {
+                const block = buffer.slice(0, boundary).trim();
+                buffer = buffer.slice(boundary + 2);
+                const event = parseSseBlock(block);
+                if (event) onEvent(event);
+                boundary = buffer.indexOf('\n\n');
             }
-            boundary = buffer.indexOf('\n\n');
         }
-    }
-
-    const tail = buffer.trim();
-    if (tail) {
-        const event = parseSseBlock(tail);
-        if (event) {
-            onEvent(event);
+        buffer += decoder.decode();
+        const tail = buffer.trim();
+        if (tail) {
+            const event = parseSseBlock(tail);
+            if (event) onEvent(event);
         }
+    } finally {
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
     }
-}
-
-async function submitQuestionFallback(trimmed, streamMessage) {
-    window.__aiAssistantLastTransport = 'fallback';
-    addStatus(streamMessage, '스트리밍 연결이 제한되어 일반 응답으로 전환합니다.');
-    const response = await fetch('/api/ai-assistant/chat', {
-        method: 'POST',
-        headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ question: trimmed, session_id: currentSessionId })
-    });
-    const data = await response.json();
-    if (!response.ok || !data.success) {
-        throw new Error(data.message || 'AI 조회 중 오류가 발생했습니다.');
-    }
-    if (data.session && data.session.id) {
-        currentSessionId = data.session.id;
-        upsertSession(data.session);
-        renderSessionList();
-    }
-    const result = data.data || {};
-    setStreamMeta(streamMessage, {
-        mode: result.mode || 'mock',
-        domain: result.domain || {}
-    });
-    appendStreamText(streamMessage, result.answer || '');
 }
 
 async function submitQuestion(question) {
+    if (requestBusy) return;
     const trimmed = question.trim();
     if (!trimmed) {
         alert('질문을 입력해 주세요.');
         return;
     }
 
+    requestBusy = true;
+    viewRevision += 1;
+    document.querySelector('.assistant-shell').setAttribute('aria-busy', 'true');
     appendMessage('user', trimmed);
     questionInput.value = '';
     sendButton.disabled = true;
     const streamMessage = appendStreamingMessage();
     window.__aiAssistantLastTransport = 'stream-started';
 
+    let completed = false;
     try {
         const response = await fetch('/api/ai-assistant/chat-stream', {
             method: 'POST',
@@ -768,8 +775,8 @@ async function submitQuestion(question) {
         });
 
         if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(errorText || 'AI 조회 중 오류가 발생했습니다.');
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || 'AI 조회 중 오류가 발생했습니다.');
         }
 
         await readEventStream(response, (event) => {
@@ -787,6 +794,8 @@ async function submitQuestion(question) {
             } else if (event.event === 'error') {
                 throw new Error(payload.message || '스트리밍 처리 중 오류가 발생했습니다.');
             } else if (event.event === 'done') {
+                completed = true;
+                PortalAiRender.text(streamMessage.contentNode, streamMessage.text);
                 if (streamMessage.typing) {
                     streamMessage.typing.remove();
                     streamMessage.typing = null;
@@ -795,15 +804,14 @@ async function submitQuestion(question) {
                 window.__aiAssistantLastTransport = 'stream';
             }
         });
+        if (!completed) throw new Error('완료 전에 연결이 끊어졌습니다. 대화 이력을 확인해 주세요.');
     } catch (error) {
-        try {
-            await submitQuestionFallback(trimmed, streamMessage);
-        } catch (fallbackError) {
-            window.__aiAssistantLastTransport = 'error';
-            streamMessage.statusList.innerHTML = '';
-            streamMessage.contentNode.textContent = `요청 중 오류가 발생했습니다: ${fallbackError.message || fallbackError}`;
-            streamMessage.metaNode.textContent = '오류';
-        }
+        window.__aiAssistantLastTransport = 'error';
+        if (streamMessage.typing) streamMessage.typing.remove();
+        streamMessage.bubble.classList.remove('streaming');
+        PortalAiRender.resources(streamMessage.bubble, {});
+        addStatus(streamMessage, `오류: ${error.message || error}`);
+        streamMessage.metaNode.textContent = '미완료 · 자동으로 다시 요청하지 않습니다.';
     } finally {
         try {
             await loadSessions(false);
@@ -811,6 +819,8 @@ async function submitQuestion(question) {
             console.warn('대화 목록 갱신 실패:', error);
         }
         sendButton.disabled = false;
+        requestBusy = false;
+        document.querySelector('.assistant-shell').setAttribute('aria-busy', 'false');
         questionInput.focus();
     }
 }

@@ -1,12 +1,8 @@
-"""AI query assistant routes.
-
-The first implementation is intentionally a small mock-mode shell. It gives the
-portal a stable UI/API contract now, while leaving the internal company AI
-script integration as a later swap-in.
-"""
+"""AI chat routes, owner-scoped history, streaming and registered material delivery."""
 
 import configparser
 import importlib
+import inspect
 import json
 import logging
 import sys
@@ -14,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from flask import Blueprint, Response, jsonify, render_template, request, session, stream_with_context
+from flask import Blueprint, Response, jsonify, render_template, request, session, stream_with_context, send_file
 
 from config.menu import MENU_CONFIG
 from db_connection import get_db_connection
@@ -34,9 +30,17 @@ logger = logging.getLogger(__name__)
 
 
 def _load_config() -> configparser.ConfigParser:
-    config = configparser.ConfigParser()
-    config.read("config.ini", encoding="utf-8")
+    config = configparser.ConfigParser(interpolation=None)
+    config.read(Path(__file__).resolve().parent / "config.ini", encoding="utf-8-sig")
     return config
+
+
+def _invoke_handler(handler, question, context):
+    try:
+        inspect.signature(handler).bind(question, context=context)
+    except TypeError:
+        return handler(question)
+    return handler(question, context=context)
 
 
 def _get_ai_config() -> configparser.SectionProxy:
@@ -554,10 +558,7 @@ def _real_answer(
     try:
         module = importlib.import_module(module_name)
         handler = getattr(module, function_name)
-        try:
-            result = handler(question, context=context)
-        except TypeError:
-            result = handler(question)
+        result = _invoke_handler(handler, question, context)
     except Exception as exc:
         logger.exception("AI assistant real handler failed")
         return {
@@ -581,7 +582,7 @@ def _real_answer(
             "created_at": get_korean_time().isoformat(),
             "raw": result,
         }
-        for key in ("structured_result", "structured_results", "result", "results"):
+        for key in ("structured_result", "structured_results", "result", "results", "resources", "model_routing", "semantic_model", "answer_model", "author_choice", "routing_basis"):
             if key in result:
                 response[key] = result[key]
         return response
@@ -733,10 +734,7 @@ def _real_stream_answer(
     try:
         module = importlib.import_module(module_name)
         handler = getattr(module, function_name)
-        try:
-            result = handler(question, context=context)
-        except TypeError:
-            result = handler(question)
+        result = _invoke_handler(handler, question, context)
 
         if isinstance(result, dict):
             answer = str(result.get("answer", result))
@@ -747,7 +745,7 @@ def _real_stream_answer(
                 "history_count": context.get("history_count", 0),
                 "result_count": context.get("result_count", 0),
             }
-            for key in ("structured_result", "structured_results", "result", "results"):
+            for key in ("structured_result", "structured_results", "result", "results", "resources", "model_routing", "semantic_model", "answer_model", "author_choice", "routing_basis"):
                 if key in result:
                     meta[key] = result[key]
             yield _sse_event("meta", meta)
@@ -953,6 +951,7 @@ def ai_assistant_page():
         menu=MENU_CONFIG,
         ai_mode=section.get("mode", DEFAULT_MODE),
         ai_enabled=section.getboolean("enabled", fallback=True),
+        knowledge_enabled=_load_config().getboolean("AI_KNOWLEDGE", "enabled", fallback=False),
         domains=domains,
     )
 
@@ -1012,7 +1011,7 @@ def ai_assistant_chat():
         if conn:
             conn.close()
 
-    if mode == "real":
+    if mode in {"real", "internal"}:
         result = _real_answer(
             question,
             history=chat_history,
@@ -1042,6 +1041,12 @@ def ai_assistant_chat():
                 "domain": result.get("domain", {}),
                 "history_count": result.get("history_count", len(chat_history)),
                 "result_count": result.get("result_count", len(recent_results)),
+                "resources": result.get("resources", {}),
+                "model_routing": result.get("model_routing", False),
+                "semantic_model": result.get("semantic_model", ""),
+                "answer_model": result.get("answer_model", ""),
+                "author_choice": result.get("author_choice", ""),
+                "routing_basis": result.get("routing_basis", ""),
             },
         )
         _save_chat_results(conn, int(chat_session["id"]), assistant_message_id, result)
@@ -1049,12 +1054,14 @@ def ai_assistant_chat():
     except Exception:
         if conn:
             conn.rollback()
-        logger.debug("AI chat assistant message save skipped", exc_info=True)
+        logger.exception("AI chat assistant message save failed")
+        return jsonify({"success": False, "message": "답변 저장에 실패했습니다. 자동 재호출하지 않습니다."}), 500
     finally:
         if conn:
             conn.close()
 
-    return jsonify({"success": True, "data": result, "session": chat_session})
+    return jsonify({"success": result.get("intent") not in {"handler_error", "configuration_missing"}, "data": result, "session": chat_session,
+                    "message": result.get("answer") if result.get("intent") in {"handler_error", "configuration_missing"} else ""})
 
 
 @ai_assistant_bp.route("/api/ai-assistant/chat-stream", methods=["POST"])
@@ -1116,6 +1123,7 @@ def ai_assistant_chat_stream():
         assistant_chunks: List[str] = []
         assistant_meta: Dict[str, Any] = {}
         assistant_results: List[Dict[str, Any]] = []
+        failed = False
         yield _sse_event("session", chat_session)
         yield _sse_event("status", {"message": "요청을 접수했습니다."})
         source = (
@@ -1136,10 +1144,15 @@ def ai_assistant_chat_stream():
         )
         for event_text in source:
             event_name, event_payload = _decode_sse_event_text(event_text)
+            if event_name == "done":
+                continue
             if event_name == "chunk":
                 assistant_chunks.append(str(event_payload.get("text") or ""))
             elif event_name == "meta":
-                assistant_meta = event_payload
+                assistant_meta.update(event_payload)
+            elif event_name == "error":
+                failed = True
+                assistant_meta.update({"intent": "handler_error", "resources": {}})
             elif event_name in {"result", "structured_result"}:
                 assistant_results.append(event_payload)
             elif event_name in {"results", "structured_results"}:
@@ -1169,10 +1182,17 @@ def ai_assistant_chat_stream():
             except Exception:
                 if save_conn:
                     save_conn.rollback()
-                logger.debug("AI stream assistant message save skipped", exc_info=True)
+                logger.exception("AI stream assistant message save failed")
+                yield _sse_event("error", {"message": "답변 저장에 실패했습니다. 자동 재호출하지 않습니다."})
+                return
             finally:
                 if save_conn:
                     save_conn.close()
+        if not failed:
+            if not assistant_text.strip():
+                yield _sse_event("error", {"message": "AI가 빈 답변을 반환했습니다."})
+            else:
+                yield _sse_event("done", {"message": "완료"})
 
     return Response(
         stream_with_context(generate()),
@@ -1182,3 +1202,36 @@ def ai_assistant_chat_stream():
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@ai_assistant_bp.route("/api/ai-assistant/materials/<identifier>/download")
+@ai_assistant_bp.route("/api/ai-assistant/materials/<identifier>/files/<download_id>")
+@ai_assistant_bp.route("/api/ai-assistant/materials/<identifier>/image", defaults={"image_only": True})
+@ai_assistant_bp.route("/api/ai-assistant/materials/<identifier>/pages/<int:page>.png")
+def ai_assistant_material(identifier, download_id=None, image_only=False, page=None):
+    permission_response = enforce_permission(AI_ASSISTANT_MENU_CODE, "view", response_type="json")
+    if permission_response:
+        return permission_response
+    if not _current_login_id():
+        return jsonify({"success": False, "message": "로그인이 필요합니다."}), 401
+    config = _load_config()
+    if not config.getboolean("AI_ASSISTANT", "enabled", fallback=True) or not config.getboolean("AI_KNOWLEDGE", "enabled", fallback=False):
+        return jsonify({"success": False, "message": "자료 조회가 비활성화되어 있습니다."}), 403
+    from portal_ai.knowledge import KnowledgeError, get_store
+    from portal_ai.resources import preview_path, original_image_path
+    try:
+        if page is not None:
+            path = preview_path(config, identifier, page)
+        elif image_only:
+            path = original_image_path(config, identifier)
+        else:
+            path = get_store(config).file_resource(identifier, download_id)
+        response = send_file(path, as_attachment=page is None and not image_only, download_name=path.name, max_age=0)
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+    except (KnowledgeError, FileNotFoundError) as exc:
+        return jsonify({"success": False, "message": str(exc)}), 404
+    except Exception:
+        logger.exception("AI material delivery failed")
+        return jsonify({"success": False, "message": "자료를 열지 못했습니다. 파일 상태와 서버 폴더 권한을 확인하세요."}), 500
