@@ -2,7 +2,7 @@
 {% from 'includes/table_controls.html' import render_table_controls %}
 {% block title %}AI 학습자료 업로드{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/ai-training-materials.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ai-training-materials.css', v='20260908-title') }}">
 <div class="training-list" data-register-url="{{ url_for('ai_training_materials.register_page', popup=1, part=register_part) }}">
     <div class="page-header"><h2 class="page-title">AI 학습자료 업로드</h2></div>
     <nav class="training-part-tabs" aria-label="파트별 학습자료">

@@ -54,6 +54,7 @@
 .training-list .data-table tbody tr:hover { background: #f8fafc; }
 .training-list a, .training-detail a { color: #2f5fd3; text-decoration: none; }
 .training-list a:hover, .training-detail a:hover { text-decoration: underline; }
+.training-list .data-table a[data-training-popup] { color: #2f5fd3; font-weight: 600; }
 .training-list .search-actions a { color: white; }
 .training-pagination { display: flex; justify-content: center; align-items: center; gap: 16px; padding: 20px; }
 .training-detail { background: #f3f4f6; }
