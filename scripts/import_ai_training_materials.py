@@ -1,7 +1,7 @@
 import argparse
-import hashlib
 import os
 import sys
+from contextlib import ExitStack
 from datetime import datetime
 from pathlib import Path
 
@@ -62,10 +62,32 @@ def lookup_part_author(part):
     return author
 
 
+def collect_files(folder, recursive=False):
+    paths = folder.rglob("*") if recursive else folder.iterdir()
+    return sorted((path for path in paths if path.is_file() and not path.is_symlink()),
+                  key=lambda path: str(path).casefold())
+
+
+def collect_import_groups(source, group_by_folder=False, recursive=False):
+    if not group_by_folder:
+        return [(path.name, [path], False) for path in collect_files(source, recursive)]
+    groups = []
+    for path in sorted(source.iterdir(), key=lambda path: str(path).casefold()):
+        if path.is_symlink():
+            continue
+        if path.is_file():
+            groups.append((path.name, [path], False))
+        elif path.is_dir():
+            groups.append((path.name, collect_files(path, recursive=True), True))
+    return groups
+
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Import one file as one AI training material post. Preview by default.")
+    parser = argparse.ArgumentParser(description="Import AI training materials by file or folder. Preview by default.")
     parser.add_argument("--folder", type=Path, help="Source folder; originals are copied, never moved.")
-    parser.add_argument("--recursive", action="store_true", help="Include subfolders.")
+    grouping = parser.add_mutually_exclusive_group()
+    grouping.add_argument("--recursive", action="store_true", help="Include subfolders; still one post per file.")
+    grouping.add_argument("--group-by-folder", action="store_true", help="Each immediate subfolder becomes one post with all its files (including deeper folders). Loose files remain separate posts.")
     parser.add_argument("--author-id", help="Author SSO ID.")
     parser.add_argument("--author-name", help="Author display name.")
     parser.add_argument("--department", help="Author department name.")
@@ -88,7 +110,7 @@ def main(argv=None):
     try:
         os.chdir(PROJECT_ROOT)
         from werkzeug.datastructures import FileStorage
-        from ai_training_materials import MATERIAL_PARTS, initialize_schema, load_settings, prepare_file, save_material
+        from ai_training_materials import MATERIAL_PARTS, build_import_key, initialize_schema, load_settings, prepare_file, save_material
         from db_connection import get_db_connection
 
         if args.init_only:
@@ -101,8 +123,7 @@ def main(argv=None):
         destination = settings["folder"]
         if source == destination or source in destination.parents or destination in source.parents:
             parser.error("Source and upload folders must be separate, not nested inside each other.")
-        paths = sorted((source.rglob("*") if args.recursive else source.iterdir()), key=lambda path: str(path).casefold())
-        paths = [path for path in paths if path.is_file() and not path.is_symlink()]
+        groups = collect_import_groups(source, args.group_by_folder, args.recursive)
         if args.use_part_author:
             try:
                 author = lookup_part_author(args.part)
@@ -121,33 +142,42 @@ def main(argv=None):
         print("Department:", author["department_id"], author["department_name"])
         print("Created / initial modified:", args.created_date.isoformat(sep=" ") if args.created_date else "current time")
         print("Mode:", "APPLY" if args.apply else "PREVIEW (no DB/file changes)")
+        print("Grouping:", "one post per immediate subfolder; loose files separately" if args.group_by_folder else "one post per file")
         if args.apply:
             initialize_schema()
             with get_db_connection() as conn:
                 target = conn.execute("SELECT current_database() AS name, inet_server_addr()::text AS host").fetchone()
                 print("Team PostgreSQL:", target["name"], target["host"])
         created = skipped = failed = 0
-        for path in paths:
+        for title, paths, grouped in groups:
+            if not paths:
+                print("[SKIP empty folder]", title)
+                continue
             try:
-                with path.open("rb") as stream:
-                    upload = FileStorage(stream=stream, filename=path.name)
-                    prepared = prepare_file(upload, settings)
+                with ExitStack() as opened:
+                    uploads = []
+                    for path in paths:
+                        stream = opened.enter_context(path.open("rb"))
+                        uploads.append(FileStorage(stream=stream, filename=path.name))
+                    prepared = [prepare_file(upload, settings) for upload in uploads]
+                    import_key = build_import_key(prepared, folder_title=title if grouped else None)
                     if not args.apply:
-                        print("[READY]", path.name, "-> title:", path.name)
+                        print("[READY] title:", title, "| attachments:", len(paths))
+                        for path in paths:
+                            print("  -", path.relative_to(source))
                         continue
-                    import_key = hashlib.sha256((path.name + "\0" + prepared["sha256"]).encode("utf-8")).hexdigest()
-                    saved = save_material(path.name, [upload], author, import_key=import_key, part_name=args.part,
-                                          import_created_at=args.created_date)
+                    saved = save_material(title, uploads, author, import_key=import_key, part_name=args.part,
+                                          import_created_at=args.created_date, import_grouped=grouped)
                     if saved is None:
                         skipped += 1
-                        print("[SKIP unchanged]", path.name)
+                        print("[SKIP unchanged]", title)
                     else:
                         created += 1
-                        print("[CREATED]", saved["request_number"], path.name)
+                        print("[CREATED]", saved["request_number"], title, "| attachments:", len(paths))
             except Exception as exc:
                 failed += 1
-                print("[FAILED]", path.name, str(exc))
-        print("Files: {}; created: {}; skipped: {}; failed: {}".format(len(paths), created, skipped, failed))
+                print("[FAILED]", title, str(exc))
+        print("Files: {}; created: {}; skipped: {}; failed: {}".format(sum(len(paths) for _, paths, _ in groups), created, skipped, failed))
         return 1 if failed else 0
     finally:
         os.chdir(previous_cwd)

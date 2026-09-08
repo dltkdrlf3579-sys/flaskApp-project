@@ -103,6 +103,18 @@ def prepare_file(file_storage, settings):
     return {"file": file_storage, "name": name, "size": size, "sha256": digest.hexdigest()}
 
 
+def build_import_key(prepared, folder_title=None):
+    if folder_title is None:
+        if len(prepared) != 1:
+            raise ValueError("파일별 일괄 등록은 게시글당 파일 1개만 가능합니다.")
+        return hashlib.sha256((prepared[0]["name"] + "\0" + prepared[0]["sha256"]).encode("utf-8")).hexdigest()
+    if not prepared:
+        raise ValueError("폴더에 첨부파일이 1개 이상 있어야 합니다.")
+    manifest = [folder_title.strip(), sorted((item["name"], item["sha256"]) for item in prepared)]
+    encoded = json.dumps(manifest, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return "folder-v1:" + hashlib.sha256(encoded).hexdigest()
+
+
 def remove_saved_files(paths):
     failed = []
     for path in paths:
@@ -120,7 +132,7 @@ def remove_saved_files(paths):
 
 
 def save_material(title, files, author, material_id=None, keep_ids=None, version=None, import_key=None, part_name=None,
-                  *, import_created_at=None):
+                  *, import_created_at=None, import_grouped=False):
     title = str(title or "").strip()
     part_name = str(part_name or "").strip()
     if part_name not in MATERIAL_PARTS:
@@ -129,6 +141,8 @@ def save_material(title, files, author, material_id=None, keep_ids=None, version
         raise ValueError("제목은 1~300자로 입력해 주세요.")
     if not author.get("author_id") or not author.get("author_name"):
         raise ValueError("등록자 ID와 등록자명이 필요합니다.")
+    if import_grouped and (import_key is None or material_id is not None):
+        raise ValueError("폴더 묶음 등록은 신규 일괄 등록에만 사용할 수 있습니다.")
     if import_created_at is not None:
         if import_key is None or material_id is not None:
             raise ValueError("등록일 지정은 신규 일괄 등록에만 사용할 수 있습니다.")
@@ -137,9 +151,7 @@ def save_material(title, files, author, material_id=None, keep_ids=None, version
     settings = load_settings()
     prepared = [prepare_file(upload, settings) for upload in files if upload.filename]
     if import_key is not None:
-        if len(prepared) != 1:
-            raise ValueError("일괄 등록은 게시글당 파일 1개만 가능합니다.")
-        actual_key = hashlib.sha256((prepared[0]["name"] + "\0" + prepared[0]["sha256"]).encode("utf-8")).hexdigest()
+        actual_key = build_import_key(prepared, folder_title=title if import_grouped else None)
         if import_key != actual_key:
             raise ValueError("검사 이후 원본 파일이 변경되었습니다. 다시 실행해 주세요.")
     new_paths = []
