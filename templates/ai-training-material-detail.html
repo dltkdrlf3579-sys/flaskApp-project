@@ -4,7 +4,7 @@
 {% block popup_title %}AI 학습자료 {{ '상세정보' if material else '등록' }}{% endblock %}
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/board-form.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/ai-training-materials.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ai-training-materials.css', v='20260908-attachments') }}">
 {{ attachment_styles() }}
 <form id="training-form" class="board-form-container training-detail" method="post" enctype="multipart/form-data"
       action="{{ url_for('ai_training_materials.save_api', material_id=material.id) if material else url_for('ai_training_materials.save_api') }}"
@@ -49,13 +49,14 @@
             {% if can_write %}<input type="file" id="training-files" multiple hidden accept="{{ '.' + (settings.extensions|sort|join(',.')) }}">{% endif %}
             <div class="training-file-table">
                 <table>
-                    <thead><tr><th>파일명</th><th>용량</th>{% if can_write %}<th>관리</th>{% endif %}</tr></thead>
+                    <thead><tr><th>파일명</th><th class="training-description-cell">설명</th><th class="training-size-cell">용량</th>{% if can_write %}<th class="training-action-cell">관리</th>{% endif %}</tr></thead>
                     <tbody id="training-file-body">
                         {% for attachment in attachments %}
                         <tr data-file-id="{{ attachment.id }}">
-                            <td><a href="{{ url_for('ai_training_materials.download_file', file_id=attachment.id) }}" download>{{ attachment.file_name }}</a></td>
-                            <td>{{ (attachment.file_size / 1024 / 1024)|round(2) }} MB</td>
-                            {% if can_write %}<td><button type="button" class="btn btn-outline-danger btn-sm training-remove">삭제</button></td>{% endif %}
+                            <td><a href="{{ url_for('ai_training_materials.download_file', file_id=attachment.id) }}" download>{{ attachment.file_name }}</a><small class="training-file-date">첨부일: {{ attachment.uploaded_at.strftime('%Y-%m-%d %H:%M') if attachment.uploaded_at else '-' }}</small></td>
+                            <td class="training-description-cell"><input type="text" class="attachment-desc" value="{{ attachment.description }}" maxlength="1000" aria-label="{{ attachment.file_name }} 설명" placeholder="설명을 입력하세요 (선택)" {{ 'readonly' if not can_write else '' }}></td>
+                            <td class="training-size-cell">{{ (attachment.file_size / 1024 / 1024)|round(2) }} MB</td>
+                            {% if can_write %}<td class="training-action-cell"><button type="button" class="btn btn-outline-danger btn-sm training-remove">삭제</button></td>{% endif %}
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -69,5 +70,5 @@
         <button type="button" id="training-close" class="btn btn-secondary">닫기</button>
     </div>
 </form>
-<script src="{{ url_for('static', filename='js/ai-training-materials.js') }}" defer></script>
+<script src="{{ url_for('static', filename='js/ai-training-materials.js', v='20260908-attachments') }}" defer></script>
 {% endblock %}

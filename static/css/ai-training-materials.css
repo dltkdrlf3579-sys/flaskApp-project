@@ -57,11 +57,16 @@
 .training-list .search-actions a { color: white; }
 .training-pagination { display: flex; justify-content: center; align-items: center; gap: 16px; padding: 20px; }
 .training-detail { background: #f3f4f6; }
-.training-file-table table { width: 100%; border-collapse: collapse; min-width: 500px; }
+.training-file-table table { width: 100%; border-collapse: collapse; min-width: 760px; }
 .training-file-table th { background: #f8f9fa; color: #374151; font-weight: 600; }
 .training-file-table td, .training-file-table th { padding: 12px 20px; border-bottom: 1px solid #e5e7eb; }
 .training-file-table td:first-child { overflow-wrap: anywhere; }
-.training-file-table td:not(:first-child) { width: 110px; white-space: nowrap; }
+.training-file-table .training-description-cell { width: 38%; min-width: 240px; }
+.training-file-table .attachment-desc { width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px; }
+.training-file-table .attachment-desc[readonly] { background: #f8f9fa; }
+.training-file-table .training-size-cell { width: 110px; white-space: nowrap; }
+.training-file-table .training-action-cell { width: 85px; white-space: nowrap; }
+.training-file-date { display: block; margin-top: 4px; color: #6b7280; font-size: 12px; }
 .training-detail .empty-message, .training-list .empty-message { padding: 35px; text-align: center; color: #6b7280; }
 .training-save-actions { display: flex; gap: 10px; justify-content: center; padding: 8px 0 20px; }
 .training-save-actions .btn { min-width: 100px; }

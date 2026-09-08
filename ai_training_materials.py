@@ -67,7 +67,8 @@ def load_settings():
 
 def initialize_schema():
     with get_db_connection() as conn:
-        for filename in ("008_create_ai_training_materials.sql", "009_add_ai_training_material_part.sql"):
+        for filename in ("008_create_ai_training_materials.sql", "009_add_ai_training_material_part.sql",
+                         "010_add_ai_training_file_metadata.sql"):
             sql = (PROJECT_ROOT / "migrations" / filename).read_text(encoding="utf-8")
             conn.execute(sql)
 
@@ -150,7 +151,8 @@ def remove_saved_files(paths):
 
 
 def save_material(title, files, author, material_id=None, keep_ids=None, version=None, import_key=None, part_name=None,
-                  *, import_created_at=None, import_grouped=False, capture_new_uploads=False):
+                  *, import_created_at=None, import_grouped=False, capture_new_uploads=False,
+                  attachment_descriptions=None, new_file_descriptions=None):
     title = str(title or "").strip()
     part_name = str(part_name or "").strip()
     if part_name not in MATERIAL_PARTS:
@@ -170,6 +172,24 @@ def save_material(title, files, author, material_id=None, keep_ids=None, version
             raise ValueError("일괄 등록일은 시간대 없는 날짜·시각이어야 합니다.")
     settings = load_settings()
     prepared = [prepare_file(upload, settings) for upload in files if upload.filename]
+    if attachment_descriptions is None:
+        attachment_descriptions = {}
+    if not isinstance(attachment_descriptions, dict) or any(
+            not isinstance(key, str) or not key.isascii() or not key.isdecimal()
+            for key in attachment_descriptions):
+        raise ValueError("첨부파일 설명 정보가 올바르지 않습니다.")
+    if new_file_descriptions is None:
+        new_file_descriptions = [""] * len(prepared)
+    if not isinstance(new_file_descriptions, list) or len(new_file_descriptions) != len(prepared):
+        raise ValueError("새 첨부파일과 설명 개수가 일치하지 않습니다.")
+    if any(not isinstance(value, str) or len(value) > 1000
+           for value in list(attachment_descriptions.values()) + new_file_descriptions):
+        raise ValueError("첨부파일 설명은 1000자 이내의 텍스트로 입력해 주세요.")
+    descriptions = {int(key): value.strip() for key, value in attachment_descriptions.items()}
+    if material_id is None and descriptions:
+        raise ValueError("신규 글에 기존 첨부파일 설명을 지정할 수 없습니다.")
+    for item, description in zip(prepared, new_file_descriptions):
+        item["description"] = description.strip()
     if import_key is not None:
         actual_key = build_import_key(prepared, folder_title=title if import_grouped else None)
         if import_key != actual_key:
@@ -208,15 +228,22 @@ def save_material(title, files, author, material_id=None, keep_ids=None, version
                                     (material_id,)).fetchall()
             if keep_ids is None or not set(keep_ids).issubset({item["id"] for item in existing}):
                 raise ValueError("첨부파일 목록이 올바르지 않습니다.")
+            if not set(descriptions).issubset(set(keep_ids)):
+                raise ValueError("이 글에 남겨둔 첨부파일의 설명만 수정할 수 있습니다.")
             if not keep_ids and not prepared:
                 raise ValueError("첨부파일을 1개 이상 남겨 주세요.")
+            description_changed = False
             for item in existing:
                 if item["id"] not in keep_ids:
                     removed_paths.append(stored_path(item["storage_path"], settings))
                     if capture_new_uploads:
                         removed_new_uploads.append(stored_path(item["storage_path"], settings, new_upload=True))
                     conn.execute("DELETE FROM ai_training_material_files WHERE id = %s", (item["id"],))
-            changed = title != row["title"] or part_name != row["part_name"] or bool(prepared) or bool(removed_paths)
+                elif item["id"] in descriptions and descriptions[item["id"]] != item["description"]:
+                    conn.execute("UPDATE ai_training_material_files SET description = %s WHERE id = %s AND material_id = %s",
+                                 (descriptions[item["id"]], item["id"], material_id))
+                    description_changed = True
+            changed = title != row["title"] or part_name != row["part_name"] or bool(prepared) or bool(removed_paths) or description_changed
             if changed:
                 conn.execute("""UPDATE ai_training_materials SET title = %s, part_name = %s,
                              updated_at = clock_timestamp(), updated_by = %s WHERE id = %s""",
@@ -238,10 +265,10 @@ def save_material(title, files, author, material_id=None, keep_ids=None, version
                 except OSError as exc:
                     raise NewUploadCopyError("new_upload 파일 복사 실패") from exc
             conn.execute("""INSERT INTO ai_training_material_files
-                         (material_id, file_name, storage_path, file_size, sha256)
-                         VALUES (%s, %s, %s, %s, %s)""",
+                         (material_id, file_name, storage_path, file_size, sha256, description)
+                         VALUES (%s, %s, %s, %s, %s, %s)""",
                          (material_id, item["name"], destination.relative_to(settings["folder"]).as_posix(),
-                          item["size"], item["sha256"]))
+                          item["size"], item["sha256"], item["description"]))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -338,7 +365,9 @@ def save_api(material_id=None):
                 raise ValueError("첨부파일 목록이 올바르지 않습니다.")
         saved = save_material(request.form.get("title"), request.files.getlist("files"), author,
                               material_id=material_id, keep_ids=keep_ids, version=request.form.get("version"),
-                              part_name=request.form.get("part_name"), capture_new_uploads=True)
+                              part_name=request.form.get("part_name"), capture_new_uploads=True,
+                              attachment_descriptions=json.loads(request.form.get("attachment_descriptions", "null")),
+                              new_file_descriptions=json.loads(request.form.get("new_file_descriptions", "null")))
         return jsonify(success=True, **saved, detail_url=url_for("ai_training_materials.detail_page", material_id=saved["id"]))
     except MaterialConflict as exc:
         return jsonify(success=False, message=str(exc)), 409

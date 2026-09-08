@@ -44,13 +44,20 @@
         document.getElementById('training-empty').hidden = count > 0;
     }
 
-    function finish() {
+    function finish(result) {
+        const message = form.elements.version.value ? '수정이 완료되었습니다.' : '등록이 완료되었습니다.';
+        window.alert(result.warning ? `${message}\n\n${result.warning}` : message);
         if (window.opener && !window.opener.closed) {
-            window.opener.location.reload();
-            window.close();
-        } else {
-            window.location.assign(form.dataset.listUrl);
+            try {
+                window.opener.location.reload();
+            } catch (error) {
+                console.warn('목록 창을 새로고침하지 못했습니다.', error);
+            }
         }
+        const detailUrl = new URL(result.detail_url, window.location.origin);
+        if (new URLSearchParams(window.location.search).get('popup') === '1') detailUrl.searchParams.set('popup', '1');
+        detailUrl.searchParams.set('t', Date.now());
+        window.location.replace(detailUrl.toString());
     }
 
     document.getElementById('training-close').addEventListener('click', () => {
@@ -79,13 +86,31 @@
             pending.set(key, file);
             const row = fileBody.insertRow();
             row.dataset.pendingKey = key;
-            row.insertCell().textContent = file.name;
-            row.insertCell().textContent = `${(file.size / 1024 / 1024).toFixed(2)} MB`;
+            const nameCell = row.insertCell();
+            nameCell.textContent = file.name;
+            const uploadedAt = document.createElement('small');
+            uploadedAt.className = 'training-file-date';
+            uploadedAt.textContent = '첨부일: 저장 시 기록';
+            nameCell.append(uploadedAt);
+            const descriptionCell = row.insertCell();
+            descriptionCell.className = 'training-description-cell';
+            const description = document.createElement('input');
+            description.type = 'text';
+            description.className = 'attachment-desc';
+            description.maxLength = 1000;
+            description.placeholder = '설명을 입력하세요 (선택)';
+            description.setAttribute('aria-label', `${file.name} 설명`);
+            descriptionCell.append(description);
+            const sizeCell = row.insertCell();
+            sizeCell.className = 'training-size-cell';
+            sizeCell.textContent = `${(file.size / 1024 / 1024).toFixed(2)} MB`;
             const button = document.createElement('button');
             button.type = 'button';
             button.className = 'btn btn-outline-danger btn-sm training-remove';
             button.textContent = '삭제';
-            row.insertCell().append(button);
+            const actionCell = row.insertCell();
+            actionCell.className = 'training-action-cell';
+            actionCell.append(button);
         }
         fileInput.value = '';
         updateCount();
@@ -109,7 +134,17 @@
         }
         const data = new FormData(form);
         data.set('keep_file_ids', JSON.stringify([...fileBody.querySelectorAll('[data-file-id]')].map(row => Number(row.dataset.fileId))));
-        pending.forEach(file => data.append('files', file));
+        const descriptions = {};
+        fileBody.querySelectorAll('[data-file-id]').forEach(row => {
+            descriptions[row.dataset.fileId] = row.querySelector('.attachment-desc').value;
+        });
+        const newDescriptions = [];
+        fileBody.querySelectorAll('[data-pending-key]').forEach(row => {
+            data.append('files', pending.get(row.dataset.pendingKey));
+            newDescriptions.push(row.querySelector('.attachment-desc').value);
+        });
+        data.set('attachment_descriptions', JSON.stringify(descriptions));
+        data.set('new_file_descriptions', JSON.stringify(newDescriptions));
         saving = true;
         errorBox.hidden = true;
         const saveButton = document.getElementById('training-save');
@@ -120,8 +155,7 @@
             const response = await fetch(form.action, {method: 'POST', body: data});
             const result = await response.json().catch(() => ({message: `서버 응답 오류 (${response.status})`}));
             if (!response.ok || !result.success) throw new Error(result.message || result.error || '저장에 실패했습니다.');
-            if (result.warning) window.alert(result.warning);
-            finish();
+            finish(result);
         } catch (error) {
             showError(error.message);
         } finally {
