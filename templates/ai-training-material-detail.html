@@ -23,7 +23,16 @@
                 <div class="info-cell span-2"><label>작성부서</label><div class="value">{{ (material.department_name if material else author.department_name) or '-' }}</div></div>
             </div>
             <div class="info-row">
-                <div class="info-cell span-6"><label for="training-title">제목</label><input id="training-title" name="title" value="{{ material.title if material else '' }}" maxlength="300" required {{ 'readonly' if not can_write else '' }} placeholder="학습시킬 자료의 제목을 입력하세요"></div>
+                <div class="info-cell span-2">
+                    <label for="training-part">파트</label>
+                    {% if can_write %}
+                    <select id="training-part" name="part_name" required>
+                        <option value="" disabled {{ 'selected' if not selected_part else '' }}>{{ '파트 선택 (현재 미분류)' if material and not selected_part else '파트 선택' }}</option>
+                        {% for part in parts %}<option value="{{ part }}" {{ 'selected' if selected_part == part else '' }}>{{ part }}</option>{% endfor %}
+                    </select>
+                    {% else %}<div class="value">{{ selected_part or '미분류' }}</div>{% endif %}
+                </div>
+                <div class="info-cell span-4 training-title-cell"><label for="training-title">제목</label><input id="training-title" name="title" value="{{ material.title if material else '' }}" maxlength="300" required {{ 'readonly' if not can_write else '' }} placeholder="학습시킬 자료의 제목을 입력하세요"></div>
                 <div class="info-cell span-2"><label>수정일</label><div class="value">{{ material.updated_at.strftime('%Y-%m-%d %H:%M:%S') if material else '-' }}</div></div>
             </div>
         </div>

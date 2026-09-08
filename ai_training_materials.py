@@ -17,6 +17,11 @@ from upload_utils import sanitize_filename
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 MENU_CODE = "AI_TRAINING_MATERIALS"
+MATERIAL_PARTS = (
+    "작업안전파트", "사고예방파트", "교육문화파트",
+    "적격성평가파트", "위험성평가파트", "공통",
+)
+UNASSIGNED_PART = "__unassigned__"
 ai_training_materials_bp = Blueprint("ai_training_materials", __name__)
 logger = logging.getLogger(__name__)
 
@@ -44,9 +49,10 @@ def load_settings():
 
 
 def initialize_schema():
-    sql = (PROJECT_ROOT / "migrations/008_create_ai_training_materials.sql").read_text(encoding="utf-8")
     with get_db_connection() as conn:
-        conn.execute(sql)
+        for filename in ("008_create_ai_training_materials.sql", "009_add_ai_training_material_part.sql"):
+            sql = (PROJECT_ROOT / "migrations" / filename).read_text(encoding="utf-8")
+            conn.execute(sql)
 
 
 def current_author():
@@ -113,12 +119,21 @@ def remove_saved_files(paths):
     return failed
 
 
-def save_material(title, files, author, material_id=None, keep_ids=None, version=None, import_key=None):
+def save_material(title, files, author, material_id=None, keep_ids=None, version=None, import_key=None, part_name=None,
+                  *, import_created_at=None):
     title = str(title or "").strip()
+    part_name = str(part_name or "").strip()
+    if part_name not in MATERIAL_PARTS:
+        raise ValueError("파트를 선택해 주세요. 공용 자료는 '공통'을 선택할 수 있습니다.")
     if not title or len(title) > 300:
         raise ValueError("제목은 1~300자로 입력해 주세요.")
     if not author.get("author_id") or not author.get("author_name"):
         raise ValueError("등록자 ID와 등록자명이 필요합니다.")
+    if import_created_at is not None:
+        if import_key is None or material_id is not None:
+            raise ValueError("등록일 지정은 신규 일괄 등록에만 사용할 수 있습니다.")
+        if not isinstance(import_created_at, datetime) or import_created_at.tzinfo is not None:
+            raise ValueError("일괄 등록일은 시간대 없는 날짜·시각이어야 합니다.")
     settings = load_settings()
     prepared = [prepare_file(upload, settings) for upload in files if upload.filename]
     if import_key is not None:
@@ -136,11 +151,14 @@ def save_material(title, files, author, material_id=None, keep_ids=None, version
                 raise ValueError("첨부파일을 1개 이상 추가해 주세요.")
             row = conn.execute(
                 """INSERT INTO ai_training_materials
-                   (title, author_id, author_name, department_id, department_name, updated_by, import_key)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)
+                   (title, author_id, author_name, department_id, department_name, updated_by, import_key, part_name,
+                    created_at, updated_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s,
+                           COALESCE(%s::timestamp, CURRENT_TIMESTAMP), COALESCE(%s::timestamp, CURRENT_TIMESTAMP))
                    ON CONFLICT (import_key) DO NOTHING RETURNING *""",
                 (title, author["author_id"], author["author_name"], author.get("department_id", ""),
-                 author.get("department_name", ""), author["author_id"], import_key),
+                 author.get("department_name", ""), author["author_id"], import_key, part_name,
+                 import_created_at, import_created_at),
             ).fetchone()
             if row is None:
                 conn.rollback()
@@ -163,11 +181,11 @@ def save_material(title, files, author, material_id=None, keep_ids=None, version
                 if item["id"] not in keep_ids:
                     removed_paths.append(stored_path(item["storage_path"], settings))
                     conn.execute("DELETE FROM ai_training_material_files WHERE id = %s", (item["id"],))
-            changed = title != row["title"] or bool(prepared) or bool(removed_paths)
+            changed = title != row["title"] or part_name != row["part_name"] or bool(prepared) or bool(removed_paths)
             if changed:
-                conn.execute("""UPDATE ai_training_materials SET title = %s,
+                conn.execute("""UPDATE ai_training_materials SET title = %s, part_name = %s,
                              updated_at = clock_timestamp(), updated_by = %s WHERE id = %s""",
-                             (title, author["author_id"], material_id))
+                             (title, part_name, author["author_id"], material_id))
         folder = settings["folder"] / request_number(row)
         if prepared:
             folder.mkdir(parents=True, exist_ok=True)
@@ -201,6 +219,9 @@ def materials_page():
     if guard:
         return guard
     query = request.args.get("q", "").strip()
+    selected_part = request.args.get("part", "").strip()
+    if selected_part not in ("", UNASSIGNED_PART, *MATERIAL_PARTS):
+        abort(400, description="올바른 파트를 선택해 주세요.")
     per_page = request.args.get("per_page", 10, type=int)
     if per_page not in (10, 25, 50, 100):
         per_page = 10
@@ -208,22 +229,24 @@ def materials_page():
     where_sql = "TRUE"
     params = ()
     if query:
-        where_sql = """(position(lower(%s) in lower(material.title)) > 0 OR EXISTS (
-            SELECT 1 FROM ai_training_material_files file
-            WHERE file.material_id = material.id AND position(lower(%s) in lower(file.file_name)) > 0))"""
-        params = (query, query)
+        where_sql = "position(lower(%s) in lower(material.title)) > 0"
+        params = (query,)
+    if selected_part:
+        where_sql += " AND material.part_name = %s"
+        params += ("" if selected_part == UNASSIGNED_PART else selected_part,)
     with get_db_connection() as conn:
         total = conn.execute("SELECT count(*) AS total FROM ai_training_materials material WHERE " + where_sql,
                              params).fetchone()["total"]
         total_pages = max(1, math.ceil(total / per_page))
         page = min(page, total_pages)
-        rows = conn.execute("""SELECT material.*, COALESCE((SELECT string_agg(file.file_name, ', ' ORDER BY file.id)
-                            FROM ai_training_material_files file WHERE file.material_id = material.id), '') AS file_names
-                            FROM ai_training_materials material WHERE """ + where_sql +
+        rows = conn.execute("SELECT material.* FROM ai_training_materials material WHERE " + where_sql +
                             " ORDER BY material.updated_at DESC, material.id DESC LIMIT %s OFFSET %s",
                             params + (per_page, (page - 1) * per_page)).fetchall()
     return render_template("ai-training-materials.html", materials=rows, query=query,
                            total_count=total, page=page, total_pages=total_pages, per_page=per_page,
+                           selected_part=selected_part,
+                           part_filters=[("", "전체")] + [(part, part) for part in MATERIAL_PARTS] + [(UNASSIGNED_PART, "미분류")],
+                           register_part=selected_part if selected_part in MATERIAL_PARTS else "",
                            can_write=get_user_permission_level(MENU_CODE, "write") > 0)
 
 
@@ -234,6 +257,8 @@ def register_page():
         return guard
     return render_template("ai-training-material-detail.html", material=None, attachments=[],
                            author=current_author(), today=datetime.now(), settings=load_settings(),
+                           parts=MATERIAL_PARTS,
+                           selected_part=request.args.get("part") if request.args.get("part") in MATERIAL_PARTS else "",
                            can_write=True, is_popup=request.args.get("popup") == "1")
 
 
@@ -250,6 +275,7 @@ def detail_page(material_id):
                                    (material_id,)).fetchall()
     return render_template("ai-training-material-detail.html", material=row, attachments=attachments,
                            request_number=request_number(row), settings=load_settings(),
+                           parts=MATERIAL_PARTS, selected_part=row["part_name"],
                            can_write=get_user_permission_level(MENU_CODE, "write") > 0,
                            is_popup=request.args.get("popup") == "1")
 
@@ -268,7 +294,8 @@ def save_api(material_id=None):
             if not isinstance(keep_ids, list) or any(type(value) is not int for value in keep_ids):
                 raise ValueError("첨부파일 목록이 올바르지 않습니다.")
         saved = save_material(request.form.get("title"), request.files.getlist("files"), author,
-                              material_id=material_id, keep_ids=keep_ids, version=request.form.get("version"))
+                              material_id=material_id, keep_ids=keep_ids, version=request.form.get("version"),
+                              part_name=request.form.get("part_name"))
         return jsonify(success=True, **saved, detail_url=url_for("ai_training_materials.detail_page", material_id=saved["id"]))
     except MaterialConflict as exc:
         return jsonify(success=False, message=str(exc)), 409

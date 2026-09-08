@@ -26,6 +26,17 @@
 }
 
 .training-list .search-section label { font-weight: 600; }
+.training-list .search-section select {
+    width: 180px;
+    padding: 9px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    background: white;
+}
+.training-part-tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid #d1d5db; margin-bottom: 20px; }
+.training-list .training-part-tab { flex-shrink: 0; padding: 12px 18px; border-bottom: 3px solid transparent; color: #6b7280; font-weight: 600; white-space: nowrap; }
+.training-list .training-part-tab:hover { background: #f8fafc; text-decoration: none; }
+.training-list .training-part-tab.active { border-bottom-color: #2f5fd3; color: #2f5fd3; }
 .training-list .search-section input[type="text"] {
     width: 320px;
     max-width: 100%;
@@ -59,6 +70,6 @@
 @media (max-width: 900px) {
     .training-detail .info-row { grid-template-columns: 1fr 1fr; }
     .training-detail .info-cell { grid-column: span 1 !important; }
-    .training-detail .info-cell.span-6 { grid-column: span 2 !important; }
+    .training-detail .info-cell.training-title-cell { grid-column: span 2 !important; }
     .training-detail .attachments-header-right { flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 }

@@ -3,11 +3,16 @@
 ## 범위와 저장 구조
 
 - 협력사 정보 → **AI 학습자료 업로드** (`/ai-training-materials`).
-- 목록: 제목, 첨부파일명, 등록자, 등록일, 수정일, 등록부서. 최근 수정순 정렬.
+- 목록: 파트 → 제목 → 등록일 → 수정일 → 등록자 → 등록부서. 파트·제목은 1·2열로 고정한다. 나머지는 변경요청 게시판의 날짜 → 작성자 → 부서 순서를 참고하고 수정일은 등록일 옆에 배치한다. 최근 수정순 정렬. 첨부파일명 열은 표시하지 않으며 실제 파일 목록은 상세 팝업에서 확인한다. 검색창은 제목만 부분 검색하며 첨부파일명은 검색 대상에서 제외한다. 파트 필터는 그대로 유지한다.
 - 기존 게시판처럼 등록·상세는 팝업. 요청번호·등록일·작성자·작성부서와 제목·수정일, 첨부파일만 표시.
 - 웹 등록은 제목을 지정하고 파일 여러 개를 한 게시글에 첨부할 수 있다.
 - 폴더 일괄 등록은 **파일 1개당 게시글 1개**, 제목은 **확장자를 포함한 원래 파일명**이다.
-- 제목 수정, 파일 추가·삭제·교체를 저장하면 수정일만 갱신된다. 변경 없이 저장하면 수정일도 유지된다.
+- 제목·파트 수정, 파일 추가·삭제·교체를 저장하면 수정일만 갱신된다. 변경 없이 저장하면 수정일도 유지된다.
+- 파트는 작업안전파트, 사고예방파트, 교육문화파트, 적격성평가파트, 위험성평가파트, 공통의 6개 분류다. 작성부서와는 별개이며 등록·수정 시 선택한다.
+- 목록 상단 파트 탭과 검색 드롭다운은 같은 필터를 사용한다. 파트 변경 시 즉시 조회하며 검색어는 유지한다. 페이지 이동·표시 개수 변경 시에도 선택한 파트를 유지한다.
+- 파트를 선택한 상태에서 등록 팝업을 열면 해당 파트가 미리 선택된다. 전체/미분류에서는 사용자가 선택해야 한다.
+- 기존 글은 임의로 분류하지 않고 `미분류`로 유지한다. 다음 수정 시 6개 중 하나를 선택한다. `공통`은 사용자가 명시적으로 선택하는 분류이며 미분류와 다르다.
+- 파트 분류는 검색용이다. 파트별로 새 권한 체계를 만들거나 실제 파일 저장 폴더를 변경하지 않는다.
 - 작성자·작성부서는 최초 등록 시 SSO 세션에서 기록하며 수정 시 덮어쓰지 않는다.
 - DB는 `[DATABASE] postgres_dsn`의 팀 전용 PostgreSQL이다. IQADB를 사용하지 않는다.
 - 신규 테이블 `ai_training_materials`(게시글), `ai_training_material_files`(파일명·저장경로·크기·해시).
@@ -25,6 +30,7 @@
 
 - `ai_training_materials.py`
 - `migrations/008_create_ai_training_materials.sql`
+- `migrations/009_add_ai_training_material_part.sql`
 - `scripts/import_ai_training_materials.py`
 - `templates/ai-training-materials.html`
 - `templates/ai-training-material-detail.html`
@@ -46,7 +52,7 @@ max_upload_size_mb = 50
 
 다른 디스크에 저장하려면 `upload_folder = D:/AI_training_uploads`처럼 절대경로를 지정한다. 웹서버 계정과 일괄 등록 실행 계정 모두 이 경로에 쓰기 권한이 있어야 한다. 파일 등록 후 경로를 바꿀 경우 기존 폴더의 내용도 같은 하위 구조로 복사해야 한다.
 
-서버 시작 시 기존 마이그레이션으로 테이블이 생성된다. 이 메뉴 테이블만 먼저 준비하려면 **포털 가상환경의 Python**으로 다음을 실행한다. 아래 `D:\flask-portal`은 실제 운영 폴더로 바꾼다.
+서버 시작 시 기존 마이그레이션으로 테이블과 파트 컬럼이 생성된다. 이 메뉴 스키마만 먼저 준비하려면 **포털 가상환경의 Python**으로 다음을 실행한다. 기존 게시판을 이미 운영 중이더라도 파트 추가 후 이 명령을 재실행해도 되며 기존 글·파일·등록일·수정일은 유지된다. 아래 `D:\flask-portal`은 실제 운영 폴더로 바꾼다.
 
 ```cmd
 D:\flask-portal\venv\Scripts\python.exe D:\flask-portal\scripts\import_ai_training_materials.py --init-only
@@ -62,25 +68,87 @@ D:\flask-portal\venv\Scripts\python.exe D:\flask-portal\scripts\import_ai_traini
 2. 다음 명령으로 미리 검사한다. 이 단계는 DB/실제 저장 폴더를 변경하지 않는다.
 
 ```cmd
-D:\flask-portal\venv\Scripts\python.exe D:\flask-portal\scripts\import_ai_training_materials.py --folder "D:\AI_upload_inbox"
+D:\flask-portal\venv\Scripts\python.exe D:\flask-portal\scripts\import_ai_training_materials.py --folder "D:\AI_upload_inbox" --part "작업안전파트"
 ```
 
-3. 정상 파일을 확인한 뒤 실제 등록한다. 등록자 ID·이름·부서는 실제 값으로 바꾼다. 스크립트는 브라우저 SSO 세션을 갖지 않으므로 명시적으로 받는다.
+3. 정상 파일을 확인한 뒤 실제 등록한다. 아래는 직접 입력 방식이다. 등록자 ID·이름·부서는 실제 값으로 바꾼다. 스크립트는 브라우저 SSO 세션을 갖지 않는다. 지정 파트 담당자를 자동 조회하려면 다음 절의 `--use-part-author`를 사용한다.
 
 ```cmd
-D:\flask-portal\venv\Scripts\python.exe D:\flask-portal\scripts\import_ai_training_materials.py --folder "D:\AI_upload_inbox" --author-id "my_sso_id" --author-name "홍길동" --department "상생EHS기획그룹" --apply
+D:\flask-portal\venv\Scripts\python.exe D:\flask-portal\scripts\import_ai_training_materials.py --folder "D:\AI_upload_inbox" --part "작업안전파트" --author-id "my_sso_id" --author-name "홍길동" --department "상생EHS기획그룹" --apply
 ```
 
 - `--recursive`: 입력 폴더 하위 폴더까지 등록하려는 경우에만 추가.
 - `--department-id "부서코드"`: 부서코드도 저장하려는 경우 추가.
+- `--part "공통"`: 파트 소속 없는 공용 자료를 등록할 때 사용. 한 번 실행하는 폴더 내 파일에는 동일한 파트를 적용하므로 파트별 폴더를 나누어 실행한다.
 - 원본은 복사하며 이동·삭제하지 않는다. 파일별로 게시글과 첨부파일을 함께 저장한다.
 - 동일한 **파일명 + 파일내용(SHA-256)**으로 이 스크립트에서 이미 등록한 자료는 재실행 시 건너뛴다. 일부 실패 후 같은 명령을 다시 실행해도 성공한 자료를 중복 생성하지 않는다.
 - 같은 이름이어도 파일 내용이 달라지면 **새 게시글**이 된다. 기존 게시글을 교체하려면 웹 팝업에서 기존 첨부 삭제 → 새 첨부 추가 → 수정완료를 사용한다.
 - 웹에서 이미 수정한 게시글을 스크립트 재실행으로 되돌리지 않는다. 웹으로 직접 등록했던 자료까지 중복 판별하지는 않는다.
+- 같은 파일을 다른 `--part`로 지정해 다시 실행해도 기존 글은 중복으로 등록하거나 자동 재분류하지 않는다. 파트 변경은 게시글 팝업에서 수정한다.
 - `[FAILED]`가 있으면 해당 파일과 이유를 확인한다. 성공한 게시글은 유지되며 프로세스 종료코드는 1이다.
 - 이 스크립트는 팀 DB에 직접 쓰는 운영자 도구이므로 웹 권한 검사를 거치지 않는다. 운영자가 관리하는 PC에서만 실행한다.
 
+### 이번 일회성 등록: 파트 담당자 자동 조회 + 2026년 8월 1일
+
+기존 `scripts/import_ai_training_materials.py`에 선택 옵션을 추가했다. 일반 웹 등록은 여전히 실제 로그인한 사람과 현재 시각을 사용한다. 기존 게시글을 일괄 수정하는 스크립트가 아니다.
+
+| 파트 | 지정 등록자 SSO ID |
+| --- | --- |
+| 작업안전파트 | `kamarad.kim` |
+| 사고예방파트 | `sang0.oh` |
+| 위험성평가파트 | `dgyeong.kwak` |
+| 교육문화파트 | `ks72.lim` |
+| 적격성평가파트 | `sanggil2.lee` |
+
+- ID로 팀 PostgreSQL `system_users.login_id`를 조회하여 `user_name`, `dept_id`, `dept_name`을 가져온다. 파트명이 작성부서가 되는 것은 아니다. SSO에 대신 로그인하거나 IQADB에 직접 연결하지 않는다.
+- 활성 사용자 1명이 명확히 조회되고 이름·부서코드·부서명이 모두 있어야 한다. 누락·중복·비활성이면 등록 전에 중단한다. 정보를 추측하거나 다른 테이블로 우회하지 않는다.
+- 아래 명령은 **해당 파트 파일만 들어 있는 폴더**를 대상으로 한다. 다른 파트는 `--folder`와 `--part`를 함께 바꿔 각각 실행한다. `--recursive` 사용 시 그 하위의 모든 파일에도 같은 파트·담당자가 적용된다.
+
+사내 PC의 CMD에서 실제 포털 경로로 이동한 뒤 미리 확인:
+
+```cmd
+cd /d D:\flask-portal
+venv\Scripts\python.exe scripts\import_ai_training_materials.py --folder "D:\AI_upload_inbox\작업안전파트" --part "작업안전파트" --use-part-author --created-date 2026-08-01
+```
+
+출력된 `Author`, `Department`, `Created / initial modified`가 맞으면 실제 등록:
+
+```cmd
+venv\Scripts\python.exe scripts\import_ai_training_materials.py --folder "D:\AI_upload_inbox\작업안전파트" --part "작업안전파트" --use-part-author --created-date 2026-08-01 --apply
+```
+
+- `--apply`가 없으면 담당자 정보와 파일을 읽기만 하며 테이블 생성·DB 저장·파일 복사는 하지 않는다. 자동 담당자 모드는 미리보기부터 팀 DB 연결이 필요하다.
+- `--created-date 2026-08-01`이면 신규 게시글의 등록일과 최초 수정일은 모두 **2026-08-01 00:00:00**이다. 요청번호도 `AI-20260801-...`이며 첨부파일 저장 폴더가 이 번호와 일치하도록 처음 저장 시 함께 처리한다.
+- 날짜 옵션을 생략하면 현재 시각이다. 날짜를 코드 기본값으로 고정하지 않아 다음번 실수로 계속 과거 날짜를 적용하지 않는다.
+- 이후 웹에서 실제 변경하여 저장하면 등록일·원래 담당자는 유지하고 수정일만 실제 수정 시각으로 갱신한다.
+- 같은 파일을 재실행하면 기존 중복 방지 규칙대로 건너뛴다. 날짜나 담당자를 다르게 지정해도 이미 등록된 글을 덮어쓰지 않는다.
+- `--use-part-author`와 직접 입력하는 작성자·부서 옵션은 동시에 사용할 수 없다.
+- `공통`은 지정 담당자가 없으므로 자동 조회 옵션을 빼고 기존처럼 `--author-id`, `--author-name`, `--department`를 지정한다. 원하면 `--department-id`와 `--created-date 2026-08-01`을 함께 사용할 수 있다.
+- `system_users`에 ID가 없다면 사내 사용자 정보 동기화 상태를 먼저 확인한다. 개발 노트북의 가상 사용자로 운영 담당자를 대체하지 않는다.
+- 이번 추가의 파일은 `ai_training_materials.py`와 `scripts/import_ai_training_materials.py`이다. 날짜용 신규 마이그레이션은 없다. 다만 이전 파트 추가가 운영에 아직 없다면 위 이관 목록의 파트 관련 파일과 `009_add_ai_training_material_part.sql`도 함께 반영해야 한다.
+
 ## 구현·검증 체크리스트
+
+일회성 등록 담당자·등록일 지정 (2026-09-08 요청):
+
+- [x] 파트별 지정 SSO ID를 팀 DB `system_users`에서 조회하여 이름·부서 자동 입력.
+- [x] 사용자 누락·중복·비활성·필수 정보 누락 시 등록 전 중단, 미리보기는 DB/파일 변경 없음.
+- [x] 명시한 날짜로 신규 일괄 등록의 등록일·최초 수정일을 함께 저장하고 요청번호·파일 경로 일치.
+- [x] 일반 웹 등록의 실제 SSO·현재 날짜 유지, 기존 글·중복 글의 날짜 유지, 이후 수정 시 수정일만 갱신.
+- [x] 격리 PostgreSQL 검증 및 사내 PC용 실행 방법 기록.
+
+일회성 등록 검증(2026-09-08): `.tmp/training_import_override_validation.py`의 **54개 검사 통과**. 별도 PostgreSQL 스키마에 가상 사용자·문서를 넣어 5개 파트 매핑, 이름·부서 조회, 8월 1일 등록일/최초 수정일, 요청번호/실제 파일 경로, 중복 실행, 공통 수동 입력, 날짜 생략 시 현재 시각, 누락·중복·비활성 사용자 차단을 확인했다. 웹 API에 작성자·날짜 값을 임의로 보내도 실제 로그인 정보·현재 시각을 사용하며, 기존 일괄 자료 교체 시 등록일·작성자는 유지하고 수정일·수정자만 갱신하는 것을 확인했다. 첨부 DB 저장 실패 시 게시글 롤백·복사 파일 제거도 확인했다. `.tmp/training_parts_validation.py`의 **49개 기존 기능 검사 통과**. Python 3.9 문법·UTF-8·공백 검사 통과. 테스트 스키마·생성 파일은 제거했고 실제 운영 자료/담당자 정보는 조회·변경하지 않았다. 운영 PC에서는 먼저 미리보기 출력의 실제 이름·부서를 확인해야 한다.
+
+파트 분류 추가:
+
+- [x] 5개 파트 + 공통 분류, 목록 탭/드롭다운, 등록·수정 선택 및 수정일 연동.
+- [x] 기존 데이터 유지 마이그레이션 및 일괄 등록 `--part` 연결.
+- [x] PostgreSQL 검증: 분류 저장·변경·검색·미분류 이관·중복 등록·권한 유지.
+- [x] 브라우저 검증: 탭/드롭다운 동기화·등록 기본값·페이지 이동·수정 반영.
+
+파트 추가 검증(2026-09-07): 격리된 실제 PostgreSQL에서 48개 항목 통과. 브라우저에서 탭·드롭다운 연동, 검색어와 파트의 동시 적용, 다음 페이지·표시 개수 변경 시 조건 유지, 현재 파트가 선택된 등록 팝업, 파트 필수 선택, 수정 후 재분류 반영을 확인했다. 기존 4개 기본정보는 여전히 표시 전용이며 파트 선택과 별개다. 테스트 스키마·파일을 정리했고 개발 DB에 파트 컬럼을 적용했다. 사내 운영 DB에는 `009_add_ai_training_material_part.sql`을 포함하여 이관해야 한다. 이번 파트 추가에는 `config.ini` 변경이 없다.
+
+최초 게시판 구현:
 
 - [x] 메뉴·권한 관리 연결, 기존 목록/팝업 스타일 재사용.
 - [x] PostgreSQL 스키마, 전용 저장 폴더, 한글 파일명 다운로드.

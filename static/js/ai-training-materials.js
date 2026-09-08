@@ -11,6 +11,9 @@
 
     const listing = document.querySelector('.training-list');
     if (listing) {
+        document.getElementById('training-part-filter').addEventListener('change', event => {
+            event.target.form.requestSubmit();
+        });
         window.showRegisterModal = () => openPopup(listing.dataset.registerUrl, 'aiTrainingRegister');
         listing.querySelectorAll('[data-training-popup]').forEach(link => {
             link.addEventListener('click', event => {
@@ -112,7 +115,7 @@
         const saveButton = document.getElementById('training-save');
         const label = saveButton.textContent;
         saveButton.textContent = '저장 중...';
-        form.querySelectorAll('button, input').forEach(element => { element.disabled = true; });
+        form.querySelectorAll('button, input, select').forEach(element => { element.disabled = true; });
         try {
             const response = await fetch(form.action, {method: 'POST', body: data});
             const result = await response.json().catch(() => ({message: `서버 응답 오류 (${response.status})`}));
@@ -124,7 +127,7 @@
         } finally {
             saving = false;
             saveButton.textContent = label;
-            form.querySelectorAll('button, input').forEach(element => { element.disabled = false; });
+            form.querySelectorAll('button, input, select').forEach(element => { element.disabled = false; });
         }
     });
 })();
