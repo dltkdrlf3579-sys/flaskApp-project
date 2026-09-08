@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import math
+import shutil
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -30,6 +31,10 @@ class MaterialConflict(ValueError):
     pass
 
 
+class NewUploadCopyError(OSError):
+    pass
+
+
 def load_settings():
     config = configparser.ConfigParser(interpolation=None)
     config.read(PROJECT_ROOT / "config.ini", encoding="utf-8")
@@ -37,12 +42,24 @@ def load_settings():
                              fallback="uploads/ai_training_materials"))
     if not folder.is_absolute():
         folder = PROJECT_ROOT / folder
+    folder = folder.resolve()
+    new_upload_value = config.get("AI_TRAINING_MATERIALS", "new_upload_folder",
+                                  fallback="new_upload/ai_training_materials").strip()
+    if not new_upload_value:
+        raise ValueError("AI_TRAINING_MATERIALS.new_upload_folder 경로를 입력해 주세요.")
+    new_upload_folder = Path(new_upload_value)
+    if not new_upload_folder.is_absolute():
+        new_upload_folder = PROJECT_ROOT / new_upload_folder
+    new_upload_folder = new_upload_folder.resolve()
+    if folder == new_upload_folder or folder in new_upload_folder.parents or new_upload_folder in folder.parents:
+        raise ValueError("원본 저장 폴더와 new_upload 폴더는 서로 포함되지 않는 별도 경로여야 합니다.")
     limit = config.getint("AI_TRAINING_MATERIALS", "max_upload_size_mb", fallback=50)
     if limit <= 0:
         raise ValueError("AI_TRAINING_MATERIALS.max_upload_size_mb는 양수여야 합니다.")
     extensions = config.get("SECURITY", "allowed_extensions", fallback="pdf,docx,xlsx,pptx,txt")
     return {
-        "folder": folder.resolve(),
+        "folder": folder,
+        "new_upload_folder": new_upload_folder,
         "max_mb": limit,
         "extensions": {value.strip().lower() for value in extensions.split(",") if value.strip()},
     }
@@ -72,10 +89,11 @@ def request_number(row):
     return "AI-{:%Y%m%d}-{:06d}".format(row["created_at"], row["id"])
 
 
-def stored_path(relative_path, settings):
-    target = (settings["folder"] / relative_path).resolve()
+def stored_path(relative_path, settings, *, new_upload=False):
+    base_folder = settings["new_upload_folder"] if new_upload else settings["folder"]
+    target = (base_folder / relative_path).resolve()
     try:
-        target.relative_to(settings["folder"])
+        target.relative_to(base_folder)
     except ValueError:
         raise ValueError("잘못된 첨부파일 경로입니다.")
     return target
@@ -132,7 +150,7 @@ def remove_saved_files(paths):
 
 
 def save_material(title, files, author, material_id=None, keep_ids=None, version=None, import_key=None, part_name=None,
-                  *, import_created_at=None, import_grouped=False):
+                  *, import_created_at=None, import_grouped=False, capture_new_uploads=False):
     title = str(title or "").strip()
     part_name = str(part_name or "").strip()
     if part_name not in MATERIAL_PARTS:
@@ -143,6 +161,8 @@ def save_material(title, files, author, material_id=None, keep_ids=None, version
         raise ValueError("등록자 ID와 등록자명이 필요합니다.")
     if import_grouped and (import_key is None or material_id is not None):
         raise ValueError("폴더 묶음 등록은 신규 일괄 등록에만 사용할 수 있습니다.")
+    if capture_new_uploads and import_key is not None:
+        raise ValueError("일괄 등록 자료는 new_upload에 복사하지 않습니다.")
     if import_created_at is not None:
         if import_key is None or material_id is not None:
             raise ValueError("등록일 지정은 신규 일괄 등록에만 사용할 수 있습니다.")
@@ -156,6 +176,7 @@ def save_material(title, files, author, material_id=None, keep_ids=None, version
             raise ValueError("검사 이후 원본 파일이 변경되었습니다. 다시 실행해 주세요.")
     new_paths = []
     removed_paths = []
+    removed_new_uploads = []
     conn = get_db_connection()
     try:
         if material_id is None:
@@ -192,6 +213,8 @@ def save_material(title, files, author, material_id=None, keep_ids=None, version
             for item in existing:
                 if item["id"] not in keep_ids:
                     removed_paths.append(stored_path(item["storage_path"], settings))
+                    if capture_new_uploads:
+                        removed_new_uploads.append(stored_path(item["storage_path"], settings, new_upload=True))
                     conn.execute("DELETE FROM ai_training_material_files WHERE id = %s", (item["id"],))
             changed = title != row["title"] or part_name != row["part_name"] or bool(prepared) or bool(removed_paths)
             if changed:
@@ -206,6 +229,14 @@ def save_material(title, files, author, material_id=None, keep_ids=None, version
             destination = stored_path(request_number(row) + "/" + filename, settings)
             new_paths.append(destination)
             item["file"].save(destination)
+            if capture_new_uploads:
+                pending_path = stored_path(request_number(row) + "/" + filename, settings, new_upload=True)
+                new_paths.append(pending_path)
+                try:
+                    pending_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(destination, pending_path)
+                except OSError as exc:
+                    raise NewUploadCopyError("new_upload 파일 복사 실패") from exc
             conn.execute("""INSERT INTO ai_training_material_files
                          (material_id, file_name, storage_path, file_size, sha256)
                          VALUES (%s, %s, %s, %s, %s)""",
@@ -218,7 +249,7 @@ def save_material(title, files, author, material_id=None, keep_ids=None, version
         raise
     finally:
         conn.close()
-    failed_removals = remove_saved_files(removed_paths)
+    failed_removals = remove_saved_files(removed_paths + removed_new_uploads)
     result = {"id": material_id, "request_number": request_number(row)}
     if failed_removals:
         result["warning"] = "게시글은 저장됐지만 이전 파일 일부를 폴더에서 삭제하지 못했습니다. 학습 전에 서버 로그에 표시된 파일과 폴더 권한을 확인해 주세요."
@@ -307,12 +338,15 @@ def save_api(material_id=None):
                 raise ValueError("첨부파일 목록이 올바르지 않습니다.")
         saved = save_material(request.form.get("title"), request.files.getlist("files"), author,
                               material_id=material_id, keep_ids=keep_ids, version=request.form.get("version"),
-                              part_name=request.form.get("part_name"))
+                              part_name=request.form.get("part_name"), capture_new_uploads=True)
         return jsonify(success=True, **saved, detail_url=url_for("ai_training_materials.detail_page", material_id=saved["id"]))
     except MaterialConflict as exc:
         return jsonify(success=False, message=str(exc)), 409
     except ValueError as exc:
         return jsonify(success=False, message=str(exc)), 400
+    except NewUploadCopyError:
+        logger.exception("AI 학습자료 new_upload 복사 실패; 저장 취소")
+        return jsonify(success=False, message="새 업로드 폴더(new_upload)에 복사하지 못해 저장을 취소했습니다. 폴더 경로·쓰기 권한·디스크 여유 공간을 확인해 주세요."), 500
     except Exception:
         logger.exception("AI 학습자료 저장 실패")
         return jsonify(success=False, message="저장하지 못했습니다. 서버 로그와 파일 저장 폴더 권한을 확인해 주세요."), 500

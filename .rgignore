@@ -6,6 +6,7 @@ venv/
 .venv/
 .wslvenv/
 uploads/
+new_upload/
 logs/
 reports/
 screenshot/

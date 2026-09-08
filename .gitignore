@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 venv/
 uploads/
+new_upload/
 gpt/
 screenshot/
 
