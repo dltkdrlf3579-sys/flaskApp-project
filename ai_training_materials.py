@@ -4,7 +4,7 @@ import json
 import logging
 import math
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -32,6 +32,10 @@ class MaterialConflict(ValueError):
 
 
 class NewUploadCopyError(OSError):
+    pass
+
+
+class DeletionNoticeError(OSError):
     pass
 
 
@@ -150,6 +154,27 @@ def remove_saved_files(paths):
     return failed
 
 
+def write_deletion_notice(path, row, removed_files, author, deleted_at):
+    payload = {
+        "안내": "AI 학습자료 첨부 삭제 이력입니다. 학습 문서가 아닌 삭제 반영용 기록입니다.",
+        "삭제시각": deleted_at.isoformat(timespec="seconds"),
+        "삭제자 SSO ID": author["author_id"],
+        "삭제자 이름": author["author_name"],
+        "삭제자 부서": author.get("department_name", ""),
+        "요청번호": request_number(row),
+        "게시글 ID": row["id"],
+        "삭제 전 게시글 제목": row["title"],
+        "삭제 전 파트": row["part_name"],
+        "삭제된 파일": [
+            {"첨부 ID": item["id"], "파일명": item["file_name"],
+             "기존 저장경로": item["storage_path"], "SHA256": item["sha256"]}
+            for item in removed_files
+        ],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8-sig")
+
+
 def save_material(title, files, author, material_id=None, keep_ids=None, version=None, import_key=None, part_name=None,
                   *, import_created_at=None, import_grouped=False, capture_new_uploads=False,
                   attachment_descriptions=None, new_file_descriptions=None):
@@ -197,6 +222,7 @@ def save_material(title, files, author, material_id=None, keep_ids=None, version
     new_paths = []
     removed_paths = []
     removed_new_uploads = []
+    removed_files = []
     conn = get_db_connection()
     try:
         if material_id is None:
@@ -238,6 +264,7 @@ def save_material(title, files, author, material_id=None, keep_ids=None, version
                     removed_paths.append(stored_path(item["storage_path"], settings))
                     if capture_new_uploads:
                         removed_new_uploads.append(stored_path(item["storage_path"], settings, new_upload=True))
+                        removed_files.append(item)
                     conn.execute("DELETE FROM ai_training_material_files WHERE id = %s", (item["id"],))
                 elif item["id"] in descriptions and descriptions[item["id"]] != item["description"]:
                     conn.execute("UPDATE ai_training_material_files SET description = %s WHERE id = %s AND material_id = %s",
@@ -269,6 +296,18 @@ def save_material(title, files, author, material_id=None, keep_ids=None, version
                          VALUES (%s, %s, %s, %s, %s, %s)""",
                          (material_id, item["name"], destination.relative_to(settings["folder"]).as_posix(),
                           item["size"], item["sha256"], item["description"]))
+        if removed_files:
+            deleted_at = datetime.now(timezone(timedelta(hours=9)))
+            notice_name = deleted_at.strftime("%H%M%S_%f_") + uuid4().hex + ".txt"
+            notice_path = stored_path(
+                "_deletions/" + deleted_at.strftime("%Y-%m-%d") + "/" + notice_name,
+                settings, new_upload=True,
+            )
+            new_paths.append(notice_path)
+            try:
+                write_deletion_notice(notice_path, row, removed_files, author, deleted_at)
+            except OSError as exc:
+                raise DeletionNoticeError("new_upload 삭제 이력 저장 실패") from exc
         conn.commit()
     except Exception:
         conn.rollback()
@@ -373,6 +412,9 @@ def save_api(material_id=None):
         return jsonify(success=False, message=str(exc)), 409
     except ValueError as exc:
         return jsonify(success=False, message=str(exc)), 400
+    except DeletionNoticeError:
+        logger.exception("AI 학습자료 삭제 이력 저장 실패; 저장 취소")
+        return jsonify(success=False, message="삭제 이력을 새 업로드 폴더(new_upload)에 기록하지 못해 저장을 취소했습니다. 폴더 쓰기 권한·디스크 여유 공간을 확인해 주세요."), 500
     except NewUploadCopyError:
         logger.exception("AI 학습자료 new_upload 복사 실패; 저장 취소")
         return jsonify(success=False, message="새 업로드 폴더(new_upload)에 복사하지 못해 저장을 취소했습니다. 폴더 경로·쓰기 권한·디스크 여유 공간을 확인해 주세요."), 500
