@@ -129,6 +129,27 @@ class NavigatorTests(unittest.TestCase):
             menus = namespace['api_menus']().get_json()
         self.assertEqual([m['name'] for m in menus if m['code'] == navigator.MENU_CODE], ['AX EHS Navigator'])
 
+    def test_hidden_menus_removed_for_every_topbar_path(self):
+        import permission_helpers as helpers
+        from config.menu import MENU_CONFIG
+        all_codes = [{'code': helpers.resolve_menu_code(s['url'])} for m in MENU_CONFIG for s in m['submenu']]
+        app = Flask(__name__)
+        with app.test_request_context('/'):
+            for enabled, admin, fail in [(True, False, False), (True, True, False),
+                                          (False, False, False), (True, False, True)]:
+                with self.subTest(enabled=enabled, admin=admin, fail=fail), \
+                     patch.object(helpers, 'PERMISSION_ENABLED', enabled), \
+                     patch.object(helpers, 'is_super_admin', return_value=admin), \
+                     patch.object(helpers, 'get_user_accessible_menus', return_value=all_codes,
+                                  side_effect=RuntimeError('test') if fail else None):
+                    menus = helpers.build_user_menu_config()
+                    slugs = {s['url'] for m in menus for s in m['submenu']}
+                    self.assertTrue({'ai-assistant', 'subcontract-approval', 'subcontract-report'}.isdisjoint(slugs))
+                    self.assertIn('ax-ehs-navigator', slugs)
+        # Hiding navigation must not remove grantable permission definitions.
+        from permission_api import _flatten_menu_codes
+        self.assertTrue({'AI_ASSISTANT', 'SUBCONTRACT_APPROVAL', 'SUBCONTRACT_REPORT'}.issubset(_flatten_menu_codes()))
+
     def test_admin_can_save_navigator_for_user_and_department(self):
         import permission_api
         app = Flask(__name__)

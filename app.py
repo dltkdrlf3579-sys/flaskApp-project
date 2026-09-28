@@ -33,6 +33,7 @@ from permission_helpers import (
     is_super_admin,
     SUPER_ADMIN_USERS,
     build_user_menu_config,
+    build_topbar_menu_config,
     enforce_permission,
     enforce_board_permission,
     get_user_permission_level,
@@ -201,7 +202,7 @@ def inject_user_menu():
         menu_config = build_user_menu_config()
     except Exception as exc:
         logging.debug('inject_user_menu failed: %s', exc)
-        menu_config = MENU_CONFIG
+        menu_config = build_topbar_menu_config(MENU_CONFIG)
 
     identity = _build_board_user_context()
     return {

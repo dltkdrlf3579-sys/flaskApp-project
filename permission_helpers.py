@@ -176,10 +176,23 @@ def resolve_board_permission_code(board_type: str) -> str:
 
     return BOARD_PERMISSION_MAP.get(normalized.rstrip('s'), menu_code)
 
+def build_topbar_menu_config(menu_config):
+    """Keep hidden menu definitions for permissions, but never send them to the topbar."""
+    visible = []
+    for section in menu_config:
+        if section.get('hidden_in_topbar'):
+            continue
+        item = copy.deepcopy(section)
+        item['submenu'] = [sub for sub in item.get('submenu', []) if not sub.get('hidden_in_topbar')]
+        if item['submenu']:
+            visible.append(item)
+    return visible
+
+
 def build_user_menu_config():
     try:
         if not PERMISSION_ENABLED or is_super_admin():
-            return copy.deepcopy(MENU_CONFIG)
+            return build_topbar_menu_config(MENU_CONFIG)
 
         accessible = get_user_accessible_menus()
         allowed_codes = {entry.get('code') for entry in accessible if entry.get('code')}
@@ -194,10 +207,10 @@ def build_user_menu_config():
                     sub_filtered.append(dict(item))
             if sub_filtered:
                 filtered.append({**section, 'submenu': sub_filtered})
-        return filtered
+        return build_topbar_menu_config(filtered)
     except Exception as exc:
         logger.debug("build_user_menu_config failed: %s", exc)
-        return copy.deepcopy(MENU_CONFIG)
+        return build_topbar_menu_config(MENU_CONFIG)
 
 def is_super_admin():
     """현재 사용자가 슈퍼어드민인지 확인"""
