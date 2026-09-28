@@ -54,6 +54,7 @@ from boards.safety_instruction import safety_instruction_bp
 from partner_access import partner_access_bp
 from ai_assistant import ai_assistant_bp
 from ai_training_materials import ai_training_materials_bp
+from navigator import navigator_bp
 from controllers.boards.accident_controller import (
     AccidentController,
     build_accident_config,
@@ -122,6 +123,7 @@ app.register_blueprint(subcontract_report_bp)
 app.register_blueprint(partner_access_bp)
 app.register_blueprint(ai_assistant_bp)
 app.register_blueprint(ai_training_materials_bp)
+app.register_blueprint(navigator_bp)
 register_permission_routes(app)
 
 CHANGE_REQUEST_DATE_COLUMNS = {'final_check_date'}
@@ -9597,6 +9599,7 @@ def page_view(url):
     """일반 페이지 체크 (catch-all 라우트) - 모든 다른 라우트 후에 실행"""
     # 실제 라우트로 리다이렉트
     route_map = {
+        'ax-ehs-navigator': 'navigator.dashboard',
         'accident': 'accident_route',
         # 구경로 호환: partner-accident는 accident로 리다이렉트
         'partner-accident': 'accident_route',

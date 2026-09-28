@@ -32,4 +32,10 @@ MENU_CONFIG = [
             {"title": "화관법 도급신고", "url": "subcontract-report"},
         ],
     },
+    {
+        "title": "AX EHS Navigator",
+        "submenu": [
+            {"title": "대시보드", "url": "ax-ehs-navigator"},
+        ],
+    },
 ]

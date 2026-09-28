@@ -85,3 +85,7 @@ __pycache__/
 env/
 
 deletelist/
+
+# Navigator query contract and regression coverage
+!docs/navigator-dashboard.md
+!tests/test_navigator.py

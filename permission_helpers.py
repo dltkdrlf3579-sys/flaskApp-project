@@ -20,6 +20,7 @@ SUPER_ADMIN_USERS = config.get('PERMISSION', 'super_admin_users', fallback='').s
 SUPER_ADMIN_USERS = [u.strip() for u in SUPER_ADMIN_USERS if u.strip()]
 
 MENU_PERMISSION_MAP = {
+    'ax-ehs-navigator': 'AX_EHS_NAVIGATOR',
     'partner-standards': 'VENDOR_MGT',
     'partner-change-request': 'REFERENCE_CHANGE',
     'partner-change-request-detail': 'REFERENCE_CHANGE',
@@ -59,6 +60,7 @@ MENU_PERMISSION_MAP = {
 }
 
 BOARD_PERMISSION_MAP = {
+    'ax-ehs-navigator': 'AX_EHS_NAVIGATOR',
     'ai-training-materials': 'AI_TRAINING_MATERIALS',
     'ai_training_materials': 'AI_TRAINING_MATERIALS',
     'partner': 'VENDOR_MGT',
@@ -97,6 +99,7 @@ BOARD_PERMISSION_MAP = {
 }
 
 MENU_ICON_MAP = {
+    'AX_EHS_NAVIGATOR': 'fas fa-chart-bar',
     'VENDOR_MGT': 'fas fa-building',
     'REFERENCE_CHANGE': 'fas fa-exchange-alt',
     'PARTNER_ACCESS': 'fas fa-id-card',
@@ -360,6 +363,7 @@ def get_user_accessible_menus():
         # 권한 체크 비활성화 시 전체 메뉴 반환
         if not PERMISSION_ENABLED or is_super_admin():
             return [
+                {'code': 'AX_EHS_NAVIGATOR', 'name': 'AX EHS Navigator 대시보드', 'url': '/ax-ehs-navigator', 'icon': 'fas fa-chart-bar', 'read_level': 3, 'write_level': 0},
                 {'code': 'VENDOR_MGT', 'name': '협력사 기준정보', 'url': '/vendor-management', 'icon': 'fas fa-building', 'read_level': 3, 'write_level': 3},
                 {'code': 'REFERENCE_CHANGE', 'name': '기준정보 변경요청', 'url': '/reference-change', 'icon': 'fas fa-exchange-alt', 'read_level': 3, 'write_level': 3},
                 {'code': 'PARTNER_ACCESS', 'name': '협력사 실시간 출입정보', 'url': '/partner-access', 'icon': 'fas fa-id-card', 'read_level': 3, 'write_level': 3},
