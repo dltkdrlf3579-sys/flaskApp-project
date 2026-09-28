@@ -988,24 +988,30 @@ function buildPermissionOptions(selectedLevel, type = 'read') {
 }
 
 // 페이지 로드시 초기화
-document.addEventListener('DOMContentLoaded', function() {
-    loadMenus();
-    loadUserPermissions();
-    updateStats();
+document.addEventListener('DOMContentLoaded', async function() {
+    try {
+        await loadMenus();
+        loadUserPermissions();
+        updateStats();
+    } catch (error) {
+        console.error('메뉴 로드 오류:', error);
+        alert('권한 메뉴 목록을 불러오지 못했습니다. 페이지를 새로고침해 주세요.');
+    }
 });
 
 // 메뉴 목록 로드
 function loadMenus() {
     // API에서 메뉴 목록 가져오기 (config/menu.py에서)
-    fetch('/api/menus')
-        .then(response => response.json())
+    return fetch('/api/menus', {cache: 'no-store'})
+        .then(response => {
+            if (!response.ok) throw new Error('Permission menu request failed');
+            return response.json();
+        })
         .then(data => {
+            if (!Array.isArray(data)) throw new Error('Invalid permission menu response');
             menus = data;
             renderMenuHeaders();
             renderSubHeaders();
-        })
-        .catch(error => {
-            console.error('메뉴 로드 오류:', error);
         });
 }
 
@@ -1033,7 +1039,7 @@ function renderMenuHeaders() {
         th.setAttribute('colspan', '2');
         th.style.borderBottom = '1px solid #dee2e6';
         th.style.textAlign = 'center';
-        th.innerHTML = menu.name;
+        th.textContent = menu.name;
 
         userTable.appendChild(th.cloneNode(true));
         deptTable.appendChild(th.cloneNode(true));
@@ -2408,7 +2414,7 @@ function renderPermissionRequestsTable() {
             const th = document.createElement('th');
             th.setAttribute('colspan', '2');
             th.style.textAlign = 'center';
-            th.innerHTML = menu.name;
+            th.textContent = menu.name;
             th.className = 'menu-header-added';
             headerRow.appendChild(th);
         });

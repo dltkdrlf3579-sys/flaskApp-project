@@ -59,7 +59,7 @@ def _build_menu_title_map():
         title = section.get('title', '')
         for item in section.get('submenu', []):
             slug = item.get('url')
-            name = item.get('title') or title
+            name = item.get('permission_title') or item.get('title') or title
             if not slug:
                 continue
             normalized = resolve_menu_code(slug)

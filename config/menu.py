@@ -6,7 +6,7 @@ MENU_CONFIG = [
             {"title": "협력사 기준정보", "url": "partner-standards"},
             {"title": "기준정보 변경요청", "url": "partner-change-request"},
             {"title": "협력사 실시간 출입정보", "url": "partner-access"},
-            {"title": "AI 조회 도우미", "url": "ai-assistant"},
+            {"title": "AI 조회 도우미", "url": "ai-assistant", "hidden_in_topbar": True},
             {"title": "AI 학습자료 업로드", "url": "ai-training-materials"},
         ],
     },
@@ -27,6 +27,7 @@ MENU_CONFIG = [
     },
     {
         "title": "인허가",
+        "hidden_in_topbar": True,
         "submenu": [
             {"title": "산안법 도급승인", "url": "subcontract-approval"},
             {"title": "화관법 도급신고", "url": "subcontract-report"},
@@ -35,7 +36,7 @@ MENU_CONFIG = [
     {
         "title": "AX EHS Navigator",
         "submenu": [
-            {"title": "대시보드", "url": "ax-ehs-navigator"},
+            {"title": "대시보드", "url": "ax-ehs-navigator", "permission_title": "AX EHS Navigator"},
         ],
     },
 ]

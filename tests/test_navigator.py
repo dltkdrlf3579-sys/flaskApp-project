@@ -1,6 +1,8 @@
 """Navigator data contract and access tests; never import the production app."""
 import unittest
-from unittest.mock import patch
+import ast
+from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 from flask import Flask
 import navigator
@@ -9,7 +11,7 @@ import navigator
 def fixture():
     return {'partner_id': 'P1', 'partner_name': 'Partner One', 'site': 'Site A',
             'tier': '1', 'work_name': 'Contract', 'owner_login_id': 'alice',
-            'owner_dept_id': 'D1', '완료': 7, '미완료': 2, '기한 초과': 0, '진행중': 1,
+            'owner_dept_id': 'D1', '완료': 7, '미완료': 2, '기한초과': 0, '진행중': 1,
             'gate_completed': 2, 'gate_incomplete': 1}
 
 
@@ -39,7 +41,7 @@ class NavigatorTests(unittest.TestCase):
         row = dict(fixture(), 검토대기=3)
         result = navigator.build_dashboard(self.settings, 3, runner=lambda *a: ([row], list(row)))
         self.assertEqual(result['summary'], {'partners': 1, 'total': 13,
-                         'counts': {'완료': 7, '미완료': 2, '기한 초과': 0, '진행중': 1, '검토대기': 3}})
+                         'counts': {'완료': 7, '미완료': 2, '기한초과': 0, '진행중': 1, '검토대기': 3}})
         self.assertEqual(result['work'][0]['counts']['검토대기'], 3)
         self.assertEqual(result['summary']['counts'], result['sites'][0]['counts'])
         self.assertEqual(result['summary']['counts'], result['partners'][0]['counts'])
@@ -103,12 +105,54 @@ class NavigatorTests(unittest.TestCase):
 
     def test_menu_admin_and_request_discovery(self):
         from permission_helpers import resolve_menu_code
-        from permission_api import _flatten_menu_codes, _build_menu_title_map, _load_request_default_levels
+        from permission_api import _flatten_menu_codes, _build_menu_title_map, _default_levels_for_request
         self.assertEqual(resolve_menu_code('ax-ehs-navigator'), navigator.MENU_CODE)
         self.assertIn(navigator.MENU_CODE, _flatten_menu_codes())
         self.assertIn(navigator.MENU_CODE, _build_menu_title_map())
-        for levels in _load_request_default_levels():
-            self.assertEqual(levels[navigator.MENU_CODE], {'read': 1, 'write': 0})
+        self.assertEqual(_build_menu_title_map()[navigator.MENU_CODE], 'AX EHS Navigator')
+        for company_id in ('C100', 'C10', None):
+            self.assertEqual(_default_levels_for_request(navigator.MENU_CODE, 'read', company_id, {}, {}), (1, 0))
+            self.assertEqual(_default_levels_for_request(navigator.MENU_CODE, 'read_write', company_id, {}, {}), (1, 1))
+
+    def test_actual_admin_menu_api_exposes_navigator_name(self):
+        # Run the actual route body without importing app.py's startup hooks.
+        from flask import jsonify
+        from config.menu import MENU_CONFIG
+        from permission_helpers import resolve_menu_code
+        tree = ast.parse(Path('app.py').read_text(encoding='utf-8'))
+        route = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'api_menus')
+        route.decorator_list = []
+        namespace = {'MENU_CONFIG': MENU_CONFIG, 'resolve_menu_code': resolve_menu_code, 'jsonify': jsonify}
+        exec(compile(ast.Module(body=[route], type_ignores=[]), 'app.py', 'exec'), namespace)
+        app = Flask(__name__)
+        with app.app_context():
+            menus = namespace['api_menus']().get_json()
+        self.assertEqual([m['name'] for m in menus if m['code'] == navigator.MENU_CODE], ['AX EHS Navigator'])
+
+    def test_admin_can_save_navigator_for_user_and_department(self):
+        import permission_api
+        app = Flask(__name__)
+        app.secret_key = 'test-only'
+        permission_api.register_permission_routes(app)
+        client = app.test_client()
+        conn = MagicMock()
+        conn.cursor.return_value.fetchone.return_value = {'dept_code': 'D1', 'dept_full_path': 'Demo'}
+        with patch.object(permission_api, 'get_db_connection', return_value=conn), patch.object(permission_api, 'is_super_admin', return_value=False):
+            denied = client.post('/api/menu-roles/batch-update', json={'changes': []})
+            self.assertEqual(denied.status_code, 403)
+            conn.cursor.assert_not_called()
+            with client.session_transaction() as sess:
+                sess['admin_authenticated'] = True
+                sess['user_id'] = 'demo_admin'
+            for endpoint, identity in [('/api/menu-roles/batch-update', {'login_id': 'demo_user'}),
+                                       ('/api/dept-roles/batch-update', {'dept_id': 'D1'})]:
+                response = client.post(endpoint, json={'changes': [{**identity, 'menu_code': navigator.MENU_CODE,
+                                                                    'read_level': 3, 'write_level': 0}]})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json['count'], 1)
+            inserts = [call for call in conn.cursor.return_value.execute.call_args_list if 'INSERT INTO' in call.args[0]]
+            self.assertEqual(len(inserts), 2)
+            self.assertTrue(all(navigator.MENU_CODE in call.args[1] for call in inserts))
 
 
 if __name__ == '__main__':

@@ -87,7 +87,7 @@
         <ul class="nav-main" role="menubar" aria-label="메인 메뉴">
           {# 현재 활성 슬러그 파악 #}
           {% set active_slug = (request.view_args.get('url') if request.view_args else '') or request.path.strip('/') %}
-          {% for m in _nav_menu %}
+          {% for m in _nav_menu if not m.get('hidden_in_topbar', false) %}
           {% set is_active = false %}
           {% for sm in m.submenu %}
             {% if active_slug == sm.url %}
@@ -101,7 +101,7 @@
                aria-haspopup="true"
                aria-expanded="false">{{ m.title }}</a>
             <ul class="submenu" role="menu">
-              {% for sm in m.submenu %}
+              {% for sm in m.submenu if not sm.get('hidden_in_topbar', false) %}
               <li role="none">
                 <a role="menuitem"
                    class="submenu-link {% if active_slug == sm.url %} active{% endif %}"

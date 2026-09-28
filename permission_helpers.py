@@ -193,7 +193,7 @@ def build_user_menu_config():
                 if code in allowed_codes:
                     sub_filtered.append(dict(item))
             if sub_filtered:
-                filtered.append({'title': section.get('title'), 'submenu': sub_filtered})
+                filtered.append({**section, 'submenu': sub_filtered})
         return filtered
     except Exception as exc:
         logger.debug("build_user_menu_config failed: %s", exc)

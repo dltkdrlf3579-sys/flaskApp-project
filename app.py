@@ -9719,7 +9719,7 @@ def api_menus():
                 'group': group,
                 'code': code,
                 'slug': slug,
-                'name': item.get('title')
+                'name': item.get('permission_title') or item.get('title')
             })
     return jsonify(flattened)
 
