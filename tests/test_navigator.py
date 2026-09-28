@@ -2,6 +2,7 @@
 import unittest
 import ast
 from pathlib import Path
+import tempfile
 from unittest.mock import patch, MagicMock
 
 from flask import Flask
@@ -18,6 +19,9 @@ def fixture():
 class NavigatorTests(unittest.TestCase):
     def setUp(self):
         self.settings = navigator.load_settings()
+        # Preserve regression coverage for the existing deployed workload format.
+        self.settings['works'] = []
+        self.settings['queries']['workload'] = 'WORKLOAD'
         self.settings['queries']['exceptions'] = ''
 
     def build(self, rows, level=3, user='alice', dept='D1'):
@@ -174,6 +178,186 @@ class NavigatorTests(unittest.TestCase):
             inserts = [call for call in conn.cursor.return_value.execute.call_args_list if 'INSERT INTO' in call.args[0]]
             self.assertEqual(len(inserts), 2)
             self.assertTrue(all(navigator.MENU_CODE in call.args[1] for call in inserts))
+
+
+class NavigatorWorkScopeTests(unittest.TestCase):
+    def setUp(self):
+        self.settings = navigator.load_settings()
+        self.settings['queries']['exceptions'] = ''
+        self.settings['works'] = [
+            {'id': 'contract', 'name': 'Contract', 'scope': 'company', 'enabled': True, 'query': 'COMPANY'},
+            {'id': 'report', 'name': 'Report', 'scope': 'site', 'enabled': False, 'query': 'SITE'},
+        ]
+        self.calls = []
+
+    def company(self, **changes):
+        row = fixture()
+        for key in ('site', 'work_name', 'gate_completed', 'gate_incomplete'):
+            row.pop(key)
+        return {**row, **changes}
+
+    def build(self, company_rows, site_rows=None, level=3, user='alice', dept='D1'):
+        self.settings['works'][1]['enabled'] = site_rows is not None
+        def runner(sql, source):
+            self.calls.append((sql, source))
+            if sql == 'COMPANY':
+                return company_rows, list(self.company())
+            if sql == 'SITE' and site_rows is not None:
+                return site_rows, list(fixture())
+            raise AssertionError('Unexpected query')
+        return navigator.build_dashboard(self.settings, level, user, dept, runner)
+
+    def test_company_work_without_site_and_optional_gate(self):
+        result = self.build([self.company()])
+        self.assertEqual(result['summary']['total'], 10)
+        self.assertEqual(result['sites'], [])
+        self.assertFalse(result['site_work_linked'])
+        self.assertEqual(result['gate'], {'completed': 0, 'incomplete': 0})
+        self.assertEqual(result['work'][0]['scope'], 'company')
+        partner = result['partners'][0]
+        self.assertEqual(partner['sites'], [])
+        self.assertEqual(partner['company_work'][0]['total'], 10)
+        self.assertEqual(partner['site_work'], [])
+        self.assertEqual(self.calls, [('COMPANY', 'sample_postgres')])
+
+    def test_company_plus_two_sites_preserves_grain_in_details(self):
+        result = self.build([self.company()], [fixture(), dict(fixture(), site='Site B')])
+        self.assertEqual(result['summary']['partners'], 1)
+        self.assertEqual(result['summary']['total'], 30)
+        self.assertEqual(sum(w['total'] for w in result['work']), 30)
+        self.assertEqual(sum(s['total'] for s in result['sites']), 20)
+        partner = result['partners'][0]
+        self.assertEqual(partner['total'], 30)
+        self.assertEqual(sum(w['total'] for w in partner['company_work']), 10)
+        self.assertEqual([(w['name'], w['site'], w['total']) for w in partner['site_work']],
+                         [('Report', 'Site A', 10), ('Report', 'Site B', 10)])
+        self.assertEqual(partner['sites'], ['Site A', 'Site B'])
+        self.assertEqual(result['gate'], {'completed': 4, 'incomplete': 2})
+        self.assertEqual(len(self.calls), 2)
+
+    def test_company_data_cannot_be_replicated_per_site(self):
+        with self.assertRaises(ValueError):
+            self.build([self.company(site='A'), self.company(site='B')])
+
+    def test_site_work_requires_site_even_for_empty_result_schema(self):
+        with self.assertRaises(ValueError):
+            self.build([self.company()], [dict(fixture(), site='')])
+        self.settings['works'][1]['enabled'] = True
+        with self.assertRaises(ValueError):
+            navigator.build_dashboard(self.settings, 3,
+                runner=lambda *args: ([], list(self.company())))
+
+    def test_permissions_filter_each_work_before_aggregation(self):
+        companies = [self.company(), self.company(partner_id='P2', owner_login_id='bob'),
+                     self.company(partner_id='P3', owner_login_id='eve', owner_dept_id='D2')]
+        sites = [fixture(), dict(fixture(), partner_id='P2', owner_login_id='bob'),
+                 dict(fixture(), partner_id='P3', owner_login_id='eve', owner_dept_id='D2')]
+        for level, expected in [(0, 0), (1, 20), (2, 40), (3, 60)]:
+            with self.subTest(level=level):
+                result = self.build(companies, sites, level)
+                self.assertEqual(result['summary']['total'], expected)
+                self.assertEqual(sum(s['total'] for s in result['sites']), expected // 2)
+                self.assertEqual(sum(p['total'] for p in result['partners']), expected)
+        self.assertEqual(self.build(companies, sites, 2, '', '')['summary']['total'], 0)
+
+    def test_new_status_in_every_work_and_detail(self):
+        self.settings['statuses'].append({'key': '검토대기', 'label': '검토대기', 'color': '#aa66cc', 'completed': False})
+        self.settings['works'][1]['enabled'] = True
+        rows = {'COMPANY': dict(self.company(), 검토대기=3), 'SITE': dict(fixture(), 검토대기=5)}
+        result = navigator.build_dashboard(self.settings, 3, runner=lambda sql, source: ([rows[sql]], list(rows[sql])))
+        self.assertEqual(result['summary']['total'], 28)
+        self.assertEqual(result['summary']['counts']['검토대기'], 8)
+        self.assertEqual(result['sites'][0]['counts']['검토대기'], 5)
+        partner = result['partners'][0]
+        self.assertEqual(partner['counts']['검토대기'], 8)
+        self.assertEqual(partner['company_work'][0]['counts']['검토대기'], 3)
+        self.assertEqual(partner['site_work'][0]['counts']['검토대기'], 5)
+        with self.assertRaises(ValueError):
+            self.build([self.company()], [fixture()])
+
+    def test_gate_columns_supplied_together_and_values_validated(self):
+        for row in (self.company(gate_completed=1),
+                    self.company(gate_completed=1, gate_incomplete=9)):
+            with self.subTest(row=row), self.assertRaises(ValueError):
+                navigator.build_dashboard(self.settings, 3, runner=lambda *args: ([row], list(row)))
+
+    def test_company_exception_can_omit_site_and_remains_scoped(self):
+        self.settings['queries']['exceptions'] = 'EXCEPTIONS'
+        exception = dict(exception_id='E1', partner_id='P1', partner_name='One', work_name='Contract',
+                         issue='Review', status='미완료', category='Review', owner_name='Alice',
+                         owner_login_id='alice', owner_dept_id='D1')
+        def runner(sql, source):
+            return ([exception], list(exception)) if sql == 'EXCEPTIONS' else ([self.company()], list(self.company()))
+        result = navigator.build_dashboard(self.settings, 1, 'alice', 'D1', runner)
+        self.assertEqual(result['exceptions'][0]['site'], '')
+        self.assertNotIn('owner_login_id', result['exceptions'][0])
+        self.assertEqual(navigator.build_dashboard(self.settings, 1, 'bob', 'D2', runner)['exceptions'], [])
+
+    def test_empty_site_query_is_linked_and_failed_query_is_not_ignored(self):
+        result = self.build([self.company()], [])
+        self.assertTrue(result['site_work_linked'])
+        self.assertEqual(result['sites'], [])
+        def runner(sql, source):
+            if sql == 'SITE':
+                raise RuntimeError('Unavailable site query')
+            return [self.company()], list(self.company())
+        with self.assertRaises(RuntimeError):
+            navigator.build_dashboard(self.settings, 3, runner=runner)
+
+    def test_all_works_disabled_are_not_queried(self):
+        for work in self.settings['works']:
+            work['enabled'] = False
+        def runner(*args):
+            raise AssertionError('Disabled query ran')
+        result = navigator.build_dashboard(self.settings, 3, runner=runner)
+        self.assertEqual(result['summary']['total'], 0)
+        self.assertFalse(result['site_work_linked'])
+
+    def test_qadb_source_shared_by_all_enabled_work_queries(self):
+        self.settings['source'] = 'qadb'
+        result = self.build([self.company()], [fixture()])
+        self.assertFalse(result['sample'])
+        self.assertEqual(self.calls, [('COMPANY', 'qadb'), ('SITE', 'qadb')])
+
+    def test_work_ids_keep_identical_display_names_separate(self):
+        self.settings['works'][1]['name'] = 'Contract'
+        result = self.build([self.company()], [fixture()])
+        self.assertEqual([(w['id'], w['scope'], w['total']) for w in result['work']],
+                         [('contract', 'company', 10), ('report', 'site', 10)])
+        self.assertEqual(len(result['partners'][0]['company_work']), 1)
+        self.assertEqual(len(result['partners'][0]['site_work']), 1)
+
+    def test_config_loads_legacy_and_korean_ids_without_sql_interpolation(self):
+        prefix = navigator.CONFIG_PATH.read_text(encoding='utf-8-sig').split('[WORK:', 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'navigator.ini'
+            path.write_text(prefix + '[QUERIES]\nworkload = SELECT legacy\n', encoding='utf-8')
+            legacy = navigator.load_settings(path)
+            self.assertEqual(legacy['works'], [])
+            self.assertEqual(legacy['queries']['workload'], 'SELECT legacy')
+            sql = "SELECT value FROM example WHERE value LIKE '10%'"
+            path.write_text(prefix + '[WORK:계약평가]\nscope = company\nquery = ' + sql, encoding='utf-8')
+            work = navigator.load_settings(path)['works'][0]
+            self.assertEqual((work['id'], work['name'], work['query']), ('계약평가', '계약평가', sql))
+            path.write_text(prefix + '[WORK:future]\nscope = site\nenabled = false\n', encoding='utf-8')
+            self.assertFalse(navigator.load_settings(path)['works'][0]['enabled'])
+            path.write_text(prefix + '[WORK:future]\nscope = site\nenabled = true\n', encoding='utf-8')
+            with self.assertRaises(ValueError):
+                navigator.load_settings(path)
+
+    def test_default_config_and_invalid_scope_duplicate_id_or_mixed_format(self):
+        text = navigator.CONFIG_PATH.read_text(encoding='utf-8-sig')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'navigator.ini'
+            for content in (text.replace('scope = company', 'scope = unknown'),
+                            text.replace('[WORK:subcontract_report]', '[WORK:CONTRACT_EVALUATION]'),
+                            text.replace('[QUERIES]', '[QUERIES]\nworkload = SELECT 1')):
+                path.write_text(content, encoding='utf-8')
+                with self.subTest(content=content[:80]), self.assertRaises(ValueError):
+                    navigator.load_settings(path)
+        works = navigator.load_settings()['works']
+        self.assertEqual([w['scope'] for w in works], ['company', 'site', 'site'])
+        self.assertEqual([w['enabled'] for w in works], [True, False, False])
 
 
 if __name__ == '__main__':

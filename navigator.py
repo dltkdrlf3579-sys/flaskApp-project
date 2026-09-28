@@ -32,16 +32,37 @@ def load_settings(path=None):
         statuses.append({'key': name.casefold(), 'label': name, 'color': color.strip(),
                          'completed': name.casefold() in completed})
     keys = [s['key'] for s in statuses]
-    reserved = {'partner_id', 'partner_name', 'site', 'tier', 'work_name',
+    reserved = {'partner_id', 'partner_name', 'site', 'tier', 'work_name', 'work_id', 'scope',
                 'owner_login_id', 'owner_dept_id', 'gate_completed', 'gate_incomplete'}
     if (not statuses or len(keys) != len(set(keys)) or reserved.intersection(keys)
             or not completed or not completed.issubset(keys)):
         raise ValueError('Invalid status columns')
     queries = {name: config.get('QUERIES', name, fallback='').strip()
                for name in ('workload', 'exceptions')}
-    if not queries['workload']:
-        raise ValueError('Missing workload query')
-    return {'source': source, 'statuses': statuses, 'queries': queries}
+    works = []
+    work_ids = set()
+    for section in config.sections():
+        if not section.startswith('WORK:'):
+            continue
+        work_id = section[len('WORK:'):].strip()
+        name = config.get(section, 'name', fallback=work_id).strip()
+        scope = config.get(section, 'scope').strip().casefold()
+        enabled = config.getboolean(section, 'enabled', fallback=True)
+        query = config.get(section, 'query', fallback='').strip()
+        if not work_id or work_id.casefold() in work_ids or not name:
+            raise ValueError('Missing or duplicate work ID/name')
+        if scope not in {'company', 'site'}:
+            raise ValueError('Work scope must be company or site')
+        if enabled and not query:
+            raise ValueError('Missing enabled work query')
+        work_ids.add(work_id.casefold())
+        works.append({'id': work_id, 'name': name, 'scope': scope,
+                      'enabled': enabled, 'query': query})
+    if works and queries['workload']:
+        raise ValueError('Use WORK queries or legacy workload, not both')
+    if not works and not queries['workload']:
+        raise ValueError('Missing work queries')
+    return {'source': source, 'statuses': statuses, 'queries': queries, 'works': works}
 
 
 def query_rows(sql, source):
@@ -103,21 +124,58 @@ def count_value(value):
         raise ValueError('Invalid count') from exc
 
 
+def workload_rows(settings, level, user_id, dept_id, runner):
+    """Read each enabled work independently; scope is configuration, never inferred."""
+    keys = [s['key'] for s in settings['statuses']]
+    required = ['partner_id', 'partner_name', 'tier', 'owner_login_id', 'owner_dept_id', *keys]
+    works = settings.get('works', [])
+    if works:
+        for work in works:
+            if not work['enabled']:
+                continue
+            rows, columns = runner(work['query'], settings['source'])
+            needed = required + (['site'] if work['scope'] == 'site' else [])
+            rows = normalize_rows(rows, columns, needed)
+            names = {str(name).casefold() for name in columns}
+            if ('gate_completed' in names) != ('gate_incomplete' in names):
+                raise ValueError('Gate columns must be supplied together')
+            for row in scope_rows(rows, level, user_id, dept_id):
+                yield {**row, 'work_id': work['id'], 'work_name': work['name'],
+                       'scope': work['scope'],
+                       'site': text_value(row.get('site')) if work['scope'] == 'site' else '',
+                       'gate_completed': row.get('gate_completed', 0),
+                       'gate_incomplete': row.get('gate_incomplete', 0)}
+    else:
+        # Existing deployed INIs keep their original site-based data contract.
+        rows, columns = runner(settings['queries']['workload'], settings['source'])
+        rows = normalize_rows(rows, columns, required + ['site', 'work_name', 'gate_completed', 'gate_incomplete'])
+        for row in scope_rows(rows, level, user_id, dept_id):
+            yield {**row, 'work_id': text_value(row['work_name']), 'scope': 'site'}
+
+
 def build_dashboard(settings, level, user_id='', dept_id='', runner=query_rows):
     statuses = settings['statuses']
     keys = [s['key'] for s in statuses]
-    required = ['partner_id', 'partner_name', 'site', 'tier', 'work_name',
-                'owner_login_id', 'owner_dept_id', 'gate_completed', 'gate_incomplete', *keys]
-    rows, columns = runner(settings['queries']['workload'], settings['source'])
-    rows = scope_rows(normalize_rows(rows, columns, required), level, user_id, dept_id)
     groups = {'work': {}, 'sites': {}, 'partners': {}}
     total = {key: 0 for key in keys}
     gate = {'completed': 0, 'incomplete': 0}
     seen = set()
-    for row in rows:
-        identity = tuple(text_value(row[k]) for k in (
-            'partner_id', 'site', 'work_name', 'owner_login_id', 'owner_dept_id'))
-        if not all(text_value(row[k]) for k in ('partner_id', 'partner_name', 'site', 'work_name', 'tier')):
+    def new_entry(identity, name):
+        return {'id': identity, 'name': name, 'counts': {key: 0 for key in keys},
+                'gate_completed': 0, 'gate_incomplete': 0, 'sites': set(), 'tiers': set()}
+
+    def add_counts(entry, counts, gc, gi):
+        for key in keys:
+            entry['counts'][key] += counts[key]
+        entry['gate_completed'] += gc
+        entry['gate_incomplete'] += gi
+
+    for row in workload_rows(settings, level, user_id, dept_id, runner):
+        partner_id, site, work_id, work_name = (text_value(row[k]) for k in (
+            'partner_id', 'site', 'work_id', 'work_name'))
+        identity = (work_id, partner_id, site, text_value(row['owner_login_id']), text_value(row['owner_dept_id']))
+        if (not all(text_value(row[k]) for k in ('partner_id', 'partner_name', 'work_name', 'tier'))
+                or (row['scope'] == 'site' and not site)):
             raise ValueError('Missing workload identity')
         if identity in seen:
             raise ValueError('Duplicate workload grain')
@@ -131,37 +189,47 @@ def build_dashboard(settings, level, user_id='', dept_id='', runner=query_rows):
         gate['incomplete'] += gi
         for key in keys:
             total[key] += counts[key]
-        for group_name, group_key in [('work', identity[2]), ('sites', identity[1]), ('partners', identity[0])]:
-            entry = groups[group_name].setdefault(group_key, {
-                'id': group_key, 'name': text_value(row['partner_name']) if group_name == 'partners' else group_key,
-                'counts': {key: 0 for key in keys}, 'gate_completed': 0, 'gate_incomplete': 0,
-                'sites': set(), 'tiers': set(), 'work': {},
-            })
-            for key in keys:
-                entry['counts'][key] += counts[key]
-            entry['gate_completed'] += gc
-            entry['gate_incomplete'] += gi
-            entry['sites'].add(identity[1])
+        group_keys = [('work', work_id, work_name), ('partners', partner_id, text_value(row['partner_name']))]
+        if row['scope'] == 'site':
+            group_keys.append(('sites', site, site))
+        for group_name, group_key, group_label in group_keys:
+            entry = groups[group_name].setdefault(group_key, new_entry(group_key, group_label))
+            add_counts(entry, counts, gc, gi)
+            if site:
+                entry['sites'].add(site)
             entry['tiers'].add(text_value(row['tier']))
+            if group_name == 'work':
+                entry['scope'] = row['scope']
             if group_name == 'partners':
-                work_counts = entry['work'].setdefault(identity[2], {key: 0 for key in keys})
-                for key in keys:
-                    work_counts[key] += counts[key]
+                # Company tasks appear once; site tasks retain their site in details.
+                detail_key = (work_id, site)
+                details = entry.setdefault('company_work' if row['scope'] == 'company' else 'site_work', {})
+                detail = details.setdefault(detail_key, new_entry(work_id, work_name))
+                detail['site'] = site
+                add_counts(detail, counts, gc, gi)
     for mapping in groups.values():
         for entry in mapping.values():
             entry['sites'] = sorted(entry['sites'])
             entry['tiers'] = sorted(entry['tiers'])
             entry['total'] = sum(entry['counts'].values())
+            if mapping is groups['partners']:
+                for field in ('company_work', 'site_work'):
+                    details = []
+                    for detail in entry.get(field, {}).values():
+                        details.append({key: detail[key] for key in ('id', 'name', 'site', 'counts')}
+                                       | {'total': sum(detail['counts'].values())})
+                    entry[field] = details
     exceptions = []
     exceptions_linked = bool(settings['queries']['exceptions'])
     if exceptions_linked:
         erows, ecolumns = runner(settings['queries']['exceptions'], settings['source'])
-        erequired = ['exception_id', 'partner_id', 'partner_name', 'site', 'work_name',
+        erequired = ['exception_id', 'partner_id', 'partner_name', 'work_name',
                      'issue', 'status', 'category', 'owner_name', 'owner_login_id', 'owner_dept_id']
         erows = scope_rows(normalize_rows(erows, ecolumns, erequired), level, user_id, dept_id)
         exception_ids = set()
         for row in erows:
             entry = {key: text_value(row[key]) for key in erequired}
+            entry['site'] = text_value(row.get('site'))
             if not entry['exception_id'] or entry['exception_id'] in exception_ids:
                 raise ValueError('Missing or duplicate exception ID')
             exception_ids.add(entry['exception_id'])
@@ -174,6 +242,8 @@ def build_dashboard(settings, level, user_id='', dept_id='', runner=query_rows):
         'gate': gate, 'work': list(groups['work'].values()), 'sites': list(groups['sites'].values()),
         'partners': list(groups['partners'].values()), 'exceptions': exceptions,
         'exceptions_linked': exceptions_linked,
+        'site_work_linked': (any(w['enabled'] and w['scope'] == 'site' for w in settings.get('works', []))
+                             if settings.get('works') else True),
         'categories': dict(Counter(e['category'] for e in exceptions)),
     }
 

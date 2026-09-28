@@ -49,7 +49,7 @@
     rows.forEach(row => {
       const line = el('div', undefined, 'nv-bar-row');
       const name = el('span', row.name, 'nv-bar-name');
-      name.title = row.name;
+      name.title = row.scope ? `${row.name} · ${row.scope === 'company' ? '업체 공통' : '사업장 단위'}` : row.name;
       line.append(name, track(row.counts, true, max), el('span', fmt(row.total), 'nv-bar-total'));
       wrapper.append(line);
     });
@@ -76,7 +76,7 @@
     tableNode.append(head, body);
     return tableNode;
   }
-  function siteTable(rows, details = false) {
+  function siteTable(rows) {
     const result = table(['사업장', '대상', ...data.statuses.map(s => s.label)],
       rows.map(r => [r.name, fmt(r.total), ...data.statuses.map(s => fmt(r.counts[s.key]))]));
     result.style.minWidth = `${(data.statuses.length + 2) * 62}px`;
@@ -93,12 +93,29 @@
   }
   function exceptionTable(rows) {
     return table(['협력사', '사업장', '해당 업무', '확인 내용', '담당', '상태'],
-      rows.map(r => [r.partner_name, r.site, r.work_name, r.issue, r.owner_name, statusBadge(r.status)]));
+      rows.map(r => [r.partner_name, r.site || '업체 공통', r.work_name, r.issue, r.owner_name, statusBadge(r.status)]));
   }
   function openDialog(title, nodes) {
     $('nv-dialog-title').textContent = title;
     $('nv-dialog-body').replaceChildren(...nodes);
     if (!$('nv-dialog').open) $('nv-dialog').showModal();
+  }
+  function partnerContext(partner) {
+    return [...(partner.company_work.length ? ['업체 공통'] : []), ...partner.sites].join(' · ');
+  }
+  function partnerDetails(partner) {
+    const nodes = [];
+    if (partner.company_work.length) {
+      nodes.push(el('h3', '업체 공통 업무', 'nv-detail-heading'),
+        table(['업무', '대상', ...data.statuses.map(s => s.label)], partner.company_work.map(r =>
+          [r.name, fmt(r.total), ...data.statuses.map(s => fmt(r.counts[s.key]))])));
+    }
+    if (partner.site_work.length) {
+      nodes.push(el('h3', '사업장별 업무', 'nv-detail-heading'),
+        table(['사업장', '업무', '대상', ...data.statuses.map(s => s.label)], partner.site_work.map(r =>
+          [r.site, r.name, fmt(r.total), ...data.statuses.map(s => fmt(r.counts[s.key]))])));
+    }
+    return nodes;
   }
   function showPartner(partner) {
     selectedPartner = partner;
@@ -116,12 +133,10 @@
     const foot = el('div', undefined, 'nv-partner-footer');
     const detail = el('button', '상세 현황 보기 ›', 'nv-link');
     detail.addEventListener('click', () => {
-      const rows = Object.entries(partner.work).map(([name, counts]) => ({name, counts, total: Object.values(counts).reduce((a, b) => a + b, 0)}));
-      openDialog(`${partner.name} · 업무 현황`, [legend(), bars(rows),
-        table(['업무', ...data.statuses.map(s => s.label)], rows.map(r => [r.name, ...data.statuses.map(s => fmt(r.counts[s.key]))]))]);
+      openDialog(`${partner.name} · 업무 현황`, partnerDetails(partner));
     });
     foot.append(el('span', `Gate 미완료 ${count(partner.gate_incomplete)}`, partner.gate_incomplete ? 'nv-danger' : ''), detail);
-    target.replaceChildren(heading, el('div', partner.sites.join(' · '), 'nv-partner-info'), stats, track(partner.counts, false), foot);
+    target.replaceChildren(heading, el('div', partnerContext(partner), 'nv-partner-info'), stats, track(partner.counts, false), foot);
   }
   function render() {
     const summary = data.summary;
@@ -146,7 +161,7 @@
     const rowLimit = window.innerHeight < 800 ? 3 : 4;
     $('nv-work').replaceChildren(bars(data.work.slice(0, rowLimit)));
     if (data.sites.length) $('nv-sites').replaceChildren(siteTable(data.sites.slice(0, window.innerHeight < 800 ? 4 : 5)));
-    else empty($('nv-sites'));
+    else empty($('nv-sites'), data.site_work_linked ? '조회 범위에 해당하는 데이터가 없습니다.' : '사업장 단위 업무가 아직 연계되지 않았습니다.');
     const gateTotal = data.gate.completed + data.gate.incomplete;
     $('nv-gate-total').textContent = count(gateTotal);
     $('nv-gate-completed').textContent = count(data.gate.completed);
@@ -159,13 +174,13 @@
     else empty($('nv-exceptions'), data.exceptions_linked ? '비정상 진행 항목이 없습니다.' : '아직 연계되지 않은 항목입니다.');
     showPartner(selectedPartner || data.partners[0]);
     document.querySelector('[data-dialog="work"]').hidden = data.work.length <= rowLimit && data.statuses.length <= 3;
-    document.querySelector('[data-dialog="sites"]').hidden = data.sites.length <= (window.innerHeight < 800 ? 4 : 5) && data.statuses.length <= 2;
+    document.querySelector('[data-dialog="sites"]').hidden = !data.sites.length || (data.sites.length <= (window.innerHeight < 800 ? 4 : 5) && data.statuses.length <= 2);
   }
   document.querySelectorAll('[data-dialog]').forEach(button => button.addEventListener('click', () => {
     if (!data) return;
     const type = button.dataset.dialog;
     if (type === 'work') openDialog('업무별 현황', [legend(), bars(data.work), table(['업무', ...data.statuses.map(s => s.label)], data.work.map(r => [r.name, ...data.statuses.map(s => fmt(r.counts[s.key]))]))]);
-    if (type === 'sites') openDialog('사업장별 업무 현황', [siteTable(data.sites, true)]);
+    if (type === 'sites') openDialog('사업장별 업무 현황', [el('p', '사업장 단위 업무 기준', 'nv-muted'), siteTable(data.sites)]);
     if (type === 'exceptions') openDialog('비정상 진행 현황', [data.exceptions.length ? exceptionTable(data.exceptions) : el('p', data.exceptions_linked ? '비정상 진행 항목이 없습니다.' : '아직 연계되지 않은 항목입니다.', 'nv-empty')]);
   }));
   $('nv-close').addEventListener('click', () => $('nv-dialog').close());
@@ -176,7 +191,7 @@
     const matches = data.partners.filter(p => p.name.toLocaleLowerCase().includes(query));
     if (matches.length === 1) { showPartner(matches[0]); return; }
     const nodes = matches.map(p => {
-      const button = el('button', `${p.name} · ${p.sites.join(', ')} · 전체 ${count(p.total)}`, 'nv-result');
+      const button = el('button', `${p.name} · ${partnerContext(p)} · 전체 ${count(p.total)}`, 'nv-result');
       button.addEventListener('click', () => { showPartner(p); $('nv-dialog').close(); });
       return button;
     });
