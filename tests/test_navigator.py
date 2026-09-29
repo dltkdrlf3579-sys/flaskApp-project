@@ -1,6 +1,9 @@
 """Navigator data contract and access tests; never import the production app."""
 import unittest
 import ast
+from datetime import datetime, timezone
+from decimal import Decimal
+from io import BytesIO
 from pathlib import Path
 import tempfile
 from unittest.mock import patch, MagicMock
@@ -95,6 +98,7 @@ class NavigatorTests(unittest.TestCase):
             client = app.test_client()
             self.assertEqual(client.get('/ax-ehs-navigator').status_code, 403)
             self.assertEqual(client.get('/api/ax-ehs-navigator/dashboard').status_code, 403)
+            self.assertEqual(client.get('/api/ax-ehs-navigator/exceptions/export').status_code, 403)
             query.assert_not_called()
 
     def test_source_failure_is_not_zero_or_sample_fallback(self):
@@ -358,6 +362,120 @@ class NavigatorWorkScopeTests(unittest.TestCase):
         works = navigator.load_settings()['works']
         self.assertEqual([w['scope'] for w in works], ['company', 'site', 'site'])
         self.assertEqual([w['enabled'] for w in works], [True, False, False])
+
+
+class NavigatorExceptionExportTests(unittest.TestCase):
+    def setUp(self):
+        self.settings = navigator.load_settings()
+        self.settings['source'] = 'qadb'
+        self.settings['queries']['exceptions'] = 'EXCEPTIONS'
+        self.app = Flask(__name__)
+        self.app.secret_key = 'export-test-only'
+        self.app.register_blueprint(navigator.navigator_bp)
+        self.client = self.app.test_client()
+        with self.client.session_transaction() as sess:
+            sess['user_id'] = 'alice'
+            sess['deptid'] = 'D1'
+
+    def row(self, **changes):
+        row = dict(exception_id='E1', partner_id='0017', partner_name='가온산업',
+                    work_name='계약평가', issue='요청 납기 초과', status='기한초과',
+                    category='납기 초과', owner_name='담당 A', owner_login_id='alice',
+                    owner_dept_id='D1')
+        return {**row, **changes}
+
+    def download(self, rows, level=3, columns=None, query_error=None, suffix=''):
+        with patch.object(navigator, 'enforce_permission', return_value=None) as permission, \
+             patch.object(navigator, 'get_user_permission_level', return_value=level), \
+             patch.object(navigator, 'load_settings', return_value=self.settings), \
+             patch.object(navigator, 'query_rows', return_value=(rows, columns or list(self.row())),
+                          side_effect=query_error) as query:
+            response = self.client.get('/api/ax-ehs-navigator/exceptions/export' + suffix)
+            permission.assert_called_once_with(navigator.MENU_CODE, 'view', response_type='json')
+            if self.settings['queries']['exceptions']:
+                query.assert_called_once_with('EXCEPTIONS', 'qadb')
+            else:
+                query.assert_not_called()
+            return response
+
+    def workbook(self, response):
+        from openpyxl import load_workbook
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        self.assertIn('attachment; filename=navigator_exceptions_', response.headers['Content-Disposition'])
+        self.assertIn('no-store', response.headers['Cache-Control'])
+        return load_workbook(BytesIO(response.data))
+
+    def test_exports_all_rows_and_additional_columns_without_permission_ids(self):
+        rows = [{**self.row(), 'exception_id': f'E{i}', 'extra_detail': f'추가 내용 {i}'} for i in range(12)]
+        columns = list(rows[0])
+        sheet = self.workbook(self.download(rows, columns=columns)).active
+        headers = [cell.value for cell in sheet[1]]
+        self.assertEqual(headers, [key for key in columns if key not in navigator.EXCEPTION_PRIVATE_COLUMNS])
+        self.assertEqual(sheet.max_row, 13)
+        self.assertEqual(sheet.cell(13, headers.index('extra_detail') + 1).value, '추가 내용 11')
+        self.assertEqual(sheet.cell(2, headers.index('partner_id') + 1).value, '0017')
+        self.assertEqual(sheet.freeze_panes, 'A2')
+        self.assertEqual(sheet.auto_filter.ref, f'A1:I13')
+
+    def test_download_uses_same_permission_scope_as_dashboard_and_ignores_url_scope(self):
+        rows = [self.row(), {**self.row(), 'exception_id': 'E2', 'owner_login_id': 'bob'},
+                {**self.row(), 'exception_id': 'E3', 'owner_login_id': 'eve', 'owner_dept_id': 'D2'}]
+        for level, expected in [(0, 0), (1, 1), (2, 2), (3, 3)]:
+            with self.subTest(level=level):
+                sheet = self.workbook(self.download(rows, level=level)).active
+                self.assertEqual(sheet.max_row - 1, expected)
+                dashboard = navigator.build_dashboard(self.settings, level, 'alice', 'D1',
+                    lambda sql, source: (rows, list(rows[0])) if sql == 'EXCEPTIONS' else ([], list(fixture())))
+                self.assertEqual(len(dashboard['exceptions']), expected)
+        sheet = self.workbook(self.download(rows, level=1, suffix='?user_id=eve&deptid=D2&read_level=3')).active
+        self.assertEqual(sheet.max_row, 2)
+
+    def test_raw_types_identifiers_and_formula_like_text_are_preserved(self):
+        row = {**self.row(), 'exception_id': 1234567890123456789, 'issue': '=HYPERLINK("test")',
+               '납기일': datetime(2026, 9, 29, 0, 0, tzinfo=timezone.utc),
+               'days': Decimal('2.5'), 'code': '00042', 'note': '@SUM(1,2)',
+               'metadata': {'단계': '확인'}, 'site': None}
+        sheet = self.workbook(self.download([row], columns=list(row))).active
+        cells = dict(zip([cell.value for cell in sheet[1]], sheet[2]))
+        self.assertEqual(cells['exception_id'].value, '1234567890123456789')
+        self.assertEqual(cells['issue'].value, row['issue'])
+        self.assertEqual(cells['issue'].data_type, 's')
+        self.assertEqual(cells['note'].value, row['note'])
+        self.assertEqual(cells['code'].value, '00042')
+        self.assertEqual(cells['days'].value, 2.5)
+        self.assertEqual(cells['days'].data_type, 'n')
+        self.assertEqual(cells['납기일'].value, datetime(2026, 9, 29, 9, 0))
+        self.assertEqual(cells['site'].value, None)
+        self.assertEqual(cells['metadata'].value, '{"단계": "확인"}')
+
+    def test_uppercase_columns_filter_private_ids_and_keep_original_headers(self):
+        row = {key.upper(): value for key, value in self.row().items()}
+        sheet = self.workbook(self.download([row], columns=list(row))).active
+        headers = [cell.value for cell in sheet[1]]
+        self.assertIn('PARTNER_NAME', headers)
+        self.assertNotIn('OWNER_LOGIN_ID', headers)
+        self.assertNotIn('OWNER_DEPT_ID', headers)
+        self.assertEqual(sheet['C2'].value, '가온산업')
+
+    def test_empty_query_result_has_headers_and_unlinked_query_does_not_run(self):
+        sheet = self.workbook(self.download([])).active
+        self.assertEqual(sheet.max_row, 1)
+        self.settings['queries']['exceptions'] = ''
+        response = self.download([])
+        self.assertEqual(response.status_code, 404)
+        self.assertIn('error', response.json)
+
+    def test_query_failure_missing_columns_or_duplicate_ids_is_not_empty_excel(self):
+        with self.assertLogs(navigator.logger, level='ERROR'):
+            failed = self.download([], query_error=RuntimeError('private query details'))
+            missing = self.download([], columns=['partner_id'])
+            duplicate = self.download([self.row(), self.row()])
+        for response in (failed, missing, duplicate):
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(response.mimetype, 'application/json')
+            self.assertNotIn('private query details', response.get_data(as_text=True))
+            self.assertNotIn('Content-Disposition', response.headers)
 
 
 if __name__ == '__main__':

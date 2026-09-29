@@ -1,19 +1,26 @@
 """Read-only Navigator: configured queries, scoped counts, no persisted snapshot."""
 from collections import Counter
 import configparser
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, time, timezone, timedelta
 from decimal import Decimal, InvalidOperation
+from io import BytesIO
+import json
 import logging
+from numbers import Number
 from pathlib import Path
 import re
 
-from flask import Blueprint, jsonify, render_template, session
+from flask import Blueprint, jsonify, render_template, send_file, session
 from permission_helpers import enforce_permission, get_user_permission_level
 
 navigator_bp = Blueprint('navigator', __name__)
 MENU_CODE = 'AX_EHS_NAVIGATOR'
 CONFIG_PATH = Path(__file__).with_name('navigator_config.ini')
 logger = logging.getLogger(__name__)
+EXCEPTION_FIELDS = ('exception_id', 'partner_id', 'partner_name', 'work_name',
+                    'issue', 'status', 'category', 'owner_name', 'owner_login_id', 'owner_dept_id')
+EXCEPTION_PRIVATE_COLUMNS = {'owner_login_id', 'owner_dept_id'}
+LOCAL_TIMEZONE = timezone(timedelta(hours=9))
 
 
 def load_settings(path=None):
@@ -124,6 +131,88 @@ def count_value(value):
         raise ValueError('Invalid count') from exc
 
 
+def read_exceptions(settings, level, user_id='', dept_id='', runner=None):
+    """Shared raw query and row scope for the dashboard and Excel download."""
+    sql = settings['queries']['exceptions']
+    if not sql:
+        return [], [], False
+    rows, columns = (runner or query_rows)(sql, settings['source'])
+    rows = scope_rows(normalize_rows(rows, columns, EXCEPTION_FIELDS), level, user_id, dept_id)
+    seen = set()
+    for row in rows:
+        identity = text_value(row['exception_id'])
+        if not identity or identity in seen:
+            raise ValueError('Missing or duplicate exception ID')
+        seen.add(identity)
+    return rows, columns, True
+
+
+def exception_workbook(rows, columns):
+    from openpyxl import Workbook
+    from openpyxl.cell import WriteOnlyCell
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    public_columns = [(str(column).casefold(), str(column)) for column in columns
+                      if str(column).casefold() not in EXCEPTION_PRIVATE_COLUMNS]
+    if len(rows) > 1048575 or len(public_columns) > 16384:
+        raise ValueError('Exception data exceeds Excel worksheet limits')
+    book = Workbook(write_only=True)
+    sheet = book.create_sheet('RawData')
+    sheet.freeze_panes = 'A2'
+    sheet.auto_filter.ref = f'A1:{get_column_letter(len(public_columns))}{len(rows) + 1}'
+    header_fill = PatternFill('solid', fgColor='244675')
+    header_font = Font(name='맑은 고딕', color='FFFFFF', bold=True)
+    body_font = Font(name='맑은 고딕', size=11)
+    alignment = Alignment(vertical='top', wrap_text=True)
+
+    def cell_value(value, key):
+        if value is None or str(value).strip().lower() in {'nan', 'nat', '<na>'}:
+            return None
+        if key in {'exception_id', 'partner_id'}:
+            return text_value(value)
+        if isinstance(value, datetime) and value.utcoffset() is not None:
+            return value.astimezone(LOCAL_TIMEZONE).replace(tzinfo=None)
+        if isinstance(value, time) and value.utcoffset() is not None:
+            return value.isoformat()
+        if isinstance(value, (dict, list, tuple)):
+            return json.dumps(value, ensure_ascii=False, default=str)
+        if isinstance(value, (str, Number, Decimal, date, time, timedelta)):
+            return value
+        return str(value)
+
+    def excel_cell(value, header=False):
+        if isinstance(value, str) and len(value) > 32767:
+            raise ValueError('Exception text exceeds Excel cell limits')
+        cell = WriteOnlyCell(sheet, value=value)
+        # Raw strings must stay text, including values beginning with '='.
+        if isinstance(value, str):
+            cell.data_type = 's'
+        cell.font = header_font if header else body_font
+        cell.alignment = alignment
+        if header:
+            cell.fill = header_fill
+        elif isinstance(value, datetime):
+            cell.number_format = 'yyyy-mm-dd hh:mm:ss'
+        elif isinstance(value, date):
+            cell.number_format = 'yyyy-mm-dd'
+        return cell
+
+    for index, (key, label) in enumerate(public_columns, start=1):
+        lengths = [len(label)] + [len(str(cell_value(row.get(key), key) or '')) for row in rows[:100]]
+        width = max(15, min(60, max(lengths) * 1.5 + 2))
+        if key == 'issue':
+            width = max(width, 36)
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    sheet.append([excel_cell(label, header=True) for _, label in public_columns])
+    for row in rows:
+        sheet.append([excel_cell(cell_value(row.get(key), key)) for key, _ in public_columns])
+    output = BytesIO()
+    book.save(output)
+    output.seek(0)
+    return output
+
+
 def workload_rows(settings, level, user_id, dept_id, runner):
     """Read each enabled work independently; scope is configuration, never inferred."""
     keys = [s['key'] for s in settings['statuses']]
@@ -219,25 +308,13 @@ def build_dashboard(settings, level, user_id='', dept_id='', runner=query_rows):
                         details.append({key: detail[key] for key in ('id', 'name', 'site', 'counts')}
                                        | {'total': sum(detail['counts'].values())})
                     entry[field] = details
-    exceptions = []
-    exceptions_linked = bool(settings['queries']['exceptions'])
-    if exceptions_linked:
-        erows, ecolumns = runner(settings['queries']['exceptions'], settings['source'])
-        erequired = ['exception_id', 'partner_id', 'partner_name', 'work_name',
-                     'issue', 'status', 'category', 'owner_name', 'owner_login_id', 'owner_dept_id']
-        erows = scope_rows(normalize_rows(erows, ecolumns, erequired), level, user_id, dept_id)
-        exception_ids = set()
-        for row in erows:
-            entry = {key: text_value(row[key]) for key in erequired}
-            entry['site'] = text_value(row.get('site'))
-            if not entry['exception_id'] or entry['exception_id'] in exception_ids:
-                raise ValueError('Missing or duplicate exception ID')
-            exception_ids.add(entry['exception_id'])
-            # Only return public display fields after scope filtering.
-            exceptions.append({k: v for k, v in entry.items() if not k.startswith('owner_') or k == 'owner_name'})
+    erows, _, exceptions_linked = read_exceptions(settings, level, user_id, dept_id, runner)
+    exceptions = [{**{key: text_value(row[key]) for key in EXCEPTION_FIELDS
+                      if key not in EXCEPTION_PRIVATE_COLUMNS},
+                   'site': text_value(row.get('site'))} for row in erows]
     return {
         'statuses': statuses, 'sample': settings['source'] == 'sample_postgres',
-        'queried_at': datetime.now(timezone(timedelta(hours=9))).strftime('%Y.%m.%d %H:%M'),
+        'queried_at': datetime.now(LOCAL_TIMEZONE).strftime('%Y.%m.%d %H:%M'),
         'summary': {'partners': len(groups['partners']), 'total': sum(total.values()), 'counts': total},
         'gate': gate, 'work': list(groups['work'].values()), 'sites': list(groups['sites'].values()),
         'partners': list(groups['partners'].values()), 'exceptions': exceptions,
@@ -272,3 +349,26 @@ def dashboard_data():
     except Exception:
         logger.exception('Navigator dashboard query failed')
         return jsonify({'error': '현황을 불러오지 못했습니다. 조회 설정과 데이터 연결을 확인해 주세요.'}), 503
+
+
+@navigator_bp.get('/api/ax-ehs-navigator/exceptions/export')
+def export_exceptions():
+    denied = enforce_permission(MENU_CODE, 'view', response_type='json')
+    if denied is not None:
+        return denied
+    try:
+        rows, columns, linked = read_exceptions(
+            load_settings(), get_user_permission_level(MENU_CODE, 'read'),
+            session.get('user_id'), session.get('deptid'))
+        if not linked:
+            return jsonify({'error': '비정상 진행 현황 조회가 아직 연계되지 않았습니다.'}), 404
+        response = send_file(
+            exception_workbook(rows, columns), as_attachment=True,
+            download_name=f'navigator_exceptions_{datetime.now(LOCAL_TIMEZONE):%Y%m%d_%H%M%S}.xlsx',
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            max_age=0, etag=False)
+        response.headers['Cache-Control'] = 'no-store, private'
+        return response
+    except Exception:
+        logger.exception('Navigator exception Excel export failed')
+        return jsonify({'error': '엑셀을 내려받지 못했습니다. 조회 설정과 데이터 연결을 확인해 주세요.'}), 503

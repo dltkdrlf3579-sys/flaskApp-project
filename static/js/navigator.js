@@ -7,6 +7,7 @@
   const rate = (value, total) => total ? `${(value * 100 / total).toFixed(1)}%` : '—';
   let data;
   let selectedPartner;
+  let downloading = false;
   function el(tag, text, cls) {
     const node = document.createElement(tag);
     if (text !== undefined) node.textContent = text;
@@ -122,7 +123,7 @@
     const target = $('nv-partner');
     if (!partner) { empty(target, '조회 가능한 협력사가 없습니다.'); return; }
     const heading = el('div', undefined, 'nv-partner-heading');
-    heading.append(el('strong', partner.name), el('span', partner.tiers.join(' · '), 'nv-badge'));
+    heading.append(el('strong', partner.name));
     const stats = el('div', undefined, 'nv-partner-stats');
     [['전체 업무', partner.total, null], ...data.statuses.map(s => [s.label, partner.counts[s.key], s.color])].forEach(([label, n, color]) => {
       const box = el('div');
@@ -137,6 +138,14 @@
     });
     foot.append(el('span', `Gate 미완료 ${count(partner.gate_incomplete)}`, partner.gate_incomplete ? 'nv-danger' : ''), detail);
     target.replaceChildren(heading, el('div', partnerContext(partner), 'nv-partner-info'), stats, track(partner.counts, false), foot);
+  }
+  function updateDownload() {
+    const button = $('nv-download');
+    button.disabled = downloading || !data || !data.exceptions_linked || !data.exceptions.length;
+    button.textContent = downloading ? '다운로드 중…' : '엑셀 다운로드';
+    button.setAttribute('aria-busy', String(downloading));
+    button.title = data && data.exceptions_linked && data.exceptions.length
+      ? '조회 권한 범위의 전체 비정상 항목 다운로드' : '다운로드할 항목이 없습니다.';
   }
   function render() {
     const summary = data.summary;
@@ -172,6 +181,7 @@
     $('nv-exception-count').textContent = data.exceptions_linked ? `${count(data.exceptions.length)}` : '미연계';
     if (data.exceptions.length) $('nv-exceptions').replaceChildren(exceptionTable(data.exceptions.slice(0, rowLimit)));
     else empty($('nv-exceptions'), data.exceptions_linked ? '비정상 진행 항목이 없습니다.' : '아직 연계되지 않은 항목입니다.');
+    updateDownload();
     showPartner(selectedPartner || data.partners[0]);
     document.querySelector('[data-dialog="work"]').hidden = data.work.length <= rowLimit && data.statuses.length <= 3;
     document.querySelector('[data-dialog="sites"]').hidden = !data.sites.length || (data.sites.length <= (window.innerHeight < 800 ? 4 : 5) && data.statuses.length <= 2);
@@ -184,6 +194,33 @@
     if (type === 'exceptions') openDialog('비정상 진행 현황', [data.exceptions.length ? exceptionTable(data.exceptions) : el('p', data.exceptions_linked ? '비정상 진행 항목이 없습니다.' : '아직 연계되지 않은 항목입니다.', 'nv-empty')]);
   }));
   $('nv-close').addEventListener('click', () => $('nv-dialog').close());
+  $('nv-download').addEventListener('click', async () => {
+    if (downloading || !data || !data.exceptions_linked || !data.exceptions.length) return;
+    downloading = true;
+    updateDownload();
+    $('nv-message').textContent = '';
+    try {
+      const response = await fetch($('nv-download').dataset.export, {cache: 'no-store', credentials: 'same-origin'});
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || '엑셀을 내려받지 못했습니다.');
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const link = el('a');
+      link.href = url;
+      const filename = /filename="?([^";]+)"?/.exec(response.headers.get('Content-Disposition') || '');
+      link.download = filename ? filename[1] : 'navigator_exceptions.xlsx';
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      $('nv-message').textContent = error.message;
+    } finally {
+      downloading = false;
+      updateDownload();
+    }
+  });
   $('nv-search').addEventListener('submit', event => {
     event.preventDefault();
     if (!data) return;
