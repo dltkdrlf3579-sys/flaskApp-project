@@ -142,7 +142,7 @@
   function updateDownload() {
     const button = $('nv-download');
     button.disabled = downloading || !data || !data.exceptions_linked || !data.exceptions.length;
-    button.textContent = downloading ? '다운로드 중…' : '엑셀 다운로드';
+    $('nv-download-label').textContent = downloading ? '다운로드 중…' : '엑셀 다운로드';
     button.setAttribute('aria-busy', String(downloading));
     button.title = data && data.exceptions_linked && data.exceptions.length
       ? '조회 권한 범위의 전체 비정상 항목 다운로드' : '다운로드할 항목이 없습니다.';

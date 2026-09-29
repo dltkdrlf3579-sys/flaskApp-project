@@ -10,7 +10,7 @@ body:has(.navigator){background:#f4f8fc;color:#183054}
 #nv-sites .nv-table{min-width:370px}
 #nv-sites .nv-table th{white-space:normal;padding:7px 4px;font-size:11px}
 .nv-caption{margin:4px 0 0;font-size:11px;color:#7b8da5}.nv-detail-heading{font-size:14px;margin:20px 0 9px}.nv-detail-heading:first-child{margin-top:0}
-.nv-panel-actions{display:flex;align-items:center;gap:14px;margin-left:auto;flex-shrink:0}.nv-link:disabled{color:#9aacc2;cursor:default}.nv-link[aria-busy="true"]{cursor:wait}
+.nv-exceptions-header{flex-wrap:wrap}.nv-panel-actions{display:flex;align-items:center;gap:32px;margin-left:auto;flex-shrink:0}.nv-excel-download{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:6px 12px;border:1px solid #d1d5db;border-radius:4px;background:#fff;color:#333;font:inherit;line-height:1.5;white-space:nowrap;cursor:pointer;transition:background-color .2s,border-color .2s}.nv-excel-download:enabled:hover{background:#f3f4f6;border-color:#b8bec8}.nv-excel-download:focus-visible{outline:2px solid #198754;outline-offset:2px}.nv-excel-download:disabled{color:#9aacc2;opacity:.6;cursor:default}.nv-excel-download[aria-busy="true"]{cursor:wait}
 body:has(.navigator) .flash-messages:not(:has(.alert)){display:none}
 body:has(.navigator) .nav-item:has(a[href="/ax-ehs-navigator"])>.nav-link{color:#2f5fd3;box-shadow:inset 0 -2px #2f5fd3}
 .container:has(>.navigator){margin:14px 20px;width:calc(100% - 40px)}
