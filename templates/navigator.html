@@ -19,6 +19,6 @@
     <article class="nv-card nv-panel"><header><h2>협력사 상태 조회</h2><form id="nv-search"><input id="nv-search-input" type="search" placeholder="협력사명 검색" aria-label="협력사명 검색" maxlength="100"><button type="submit" aria-label="협력사 검색"><i class="bi bi-search" aria-hidden="true"></i></button></form></header><div id="nv-partner" class="nv-partner"></div></article>
   </section>
 </main>
-<dialog id="nv-dialog" aria-labelledby="nv-dialog-title"><header><h2 id="nv-dialog-title"></h2><button id="nv-close" class="nv-link" aria-label="닫기">닫기 ✕</button></header><div id="nv-dialog-body"></div></dialog>
+<dialog id="nv-dialog" aria-labelledby="nv-dialog-title"><header><h2 id="nv-dialog-title"></h2><button type="button" id="nv-close" class="nv-dialog-close" aria-label="닫기" title="닫기"><span aria-hidden="true">✕</span></button></header><div id="nv-dialog-body"></div></dialog>
 <script src="{{ url_for('static', filename='js/navigator.js') }}" defer></script>
 {% endblock %}

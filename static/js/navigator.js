@@ -98,8 +98,11 @@
   }
   function openDialog(title, nodes) {
     $('nv-dialog-title').textContent = title;
-    $('nv-dialog-body').replaceChildren(...nodes);
+    const body = $('nv-dialog-body');
+    body.replaceChildren(...nodes);
     if (!$('nv-dialog').open) $('nv-dialog').showModal();
+    body.scrollTop = 0;
+    body.scrollLeft = 0;
   }
   function partnerContext(partner) {
     return [...(partner.company_work.length ? ['업체 공통'] : []), ...partner.sites].join(' · ');
